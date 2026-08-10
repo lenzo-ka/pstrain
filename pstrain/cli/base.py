@@ -265,7 +265,7 @@ class FeatureExtractAction(PstrainAction):
     input_file: Path
     output_file: Path
     samprate: int = 16000
-    nfilt: int = 40
+    nfilt: int = 25
     ncep: int = 13
 
     def _get_shell_cmd(self) -> list[str]:
@@ -608,7 +608,7 @@ class CommandContext:
         input_file: Path,
         output_file: Path,
         samprate: int = 16000,
-        nfilt: int = 40,
+        nfilt: int = 25,
         ncep: int = 13,
     ) -> None:
         """Extract features from audio file."""

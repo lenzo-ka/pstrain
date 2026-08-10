@@ -163,7 +163,7 @@ class CommandBuilder:
         input_file: Path,
         output_file: Path,
         samprate: int = 16000,
-        nfilt: int = 40,
+        nfilt: int = 25,
         nfft: int = 512,
         lowerf: float = 130.0,
         upperf: float = 6800.0,

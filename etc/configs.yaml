@@ -11,7 +11,7 @@ default:
   features:
     samprate: 16000
     ncep: 13
-    nfilt: 40
+    nfilt: 25
     nfft: 512
     lowerf: 130
     upperf: 6800
@@ -26,7 +26,7 @@ wideband:
   features:
     samprate: 16000
     ncep: 13
-    nfilt: 40
+    nfilt: 25
     nfft: 512
     lowerf: 130
     upperf: 6800
@@ -56,7 +56,7 @@ wideband_large:
   features:
     samprate: 16000
     ncep: 13
-    nfilt: 40
+    nfilt: 25
     nfft: 512
     lowerf: 130
     upperf: 6800

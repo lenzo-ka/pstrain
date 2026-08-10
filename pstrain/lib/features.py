@@ -47,7 +47,7 @@ class FEParams:
     """
 
     samprate: int = 16000
-    nfilt: int = 40  # Matches sphinx_fe, CommandBuilder, and PipelineContext defaults.
+    nfilt: int = 25  # SphinxTrain wideband training default.
     nfft: int = 512
     lowerf: float = 130.0
     upperf: float = 6800.0
@@ -101,7 +101,7 @@ class FeatureExtractor:
 
         Args:
             samprate: Sample rate in Hz (default: 16000)
-            nfilt: Number of mel filters (default: 40 for wideband)
+            nfilt: Number of mel filters (default: 25 for SphinxTrain wideband)
             nfft: FFT size (default: 512)
             lowerf: Lower frequency bound (default: 130)
             upperf: Upper frequency bound (default: 6800)

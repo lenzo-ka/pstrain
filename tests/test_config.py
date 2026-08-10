@@ -21,7 +21,7 @@ class TestFeatureConfig:
         """Test default feature settings."""
         cfg = FeatureConfig()
         assert cfg.num_ceps == 13
-        assert cfg.num_filters == 40
+        assert cfg.num_filters == 25
         assert cfg.nfft == 512
         assert cfg.lower_freq == 130.0
         assert cfg.upper_freq == 6800.0
@@ -150,4 +150,4 @@ class TestConfigMerging:
         cfg.features.num_ceps = 26
         assert cfg.features.num_ceps == 26
         # Other values should remain defaults
-        assert cfg.features.num_filters == 40
+        assert cfg.features.num_filters == 25

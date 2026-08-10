@@ -74,7 +74,10 @@ class FeatureConfig(BaseModel):
     # MFCC parameters
     num_ceps: int = Field(13, ge=1, le=50, description="Number of cepstral coefficients")
     num_filters: int = Field(
-        40, ge=1, le=100, description="Number of mel filters (40 wideband, 25 telephone)"
+        25,
+        ge=1,
+        le=100,
+        description="Number of mel filters (25 SphinxTrain wideband; 15 for 8 kHz telephone)",
     )
     nfft: int = Field(512, ge=64, le=4096, description="FFT size")
 

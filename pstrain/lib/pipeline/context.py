@@ -63,7 +63,7 @@ def _native_library_identity() -> dict[str, str]:
 class FeatParams:
     """Acoustic front-end parameters.
 
-    Defaults are SphinxTrain wideband: 16 kHz audio, 40-filter mel bank,
+    Defaults are SphinxTrain wideband: 16 kHz audio, 25-filter mel bank,
     DCT-transformed cepstra with 13 coefficients, batch CMN, no AGC,
     no variance normalization. All fields are emitted into per-model
     `feat.params` files so PocketSphinx and friends can match the
@@ -72,7 +72,7 @@ class FeatParams:
 
     samprate: int = 16000
     ncep: int = 13
-    nfilt: int = 40
+    nfilt: int = 25
     nfft: int = 512
     lowerf: int = 130
     upperf: int = 6800
@@ -121,7 +121,7 @@ DEFAULT_CONFIGS: dict[str, dict[str, Any]] = {
         "features": {
             "samprate": 16000,
             "ncep": 13,
-            "nfilt": 40,
+            "nfilt": 25,
             "nfft": 512,
             "lowerf": 130,
             "upperf": 6800,
@@ -138,7 +138,7 @@ DEFAULT_CONFIGS: dict[str, dict[str, Any]] = {
         "features": {
             "samprate": 16000,
             "ncep": 13,
-            "nfilt": 40,
+            "nfilt": 25,
             "nfft": 512,
             "lowerf": 130,
             "upperf": 6800,
@@ -172,7 +172,7 @@ DEFAULT_CONFIGS: dict[str, dict[str, Any]] = {
         "features": {
             "samprate": 16000,
             "ncep": 13,
-            "nfilt": 40,
+            "nfilt": 25,
             "nfft": 512,
             "lowerf": 130,
             "upperf": 6800,

@@ -54,7 +54,7 @@ class TestFEParams:
         """Test default configuration values."""
         cfg = FEParams()
         assert cfg.samprate == 16000
-        assert cfg.nfilt == 40
+        assert cfg.nfilt == 25
         assert cfg.nfft == 512
         assert cfg.lowerf == 130
         assert cfg.upperf == 6800
@@ -69,7 +69,7 @@ class TestFEParams:
         assert cfg.ncep == 26
         assert cfg.nfft == 256
         # Other values should still be defaults
-        assert cfg.nfilt == 40
+        assert cfg.nfilt == 25
 
 
 class TestFeatureExtractor:

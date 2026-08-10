@@ -130,8 +130,8 @@ features
 
 ``features.num_filters``
    :Type: ``int``
-   :Default: ``40``
-   :Description: Number of mel filters (40 wideband, 25 legacy)
+   :Default: ``25``
+   :Description: Number of mel filters (25 SphinxTrain wideband; 15 for 8 kHz telephone)
 
 ``features.preemphasis``
    :Type: ``float``

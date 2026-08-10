@@ -95,7 +95,7 @@ class FeatParams(TypedDict):
 # Use this constant instead of duplicating defaults across modules.
 DEFAULT_FEAT_PARAMS: FeatParams = {
     "samprate": 16000,
-    "nfilt": 40,
+    "nfilt": 25,
     "nfft": 512,
     "lowerf": 130.0,
     "upperf": 6800.0,
