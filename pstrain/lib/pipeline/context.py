@@ -101,6 +101,7 @@ class TrainParams:
     # Kept at 0.001: A7 measurement found that using SphinxTrain's literal
     # 0.1 in pstrain's relative-likelihood criterion worsens WER.
     convergence_ratio: float = 0.001
+    min_iterations: int = 1
     # Warn on every skipped update; fail a stage above five percent.
     max_skip_fraction: float = 0.05
     # Tuned by SphinxTrain scripts/40.buildtrees/buildtree.pl for 3-state HMMs.

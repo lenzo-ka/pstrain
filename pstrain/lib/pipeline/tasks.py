@@ -314,6 +314,7 @@ def _make_bw_train_task(
             filler_dict=ctx.filler_dict,
             n_iter=ctx.train.max_iterations,
             convergence_ratio=ctx.train.convergence_ratio,
+            min_iterations=ctx.train.min_iterations,
             config=BWConfig(
                 a_beam=ctx.train.a_beam,
                 b_beam=ctx.train.b_beam,
@@ -373,6 +374,7 @@ def _make_split_and_train_task(
             filler_dict=ctx.filler_dict,
             n_iter=ctx.train.max_iterations,
             convergence_ratio=ctx.train.convergence_ratio,
+            min_iterations=ctx.train.min_iterations,
             config=BWConfig(
                 a_beam=ctx.train.a_beam,
                 b_beam=ctx.train.b_beam,
