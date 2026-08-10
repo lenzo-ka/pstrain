@@ -12,21 +12,10 @@ from datetime import datetime
 from pathlib import Path
 
 from st2.lib.model import MODEL_FILES_REQUIRED
-from st2.lib.pipeline.context import FeatParams
-from st2.lib.pipeline.feat_params import write_feat_params
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["package_model", "create_feat_params", "create_noisedict"]
-
-def create_feat_params(
-    output_path: Path,
-    feat_params: FeatParams,
-) -> Path:
-    """Create ``feat.params`` from the profile that trained the model."""
-    output_path = write_feat_params(output_path, feat_params)
-    logger.info("Created feat.params: %s", output_path)
-    return output_path
+__all__ = ["package_model", "create_noisedict"]
 
 
 def create_noisedict(
@@ -64,7 +53,6 @@ def create_noisedict(
 def package_model(
     model_dir: Path,
     output_dir: Path,
-    feat_params: FeatParams,
     model_name: str | None = None,
     dictionary_path: Path | None = None,
     filler_dict_path: Path | None = None,
@@ -78,7 +66,6 @@ def package_model(
     Args:
         model_dir: Source model directory
         output_dir: Output directory for packaged model
-        feat_params: Feature profile used to train the model
         model_name: Name for the model (used in output path)
         dictionary_path: Path to pronunciation dictionary
         filler_dict_path: Path to filler dictionary
@@ -105,6 +92,12 @@ def package_model(
     """
     model_dir = Path(model_dir)
     output_dir = Path(output_dir)
+    source_feat_params = model_dir / "feat.params"
+    if not source_feat_params.is_file():
+        raise FileNotFoundError(
+            f"cannot package model: trained model directory lacks feat.params: "
+            f"{source_feat_params}"
+        )
 
     if model_name:
         package_dir = output_dir / model_name
@@ -128,7 +121,8 @@ def package_model(
         else:
             logger.warning("Model file not found: %s", src)
 
-    feat_path = create_feat_params(acoustic_dir / "feat.params", feat_params)
+    feat_path = acoustic_dir / "feat.params"
+    shutil.copyfile(source_feat_params, feat_path)
     result["feat_params"] = feat_path
 
     # Create noisedict
@@ -157,7 +151,7 @@ def package_model(
 
     # Create README
     readme_path = package_dir / "README.txt"
-    _create_readme(readme_path, model_name, feat_params)
+    _create_readme(readme_path, model_name)
     result["readme"] = readme_path
 
     logger.info("Packaged model to: %s", package_dir)
@@ -167,7 +161,6 @@ def package_model(
 def _create_readme(
     output_path: Path,
     model_name: str | None,
-    feat_params: FeatParams,
 ) -> None:
     """Create README file for the model package."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -210,12 +203,7 @@ Command line:
 
 Feature Parameters
 ------------------
-Sample rate: {feat_params.samprate} Hz
-Mel filters: {feat_params.nfilt}
-FFT size: {feat_params.nfft}
-Frequency range: {feat_params.lowerf}-{feat_params.upperf} Hz
-Cepstral coefficients: {feat_params.ncep}
-Feature type: {feat_params.feat_type}
+See acoustic/feat.params (copied verbatim from the trained model).
 
 License
 -------

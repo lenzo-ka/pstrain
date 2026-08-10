@@ -7,8 +7,26 @@ from pathlib import Path
 from st2.lib.pipeline.context import FeatParams
 
 
+def _validate_honored_values(feat: FeatParams) -> None:
+    """Reject settings that the native training engine hardcodes."""
+    honored = {
+        "transform": "dct",
+        "feat_type": "1s_c_d_dd",
+        "agc": "none",
+        "varnorm": "no",
+    }
+    for field, actual in honored.items():
+        requested = getattr(feat, field)
+        if requested != actual:
+            raise ValueError(
+                f"{field}={requested!r} cannot be serialized truthfully: "
+                f"the training engine hardcodes {field}={actual!r}"
+            )
+
+
 def feat_params_lines(feat: FeatParams) -> list[str]:
     """Return a complete Sphinx ``feat.params`` for *feat*."""
+    _validate_honored_values(feat)
     return [
         f"-samprate {feat.samprate}\n",
         f"-ncep {feat.ncep}\n",

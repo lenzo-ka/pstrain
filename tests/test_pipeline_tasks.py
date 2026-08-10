@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from st2.lib.pipeline import PipelineContext
+from st2.lib.pipeline.context import FeatParams
 from st2.lib.pipeline.tasks import TARGETS, build_pipeline
 
 
@@ -128,6 +129,19 @@ def test_fanout_tasks_share_parallel_group(empty_project: Path) -> None:
     assert len(extracts) == 3
     groups = {t.parallel_group for t in extracts}
     assert groups == {"features"}
+
+
+def test_extract_task_forwards_lifter(empty_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def capture(_audio: Path, _output: Path, params: dict[str, object]) -> None:
+        captured.update(params)
+
+    monkeypatch.setattr("st2.lib.pipeline.tasks._extract_features_worker", capture)
+    ctx = PipelineContext(project_dir=empty_project, feat=FeatParams(lifter=17))
+    build_pipeline(ctx).tasks()["extract:placeholder"].fn()
+
+    assert captured["lifter"] == 17
 
 
 def test_nested_and_flat_audio_fanout_uses_relative_fileids(empty_project: Path) -> None:
