@@ -208,6 +208,7 @@ def test_wedged_worker_send_times_out_and_next_call_respawns(
         duplicate.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 1024)
     finally:
         duplicate.close()
+    original_timeout = native_worker._REQUEST_TIMEOUT
     os.kill(old_pid, signal.SIGSTOP)
     try:
         monkeypatch.setattr(native_worker, "_REQUEST_TIMEOUT", 0.2)
@@ -215,6 +216,10 @@ def test_wedged_worker_send_times_out_and_next_call_respawns(
         payload = "x" * (native_worker._MAX_REQUEST_BYTES - 1024)
         with pytest.raises(native_worker.PstrainWorkerError, match="timed out during"):
             native_worker.call("_fault_exit_zero", (payload,), (tmp_path / "input",))
+
+        # The short timeout is only for the wedged call; recovery includes a
+        # fresh spawn, which slower CI machines cannot finish inside 200 ms.
+        monkeypatch.setattr(native_worker, "_REQUEST_TIMEOUT", original_timeout)
 
         recovered = tmp_path / "recovered.mdef"
         mdef.generate_ci_mdef(phones, recovered)
