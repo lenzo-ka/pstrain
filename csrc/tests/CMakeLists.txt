@@ -18,3 +18,14 @@ add_test(
   NAME io_roundtrip
   COMMAND test_io_roundtrip ${CMAKE_CURRENT_BINARY_DIR}
 )
+
+add_executable(test_gauden_scaling test_gauden_scaling.c)
+target_link_libraries(test_gauden_scaling pstrainc)
+target_include_directories(test_gauden_scaling
+  PRIVATE ${CMAKE_BINARY_DIR}
+)
+
+add_test(
+  NAME gauden_scaling
+  COMMAND test_gauden_scaling
+)

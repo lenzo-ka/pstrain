@@ -3,6 +3,10 @@
  * Copyright (c) 1995-2000 Carnegie Mellon University.  All rights
  * reserved.
  *
+ * Modifications for pstrain are Copyright (c) 2026 Kevin Lenzo and are
+ * licensed under the BSD 2-Clause license (see LICENSE at the repository
+ * root). The repository history records the modifications.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -1324,9 +1328,6 @@ gauden_scale_densities_fwd(float64 ***den,		/* density array for a mixture Gauss
     return max_den;
 }
 
-/* log(MIN_IEEE_NORM_POS_FLOAT64) */
-#define MINUS_LOG_INFINITY -708.407751281802
-
 int
 gauden_scale_densities_bwd(float64 ***den,		/* density array for a mixture Gaussian */
 			   uint32 ***den_idx,
@@ -1347,11 +1348,11 @@ gauden_scale_densities_bwd(float64 ***den,		/* density array for a mixture Gauss
     for (i = 0; i < n_cb; i++) {
 	c = cb[i];
 	for (j = 0; j < g->n_feat; j++) {
-	    if (scl[j] <= MINUS_LOG_INFINITY) {
-		E_WARN("Scaling factor too small: %f\n", scl[j]);
-		scl[j] = MINUS_LOG_INFINITY + MAX_LOG_DEN;
-	    }
 	    for (k = 0; k < g->n_top; k++) {
+		/* scl is a log-domain offset, not a linear value. It may be
+		 * below log(DBL_MIN); only the difference must be exponentiable.
+		 * Reuse the exact forward offset to keep alpha and beta scaled
+		 * identically. */
 		den[c][j][k] = exp(den[c][j][k] - scl[j]);
 		assert(finite(den[c][j][k]));
 	    }
