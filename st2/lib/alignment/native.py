@@ -20,6 +20,7 @@ Typical use::
 
 from __future__ import annotations
 
+import contextlib
 import wave
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
@@ -172,10 +173,8 @@ class Aligner:
         self.close()
 
     def __del__(self) -> None:
-        try:
+        with contextlib.suppress(Exception):
             self.close()
-        except Exception:
-            pass
 
     def align_mfcc(
         self,

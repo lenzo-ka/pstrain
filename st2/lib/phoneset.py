@@ -89,7 +89,7 @@ class Phoneset:
         phones: set[str] = set()
 
         try:
-            with open(path, encoding="utf-8") as f:
+            with path.open(encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line or line.startswith("#"):
@@ -173,7 +173,7 @@ class Phoneset:
         """
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(path, "w", encoding="utf-8") as f:
+        with path.open("w", encoding="utf-8") as f:
             # Write silence phone first if present
             if silence_phone in self._phones:
                 f.write(f"{silence_phone}\n")
@@ -278,7 +278,7 @@ def load_phone_map_json(map_file: Path) -> dict[str, str]:
     Returns:
         Dictionary mapping source phones to target phones
     """
-    with open(map_file, encoding="utf-8") as f:
+    with map_file.open(encoding="utf-8") as f:
         data = json.load(f)
     return {k: v for k, v in data.items() if not k.startswith("_")}
 
@@ -299,7 +299,7 @@ def load_phone_map_text(map_file: Path) -> dict[str, str]:
     """
     phone_map: dict[str, str] = {}
 
-    with open(map_file, encoding="utf-8") as f:
+    with map_file.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#"):

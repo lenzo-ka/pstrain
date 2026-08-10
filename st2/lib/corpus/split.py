@@ -126,12 +126,12 @@ def train_test_split(
 
 
 def _write_transcription(path: Path, entries: list[tuple[str, str]]) -> None:
-    with open(path, "w") as f:
+    with path.open("w") as f:
         for fileid, text in entries:
             f.write(f"{fileid} {text}\n")
 
 
 def _write_fileids(path: Path, entries: list[tuple[str, str]]) -> None:
-    with open(path, "w") as f:
+    with path.open("w") as f:
         for fileid, _ in entries:
             f.write(f"{fileid}\n")

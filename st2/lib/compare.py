@@ -861,15 +861,15 @@ def compare_auto(
 
     if type_a == FileType.FEATURES:
         return (type_a, compare_features(file_a, file_b, rtol, atol))
-    elif type_a in (FileType.MEANS, FileType.VARIANCES):
+    if type_a in (FileType.MEANS, FileType.VARIANCES):
         return (type_a, compare_gaussians(file_a, file_b, rtol, atol))
-    elif type_a == FileType.MIXTURE_WEIGHTS:
+    if type_a == FileType.MIXTURE_WEIGHTS:
         return (type_a, compare_mixw(file_a, file_b, rtol, atol))
-    elif type_a == FileType.TRANSITION_MATRICES:
+    if type_a == FileType.TRANSITION_MATRICES:
         return (type_a, compare_tmat(file_a, file_b, rtol, atol))
-    elif type_a == FileType.MODEL:
+    if type_a == FileType.MODEL:
         return (type_a, compare_models(file_a, file_b, rtol, atol))
-    elif type_a == FileType.MDEF:
+    if type_a == FileType.MDEF:
         # Simple text comparison for mdef
         text_a = Path(file_a).read_text()
         text_b = Path(file_b).read_text()
@@ -884,8 +884,7 @@ def compare_auto(
                 shape_b=(len(text_b),),
             ),
         )
-    else:
-        raise ValueError(f"Comparison not supported for type: {type_a.value}")
+    raise ValueError(f"Comparison not supported for type: {type_a.value}")
 
 
 def print_model_stats(file_path: Path) -> None:
@@ -963,10 +962,7 @@ def load_senones(
 
         # Normalize weights to sum to 1
         total = sum(raw_weights)
-        if total > 0:
-            weights = [w / total for w in raw_weights]
-        else:
-            weights = [1.0 / n_density] * n_density
+        weights = [w / total for w in raw_weights] if total > 0 else [1.0 / n_density] * n_density
 
         gaussians = []
         for den_idx in range(n_density):

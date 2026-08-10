@@ -71,7 +71,7 @@ def test_generated_config_profiles_all_load(tmp_path: Path) -> None:
     project = tmp_path / "project"
     setup_project(project)
 
-    with open(project / "etc" / "configs.yaml", encoding="utf-8") as f:
+    with (project / "etc" / "configs.yaml").open(encoding="utf-8") as f:
         generated = yaml.safe_load(f)
     assert generated == DEFAULT_CONFIGS
     for config_name in generated:

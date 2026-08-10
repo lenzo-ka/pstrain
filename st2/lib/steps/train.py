@@ -82,7 +82,7 @@ def run_bw_training(
     logger.info("Loaded %d transcripts", len(transcripts))
 
     # Load fileids
-    with open(train_fileids) as f:
+    with train_fileids.open() as f:
         fileids = [line.strip() for line in f if line.strip()]
     logger.info("Training on %d utterances", len(fileids))
 

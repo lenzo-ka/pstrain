@@ -249,7 +249,7 @@ def cmd_config_set(args: Any) -> int:
     if config_path.exists():
         import yaml
 
-        with open(config_path, encoding="utf-8") as f:
+        with config_path.open(encoding="utf-8") as f:
             config_dict = yaml.safe_load(f) or {}
     else:
         config_dict = {}
@@ -261,7 +261,7 @@ def cmd_config_set(args: Any) -> int:
     import yaml
 
     config_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(config_path, "w", encoding="utf-8") as f:
+    with config_path.open("w", encoding="utf-8") as f:
         yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False)
 
     print(f"Set {args.key} = {value} in {config_path}")
@@ -420,12 +420,11 @@ def _parse_value(value_str: str, type_str: str) -> Any:
 
     if type_lower in ("int", "integer"):
         return int(value_str)
-    elif type_lower in ("float", "number"):
+    if type_lower in ("float", "number"):
         return float(value_str)
-    elif type_lower in ("bool", "boolean"):
+    if type_lower in ("bool", "boolean"):
         return value_str.lower() in ("true", "yes", "1", "on")
-    elif type_lower.startswith("list"):
+    if type_lower.startswith("list"):
         # Simple list parsing: comma-separated
         return [v.strip() for v in value_str.split(",")]
-    else:
-        return value_str
+    return value_str

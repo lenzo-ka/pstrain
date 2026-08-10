@@ -10,6 +10,7 @@ Implements the CD training pipeline:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import shutil
 from pathlib import Path
@@ -95,7 +96,7 @@ def _parse_mdef_stats(mdef_path: Path) -> dict[str, int]:
     n_tri = 0
     n_tied_state = 0
 
-    with open(mdef_path) as f:
+    with mdef_path.open() as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -107,10 +108,8 @@ def _parse_mdef_stats(mdef_path: Path) -> dict[str, int]:
                     parts = line.split()
                     for i, p in enumerate(parts):
                         if p == "n_tied_state" and i + 1 < len(parts):
-                            try:
+                            with contextlib.suppress(ValueError):
                                 n_tied_state = int(parts[i + 1])
-                            except ValueError:
-                                pass
                             break
                 continue
 
@@ -206,7 +205,7 @@ def _parse_untied_mdef_for_init(mdef_path: Path) -> tuple[int, dict[int, int]]:
     n_tied_state = 0
 
     # First pass: get header info
-    with open(mdef_path) as f:
+    with mdef_path.open() as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -237,7 +236,7 @@ def _parse_untied_mdef_for_init(mdef_path: Path) -> tuple[int, dict[int, int]]:
     # Build mapping
     tied_to_ci: dict[int, int] = {}
 
-    with open(mdef_path) as f:
+    with mdef_path.open() as f:
         in_data = False
         for line in f:
             line = line.strip()
@@ -346,7 +345,7 @@ def filter_tree_phones(phone_list: Path) -> list[str]:
     Drops silence and filler phones. The pipeline runner reads this list
     at plan time to fan out per-(phone, state) tree-build tasks.
     """
-    with open(phone_list) as f:
+    with phone_list.open() as f:
         phones = [line.strip() for line in f if line.strip()]
     return [p for p in phones if p not in TREE_SKIP_PHONES and not p.startswith("+")]
 
@@ -589,7 +588,7 @@ def _parse_state_tying(untied_mdef: Path, tied_mdef: Path) -> dict[int, int]:
 def _count_tied_states(mdef_path: Path) -> int:
     """Count number of tied states in mdef."""
     max_ts = -1
-    with open(mdef_path) as f:
+    with mdef_path.open() as f:
         for line in f:
             line = line.strip()
             if line.startswith("#") or not line:

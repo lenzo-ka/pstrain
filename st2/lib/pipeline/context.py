@@ -199,7 +199,7 @@ def load_configs(project_dir: Path) -> dict[str, dict[str, Any]]:
     configs_file = project_dir / "etc" / "configs.yaml"
     if not configs_file.exists():
         return dict(DEFAULT_CONFIGS)
-    with open(configs_file) as f:
+    with configs_file.open() as f:
         user_configs = yaml.safe_load(f) or {}
     merged = dict(DEFAULT_CONFIGS)
     merged.update(user_configs)
@@ -330,7 +330,7 @@ class PipelineContext:
         path = self.etc_dir / f"{split}.fileids"
         if not path.exists():
             return []
-        with open(path) as f:
+        with path.open() as f:
             return [line.strip() for line in f if line.strip()]
 
     def all_fileids(self) -> list[str]:

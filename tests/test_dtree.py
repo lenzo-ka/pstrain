@@ -1,5 +1,6 @@
 """Tests for decision tree building functionality."""
 
+import contextlib
 from pathlib import Path
 
 import pytest
@@ -168,7 +169,7 @@ class TestPruneTree:
         input_dir.mkdir()
         output_dir = tmp_path / "output_trees"  # doesn't exist yet
 
-        try:
+        with contextlib.suppress(RuntimeError):
             dtree.prune_tree(
                 mdef,
                 pset,
@@ -176,9 +177,6 @@ class TestPruneTree:
                 output_dir,
                 n_seno_target=100,
             )
-        except RuntimeError:
-            # Expected - no real data, but output dir should be created
-            pass
 
         # Output directory should be created
         assert output_dir.exists()
@@ -193,7 +191,7 @@ class TestPruneTree:
         input_dir.mkdir()
         output_dir = tmp_path / "output_trees"
 
-        try:
+        with contextlib.suppress(RuntimeError):
             dtree.prune_tree(
                 mdef,
                 pset,
@@ -203,6 +201,3 @@ class TestPruneTree:
                 min_occ=10.0,
                 allphones=False,
             )
-        except RuntimeError:
-            # Expected - no real tree files
-            pass

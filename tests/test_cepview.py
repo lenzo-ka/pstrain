@@ -20,7 +20,7 @@ class TestViewCepstra:
         data = np.random.randn(n_frames, n_coeff).astype(np.float32)
 
         # Write MFC file
-        with open(mfc_path, "wb") as f:
+        with mfc_path.open("wb") as f:
             n_float = n_frames * n_coeff
             f.write(np.array([n_float], dtype=np.int32).tobytes())
             f.write(data.tobytes())
@@ -46,7 +46,7 @@ class TestViewCepstra:
         n_coeff = 13
         data = np.zeros((n_frames, n_coeff), dtype=np.float32)
 
-        with open(mfc_path, "wb") as f:
+        with mfc_path.open("wb") as f:
             n_float = n_frames * n_coeff
             f.write(np.array([n_float], dtype=np.int32).tobytes())
             f.write(data.tobytes())
@@ -70,7 +70,7 @@ class TestViewCepstra:
         n_coeff = 13
         data = np.arange(n_frames * n_coeff, dtype=np.float32).reshape(n_frames, n_coeff)
 
-        with open(mfc_path, "wb") as f:
+        with mfc_path.open("wb") as f:
             n_float = n_frames * n_coeff
             f.write(np.array([n_float], dtype=np.int32).tobytes())
             f.write(data.tobytes())

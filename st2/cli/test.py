@@ -95,10 +95,7 @@ class TestCommand(Command):
             return CommandResult.fail(f"PocketSphinx not available: {msg}")
 
         # Resolve project directory
-        if ctx.args.project_dir:
-            project_dir = Path(ctx.args.project_dir).resolve()
-        else:
-            project_dir = Path.cwd()
+        project_dir = Path(ctx.args.project_dir).resolve() if ctx.args.project_dir else Path.cwd()
 
         if not project_dir.exists():
             return CommandResult.fail(f"Project directory does not exist: {project_dir}")

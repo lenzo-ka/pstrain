@@ -40,10 +40,7 @@ def build_lm(
     output_path = Path(output_path)
 
     # Extract text from dict if needed
-    if isinstance(transcripts, dict):
-        texts = list(transcripts.values())
-    else:
-        texts = list(transcripts)
+    texts = list(transcripts.values()) if isinstance(transcripts, dict) else list(transcripts)
 
     # Clean transcripts: remove sentence markers, preserve case to match dictionary
     clean_texts = []
@@ -126,7 +123,7 @@ def load_transcripts(transcript_file: Path) -> dict[str, str]:
     """
     transcripts = {}
 
-    with open(transcript_file, encoding="utf-8", errors="replace") as f:
+    with transcript_file.open(encoding="utf-8", errors="replace") as f:
         for line in f:
             line = line.strip()
             if not line:

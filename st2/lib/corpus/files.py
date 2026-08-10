@@ -21,7 +21,7 @@ def load_filelist(path: Path) -> list[str]:
     try:
         # Read line by line instead of loading entire file into memory
         result = []
-        with open(path, encoding="utf-8") as f:
+        with path.open(encoding="utf-8") as f:
             for line in f:
                 stripped = line.strip()
                 if stripped:
@@ -40,7 +40,7 @@ def save_filelist(path: Path, filelist: list[str]) -> None:
         filelist: List of file IDs to save
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    with path.open("w", encoding="utf-8") as f:
         for file_id in filelist:
             f.write(f"{file_id}\n")
 
@@ -63,7 +63,7 @@ def extract_vocabulary(transcript_files: list[Path]) -> set[str]:
         if not transcript_file.exists():
             continue
 
-        with open(transcript_file, encoding="utf-8") as f:
+        with transcript_file.open(encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line or line.startswith("#"):
@@ -92,7 +92,7 @@ def detect_transcript_format(path: Path) -> str:
     Returns:
         Format name: "sphinx", "csv", "tsv", or "unknown"
     """
-    with open(path, encoding="utf-8") as f:
+    with path.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#"):
@@ -144,20 +144,19 @@ def convert_to_sphinx(
 
     if input_format == "sphinx":
         return _convert_sphinx_to_sphinx(input_path, output_path)
-    elif input_format == "tsv":
+    if input_format == "tsv":
         return _convert_tsv_to_sphinx(input_path, output_path)
-    elif input_format == "csv":
+    if input_format == "csv":
         return _convert_csv_to_sphinx(input_path, output_path)
-    else:
-        raise ValueError(f"Unknown transcript format: {input_format}")
+    raise ValueError(f"Unknown transcript format: {input_format}")
 
 
 def _convert_sphinx_to_sphinx(input_path: Path, output_path: Path) -> int:
     """Copy/validate Sphinx format transcript."""
     count = 0
     with (
-        open(input_path, encoding="utf-8") as f_in,
-        open(output_path, "w", encoding="utf-8") as f_out,
+        input_path.open(encoding="utf-8") as f_in,
+        output_path.open("w", encoding="utf-8") as f_out,
     ):
         for line in f_in:
             line = line.strip()
@@ -176,8 +175,8 @@ def _convert_tsv_to_sphinx(input_path: Path, output_path: Path) -> int:
     """Convert TSV (fileid<TAB>text) to Sphinx format."""
     count = 0
     with (
-        open(input_path, encoding="utf-8") as f_in,
-        open(output_path, "w", encoding="utf-8") as f_out,
+        input_path.open(encoding="utf-8") as f_in,
+        output_path.open("w", encoding="utf-8") as f_out,
     ):
         for line in f_in:
             line = line.strip()
@@ -197,8 +196,8 @@ def _convert_csv_to_sphinx(input_path: Path, output_path: Path) -> int:
     """Convert CSV (fileid,text) to Sphinx format."""
     count = 0
     with (
-        open(input_path, encoding="utf-8", newline="") as f_in,
-        open(output_path, "w", encoding="utf-8") as f_out,
+        input_path.open(encoding="utf-8", newline="") as f_in,
+        output_path.open("w", encoding="utf-8") as f_out,
     ):
         reader = csv.reader(f_in)
         for row in reader:

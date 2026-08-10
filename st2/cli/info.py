@@ -66,25 +66,22 @@ class InfoCommand(Command):
             if paths.bin_dir:
                 print(paths.bin_dir)
                 return CommandResult.ok()
-            else:
-                print("not found", file=sys.stderr)
-                return CommandResult.fail("Binary directory not found")
+            print("not found", file=sys.stderr)
+            return CommandResult.fail("Binary directory not found")
 
         if getattr(args, "lib_path", False):
             if paths.lib_path:
                 print(paths.lib_path)
                 return CommandResult.ok()
-            else:
-                print("not found", file=sys.stderr)
-                return CommandResult.fail("Library not found")
+            print("not found", file=sys.stderr)
+            return CommandResult.fail("Library not found")
 
         if getattr(args, "include_dir", False):
             if paths.include_dir:
                 print(paths.include_dir)
                 return CommandResult.ok()
-            else:
-                print("not found", file=sys.stderr)
-                return CommandResult.fail("Include directory not found")
+            print("not found", file=sys.stderr)
+            return CommandResult.fail("Include directory not found")
 
         if getattr(args, "cflags", False):
             flags = []

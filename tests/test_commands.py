@@ -168,5 +168,5 @@ class TestBinaryRegistry:
         from st2.lib.commands import find_binary
 
         # Should find common utilities
-        ls_path = find_binary("ls")
-        assert ls_path is not None or True  # May not exist on all systems
+        find_binary("ls")
+        assert True  # May not exist on all systems

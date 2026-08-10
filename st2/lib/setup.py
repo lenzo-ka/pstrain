@@ -91,16 +91,17 @@ def setup_project(
 
     configs_file = project_dir / "etc" / "configs.yaml"
     if clobber or not configs_file.exists():
-        with open(configs_file, "w", encoding="utf-8") as f:
+        with configs_file.open("w", encoding="utf-8") as f:
             yaml.safe_dump(DEFAULT_CONFIGS, f, sort_keys=False)
 
     # Copy transcription file
     if transcription_path:
         transcription_path = Path(transcription_path).resolve()
         dest_transcription = project_dir / "etc" / "all.transcription"
-        if transcription_path != dest_transcription:
-            if clobber or not dest_transcription.exists():
-                shutil.copy(transcription_path, dest_transcription)
+        if transcription_path != dest_transcription and (
+            clobber or not dest_transcription.exists()
+        ):
+            shutil.copy(transcription_path, dest_transcription)
 
     # Handle audio files
     if audio_path:
@@ -147,17 +148,15 @@ def setup_project(
     if dictionary_path:
         dictionary_path = Path(dictionary_path).resolve()
         dest_dict = project_dir / "shared" / "dictionary.dict"
-        if dictionary_path != dest_dict:
-            if clobber or not dest_dict.exists():
-                shutil.copy(dictionary_path, dest_dict)
+        if dictionary_path != dest_dict and (clobber or not dest_dict.exists()):
+            shutil.copy(dictionary_path, dest_dict)
 
     # Copy filler dictionary
     dest_filler = project_dir / "shared" / "filler.dict"
     if filler_dict_path:
         filler_dict_path = Path(filler_dict_path).resolve()
-        if filler_dict_path != dest_filler:
-            if clobber or not dest_filler.exists():
-                shutil.copy(filler_dict_path, dest_filler)
+        if filler_dict_path != dest_filler and (clobber or not dest_filler.exists()):
+            shutil.copy(filler_dict_path, dest_filler)
     else:
         # Use default filler dictionary from package data
         if clobber or not dest_filler.exists():
@@ -171,9 +170,8 @@ def setup_project(
     dest_phoneset = project_dir / "shared" / "phoneset.txt"
     if phoneset_path:
         phoneset_path = Path(phoneset_path).resolve()
-        if phoneset_path != dest_phoneset:
-            if clobber or not dest_phoneset.exists():
-                shutil.copy(phoneset_path, dest_phoneset)
+        if phoneset_path != dest_phoneset and (clobber or not dest_phoneset.exists()):
+            shutil.copy(phoneset_path, dest_phoneset)
     elif dictionary_path:
         dict_file = project_dir / "shared" / "dictionary.dict"
         if dict_file.exists() and (clobber or not dest_phoneset.exists()):

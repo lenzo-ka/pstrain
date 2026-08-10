@@ -39,7 +39,7 @@ class Dictionary:
             Comments start with ``#`` and are ignored
         """
         entries = {}
-        with open(dict_path, encoding="utf-8") as f:
+        with dict_path.open(encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line or line.startswith("#"):

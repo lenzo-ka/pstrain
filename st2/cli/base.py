@@ -986,7 +986,7 @@ def execute_command(args: argparse.Namespace) -> int:
     """Execute command from parsed args (used by main CLI)."""
     if hasattr(args, "command_instance"):
         return int(args.command_instance.run(args))
-    elif hasattr(args, "func"):
+    if hasattr(args, "func"):
         result = args.func(args)
         return int(result) if result is not None else 0
     return 0

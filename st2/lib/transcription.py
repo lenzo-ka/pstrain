@@ -30,7 +30,7 @@ def parse_transcription_file(transcription_path: Path) -> dict[str, str]:
     2. Sphinx: ``<s> <word1> <word2> </s> (<fileid>)``
     """
     transcripts = {}
-    with open(transcription_path, encoding="utf-8") as f:
+    with transcription_path.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:

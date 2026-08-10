@@ -76,10 +76,7 @@ class SetupCommand(Command):
     def execute(self, ctx: CommandContext) -> CommandResult:
         """Set up a project through the public library API."""
         # Resolve project directory
-        if ctx.args.project_dir:
-            project_dir = Path(ctx.args.project_dir).resolve()
-        else:
-            project_dir = Path.cwd()
+        project_dir = Path(ctx.args.project_dir).resolve() if ctx.args.project_dir else Path.cwd()
 
         # Resolve input paths
         transcription_path = (

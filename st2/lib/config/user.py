@@ -94,8 +94,7 @@ class ST2UserConfig(BaseModel):
     @classmethod
     def get_config_dir(cls) -> Path:
         """Get path to user config directory."""
-        config_dir = Path.home() / ".st2"
-        return config_dir
+        return Path.home() / ".st2"
 
     @classmethod
     def get_config_file(cls) -> Path:
@@ -116,7 +115,7 @@ class ST2UserConfig(BaseModel):
             config_file = cls.get_config_file()
 
         if config_file.exists():
-            with open(config_file, encoding="utf-8") as f:
+            with config_file.open(encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
             return cls.model_validate(data)
 
@@ -145,7 +144,7 @@ class ST2UserConfig(BaseModel):
             else:
                 data[key] = value
 
-        with open(config_file, "w", encoding="utf-8") as f:
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
 
 

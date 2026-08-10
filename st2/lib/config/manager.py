@@ -74,7 +74,7 @@ class ConfigManager:
         """
         config_file = cls.get_project_config_path(project_dir)
         if config_file.exists():
-            with open(config_file, encoding="utf-8") as f:
+            with config_file.open(encoding="utf-8") as f:
                 return yaml.safe_load(f) or {}
         return {}
 
@@ -91,7 +91,7 @@ class ConfigManager:
         """
         config_file = cls.get_experiment_config_path(project_dir, experiment)
         if config_file.exists():
-            with open(config_file, encoding="utf-8") as f:
+            with config_file.open(encoding="utf-8") as f:
                 return yaml.safe_load(f) or {}
         return {}
 
@@ -118,8 +118,7 @@ class ConfigManager:
         merged: dict[str, Any] = {}
         merged = _deep_merge(merged, user_defaults)
         merged = _deep_merge(merged, project_config)
-        merged = _deep_merge(merged, experiment_config)
-        return merged
+        return _deep_merge(merged, experiment_config)
 
     @classmethod
     def load_full_config(
@@ -224,7 +223,7 @@ class ConfigManager:
         config_file = cls.get_project_config_path(project_dir)
         config_file.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(config_file, "w", encoding="utf-8") as f:
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(config.to_dict(), f, default_flow_style=False, sort_keys=False)
 
         return config_file
@@ -249,7 +248,7 @@ class ConfigManager:
         config_file = cls.get_experiment_config_path(project_dir, experiment)
         config_file.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(config_file, "w", encoding="utf-8") as f:
+        with config_file.open("w", encoding="utf-8") as f:
             yaml.dump(config.to_dict(), f, default_flow_style=False, sort_keys=False)
 
         return config_file

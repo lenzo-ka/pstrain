@@ -89,8 +89,8 @@ def normalize_transcript_file(
 
     count = 0
     with (
-        open(input_path, encoding="utf-8") as f_in,
-        open(output_path, "w", encoding="utf-8") as f_out,
+        input_path.open(encoding="utf-8") as f_in,
+        output_path.open("w", encoding="utf-8") as f_out,
     ):
         for line in f_in:
             line = line.strip()

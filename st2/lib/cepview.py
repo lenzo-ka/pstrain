@@ -62,20 +62,14 @@ def view_cepstra(
 
     # Header
     if show_header:
-        if show_frame_numbers:
-            header = f"{'frame#':>7}"
-        else:
-            header = ""
+        header = f"{'frame#':>7}" if show_frame_numbers else ""
         for j in range(display_cols):
             header += f" c[{j:2d}]  "
         lines.append(header)
 
     # Data
     for i in range(start_frame, end_frame):
-        if show_frame_numbers:
-            line = f"{i:6d}:"
-        else:
-            line = ""
+        line = f"{i:6d}:" if show_frame_numbers else ""
         for j in range(display_cols):
             line += f"{mfc[i, j]:7.3f} "
         lines.append(line)
@@ -194,8 +188,4 @@ def check_parity(
     if len(py_values) != len(shell_values):
         return False
 
-    for pv, sv in zip(py_values, shell_values, strict=False):
-        if abs(pv - sv) > tolerance:
-            return False
-
-    return True
+    return all(abs(pv - sv) <= tolerance for pv, sv in zip(py_values, shell_values, strict=False))

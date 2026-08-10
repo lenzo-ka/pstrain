@@ -96,7 +96,7 @@ def get_sphinx_header(path: Path) -> tuple[str, str] | None:
         Tuple of (file_type_hint, version) or None if not a Sphinx file
     """
     try:
-        with open(path, "rb") as f:
+        with path.open("rb") as f:
             header = f.read(512)
 
         if not header.startswith(b"s3\n"):
@@ -125,7 +125,7 @@ def is_sphinx_binary(path: Path) -> bool:
 def _check_mfc_format(path: Path) -> bool:
     """Check if file appears to be in Sphinx .mfc format."""
     try:
-        with open(path, "rb") as f:
+        with path.open("rb") as f:
             header = f.read(4)
         if len(header) < 4:
             return False
@@ -211,7 +211,7 @@ def detect_file_type(path: Path) -> FileType:
 
     # Check for text-based files
     try:
-        with open(path, encoding="utf-8") as f:
+        with path.open(encoding="utf-8") as f:
             first_line = f.readline().strip()
 
         # ARPA LM format
@@ -287,10 +287,7 @@ def validate_file_type(
     def types_compatible(a: FileType, b: FileType) -> bool:
         if a == b:
             return True
-        for group in compatible_groups:
-            if a in group and b in group:
-                return True
-        return False
+        return any(a in group and b in group for group in compatible_groups)
 
     if not types_compatible(detected, expected):
         return False, f"Expected {expected.value}, detected {detected.value}"
@@ -304,32 +301,32 @@ def validate_file_type(
                 data = read_sphinx_mfc(path)
                 return True, f"Valid features: {data.shape}"
 
-            elif expected in (FileType.MEANS, FileType.VARIANCES):
+            if expected in (FileType.MEANS, FileType.VARIANCES):
                 from st2.lib._cffi import read_gau
 
                 data, n_cb, n_density, veclen, _ = read_gau(str(path))
                 return True, f"Valid gaussians: {data.shape}"
 
-            elif expected == FileType.MIXTURE_WEIGHTS:
+            if expected == FileType.MIXTURE_WEIGHTS:
                 from st2.lib._cffi import read_mixw
 
                 data, n_mixw, n_feat, n_density = read_mixw(str(path))
                 return True, f"Valid mixw: {data.shape}"
 
-            elif expected == FileType.TRANSITION_MATRICES:
+            if expected == FileType.TRANSITION_MATRICES:
                 from st2.lib._cffi import read_tmat
 
                 data, n_tmat, n_state = read_tmat(str(path))
                 return True, f"Valid tmat: {data.shape}"
 
-            elif expected == FileType.MODEL:
+            if expected == FileType.MODEL:
                 # Check required files exist
                 missing = [f for f in MODEL_FILES_REQUIRED if not (path / f).exists()]
                 if missing:
                     return False, f"Model missing: {', '.join(missing)}"
                 return True, "Valid model directory"
 
-            elif expected == FileType.MDEF:
+            if expected == FileType.MDEF:
                 # Try to parse mdef header
                 text = path.read_text()
                 if "version" not in text.lower() and "n_tied" not in text.lower():

@@ -226,7 +226,7 @@ def strip_dictionary_stress(input_dict: Path, output_dict: Path) -> tuple[int, i
     entries = []
     phoneset: set[str] = set()
 
-    with open(input_dict, encoding="utf-8") as f:
+    with input_dict.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
 
@@ -252,7 +252,7 @@ def strip_dictionary_stress(input_dict: Path, output_dict: Path) -> tuple[int, i
             entries.append(f"{word} {' '.join(phones_nostress)}")
 
     # Write stress-less dictionary
-    with open(output_dict, "w", encoding="utf-8") as f:
+    with output_dict.open("w", encoding="utf-8") as f:
         for entry in entries:
             f.write(entry + "\n")
 
@@ -272,7 +272,7 @@ def strip_phoneset_stress(input_phoneset: Path, output_phoneset: Path) -> int:
     """
     phones: set[str] = set()
 
-    with open(input_phoneset, encoding="utf-8") as f:
+    with input_phoneset.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line and not line.startswith("#"):
@@ -280,7 +280,7 @@ def strip_phoneset_stress(input_phoneset: Path, output_phoneset: Path) -> int:
                 phones.add(phone_nostress)
 
     # Write stress-less phoneset
-    with open(output_phoneset, "w", encoding="utf-8") as f:
+    with output_phoneset.open("w", encoding="utf-8") as f:
         # Write SIL first if present
         if "SIL" in phones:
             f.write("SIL\n")
