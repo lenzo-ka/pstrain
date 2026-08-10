@@ -10,7 +10,10 @@ actual pstrain training code.
 from __future__ import annotations
 
 import functools
+import json
 import os
+import subprocess
+import sys
 import time
 from concurrent.futures import Future
 from pathlib import Path
@@ -18,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from pstrain.lib.pipeline import Pipeline, Task, UnknownTargetError, runner
+from pstrain.lib.pipeline import timings as pipeline_timings
 
 
 def _touch(path: Path, contents: str = "") -> None:
@@ -33,6 +37,11 @@ def _raise_worker_error() -> None:
 
 def _produce_nothing() -> None:
     """Picklable callable that deliberately omits its declared output."""
+
+
+def _burn_cpu_in_child(output: Path) -> None:
+    subprocess.run([sys.executable, "-c", "sum(i * i for i in range(2_000_000))"], check=True)
+    output.touch()
 
 
 def _make_touch_task(name: str, out: Path, *, inputs: tuple[Path, ...] = ()) -> Task:
@@ -786,3 +795,263 @@ def test_force_from_path_target_works(tmp_path: Path) -> None:
     rc = pl.run(out)
     assert rc == 0
     assert out.read_text() == "ok"
+
+
+def test_inline_and_pool_task_timings_are_persisted_and_rolled_up(tmp_path: Path) -> None:
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    final = tmp_path / "final"
+    pipeline = Pipeline(tmp_path)
+    pipeline.add(
+        Task(
+            "features:first",
+            functools.partial(_touch, first),
+            outputs=(first,),
+            parallel_group="features",
+        )
+    )
+    pipeline.add(
+        Task(
+            "features:second",
+            functools.partial(_touch, second),
+            outputs=(second,),
+            parallel_group="features",
+        )
+    )
+    pipeline.add(_make_touch_task("finish", final, inputs=(first, second)))
+    pipeline.register_target("all", final)
+
+    assert pipeline.run("all", jobs=2) == 0
+    artifacts = list((tmp_path / ".pstrain" / "timings").glob("*.json"))
+    assert len(artifacts) == 1
+    document = json.loads(artifacts[0].read_text())
+    assert set(document) == {
+        "schema_version",
+        "run_id",
+        "target",
+        "start",
+        "end",
+        "status",
+        "tasks_recorded",
+        "tasks_failed",
+        "tasks",
+        "stages",
+    }
+    assert document["status"] == "completed"
+    assert document["tasks_recorded"] == 3
+    assert document["tasks_failed"] == 0
+    assert document["schema_version"] == 1
+    assert {item["task"] for item in document["tasks"]} == {
+        "features:first",
+        "features:second",
+        "finish",
+    }
+    assert {item["outcome"] for item in document["tasks"]} == {"ok"}
+    features = next(item for item in document["stages"] if item["stage"] == "features")
+    feature_tasks = [item for item in document["tasks"] if item["stage"] == "features"]
+    assert features["wall"] == pytest.approx(sum(item["wall"] for item in feature_tasks))
+    assert features["cpu"] == pytest.approx(
+        sum(
+            item["cpu_user"]
+            + item["cpu_sys"]
+            + item["cpu_children_user"]
+            + item["cpu_children_sys"]
+            for item in feature_tasks
+        )
+    )
+
+
+def test_cpu_timing_includes_reaped_child(tmp_path: Path) -> None:
+    output = tmp_path / "child-output"
+    measured = runner._worker(
+        Task("child-cpu", functools.partial(_burn_cpu_in_child, output), outputs=(output,))
+    )
+    assert measured.timing is not None
+    timing = measured.timing
+    assert timing.cpu_children_user + timing.cpu_children_sys > 0
+
+
+def test_timing_write_failure_does_not_fail_pipeline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    output = tmp_path / "output"
+    pipeline = Pipeline(tmp_path)
+    pipeline.add(
+        Task("work", functools.partial(Path.write_text, output, "done"), outputs=(output,))
+    )
+    pipeline.register_target("work", output)
+
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("blocked")
+    monkeypatch.setattr(pipeline_timings, "timings_dir", lambda project: blocker / "timings")
+    assert pipeline.run("work", jobs=1) == 0
+    assert output.exists()
+    assert "Could not write pipeline timings" in caplog.text
+
+
+@pytest.mark.parametrize("fault", ["pre", "post"])
+def test_measurement_failure_preserves_success_inline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    fault: str,
+) -> None:
+    output = tmp_path / "output"
+    monkeypatch.setenv("PSTRAIN_TIMINGS_FAULT", fault)
+    pipeline = Pipeline(tmp_path)
+    pipeline.add(
+        Task(
+            "work",
+            functools.partial(Path.write_text, output, "done"),
+            outputs=(output,),
+            parallel_group="group",
+        )
+    )
+    pipeline.register_target("work", output)
+
+    with caplog.at_level("WARNING"):
+        assert pipeline.run("work", jobs=1) == 0
+    assert output.read_text() == "done"
+    assert caplog.messages.count(f"Could not measure task work: injected {fault} timing fault") == 1
+    artifacts = list((tmp_path / ".pstrain" / "timings").glob("*.json"))
+    assert len(artifacts) == 1
+    document = json.loads(artifacts[0].read_text())
+    assert document["status"] == "completed"
+    assert document["tasks_recorded"] == 0
+
+
+@pytest.mark.parametrize("fault", ["pre", "post"])
+def test_measurement_failure_preserves_success_in_spawn_pool(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+    fault: str,
+) -> None:
+    output = tmp_path / "output"
+    monkeypatch.setenv("PSTRAIN_TIMINGS_FAULT", fault)
+    pipeline = Pipeline(tmp_path)
+    pipeline.add(
+        Task(
+            "work",
+            functools.partial(Path.write_text, output, "done"),
+            outputs=(output,),
+            parallel_group="group",
+        )
+    )
+    pipeline.register_target("work", output)
+
+    assert pipeline.run("work", jobs=2) == 0
+    captured = capfd.readouterr()
+    assert output.read_text() == "done"
+    assert f"Could not measure task work: injected {fault} timing fault" in captured.err
+    artifacts = list((tmp_path / ".pstrain" / "timings").glob("*.json"))
+    assert len(artifacts) == 1
+    document = json.loads(artifacts[0].read_text())
+    assert document["status"] == "completed"
+    assert document["tasks_recorded"] == 0
+
+
+def test_summary_failure_does_not_fail_pipeline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    output = tmp_path / "output"
+    pipeline = Pipeline(tmp_path)
+    pipeline.add(_make_touch_task("work", output))
+    pipeline.register_target("work", output)
+
+    def broken_summary(document: dict[str, object]) -> str:
+        raise RuntimeError("cannot render")
+
+    monkeypatch.setattr(runner, "format_summary", broken_summary)
+    assert pipeline.run("work", jobs=1, verbose=True) == 0
+    assert output.exists()
+    assert "Could not render pipeline timing summary: cannot render" in caplog.text
+
+
+def test_failed_task_is_recorded_and_run_status_is_failed(tmp_path: Path) -> None:
+    output = tmp_path / "output"
+
+    def fail_after_work() -> None:
+        time.sleep(0.01)
+        raise RuntimeError("deliberate failure")
+
+    pipeline = Pipeline(tmp_path)
+    pipeline.add(Task("failing", fail_after_work, outputs=(output,)))
+    pipeline.register_target("failing", output)
+
+    assert pipeline.run("failing", jobs=1) == 1
+    artifacts = list((tmp_path / ".pstrain" / "timings").glob("*.json"))
+    assert len(artifacts) == 1
+    document = json.loads(artifacts[0].read_text())
+    assert document["status"] == "failed"
+    assert document["tasks_recorded"] == 1
+    assert document["tasks_failed"] == 1
+    assert document["tasks"][0]["outcome"] == "failed"
+    assert document["tasks"][0]["wall"] > 0
+
+
+def test_timing_write_removes_stale_temporary_file(tmp_path: Path) -> None:
+    directory = tmp_path / ".pstrain" / "timings"
+    directory.mkdir(parents=True)
+    stale = directory / ".old.json.tmp-123"
+    stale.write_text("partial")
+    old = time.time() - pipeline_timings.STALE_TEMP_AGE_SECONDS - 1
+    os.utime(stale, (old, old))
+    document = pipeline_timings.build_document(
+        [],
+        run_id="new",
+        target="target",
+        started="start",
+        ended="end",
+        status="completed",
+    )
+
+    assert pipeline_timings.write_document(tmp_path, document) == directory / "new.json"
+    assert not stale.exists()
+
+
+def test_timing_write_preserves_live_temporary_file(tmp_path: Path) -> None:
+    directory = tmp_path / ".pstrain" / "timings"
+    directory.mkdir(parents=True)
+    live = directory / ".concurrent.json.tmp-456-unique"
+    live.write_text("partial")
+    document = pipeline_timings.build_document(
+        [],
+        run_id="new",
+        target="target",
+        started="start",
+        ended="end",
+        status="completed",
+    )
+
+    assert pipeline_timings.write_document(tmp_path, document) == directory / "new.json"
+    assert live.exists()
+
+
+def test_rollup_schema_and_summary_are_value_tolerant() -> None:
+    record = pipeline_timings.TaskTiming(
+        task="features:a",
+        stage="features",
+        group="features",
+        wall=2.0,
+        cpu_user=0.5,
+        cpu_sys=0.25,
+        cpu_children_user=0.5,
+        cpu_children_sys=0.25,
+        start="2026-08-10T00:00:00+00:00",
+        end="2026-08-10T00:00:02+00:00",
+        outcome="ok",
+    )
+    document = pipeline_timings.build_document(
+        [record],
+        run_id="named",
+        target="features",
+        started=record.start,
+        ended=record.end,
+        status="completed",
+    )
+    assert document["stages"] == [
+        {"stage": "features", "wall": 2.0, "cpu": 1.5, "cpu_wall_ratio": 0.75}
+    ]
+    assert "features" in pipeline_timings.format_summary(document)
+    assert "0.75x" in pipeline_timings.format_summary(document)

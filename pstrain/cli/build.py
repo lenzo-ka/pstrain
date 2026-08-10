@@ -105,6 +105,12 @@ everything, even if up to date.
             action="store_true",
             help="Rebuild all tasks reachable from target, even if up to date",
         )
+        parser.add_argument(
+            "-v",
+            "--verbose",
+            action="store_true",
+            help="Always print the pipeline timing summary",
+        )
 
     def execute(self, ctx: CommandContext) -> CommandResult:
         if ctx.args.list:
@@ -138,6 +144,7 @@ everything, even if up to date.
                 dry_run=ctx.dry_run,
                 force=ctx.args.force,
                 jobs=ctx.args.jobs,
+                verbose=ctx.verbose,
             )
         except UnknownTargetError as exc:
             print(f"Error: unknown target {exc!s}", file=sys.stderr)

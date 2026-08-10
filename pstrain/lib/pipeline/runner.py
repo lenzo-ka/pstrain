@@ -35,9 +35,20 @@ from collections.abc import Callable, Iterable
 from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from pstrain.lib.native_worker import PstrainWorkerError
+from pstrain.lib.pipeline.timings import (
+    SUMMARY_THRESHOLD_SECONDS,
+    MeasuredTask,
+    TaskTiming,
+    build_document,
+    format_summary,
+    measure,
+    new_run_id,
+    write_document,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +111,30 @@ class _PlanEntry:
     reason: str
 
 
+@dataclass
+class _ExecutionResult:
+    """Internal result that remains comparable with the historical integer rc."""
+
+    rc: int
+    timings: list[TaskTiming]
+    status: str = "completed"
+
+    def __iter__(self):  # type: ignore[no-untyped-def]
+        yield self.rc
+        yield self.timings
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, int):
+            return self.rc == other
+        if isinstance(other, _ExecutionResult):
+            return (
+                self.rc == other.rc
+                and self.timings == other.timings
+                and self.status == other.status
+            )
+        return NotImplemented
+
+
 class Pipeline:
     """Registers tasks and resolves their dependency graph by file paths.
 
@@ -108,10 +143,11 @@ class Pipeline:
     files (e.g. raw audio, hand-written transcripts).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, project_dir: Path | None = None) -> None:
         self._tasks: dict[str, Task] = {}
         self._producer_by_output: dict[Path, str] = {}
         self._targets: dict[str, Path] = {}
+        self._project_dir = project_dir
 
     def add(self, task: Task) -> None:
         if task.name in self._tasks:
@@ -207,6 +243,7 @@ class Pipeline:
         dry_run: bool = False,
         force: bool = False,
         jobs: int | None = None,
+        verbose: bool = False,
     ) -> int:
         """Build `target`. ``jobs=None`` uses the available CPU count."""
         plan = self.plan(target, force=force)
@@ -220,7 +257,32 @@ class Pipeline:
             print(f"Up to date: {target}")
             return 0
 
-        return _execute(to_run, jobs=_resolve_jobs(jobs))
+        run_id = new_run_id()
+        started = datetime.now(UTC).isoformat()
+        wall_start = time.monotonic()
+        execution = _execute(to_run, jobs=_resolve_jobs(jobs))
+        rc = execution.rc
+        records = execution.timings
+        ended = datetime.now(UTC).isoformat()
+        document = build_document(
+            records,
+            run_id=run_id,
+            target=str(target),
+            started=started,
+            ended=ended,
+            status=execution.status,
+        )
+        if self._project_dir is not None:
+            write_document(self._project_dir, document)
+        if records and (verbose or time.monotonic() - wall_start > SUMMARY_THRESHOLD_SECONDS):
+            try:
+                summary = format_summary(document)
+            except Exception as exc:
+                logger.warning("Could not render pipeline timing summary: %s", exc)
+            else:
+                print()
+                print(summary)
+        return rc
 
     def _toposort_for(self, target: Path) -> list[str]:
         """Return task names in dependency order, reachable from `target`."""
@@ -290,13 +352,14 @@ def _resolve_jobs(jobs: int | None) -> int:
     return jobs
 
 
-def _execute(entries: list[_PlanEntry], *, jobs: int) -> int:
+def _execute(entries: list[_PlanEntry], *, jobs: int) -> _ExecutionResult:
     """Execute entries, batching all dependency-ready members of a group."""
     pending = list(entries)
     producer_by_output = {
         Path(output): entry.task.name for entry in entries for output in entry.task.outputs
     }
     executed: set[str] = set()
+    timings: list[TaskTiming] = []
 
     while pending:
         entry = pending[0]
@@ -312,38 +375,48 @@ def _execute(entries: list[_PlanEntry], *, jobs: int) -> int:
                     for task_input in candidate.task.inputs
                 )
             ]
-            rc = _run_parallel_batch(batch, jobs=jobs)
+            result = _run_parallel_batch(batch, jobs=jobs)
+            if isinstance(result, int):  # Compatibility with test/integration shims.
+                rc, batch_timings = result, []
+                result_status = "failed" if rc else "completed"
+            else:
+                rc, batch_timings = result
+                result_status = result.status
+            timings.extend(batch_timings)
             if rc != 0:
-                return rc
+                return _ExecutionResult(rc, timings, result_status)
             batch_names = {candidate.task.name for candidate in batch}
             executed.update(batch_names)
             pending = [candidate for candidate in pending if candidate.task.name not in batch_names]
         else:
-            rc = _run_one(entry.task)
+            rc, inline_timings = _run_one(entry.task)
+            timings.extend(inline_timings)
             if rc != 0:
-                return rc
+                return _ExecutionResult(rc, timings, "failed")
             executed.add(entry.task.name)
             pending.pop(0)
-    return 0
+    return _ExecutionResult(0, timings)
 
 
-def _run_one(task: Task) -> int:
+def _run_one(task: Task) -> _ExecutionResult:
     """Run a single task in-process. Returns exit code."""
     logger.info("Running %s", task.name)
     print(f"-> {task.name}")
     start = time.monotonic()
-    try:
-        _execute_task(task)
-    except Exception as exc:
-        logger.exception("Task %s failed", task.name)
+    measured = measure(task.name, task.parallel_group, lambda: _execute_task(task))
+    if measured.error is not None:
+        exc = measured.error
+        logger.error("Task %s failed", task.name, exc_info=(type(exc), exc, exc.__traceback__))
         print(f"!! {task.name} failed: {exc}")
-        return 1
+        return _ExecutionResult(
+            1, [measured.timing] if measured.timing is not None else [], "failed"
+        )
     elapsed = time.monotonic() - start
     print(f"   {task.name} done in {elapsed:.1f}s")
-    return 0
+    return _ExecutionResult(0, [measured.timing] if measured.timing is not None else [])
 
 
-def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> int:
+def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> _ExecutionResult:
     """Run a batch of independent tasks in a process pool.
 
     A no-op probe proves that the pool can start before any real work is
@@ -362,12 +435,15 @@ def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> int:
     start = time.monotonic()
     failures: list[tuple[str, BaseException]] = []
     completed = 0
+    timings: list[TaskTiming] = []
     try:
         pool = ProcessPoolExecutor(
             max_workers=workers, mp_context=multiprocessing.get_context("spawn")
         )
     except (OSError, BrokenProcessPool) as exc:
-        return _abort_unstartable_batch(group_name=group_name, exc=exc)
+        return _ExecutionResult(
+            _abort_unstartable_batch(group_name=group_name, exc=exc), timings, "aborted"
+        )
 
     try:
         probe = pool.submit(_pool_startup_probe)
@@ -376,13 +452,17 @@ def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> int:
         # Deliberately abandon a wedged worker process: leaking it is preferable
         # to hanging the entire run while waiting for shutdown.
         pool.shutdown(wait=False, cancel_futures=True)
-        return _abort_unstartable_batch(group_name=group_name, exc=exc)
+        return _ExecutionResult(
+            _abort_unstartable_batch(group_name=group_name, exc=exc), timings, "aborted"
+        )
     except (OSError, BrokenProcessPool) as exc:
         pool.shutdown(wait=True, cancel_futures=True)
-        return _abort_unstartable_batch(group_name=group_name, exc=exc)
+        return _ExecutionResult(
+            _abort_unstartable_batch(group_name=group_name, exc=exc), timings, "aborted"
+        )
 
     try:
-        future_to_task: dict[Future[None], Task] = {}
+        future_to_task: dict[Future[MeasuredTask], Task] = {}
         for entry in batch:
             try:
                 future = pool.submit(_worker, entry.task)
@@ -395,7 +475,12 @@ def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> int:
         for fut in as_completed(future_to_task):
             task = future_to_task[fut]
             try:
-                fut.result()
+                measured = fut.result()
+                if measured is not None:  # Accommodate executor doubles used by callers/tests.
+                    if measured.timing is not None:
+                        timings.append(measured.timing)
+                    if measured.error is not None:
+                        raise measured.error
                 _verify_outputs(task)
                 completed += 1
                 report_every = max(1, n // _PROGRESS_REPORT_BUCKETS)
@@ -413,9 +498,9 @@ def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> int:
             print(f"   {failed_name}: {failed_exc}")
         if len(failures) > _MAX_FAILURES_TO_REPORT:
             print(f"   ... and {len(failures) - _MAX_FAILURES_TO_REPORT} more")
-        return 1
+        return _ExecutionResult(1, timings, "failed")
     print(f"   fan-out [{group_name}] done in {elapsed:.1f}s")
-    return 0
+    return _ExecutionResult(0, timings)
 
 
 def _abort_unstartable_batch(*, group_name: str, exc: BaseException) -> int:
@@ -452,10 +537,10 @@ def _pool_startup_probe() -> None:
     """Importable no-op used to prove that a process-pool worker can start."""
 
 
-def _worker(task: Task) -> None:
+def _worker(task: Task) -> MeasuredTask:
     """Entry point for ProcessPoolExecutor workers.
 
     Runs the task's callable. Must be importable at module top level so
     pickling works.
     """
-    _execute_task(task)
+    return measure(task.name, task.parallel_group, lambda: _execute_task(task))

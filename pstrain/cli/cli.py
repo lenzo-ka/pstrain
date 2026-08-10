@@ -39,6 +39,7 @@ def main() -> int:
     from pstrain.cli.split import split_command
     from pstrain.cli.step import register_step_command
     from pstrain.cli.test import test_command
+    from pstrain.cli.timings import timings_command
     from pstrain.cli.validate import validate_command
 
     # Register Command-based commands
@@ -54,6 +55,7 @@ def main() -> int:
         align_command,
         info_command,
         compare_command,
+        timings_command,
     ]
     for cmd in commands:
         cmd.register(subparsers)
