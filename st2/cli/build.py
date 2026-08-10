@@ -83,8 +83,8 @@ everything, even if up to date.
             "-j",
             "--jobs",
             type=int,
-            default=1,
-            help="Number of parallel workers for the feature fan-out (default: 1)",
+            default=None,
+            help="Parallel workers (default: auto, bounded by CPU count and batch size)",
         )
         parser.add_argument(
             "--experiment",

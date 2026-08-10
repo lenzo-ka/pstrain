@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from st2.lib.pipeline import Pipeline, Task, UnknownTargetError
+from st2.lib.pipeline import Pipeline, Task, UnknownTargetError, runner
 
 
 def _touch(path: Path, contents: str = "") -> None:
@@ -317,6 +317,159 @@ def test_parallel_fanout_writes_all_outputs(tmp_path: Path) -> None:
     for i, out in enumerate(outputs):
         assert out.read_text() == f"data-{i}"
     assert sentinel.read_text() == "done"
+
+
+def test_parallel_group_batches_ready_non_adjacent_tasks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ready group members form one batch despite an interleaved task."""
+    producer = tmp_path / "producer.txt"
+    first = tmp_path / "first.txt"
+    unrelated = tmp_path / "unrelated.txt"
+    second = tmp_path / "second.txt"
+    sentinel = tmp_path / "sentinel.txt"
+    batches: list[list[str]] = []
+
+    def record_batch(batch: list[runner._PlanEntry], *, jobs: int) -> int:
+        assert jobs == 2
+        assert producer.exists()
+        batches.append([entry.task.name for entry in batch])
+        for entry in batch:
+            if runner._run_one(entry.task) != 0:
+                return 1
+        return 0
+
+    monkeypatch.setattr(runner, "_run_parallel_batch", record_batch)
+
+    pl = Pipeline()
+    pl.add(_make_touch_task("producer", producer))
+    pl.add(
+        Task(
+            "group:first",
+            functools.partial(_touch, first, "first"),
+            inputs=(producer,),
+            outputs=(first,),
+            parallel_group="features",
+        )
+    )
+    pl.add(_make_touch_task("unrelated", unrelated))
+    pl.add(
+        Task(
+            "group:second",
+            functools.partial(_touch, second, "second"),
+            inputs=(producer,),
+            outputs=(second,),
+            parallel_group="features",
+        )
+    )
+    pl.add(
+        Task(
+            "sentinel",
+            functools.partial(_touch, sentinel, "done"),
+            inputs=(first, unrelated, second),
+            outputs=(sentinel,),
+        )
+    )
+    pl.register_target("all", sentinel)
+
+    assert [entry.task.name for entry in pl.plan("all")] == [
+        "producer",
+        "group:first",
+        "unrelated",
+        "group:second",
+        "sentinel",
+    ]
+    assert pl.run("all", jobs=2) == 0
+    assert batches == [["group:first", "group:second"]]
+    assert unrelated.exists()
+    assert sentinel.exists()
+
+
+def test_jobs_none_uses_cpu_count_bounded_by_batch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    outputs = [tmp_path / f"out-{i}" for i in range(3)]
+    sentinel = tmp_path / "sentinel"
+    observed: list[tuple[int, int]] = []
+
+    def record_batch(batch: list[runner._PlanEntry], *, jobs: int) -> int:
+        observed.append((jobs, min(jobs, len(batch))))
+        return runner._run_inline_batch(batch)
+
+    monkeypatch.setattr(runner.os, "cpu_count", lambda: 8)
+    monkeypatch.setattr(runner, "_run_parallel_batch", record_batch)
+    pl = Pipeline()
+    for i, output in enumerate(outputs):
+        pl.add(
+            Task(
+                f"group:{i}",
+                functools.partial(_touch, output),
+                outputs=(output,),
+                parallel_group="group",
+            )
+        )
+    pl.add(_make_touch_task("sentinel", sentinel, inputs=tuple(outputs)))
+    pl.register_target("all", sentinel)
+
+    assert pl.run("all") == 0
+    assert observed == [(8, 3)]
+
+
+def test_jobs_one_runs_inline_without_constructing_pool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "output"
+
+    def unexpected_pool(*args: object, **kwargs: object) -> None:
+        pytest.fail("ProcessPoolExecutor must not be constructed for jobs=1")
+
+    monkeypatch.setattr(runner, "ProcessPoolExecutor", unexpected_pool)
+    pl = Pipeline()
+    pl.add(
+        Task(
+            "grouped",
+            functools.partial(_touch, output),
+            outputs=(output,),
+            parallel_group="group",
+        )
+    )
+    pl.register_target("grouped", output)
+
+    assert pl.run("grouped", jobs=1) == 0
+    assert output.exists()
+
+
+def test_pool_construction_failure_falls_back_inline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    outputs = [tmp_path / f"out-{i}" for i in range(2)]
+    sentinel = tmp_path / "sentinel"
+
+    def denied_pool(*args: object, **kwargs: object) -> None:
+        raise PermissionError("semaphores denied")
+
+    monkeypatch.setattr(runner, "ProcessPoolExecutor", denied_pool)
+    pl = Pipeline()
+    for i, output in enumerate(outputs):
+        pl.add(
+            Task(
+                f"group:{i}",
+                functools.partial(_touch, output),
+                outputs=(output,),
+                parallel_group="group",
+            )
+        )
+    pl.add(_make_touch_task("sentinel", sentinel, inputs=tuple(outputs)))
+    pl.register_target("all", sentinel)
+
+    with caplog.at_level("WARNING"):
+        assert pl.run("all", jobs=2) == 0
+    assert all(output.exists() for output in outputs)
+    assert sentinel.exists()
+    assert "Cannot create process pool for group" in caplog.text
+    assert "running sequentially" in caplog.text
 
 
 def test_staleness_propagates_to_downstream(tmp_path: Path) -> None:

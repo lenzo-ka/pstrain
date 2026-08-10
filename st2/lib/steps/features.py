@@ -62,8 +62,8 @@ class FeaturesStep(Step):
             "-j",
             "--jobs",
             type=int,
-            default=1,
-            help="Number of parallel jobs (default: 1)",
+            default=None,
+            help="Parallel jobs (default: auto, bounded by CPU count and batch size)",
         )
 
     def execute(self, ctx: StepContext, **params: Any) -> int:
@@ -76,7 +76,7 @@ class FeaturesStep(Step):
         from st2.lib.pipeline import PipelineContext
         from st2.lib.pipeline.tasks import build_pipeline
 
-        jobs = params.get("jobs", 1)
+        jobs = params.get("jobs")
         config_name = params.get("feature_set_id", "default")
 
         pipeline_ctx = PipelineContext.from_config(
@@ -85,7 +85,7 @@ class FeaturesStep(Step):
             config_name=config_name,
         )
         ctx.log(f"Feature extraction: {pipeline_ctx.features_dir}")
-        ctx.log(f"  Jobs: {jobs}")
+        ctx.log(f"  Jobs: {jobs if jobs is not None else 'auto'}")
         pipeline = build_pipeline(pipeline_ctx)
         return pipeline.run("features", dry_run=ctx.dry_run, jobs=jobs)
 

@@ -16,9 +16,9 @@ ever need content-hash staleness, layer it on top.
 Execution model
 ---------------
 The planner returns a topologically-sorted list of tasks to run. The executor
-runs them in order. Tasks marked `parallel_group` will be batched together and
-dispatched to a `ProcessPoolExecutor` — this is how feature extraction fans
-out across fileids.
+runs them in dependency order. Ready tasks marked with the same
+`parallel_group` are batched together and dispatched to a
+`ProcessPoolExecutor` — this is how feature extraction fans out across fileids.
 
 Dry-run prints the plan with staleness markers and never executes.
 """
@@ -187,9 +187,9 @@ class Pipeline:
         *,
         dry_run: bool = False,
         force: bool = False,
-        jobs: int = 1,
+        jobs: int | None = None,
     ) -> int:
-        """Build `target`. Returns 0 on success, non-zero on failure."""
+        """Build `target`. ``jobs=None`` uses the available CPU count."""
         plan = self.plan(target, force=force)
 
         if dry_run:
@@ -201,7 +201,7 @@ class Pipeline:
             print(f"Up to date: {target}")
             return 0
 
-        return _execute(to_run, jobs=jobs)
+        return _execute(to_run, jobs=_resolve_jobs(jobs))
 
     def _toposort_for(self, target: Path) -> list[str]:
         """Return task names in dependency order, reachable from `target`."""
@@ -261,26 +261,47 @@ def _print_plan(plan: list[_PlanEntry], *, target: str) -> None:
     print("# Legend: * = will run, . = up to date")
 
 
+def _resolve_jobs(jobs: int | None) -> int:
+    """Resolve the API's auto worker setting to at least one worker."""
+    if jobs is None:
+        return max(1, os.cpu_count() or 1)
+    return jobs
+
+
 def _execute(entries: list[_PlanEntry], *, jobs: int) -> int:
-    """Execute a list of plan entries, batching adjacent same-group tasks."""
-    i = 0
-    while i < len(entries):
-        entry = entries[i]
+    """Execute entries, batching all dependency-ready members of a group."""
+    pending = list(entries)
+    producer_by_output = {
+        Path(output): entry.task.name for entry in entries for output in entry.task.outputs
+    }
+    executed: set[str] = set()
+
+    while pending:
+        entry = pending[0]
         group = entry.task.parallel_group
         if group and jobs > 1:
-            batch_end = i + 1
-            while batch_end < len(entries) and entries[batch_end].task.parallel_group == group:
-                batch_end += 1
-            batch = entries[i:batch_end]
+            batch = [
+                candidate
+                for candidate in pending
+                if candidate.task.parallel_group == group
+                and all(
+                    (producer := producer_by_output.get(Path(task_input))) is None
+                    or producer in executed
+                    for task_input in candidate.task.inputs
+                )
+            ]
             rc = _run_parallel_batch(batch, jobs=jobs)
             if rc != 0:
                 return rc
-            i = batch_end
+            batch_names = {candidate.task.name for candidate in batch}
+            executed.update(batch_names)
+            pending = [candidate for candidate in pending if candidate.task.name not in batch_names]
         else:
             rc = _run_one(entry.task)
             if rc != 0:
                 return rc
-            i += 1
+            executed.add(entry.task.name)
+            pending.pop(0)
     return 0
 
 
@@ -308,12 +329,22 @@ def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> int:
     """Run a batch of independent tasks in a process pool."""
     group_name = batch[0].task.parallel_group
     n = len(batch)
-    workers = min(jobs, n) if jobs > 0 else (os.cpu_count() or 1)
+    workers = min(jobs, n)
     print(f"-> fan-out [{group_name}]: {n} task(s), {workers} worker(s)")
     start = time.monotonic()
     failures: list[tuple[str, BaseException]] = []
     completed = 0
-    with ProcessPoolExecutor(max_workers=workers) as pool:
+    try:
+        pool = ProcessPoolExecutor(max_workers=workers)
+    except (OSError, PermissionError) as exc:
+        logger.warning(
+            "Cannot create process pool for %s (%s); running sequentially",
+            group_name,
+            exc,
+        )
+        return _run_inline_batch(batch)
+
+    with pool:
         future_to_name = {pool.submit(_worker, e.task): e.task.name for e in batch}
         for fut in as_completed(future_to_name):
             name = future_to_name[fut]
@@ -335,6 +366,15 @@ def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> int:
             print(f"   ... and {len(failures) - _MAX_FAILURES_TO_REPORT} more")
         return 1
     print(f"   fan-out [{group_name}] done in {elapsed:.1f}s")
+    return 0
+
+
+def _run_inline_batch(batch: list[_PlanEntry]) -> int:
+    """Run a fan-out batch sequentially in the current process."""
+    for entry in batch:
+        rc = _run_one(entry.task)
+        if rc != 0:
+            return rc
     return 0
 
 
