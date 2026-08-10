@@ -252,6 +252,11 @@ def validate_project(project_dir: Path, experiment: str = "default") -> Validati
     # Check audio files
     audio_dir = project_dir / "audio"
     if audio_dir.exists():
+        discovered_fileids = {
+            path.relative_to(audio_dir).with_suffix("").as_posix()
+            for path in audio_dir.rglob("*.wav")
+        }
+
         # Get all expected fileids from transcripts
         all_fileids: list[str] = []
         for split in ["train", "test", "dev"]:
@@ -277,6 +282,14 @@ def validate_project(project_dir: Path, experiment: str = "default") -> Validati
             report.missing_audio = audio_missing[:20]  # Limit list size
             report.errors.append(
                 f"Missing audio files: {len(audio_missing)} (e.g., {audio_missing[0]}.wav)"
+            )
+
+        unreachable = sorted(discovered_fileids - set(all_fileids))
+        if unreachable:
+            report.warnings.append(
+                f"Audio files not referenced by any transcription fileid: "
+                f"{len(unreachable)} (e.g., {unreachable[0]}.wav). "
+                "For nested audio, fileids must include relative directory components."
             )
 
     return report
