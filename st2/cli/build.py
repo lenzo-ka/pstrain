@@ -130,7 +130,6 @@ everything, even if up to date.
         try:
             pipeline = build_pipeline(pipeline_ctx)
         except ValueError as exc:
-            print(f"Error: {exc}", file=sys.stderr)
             return CommandResult.fail(str(exc))
 
         try:
