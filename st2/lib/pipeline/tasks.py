@@ -127,7 +127,7 @@ def _make_feat_params_task(ctx: PipelineContext) -> Task:
 def _make_extract_tasks(ctx: PipelineContext) -> list[Task]:
     """One task per fileid; parallel-safe.
 
-    Uses `audio_fileids()` (corpus-wide, derived from `audio/*.wav`) so
+    Uses `audio_fileids()` (corpus-wide, recursively derived from `audio/`) so
     extraction can be planned before the train/test split has run.
     """
     params: dict[str, Any] = {
@@ -138,8 +138,15 @@ def _make_extract_tasks(ctx: PipelineContext) -> list[Task]:
         "lowerf": ctx.feat.lowerf,
         "upperf": ctx.feat.upperf,
     }
+    fileids = ctx.audio_fileids()
+    if not fileids:
+        pattern = "**/*.wav"
+        raise ValueError(
+            f"No audio files found in {ctx.audio_dir} matching recursive glob {pattern!r}"
+        )
+
     out: list[Task] = []
-    for fileid in ctx.audio_fileids():
+    for fileid in fileids:
         audio = ctx.audio_dir / f"{fileid}.wav"
         mfc = ctx.features_dir / f"{fileid}.mfc"
         out.append(
@@ -725,11 +732,9 @@ TARGETS: list[TargetSpec] = [
 def build_pipeline(ctx: PipelineContext) -> Pipeline:
     """Build a pipeline with all ST2 training tasks registered for `ctx`.
 
-    Feature-extraction tasks are expanded to one task per fileid based on
-    the current contents of `train.fileids` + `test.fileids`. If those
-    files don't exist yet, no feature tasks are added and any model task
-    that depends on feature files will fail at planning time with a clear
-    error from the runner.
+    Feature-extraction tasks are expanded to one task per audio file found
+    recursively under the audio directory. An empty or missing audio
+    directory fails immediately during pipeline construction.
     """
     pl = Pipeline()
 

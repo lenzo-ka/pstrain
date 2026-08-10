@@ -1,7 +1,7 @@
 """CLI command for feature extraction.
 
 Drives the pipeline runner's "features" target, which fans out one task per
-fileid in `train.fileids` + `test.fileids` and runs them in a process pool.
+audio file and runs them in a process pool.
 """
 
 from __future__ import annotations
@@ -19,8 +19,7 @@ class FeaturesCommand(ProjectCommand):
     name = "features"
     help = "Extract acoustic features from audio files"
     description = (
-        "Extract MFCC features from audio files listed in "
-        "experiments/{experiment}/etc/{train,test}.fileids."
+        "Extract MFCC features from audio files found recursively under audio/."
     )
 
     def add_arguments(self, parser: argparse.ArgumentParser) -> None:
@@ -55,11 +54,7 @@ class FeaturesCommand(ProjectCommand):
         except ValueError as exc:
             return CommandResult.fail(str(exc))
 
-        fileids = pipeline_ctx.all_fileids()
-        if not fileids and not ctx.dry_run:
-            return CommandResult.fail(
-                "No fileids found. Run 'st2 split' first to create train/test fileids."
-            )
+        fileids = pipeline_ctx.audio_fileids()
 
         ctx.log_action("Extract features", str(pipeline_ctx.features_dir))
         ctx.log(f"  Audio:  {pipeline_ctx.audio_dir}")
@@ -67,7 +62,10 @@ class FeaturesCommand(ProjectCommand):
         ctx.log(f"  Files:  {len(fileids)}")
         ctx.log(f"  Jobs:   {ctx.args.jobs}")
 
-        pipeline = build_pipeline(pipeline_ctx)
+        try:
+            pipeline = build_pipeline(pipeline_ctx)
+        except ValueError as exc:
+            return CommandResult.fail(str(exc))
         try:
             rc = pipeline.run(
                 "features",

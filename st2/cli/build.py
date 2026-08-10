@@ -127,7 +127,11 @@ everything, even if up to date.
             print(f"Error: {exc}", file=sys.stderr)
             return CommandResult.fail(str(exc))
 
-        pipeline = build_pipeline(pipeline_ctx)
+        try:
+            pipeline = build_pipeline(pipeline_ctx)
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return CommandResult.fail(str(exc))
 
         try:
             rc = pipeline.run(

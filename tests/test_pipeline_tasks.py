@@ -31,6 +31,7 @@ def empty_project(tmp_path: Path) -> Path:
     (project / "experiments" / "default" / "etc" / "train.fileids").write_text("")
     (project / "experiments" / "default" / "etc" / "test.fileids").write_text("")
     (project / "experiments" / "default" / "etc" / "train.transcription").write_text("")
+    (project / "audio" / "placeholder.wav").write_text("fake-wav")
 
     return project
 
@@ -124,9 +125,64 @@ def test_fanout_tasks_share_parallel_group(empty_project: Path) -> None:
     pl = build_pipeline(ctx)
     tasks = pl.tasks()
     extracts = [t for name, t in tasks.items() if name.startswith("extract:")]
-    assert len(extracts) == 2
+    assert len(extracts) == 3
     groups = {t.parallel_group for t in extracts}
     assert groups == {"features"}
+
+
+def test_nested_and_flat_audio_fanout_uses_relative_fileids(empty_project: Path) -> None:
+    (empty_project / "audio" / "placeholder.wav").unlink()
+    for relative_path in ["flat.wav", "spk1/utt2.wav", "spk1/utt1.wav", "spk2/utt1.wav"]:
+        path = empty_project / "audio" / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("fake-wav")
+
+    ctx = PipelineContext.from_config(empty_project)
+    tasks = build_pipeline(ctx).tasks()
+
+    assert sorted(name for name in tasks if name.startswith("extract:")) == [
+        "extract:flat",
+        "extract:spk1/utt1",
+        "extract:spk1/utt2",
+        "extract:spk2/utt1",
+    ]
+    assert tasks["extract:spk1/utt1"].outputs == (
+        ctx.features_dir / "spk1" / "utt1.mfc",
+    )
+
+
+def test_audio_fileids_are_recursive_sorted_relative_posix_paths(empty_project: Path) -> None:
+    (empty_project / "audio" / "placeholder.wav").unlink()
+    for relative_path in ["z.wav", "spk2/b.wav", "spk1/c.wav", "spk1/a.wav"]:
+        path = empty_project / "audio" / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+
+    ctx = PipelineContext.from_config(empty_project)
+
+    assert ctx.audio_fileids() == ["spk1/a", "spk1/c", "spk2/b", "z"]
+    assert all("\\" not in fileid for fileid in ctx.audio_fileids())
+
+
+def test_empty_audio_directory_fails_during_pipeline_construction(
+    empty_project: Path,
+) -> None:
+    (empty_project / "audio" / "placeholder.wav").unlink()
+    ctx = PipelineContext.from_config(empty_project)
+
+    with pytest.raises(ValueError, match=r"No audio files found.*\*\*/\*\.wav"):
+        build_pipeline(ctx)
+
+
+def test_missing_audio_directory_fails_during_pipeline_construction(
+    empty_project: Path,
+) -> None:
+    (empty_project / "audio" / "placeholder.wav").unlink()
+    (empty_project / "audio").rmdir()
+    ctx = PipelineContext.from_config(empty_project)
+
+    with pytest.raises(ValueError, match=r"No audio files found.*\*\*/\*\.wav"):
+        build_pipeline(ctx)
 
 
 def test_split_task_produces_fileid_files(empty_project: Path) -> None:
@@ -155,6 +211,7 @@ def test_split_runs_end_to_end_and_partitions(tmp_path: Path) -> None:
     (project / "experiments" / "default" / "etc").mkdir(parents=True)
     (project / "shared" / "phoneset.txt").write_text("AA\nB\n")
     (project / "shared" / "dictionary.dict").write_text("HI HH AY\n")
+    (project / "audio" / "placeholder.wav").write_text("fake-wav")
 
     transcripts = "\n".join(f"utt_{i:03d} HELLO WORLD" for i in range(20)) + "\n"
     (project / "etc" / "all.transcription").write_text(transcripts)

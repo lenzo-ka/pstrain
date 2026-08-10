@@ -281,12 +281,16 @@ class PipelineContext:
         return self.read_fileids("train") + self.read_fileids("test")
 
     def audio_fileids(self, extension: str = ".wav") -> list[str]:
-        """All audio fileids in the corpus, derived from `audio/*<ext>`.
+        """All audio fileids, recursively derived from `audio/**/*<ext>`.
 
-        Returns sorted fileid stems (filename without extension). This is
-        the canonical set of files that feature extraction operates on
-        and is independent of whether the train/test split has run yet.
+        Returns sorted POSIX-style paths relative to the audio directory,
+        without the extension. This is the canonical set of files that
+        feature extraction operates on and is independent of whether the
+        train/test split has run yet.
         """
         if not self.audio_dir.exists():
             return []
-        return sorted(p.stem for p in self.audio_dir.glob(f"*{extension}"))
+        return sorted(
+            p.relative_to(self.audio_dir).with_suffix("").as_posix()
+            for p in self.audio_dir.rglob(f"*{extension}")
+        )
