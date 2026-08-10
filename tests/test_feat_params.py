@@ -24,6 +24,7 @@ def test_default_feat_params_contains_complete_training_front_end() -> None:
         "-nfft": "512",
         "-lowerf": "130",
         "-upperf": "6800",
+        "-alpha": "0.97",
         "-feat": "1s_c_d_dd",
         "-transform": "dct",
         "-lifter": "22",

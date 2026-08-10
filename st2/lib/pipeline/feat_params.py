@@ -34,6 +34,7 @@ def feat_params_lines(feat: FeatParams) -> list[str]:
         f"-nfft {feat.nfft}\n",
         f"-lowerf {feat.lowerf}\n",
         f"-upperf {feat.upperf}\n",
+        f"-alpha {feat.alpha}\n",
         f"-feat {feat.feat_type}\n",
         f"-transform {feat.transform}\n",
         f"-lifter {feat.lifter}\n",

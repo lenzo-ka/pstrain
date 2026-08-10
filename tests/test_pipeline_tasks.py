@@ -7,12 +7,15 @@ by some other task or treated as required external files.
 
 from __future__ import annotations
 
+import shutil
+from functools import partial
 from pathlib import Path
 
 import pytest
+import yaml
 
 from st2.lib.pipeline import PipelineContext
-from st2.lib.pipeline.context import FeatParams
+from st2.lib.pipeline.context import DEFAULT_CONFIGS, FeatParams
 from st2.lib.pipeline.tasks import TARGETS, build_pipeline
 
 
@@ -142,6 +145,18 @@ def test_extract_task_forwards_lifter(empty_project: Path, monkeypatch: pytest.M
     build_pipeline(ctx).tasks()["extract:placeholder"].fn()
 
     assert captured["lifter"] == 17
+
+
+def test_extract_task_forwards_preemphasis_alpha(empty_project: Path) -> None:
+    (empty_project / "etc" / "configs.yaml").write_text(
+        "custom:\n  features:\n    alpha: 0.42\n"
+    )
+    ctx = PipelineContext.from_config(empty_project, config_name="custom")
+
+    extract_task = build_pipeline(ctx).tasks()["extract:placeholder"]
+
+    assert isinstance(extract_task.fn, partial)
+    assert extract_task.fn.args[2]["alpha"] == 0.42
 
 
 def test_nested_and_flat_audio_fanout_uses_relative_fileids(empty_project: Path) -> None:
@@ -285,6 +300,45 @@ def test_named_config_overrides_defaults(empty_project: Path) -> None:
 def test_unknown_config_raises(empty_project: Path) -> None:
     with pytest.raises(ValueError, match="unknown config"):
         PipelineContext.from_config(empty_project, config_name="nonsense")
+
+
+def test_every_shipped_profile_loads(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    (project / "etc").mkdir(parents=True)
+    shipped_configs = Path(__file__).parents[1] / "etc" / "configs.yaml"
+    shutil.copyfile(shipped_configs, project / "etc" / "configs.yaml")
+    profiles = yaml.safe_load(shipped_configs.read_text())
+
+    for profile in profiles:
+        context = PipelineContext.from_config(project, config_name=profile)
+        assert context.config_name == profile
+
+
+def test_shipped_profiles_equal_builtin_defaults() -> None:
+    shipped_configs = Path(__file__).parents[1] / "etc" / "configs.yaml"
+    assert yaml.safe_load(shipped_configs.read_text()) == DEFAULT_CONFIGS
+
+
+@pytest.mark.parametrize(
+    ("block", "key", "expected"),
+    [
+        ("features", "alphaa", "feature"),
+        ("training", "iterationz", "training"),
+        ("split", "sead", "split"),
+    ],
+)
+def test_unknown_profile_parameter_names_context(
+    empty_project: Path, block: str, key: str, expected: str
+) -> None:
+    (empty_project / "etc" / "configs.yaml").write_text(
+        f"sphinxtrain:\n  {block}:\n    {key}: 1\n"
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=rf"unknown {expected} parameter '{key}' in profile 'sphinxtrain'",
+    ):
+        PipelineContext.from_config(empty_project, config_name="sphinxtrain")
 
 
 def test_multipron_training_defaults_on(empty_project: Path) -> None:
