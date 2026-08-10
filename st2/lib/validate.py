@@ -186,7 +186,7 @@ def validate_project(project_dir: Path, experiment: str = "default") -> Validati
         try:
             dictionary = Dictionary.from_file(dict_file)
             report.dictionary_entries = len(dictionary)
-            report.dictionary_base_words = len(dictionary.words())
+            report.dictionary_base_words = len(dictionary.base_words())
         except Exception as e:
             report.errors.append(f"Error loading dictionary: {e}")
 
@@ -223,7 +223,10 @@ def validate_project(project_dir: Path, experiment: str = "default") -> Validati
     ]
     present_split_artifacts = [path for path in split_artifacts if path.exists()]
     if not present_split_artifacts:
-        report.warnings.append("Split outputs are missing; run st2 split")
+        if (project_dir / "etc" / "all.transcription").exists():
+            report.warnings.append("Split outputs are missing; run st2 split")
+        else:
+            report.errors.append("no transcription; project has no corpus to train on")
     elif len(present_split_artifacts) != len(split_artifacts):
         for path in split_artifacts:
             if not path.exists():

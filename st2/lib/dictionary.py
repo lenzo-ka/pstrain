@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 __all__ = ["Dictionary"]
@@ -96,6 +97,10 @@ class Dictionary:
             Set of all words in the dictionary
         """
         return set(self._entries.keys())
+
+    def base_words(self) -> set[str]:
+        """Get words with pronunciation-variant suffixes removed."""
+        return {re.sub(r"\(\d+\)$", "", word) for word in self._entries}
 
     def __len__(self) -> int:
         """Get number of entries in dictionary.
