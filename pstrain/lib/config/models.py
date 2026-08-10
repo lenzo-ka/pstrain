@@ -44,8 +44,9 @@ class ParallelConfig(BaseModel):
 
     n_jobs: int = Field(
         -1,
-        description="Number of parallel jobs: 1=serial, -1=all cores minus 1, N=specific count",
+        description="Number of parallel jobs: 1=serial, -1=auto (CPU count minus 2), N=specific count",
     )
+    nice: int = Field(5, ge=0, description="POSIX worker niceness increment; 0 disables")
     show_progress: bool = Field(
         True,
         description="Show progress bars during parallel execution",
@@ -56,7 +57,7 @@ class ParallelConfig(BaseModel):
     def validate_n_jobs(cls, v: int) -> int:
         """Validate n_jobs value."""
         if v < -1 or v == 0:
-            raise ValueError("n_jobs must be -1 (all cores), 1 (serial), or positive")
+            raise ValueError("n_jobs must be -1 (auto), 1 (serial), or positive")
         return v
 
 

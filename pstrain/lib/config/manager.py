@@ -183,6 +183,7 @@ class ConfigManager:
         return {
             "parallel": {
                 "n_jobs": defaults.n_jobs,
+                "nice": defaults.nice,
             },
             "audio": {
                 "sample_rate": defaults.sample_rate,

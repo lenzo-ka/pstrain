@@ -29,15 +29,20 @@ from __future__ import annotations
 import hashlib
 import logging
 import multiprocessing
+import multiprocessing.util
 import os
+import signal
+import threading
 import time
 from collections.abc import Callable, Iterable
-from concurrent.futures import Future, ProcessPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
+from pstrain.lib import native_worker
 from pstrain.lib.native_worker import PstrainWorkerError
 from pstrain.lib.pipeline.timings import (
     SUMMARY_THRESHOLD_SECONDS,
@@ -65,6 +70,8 @@ _MAX_FAILURES_TO_REPORT = 5
 # A worker should start and return this module-level no-op quickly. Allow ample
 # time for slow or heavily loaded hosts before treating startup as unavailable.
 _POOL_STARTUP_TIMEOUT_SECONDS = 30.0
+_SHUTDOWN_GRACE_SECONDS = 1.0
+_PARENT_WATCH_INTERVAL_SECONDS = 0.2
 
 
 class UnknownTargetError(KeyError):
@@ -143,11 +150,29 @@ class Pipeline:
     files (e.g. raw audio, hand-written transcripts).
     """
 
-    def __init__(self, project_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        project_dir: Path | None = None,
+        *,
+        default_jobs: int | None = None,
+        worker_nice: int = 5,
+    ) -> None:
         self._tasks: dict[str, Task] = {}
         self._producer_by_output: dict[Path, str] = {}
         self._targets: dict[str, Path] = {}
         self._project_dir = project_dir
+        self._default_jobs = default_jobs
+        self._worker_nice = worker_nice
+        self._cancel_requested = threading.Event()
+
+    def cancel(self) -> None:
+        """Request cancellation.
+
+        Active parallel workers are terminated. Cancellation is observed
+        between serial tasks, so a callable already running inline completes.
+        Completion markers already published by finished tasks remain valid.
+        """
+        self._cancel_requested.set()
 
     def add(self, task: Task) -> None:
         if task.name in self._tasks:
@@ -245,7 +270,8 @@ class Pipeline:
         jobs: int | None = None,
         verbose: bool = False,
     ) -> int:
-        """Build `target`. ``jobs=None`` uses the available CPU count."""
+        """Build `target`; auto allocation leaves two logical CPUs free."""
+        self._cancel_requested.clear()
         plan = self.plan(target, force=force)
 
         if dry_run:
@@ -260,7 +286,14 @@ class Pipeline:
         run_id = new_run_id()
         started = datetime.now(UTC).isoformat()
         wall_start = time.monotonic()
-        execution = _execute(to_run, jobs=_resolve_jobs(jobs))
+        requested_jobs = self._default_jobs if jobs is None else jobs
+        with _signal_cancellation(self._cancel_requested):
+            execution = _execute(
+                to_run,
+                jobs=_resolve_jobs(requested_jobs),
+                worker_nice=self._worker_nice,
+                cancel_requested=self._cancel_requested,
+            )
         rc = execution.rc
         records = execution.timings
         ended = datetime.now(UTC).isoformat()
@@ -347,12 +380,20 @@ def _print_plan(plan: list[_PlanEntry], *, target: str) -> None:
 
 def _resolve_jobs(jobs: int | None) -> int:
     """Resolve the API's auto worker setting to at least one worker."""
-    if jobs is None:
-        return max(1, os.cpu_count() or 1)
+    if jobs is None or jobs == -1:
+        return max(1, (os.cpu_count() or 1) - 2)
+    if jobs < 1:
+        raise ValueError("jobs must be -1 (auto) or a positive integer")
     return jobs
 
 
-def _execute(entries: list[_PlanEntry], *, jobs: int) -> _ExecutionResult:
+def _execute(
+    entries: list[_PlanEntry],
+    *,
+    jobs: int,
+    worker_nice: int = 5,
+    cancel_requested: threading.Event | None = None,
+) -> _ExecutionResult:
     """Execute entries, batching all dependency-ready members of a group."""
     pending = list(entries)
     producer_by_output = {
@@ -360,8 +401,12 @@ def _execute(entries: list[_PlanEntry], *, jobs: int) -> _ExecutionResult:
     }
     executed: set[str] = set()
     timings: list[TaskTiming] = []
+    cancellation = cancel_requested or threading.Event()
 
     while pending:
+        if cancellation.is_set():
+            _print_cancelled_summary(len(executed), len(pending))
+            return _ExecutionResult(1, timings, "aborted")
         entry = pending[0]
         group = entry.task.parallel_group
         if group and jobs > 1:
@@ -375,7 +420,12 @@ def _execute(entries: list[_PlanEntry], *, jobs: int) -> _ExecutionResult:
                     for task_input in candidate.task.inputs
                 )
             ]
-            result = _run_parallel_batch(batch, jobs=jobs)
+            result = _run_parallel_batch(
+                batch,
+                jobs=jobs,
+                worker_nice=worker_nice,
+                cancel_requested=cancellation,
+            )
             if isinstance(result, int):  # Compatibility with test/integration shims.
                 rc, batch_timings = result, []
                 result_status = "failed" if rc else "completed"
@@ -416,7 +466,13 @@ def _run_one(task: Task) -> _ExecutionResult:
     return _ExecutionResult(0, [measured.timing] if measured.timing is not None else [])
 
 
-def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> _ExecutionResult:
+def _run_parallel_batch(
+    batch: list[_PlanEntry],
+    *,
+    jobs: int,
+    worker_nice: int = 5,
+    cancel_requested: threading.Event | None = None,
+) -> _ExecutionResult:
     """Run a batch of independent tasks in a process pool.
 
     A no-op probe proves that the pool can start before any real work is
@@ -436,9 +492,13 @@ def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> _ExecutionResu
     failures: list[tuple[str, BaseException]] = []
     completed = 0
     timings: list[TaskTiming] = []
+    cancellation = cancel_requested or threading.Event()
     try:
         pool = ProcessPoolExecutor(
-            max_workers=workers, mp_context=multiprocessing.get_context("spawn")
+            max_workers=workers,
+            mp_context=multiprocessing.get_context("spawn"),
+            initializer=_initialize_pool_worker,
+            initargs=(worker_nice,),
         )
     except (OSError, BrokenProcessPool) as exc:
         return _ExecutionResult(
@@ -449,9 +509,7 @@ def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> _ExecutionResu
         probe = pool.submit(_pool_startup_probe)
         probe.result(timeout=_POOL_STARTUP_TIMEOUT_SECONDS)
     except TimeoutError as exc:
-        # Deliberately abandon a wedged worker process: leaking it is preferable
-        # to hanging the entire run while waiting for shutdown.
-        pool.shutdown(wait=False, cancel_futures=True)
+        _terminate_pool(pool)
         return _ExecutionResult(
             _abort_unstartable_batch(group_name=group_name, exc=exc), timings, "aborted"
         )
@@ -472,25 +530,33 @@ def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> _ExecutionResu
                 break
             future_to_task[future] = entry.task
 
-        for fut in as_completed(future_to_task):
-            task = future_to_task[fut]
-            try:
-                measured = fut.result()
-                if measured is not None:  # Accommodate executor doubles used by callers/tests.
-                    if measured.timing is not None:
-                        timings.append(measured.timing)
-                    if measured.error is not None:
-                        raise measured.error
-                _verify_outputs(task)
-                completed += 1
-                report_every = max(1, n // _PROGRESS_REPORT_BUCKETS)
-                if completed % report_every == 0 or completed == n:
-                    print(f"   [{group_name}] {completed}/{n}")
-            except BaseException as exc:
-                failures.append((task.name, exc))
-                logger.exception("Parallel task %s failed", task.name)
+        pending_futures = set(future_to_task)
+        while pending_futures and not cancellation.is_set():
+            done, pending_futures = wait(pending_futures, timeout=0.1, return_when=FIRST_COMPLETED)
+            for fut in done:
+                task = future_to_task[fut]
+                try:
+                    measured = fut.result()
+                    if measured is not None:  # Accommodate executor doubles used by callers/tests.
+                        if measured.timing is not None:
+                            timings.append(measured.timing)
+                        if measured.error is not None:
+                            raise measured.error
+                    _verify_outputs(task)
+                    completed += 1
+                    report_every = max(1, n // _PROGRESS_REPORT_BUCKETS)
+                    if completed % report_every == 0 or completed == n:
+                        print(f"   [{group_name}] {completed}/{n}")
+                except BaseException as exc:
+                    failures.append((task.name, exc))
+                    logger.exception("Parallel task %s failed", task.name)
+        if cancellation.is_set():
+            _terminate_pool(pool)
+            _print_cancelled_summary(completed, n - completed)
+            return _ExecutionResult(1, timings, "aborted")
     finally:
-        pool.shutdown(wait=True, cancel_futures=True)
+        if not cancellation.is_set():
+            pool.shutdown(wait=True, cancel_futures=True)
     elapsed = time.monotonic() - start
     if failures:
         print(f"!! fan-out [{group_name}]: {len(failures)} failure(s)")
@@ -535,6 +601,116 @@ def _execute_task(task: Task) -> None:
 
 def _pool_startup_probe() -> None:
     """Importable no-op used to prove that a process-pool worker can start."""
+
+
+def _initialize_pool_worker(nice: int) -> None:
+    """Give each spawned pool worker a session containing its native helper."""
+    if os.name == "posix":
+        try:
+            os.setsid()
+        except PermissionError:
+            # Some spawn implementations make the child a process-group
+            # leader before the initializer runs. It already has the isolated
+            # group we need; setpgid is harmless when that is the case.
+            if os.getpgrp() != os.getpid():
+                try:
+                    os.setpgid(0, 0)
+                except PermissionError:
+                    logger.warning("Worker process-group isolation is forbidden by the host")
+        if nice:
+            try:
+                os.nice(nice)
+            except PermissionError:
+                # Sandboxed launchers can forbid setpriority even for a
+                # positive increment. Allocation must remain usable there.
+                logger.warning("Worker niceness could not be adjusted by %d", nice)
+    parent_pid = os.getppid()
+    # multiprocessing joins non-daemon children before ordinary atexit
+    # handlers. Close the helper first or a clean pool shutdown can deadlock
+    # waiting for a helper that is still waiting on its request pipe.
+    multiprocessing.util.Finalize(None, native_worker._shutdown, exitpriority=10)
+
+    def watch_parent() -> None:
+        while os.getppid() == parent_pid:
+            time.sleep(_PARENT_WATCH_INTERVAL_SECONDS)
+        if os.name == "posix" and os.getpgrp() == os.getpid():
+            os.killpg(os.getpgrp(), signal.SIGKILL)
+        os._exit(1)
+
+    threading.Thread(target=watch_parent, daemon=True, name="pstrain-parent-watch").start()
+
+
+def _pool_processes(pool: ProcessPoolExecutor) -> list[multiprocessing.Process]:
+    processes = getattr(pool, "_processes", None)
+    return list(processes.values()) if processes else []
+
+
+def _terminate_pool(pool: ProcessPoolExecutor) -> None:
+    """Cancel queued work, TERM worker sessions, then KILL and reap survivors."""
+    processes = _pool_processes(pool)
+    pool.shutdown(wait=False, cancel_futures=True)
+    if os.name == "posix":
+        for process in processes:
+            if process.pid is not None and process.is_alive():
+                try:
+                    if os.getpgid(process.pid) == process.pid:
+                        os.killpg(process.pid, signal.SIGTERM)
+                    else:
+                        process.terminate()
+                except ProcessLookupError:
+                    pass
+    else:
+        for process in processes:
+            if process.is_alive():
+                process.terminate()
+    deadline = time.monotonic() + _SHUTDOWN_GRACE_SECONDS
+    for process in processes:
+        process.join(timeout=max(0.0, deadline - time.monotonic()))
+    for process in processes:
+        if process.is_alive():
+            if os.name == "posix" and process.pid is not None:
+                try:
+                    if os.getpgid(process.pid) == process.pid:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    else:
+                        process.kill()
+                except ProcessLookupError:
+                    pass
+            else:
+                process.kill()
+    for process in processes:
+        process.join()
+
+
+class _signal_cancellation:
+    """Translate the first termination signal into cancellation."""
+
+    def __init__(self, cancellation: threading.Event) -> None:
+        self._cancellation = cancellation
+        self._seen = False
+        self._previous: dict[int, Any] = {}
+
+    def __enter__(self) -> _signal_cancellation:
+        if threading.current_thread() is threading.main_thread():
+            for signum in (signal.SIGINT, signal.SIGTERM):
+                self._previous[signum] = signal.getsignal(signum)
+                signal.signal(signum, self._handle)
+        return self
+
+    def _handle(self, signum: int, _frame: object) -> None:
+        if self._seen:
+            os._exit(128 + signum)
+        self._seen = True
+        print(f"\n!! received {signal.Signals(signum).name}; stopping pipeline")
+        self._cancellation.set()
+
+    def __exit__(self, *_args: object) -> None:
+        for signum, previous in self._previous.items():
+            signal.signal(signum, previous)
+
+
+def _print_cancelled_summary(completed: int, cancelled: int) -> None:
+    print(f"!! pipeline aborted: {completed} completed, {cancelled} cancelled")
 
 
 def _worker(task: Task) -> MeasuredTask:

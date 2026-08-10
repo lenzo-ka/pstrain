@@ -84,7 +84,7 @@ everything, even if up to date.
             "--jobs",
             type=int,
             default=None,
-            help="Parallel workers (default: auto, bounded by CPU count and batch size)",
+            help="Parallel workers (default: CPU count minus 2; explicit N may use full machine)",
         )
         parser.add_argument(
             "--experiment",

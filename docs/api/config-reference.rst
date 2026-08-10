@@ -179,7 +179,12 @@ parallel
 ``parallel.n_jobs``
    :Type: ``int``
    :Default: ``-1``
-   :Description: Number of parallel jobs: 1=serial, -1=all cores minus 1, N=specific count
+   :Description: Number of parallel jobs: 1=serial, -1=auto (CPU count minus 2), N=specific count
+
+``parallel.nice``
+   :Type: ``int``
+   :Default: ``5``
+   :Description: POSIX worker niceness increment; 0 disables
 
 ``parallel.show_progress``
    :Type: ``bool``

@@ -12,8 +12,10 @@ from __future__ import annotations
 import functools
 import json
 import os
+import signal
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import Future
 from pathlib import Path
@@ -42,6 +44,15 @@ def _produce_nothing() -> None:
 def _burn_cpu_in_child(output: Path) -> None:
     subprocess.run([sys.executable, "-c", "sum(i * i for i in range(2_000_000))"], check=True)
     output.touch()
+
+
+def _sleep_and_touch(path: Path, delay: float) -> None:
+    time.sleep(delay)
+    path.touch()
+
+
+def _write_niceness(path: Path) -> None:
+    path.write_text(str(os.getpriority(os.PRIO_PROCESS, 0)))
 
 
 def _make_touch_task(name: str, out: Path, *, inputs: tuple[Path, ...] = ()) -> Task:
@@ -399,7 +410,7 @@ def test_parallel_group_batches_ready_non_adjacent_tasks(
     sentinel = tmp_path / "sentinel.txt"
     batches: list[list[str]] = []
 
-    def record_batch(batch: list[runner._PlanEntry], *, jobs: int) -> int:
+    def record_batch(batch: list[runner._PlanEntry], *, jobs: int, **_kwargs: object) -> int:
         assert jobs == 2
         assert producer.exists()
         batches.append([entry.task.name for entry in batch])
@@ -461,7 +472,7 @@ def test_jobs_none_uses_cpu_count_bounded_by_batch(
     sentinel = tmp_path / "sentinel"
     observed: list[tuple[int, int]] = []
 
-    def record_batch(batch: list[runner._PlanEntry], *, jobs: int) -> int:
+    def record_batch(batch: list[runner._PlanEntry], *, jobs: int, **_kwargs: object) -> int:
         observed.append((jobs, min(jobs, len(batch))))
         for entry in batch:
             rc = runner._run_one(entry.task)
@@ -485,7 +496,7 @@ def test_jobs_none_uses_cpu_count_bounded_by_batch(
     pl.register_target("all", sentinel)
 
     assert pl.run("all") == 0
-    assert observed == [(8, 3)]
+    assert observed == [(6, 3)]
 
 
 def test_jobs_one_runs_inline_without_constructing_pool(
@@ -510,6 +521,146 @@ def test_jobs_one_runs_inline_without_constructing_pool(
 
     assert pl.run("grouped", jobs=1) == 0
     assert output.exists()
+
+
+def test_worker_niceness_is_observable_in_pool_task(tmp_path: Path) -> None:
+    output = tmp_path / "nice"
+    baseline = os.getpriority(os.PRIO_PROCESS, 0)
+    pipeline = Pipeline(worker_nice=5)
+    pipeline.add(
+        Task(
+            "nice",
+            functools.partial(_write_niceness, output),
+            outputs=(output,),
+            parallel_group="g",
+        )
+    )
+    pipeline.register_target("nice", output)
+
+    assert pipeline.run("nice", jobs=2) == 0
+    observed = int(output.read_text())
+    if observed == baseline:
+        pytest.skip("setpriority is forbidden by this test environment")
+    assert observed == baseline + 5
+
+
+def test_programmatic_cancel_aborts_active_fanout_and_records_timing_status(
+    tmp_path: Path,
+) -> None:
+    outputs = [tmp_path / f"out-{index}" for index in range(2)]
+    pipeline = Pipeline(tmp_path, worker_nice=0)
+    for index, output in enumerate(outputs):
+        pipeline.add(
+            Task(
+                f"slow:{index}",
+                functools.partial(_sleep_and_touch, output, 30.0),
+                outputs=(output,),
+                parallel_group="slow",
+            )
+        )
+    sentinel = tmp_path / "sentinel"
+    pipeline.add(_make_touch_task("finish", sentinel, inputs=tuple(outputs)))
+    pipeline.register_target("all", sentinel)
+    result: list[int] = []
+    thread = threading.Thread(target=lambda: result.append(pipeline.run("all", jobs=2)))
+    thread.start()
+    time.sleep(0.5)
+    pipeline.cancel()
+    thread.join(timeout=10)
+
+    assert not thread.is_alive()
+    assert result == [1]
+    artifact = max((tmp_path / ".pstrain" / "timings").glob("*.json"))
+    assert json.loads(artifact.read_text())["status"] == "aborted"
+
+
+def _wait_for_job_pids(path: Path) -> list[int]:
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        if path.exists():
+            pids = [int(value) for line in path.read_text().splitlines() for value in line.split()]
+            if len(pids) >= 4:
+                return pids
+        time.sleep(0.05)
+    raise AssertionError("workers and native helpers did not start")
+
+
+def _pid_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+@pytest.mark.parametrize("signum", [signal.SIGINT, signal.SIGTERM])
+def test_signal_aborts_tree_and_rerun_resumes_from_completed_frontier(
+    tmp_path: Path, signum: signal.Signals
+) -> None:
+    command = [sys.executable, "-m", "tests.job_control_fixture", str(tmp_path), "30"]
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    pids = _wait_for_job_pids(tmp_path / "pids")
+    marker = Task("work:0", lambda: None, outputs=(tmp_path / "out-0",)).completion_marker
+    deadline = time.monotonic() + 10
+    while marker is not None and not marker.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    process.send_signal(signum)
+    output, _ = process.communicate(timeout=15)
+
+    assert process.returncode != 0
+    assert "pipeline aborted" in output
+    assert marker is not None and marker.exists()
+    deadline = time.monotonic() + 5
+    while any(_pid_exists(pid) for pid in pids) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not any(_pid_exists(pid) for pid in pids)
+
+    (tmp_path / "pids").unlink()
+    resumed = subprocess.run(
+        [sys.executable, "-m", "tests.job_control_fixture", str(tmp_path), "0.01"],
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert resumed.returncode == 0, resumed.stdout + resumed.stderr
+    assert (tmp_path / "sentinel").exists()
+
+
+def test_second_sigint_hard_exits(tmp_path: Path) -> None:
+    process = subprocess.Popen(
+        [sys.executable, "-m", "tests.job_control_fixture", str(tmp_path), "30"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    pids = _wait_for_job_pids(tmp_path / "pids")
+    process.send_signal(signal.SIGINT)
+    time.sleep(0.005)
+    process.send_signal(signal.SIGINT)
+    process.communicate(timeout=10)
+    assert process.returncode == 128 + signal.SIGINT
+    deadline = time.monotonic() + 5
+    while any(_pid_exists(pid) for pid in pids) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not any(_pid_exists(pid) for pid in pids)
+
+
+def test_native_helper_dies_when_pool_worker_is_killed(tmp_path: Path) -> None:
+    process = subprocess.Popen(
+        [sys.executable, "-m", "tests.job_control_fixture", str(tmp_path), "30"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    pids = _wait_for_job_pids(tmp_path / "pids")
+    worker_pid, helper_pid = pids[:2]
+    os.kill(worker_pid, signal.SIGKILL)
+    process.communicate(timeout=15)
+    assert process.returncode != 0
+    deadline = time.monotonic() + 5
+    while _pid_exists(helper_pid) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not _pid_exists(helper_pid)
 
 
 def test_pool_probe_failure_aborts_batch_without_inline_execution(

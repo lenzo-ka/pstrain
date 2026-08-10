@@ -63,7 +63,7 @@ class FeaturesStep(Step):
             "--jobs",
             type=int,
             default=None,
-            help="Parallel jobs (default: auto, bounded by CPU count and batch size)",
+            help="Parallel jobs (default: CPU count minus 2; explicit N may use full machine)",
         )
 
     def execute(self, ctx: StepContext, **params: Any) -> int:

@@ -66,8 +66,9 @@ class UserDefaults(BaseModel):
     # Parallel
     n_jobs: int = Field(
         -1,
-        description="Default number of parallel jobs (-1 = all cores minus 1)",
+        description="Default number of parallel jobs (-1 = CPU count minus 2)",
     )
+    nice: int = Field(5, ge=0, description="Default POSIX worker niceness; 0 disables")
 
 
 class PstrainUserConfig(BaseModel):
