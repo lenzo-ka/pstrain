@@ -253,6 +253,7 @@ typedef struct pstrain_bw_config_s {
     float64 b_beam;
     uint32 topn;
     float32 spthresh;
+    float32 mixw_floor;
     int32 mixw_reest;
     int32 tmat_reest;
     int32 mean_reest;

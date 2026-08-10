@@ -267,6 +267,11 @@ def _make_flat_task(ctx: PipelineContext) -> Task:
     )
 
 
+def _mixw_floor_for_stage(model_name: str) -> float:
+    """Return the SphinxTrain stage-specific Baum-Welch mixture floor."""
+    return 1e-5 if model_name.startswith("cd-") and model_name != "cd-untied" else 1e-8
+
+
 def _make_bw_train_task(
     ctx: PipelineContext,
     *,
@@ -301,6 +306,10 @@ def _make_bw_train_task(
         from pstrain.lib.bw import BWConfig
         from pstrain.lib.steps.train import run_bw_training
 
+        # Upstream scripts/50.cd_hmm_tied/baum_welch.pl sets 1e-5 for every
+        # tied CD stage; CI and scripts/30.cd_hmm_untied use 1e-8.
+        mixw_floor = _mixw_floor_for_stage(out_model)
+
         # All non-split tasks consume a 1-density model (including CD-untied,
         # where upstream deliberately selects one density).
         topn = 1
@@ -319,6 +328,7 @@ def _make_bw_train_task(
                 a_beam=ctx.train.a_beam,
                 b_beam=ctx.train.b_beam,
                 topn=topn,
+                mixw_floor=mixw_floor,
                 multipron=ctx.train.multipron_training,
             ),
             multipron=ctx.train.multipron_training,
@@ -365,6 +375,9 @@ def _make_split_and_train_task(
         run_split(input_model_dir=src_dir, output_model_dir=split_dir)
         # Split stages are CI or CD-tied; upstream evaluates all densities.
         topn = int(out_model.rsplit("-", 1)[-1].removesuffix("g"))
+        # Provenance: scripts/50.cd_hmm_tied/baum_welch.pl uses -mwfloor 1e-5;
+        # scripts/20.ci_hmm/baum_welch.pl uses 1e-8.
+        mixw_floor = _mixw_floor_for_stage(out_model)
         result = run_bw_training(
             model_dir=split_dir,
             output_dir=out_dir,
@@ -380,6 +393,7 @@ def _make_split_and_train_task(
                 a_beam=ctx.train.a_beam,
                 b_beam=ctx.train.b_beam,
                 topn=topn,
+                mixw_floor=mixw_floor,
                 multipron=ctx.train.multipron_training,
             ),
             multipron=ctx.train.multipron_training,

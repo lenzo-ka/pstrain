@@ -107,6 +107,7 @@ struct pstrain_bw_context_s {
     float64 b_beam;
     uint32 topn;
     float32 spthresh;
+    float32 mixw_floor;
     int32 mixw_reest;
     int32 tmat_reest;
     int32 mean_reest;
@@ -139,6 +140,7 @@ pstrain_bw_init(const char *mdef_path,
     ctx->b_beam = config ? config->b_beam : 1e-10;  /* SphinxTrain default */
     ctx->topn = config ? config->topn : 1;
     ctx->spthresh = config ? config->spthresh : 0.0;
+    ctx->mixw_floor = config ? config->mixw_floor : 1e-8;
     ctx->mixw_reest = config ? config->mixw_reest : 1;
     ctx->tmat_reest = config ? config->tmat_reest : 1;
     ctx->mean_reest = config ? config->mean_reest : 1;
@@ -196,7 +198,7 @@ pstrain_bw_init(const char *mdef_path,
 
     /* Read mixture weights */
     E_INFO("Reading mixture weights from %s\n", mixw_path);
-    if (mod_inv_read_mixw(ctx->inv, ctx->mdef, mixw_path, 1e-8) != S3_SUCCESS) {
+    if (mod_inv_read_mixw(ctx->inv, ctx->mdef, mixw_path, ctx->mixw_floor) != S3_SUCCESS) {
         E_ERROR("Failed to read mixture weights\n");
         goto error;
     }

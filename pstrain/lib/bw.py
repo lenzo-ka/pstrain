@@ -33,6 +33,7 @@ class BWConfig:
     b_beam: float = 1e-10  # Backward beam (beta beam)
     topn: int = 1  # Number of Gaussian densities evaluated per codebook
     spthresh: float = 0.0  # State pruning threshold
+    mixw_floor: float = 1e-8  # CI and CD-untied SphinxTrain -mwfloor
     mean_reest: bool = True
     var_reest: bool = True
     mixw_reest: bool = True
@@ -133,6 +134,7 @@ class BWTrainer:
         c_config.b_beam = self.config.b_beam
         c_config.topn = self.config.topn
         c_config.spthresh = self.config.spthresh
+        c_config.mixw_floor = self.config.mixw_floor
         c_config.mean_reest = 1 if self.config.mean_reest else 0
         c_config.var_reest = 1 if self.config.var_reest else 0
         c_config.mixw_reest = 1 if self.config.mixw_reest else 0

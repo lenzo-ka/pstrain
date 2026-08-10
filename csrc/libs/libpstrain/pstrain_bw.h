@@ -22,6 +22,7 @@ typedef struct pstrain_bw_config_s {
     float64 b_beam;      /**< Backward beam (default: 1e-10) */
     uint32 topn;         /**< Gaussians evaluated per codebook (default: 1) */
     float32 spthresh;    /**< State pruning threshold (default: 0) */
+    float32 mixw_floor;  /**< Mixture-weight floor (default: 1e-8) */
     int32 mixw_reest;    /**< Re-estimate mixture weights (default: 1) */
     int32 tmat_reest;    /**< Re-estimate transition matrices (default: 1) */
     int32 mean_reest;    /**< Re-estimate means (default: 1) */

@@ -570,6 +570,15 @@ def test_bw_config_multipron_default_on() -> None:
     assert BWConfig(multipron=False).multipron is False
 
 
+def test_bw_mixture_floor_is_higher_only_for_tied_cd_stages() -> None:
+    from pstrain.lib.pipeline.tasks import _mixw_floor_for_stage
+
+    assert _mixw_floor_for_stage("ci-8g") == 1e-8
+    assert _mixw_floor_for_stage("cd-untied") == 1e-8
+    assert _mixw_floor_for_stage("cd-1g") == 1e-5
+    assert _mixw_floor_for_stage("cd-8g") == 1e-5
+
+
 def test_configured_bw_parameters_reach_training_call(
     empty_project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -641,10 +650,12 @@ def test_configured_bw_parameters_reach_training_call(
     assert config.a_beam == 1e-123
     assert config.b_beam == 1e-9
     assert config.topn == 1
+    assert config.mixw_floor == 1e-8
     c_config: Any = captured["c_config"]
     assert c_config.a_beam == 1e-123
     assert c_config.b_beam == 1e-9
     assert c_config.topn == 1
+    assert c_config.mixw_floor == 1e-8
     assert captured["convergence_ratio"] == 0.004
     assert captured["min_iterations"] == 3
     assert captured["max_skip_fraction"] == 0.02
