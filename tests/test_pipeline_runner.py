@@ -11,17 +11,27 @@ from __future__ import annotations
 
 import functools
 import time
+from concurrent.futures import Future
 from pathlib import Path
 
 import pytest
 
-from st2.lib.pipeline import Pipeline, Task, UnknownTargetError
+from st2.lib.pipeline import Pipeline, Task, UnknownTargetError, runner
 
 
 def _touch(path: Path, contents: str = "") -> None:
     """Module-level worker for parallel-execution tests; must be picklable."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(contents)
+
+
+def _raise_worker_error() -> None:
+    """Picklable failing callable for parallel-execution tests."""
+    raise RuntimeError("worker task failed")
+
+
+def _produce_nothing() -> None:
+    """Picklable callable that deliberately omits its declared output."""
 
 
 def _make_touch_task(name: str, out: Path, *, inputs: tuple[Path, ...] = ()) -> Task:
@@ -317,6 +327,370 @@ def test_parallel_fanout_writes_all_outputs(tmp_path: Path) -> None:
     for i, out in enumerate(outputs):
         assert out.read_text() == f"data-{i}"
     assert sentinel.read_text() == "done"
+
+
+def test_parallel_group_batches_ready_non_adjacent_tasks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ready group members form one batch despite an interleaved task."""
+    producer = tmp_path / "producer.txt"
+    first = tmp_path / "first.txt"
+    unrelated = tmp_path / "unrelated.txt"
+    second = tmp_path / "second.txt"
+    sentinel = tmp_path / "sentinel.txt"
+    batches: list[list[str]] = []
+
+    def record_batch(batch: list[runner._PlanEntry], *, jobs: int) -> int:
+        assert jobs == 2
+        assert producer.exists()
+        batches.append([entry.task.name for entry in batch])
+        for entry in batch:
+            if runner._run_one(entry.task) != 0:
+                return 1
+        return 0
+
+    monkeypatch.setattr(runner, "_run_parallel_batch", record_batch)
+
+    pl = Pipeline()
+    pl.add(_make_touch_task("producer", producer))
+    pl.add(
+        Task(
+            "group:first",
+            functools.partial(_touch, first, "first"),
+            inputs=(producer,),
+            outputs=(first,),
+            parallel_group="features",
+        )
+    )
+    pl.add(_make_touch_task("unrelated", unrelated))
+    pl.add(
+        Task(
+            "group:second",
+            functools.partial(_touch, second, "second"),
+            inputs=(producer,),
+            outputs=(second,),
+            parallel_group="features",
+        )
+    )
+    pl.add(
+        Task(
+            "sentinel",
+            functools.partial(_touch, sentinel, "done"),
+            inputs=(first, unrelated, second),
+            outputs=(sentinel,),
+        )
+    )
+    pl.register_target("all", sentinel)
+
+    assert [entry.task.name for entry in pl.plan("all")] == [
+        "producer",
+        "group:first",
+        "unrelated",
+        "group:second",
+        "sentinel",
+    ]
+    assert pl.run("all", jobs=2) == 0
+    assert batches == [["group:first", "group:second"]]
+    assert unrelated.exists()
+    assert sentinel.exists()
+
+
+def test_jobs_none_uses_cpu_count_bounded_by_batch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    outputs = [tmp_path / f"out-{i}" for i in range(3)]
+    sentinel = tmp_path / "sentinel"
+    observed: list[tuple[int, int]] = []
+
+    def record_batch(batch: list[runner._PlanEntry], *, jobs: int) -> int:
+        observed.append((jobs, min(jobs, len(batch))))
+        return runner._run_inline_batch(batch)
+
+    monkeypatch.setattr(runner.os, "cpu_count", lambda: 8)
+    monkeypatch.setattr(runner, "_run_parallel_batch", record_batch)
+    pl = Pipeline()
+    for i, output in enumerate(outputs):
+        pl.add(
+            Task(
+                f"group:{i}",
+                functools.partial(_touch, output),
+                outputs=(output,),
+                parallel_group="group",
+            )
+        )
+    pl.add(_make_touch_task("sentinel", sentinel, inputs=tuple(outputs)))
+    pl.register_target("all", sentinel)
+
+    assert pl.run("all") == 0
+    assert observed == [(8, 3)]
+
+
+def test_jobs_one_runs_inline_without_constructing_pool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "output"
+
+    def unexpected_pool(*args: object, **kwargs: object) -> None:
+        pytest.fail("ProcessPoolExecutor must not be constructed for jobs=1")
+
+    monkeypatch.setattr(runner, "ProcessPoolExecutor", unexpected_pool)
+    pl = Pipeline()
+    pl.add(
+        Task(
+            "grouped",
+            functools.partial(_touch, output),
+            outputs=(output,),
+            parallel_group="group",
+        )
+    )
+    pl.register_target("grouped", output)
+
+    assert pl.run("grouped", jobs=1) == 0
+    assert output.exists()
+
+
+def test_pool_probe_failure_falls_back_entire_batch_inline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    outputs = [tmp_path / f"out-{i}" for i in range(2)]
+    sentinel = tmp_path / "sentinel"
+
+    submitted: list[object] = []
+    shutdown_calls: list[tuple[bool, bool]] = []
+
+    class ProbeDeniedPool:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def submit(self, fn: object, *args: object, **kwargs: object) -> None:
+            # ProcessPoolExecutor registers work before worker startup can fail.
+            submitted.append(fn)
+            raise PermissionError("semaphores denied")
+
+        def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
+            shutdown_calls.append((wait, cancel_futures))
+
+    monkeypatch.setattr(runner, "ProcessPoolExecutor", ProbeDeniedPool)
+    pl = Pipeline()
+    for i, output in enumerate(outputs):
+        pl.add(
+            Task(
+                f"group:{i}",
+                functools.partial(_touch, output),
+                outputs=(output,),
+                parallel_group="group",
+            )
+        )
+    pl.add(_make_touch_task("sentinel", sentinel, inputs=tuple(outputs)))
+    pl.register_target("all", sentinel)
+
+    with caplog.at_level("WARNING"):
+        assert pl.run("all", jobs=2) == 0
+    assert all(output.exists() for output in outputs)
+    assert sentinel.exists()
+    assert submitted == [runner._pool_startup_probe]
+    assert shutdown_calls == [(True, True)]
+    assert "Cannot start process pool for group" in caplog.text
+    assert "running sequentially" in caplog.text
+
+
+def test_pool_probe_timeout_abandons_worker_and_falls_back_inline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    outputs = [tmp_path / f"out-{i}" for i in range(2)]
+    submitted: list[object] = []
+    shutdown_calls: list[tuple[bool, bool]] = []
+
+    class TimedOutProbeFuture(Future[None]):
+        def result(self, timeout: float | None = None) -> None:
+            assert timeout == runner._POOL_STARTUP_TIMEOUT_SECONDS
+            raise TimeoutError
+
+    class WedgedProbePool:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def submit(self, fn: object, *args: object, **kwargs: object) -> Future[None]:
+            submitted.append(fn)
+            return TimedOutProbeFuture()
+
+        def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
+            shutdown_calls.append((wait, cancel_futures))
+
+    monkeypatch.setattr(runner, "ProcessPoolExecutor", WedgedProbePool)
+    batch = [
+        runner._PlanEntry(
+            Task(
+                f"group:{i}",
+                functools.partial(_touch, output, str(i)),
+                outputs=(output,),
+                parallel_group="group",
+            ),
+            stale=True,
+            reason="test",
+        )
+        for i, output in enumerate(outputs)
+    ]
+
+    assert runner._run_parallel_batch(batch, jobs=2) == 0
+    assert submitted == [runner._pool_startup_probe]
+    assert shutdown_calls == [(False, True)]
+    assert [output.read_text() for output in outputs] == ["0", "1"]
+
+
+def test_real_submit_failure_after_probe_fails_without_inline_rerun(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    outputs = [tmp_path / f"out-{i}" for i in range(2)]
+    submitted: list[object] = []
+    shutdown_calls: list[tuple[bool, bool]] = []
+
+    class TrackingFuture(Future[None]):
+        result_calls = 0
+
+        def result(self, timeout: float | None = None) -> None:
+            self.result_calls += 1
+            return super().result(timeout)
+
+    first_real_future = TrackingFuture()
+    first_real_future.set_result(None)
+
+    class RegisterThenFailPool:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def submit(self, fn: object, *args: object, **kwargs: object) -> Future[None]:
+            submitted.append(fn)
+            future: Future[None] = Future()
+            if fn is runner._pool_startup_probe:
+                future.set_result(None)
+                return future
+            if len(submitted) == 2:
+                args[0].fn()
+                return first_real_future
+            # Mirror executor ordering: register the work, then fail startup.
+            raise PermissionError("worker spawn denied")
+
+        def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
+            shutdown_calls.append((wait, cancel_futures))
+
+    def unexpected_fallback(batch: list[runner._PlanEntry]) -> int:
+        pytest.fail("real tasks must not be rerun inline after a successful probe")
+
+    monkeypatch.setattr(runner, "_run_inline_batch", unexpected_fallback)
+    monkeypatch.setattr(runner, "ProcessPoolExecutor", RegisterThenFailPool)
+    batch = [
+        runner._PlanEntry(
+            Task(
+                f"group:{i}",
+                functools.partial(_touch, output, str(i)),
+                outputs=(output,),
+                parallel_group="group",
+            ),
+            stale=True,
+            reason="test",
+        )
+        for i, output in enumerate(outputs)
+    ]
+
+    assert runner._run_parallel_batch(batch, jobs=2) != 0
+    assert submitted == [runner._pool_startup_probe, runner._worker, runner._worker]
+    assert first_real_future.result_calls == 1
+    assert outputs[0].exists()
+    assert not outputs[1].exists()
+    assert shutdown_calls == [(True, True)]
+    assert "group:1: worker spawn denied" in capsys.readouterr().out
+
+
+def test_parallel_worker_failure_does_not_fall_back_inline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    output = tmp_path / "output"
+
+    def unexpected_fallback(batch: list[runner._PlanEntry]) -> int:
+        pytest.fail("worker failures must not be rerun inline")
+
+    class AcceptedFailingPool:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def submit(self, fn: object, *args: object, **kwargs: object) -> Future[None]:
+            future: Future[None] = Future()
+            if fn is runner._pool_startup_probe:
+                future.set_result(None)
+            else:
+                future.set_exception(RuntimeError("worker task failed"))
+            return future
+
+        def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
+            assert wait
+            assert cancel_futures
+
+    monkeypatch.setattr(runner, "_run_inline_batch", unexpected_fallback)
+    monkeypatch.setattr(runner, "ProcessPoolExecutor", AcceptedFailingPool)
+    pl = Pipeline()
+    pl.add(
+        Task(
+            "grouped",
+            _raise_worker_error,
+            outputs=(output,),
+            parallel_group="group",
+        )
+    )
+    pl.register_target("grouped", output)
+
+    assert pl.run("grouped", jobs=2) != 0
+    assert "grouped: worker task failed" in capsys.readouterr().out
+    assert not output.exists()
+
+
+def test_parallel_mixed_batch_reports_task_with_missing_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    outputs = [tmp_path / f"output-{i}" for i in range(3)]
+
+    class AcceptedSuccessfulPool:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def submit(self, fn: object, *args: object, **kwargs: object) -> Future[None]:
+            future: Future[None] = Future()
+            if fn is runner._worker:
+                args[0].fn()
+            future.set_result(None)
+            return future
+
+        def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
+            assert wait
+            assert cancel_futures
+
+    monkeypatch.setattr(runner, "ProcessPoolExecutor", AcceptedSuccessfulPool)
+    batch = [
+        runner._PlanEntry(
+            Task(
+                f"group:{i}",
+                _produce_nothing if i == 1 else functools.partial(_touch, output, str(i)),
+                outputs=(output,),
+                parallel_group="group",
+            ),
+            stale=True,
+            reason="test",
+        )
+        for i, output in enumerate(outputs)
+    ]
+
+    assert runner._run_parallel_batch(batch, jobs=2) != 0
+    output = capsys.readouterr().out
+    assert f"group:1: did not produce: [{outputs[1]!r}]" in output
+    assert "group:0: did not produce" not in output
+    assert "group:2: did not produce" not in output
+    assert outputs[0].exists()
+    assert not outputs[1].exists()
+    assert outputs[2].exists()
 
 
 def test_staleness_propagates_to_downstream(tmp_path: Path) -> None:

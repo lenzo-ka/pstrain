@@ -33,8 +33,8 @@ class FeaturesCommand(ProjectCommand):
             "-j",
             "--jobs",
             type=int,
-            default=1,
-            help="Number of parallel worker processes (default: 1)",
+            default=None,
+            help="Parallel workers (default: auto, bounded by CPU count and batch size)",
         )
         parser.add_argument(
             "--force",
@@ -58,7 +58,7 @@ class FeaturesCommand(ProjectCommand):
         ctx.log(f"  Audio:  {pipeline_ctx.audio_dir}")
         ctx.log(f"  Output: {pipeline_ctx.features_dir}")
         ctx.log(f"  Files:  {len(fileids)}")
-        ctx.log(f"  Jobs:   {ctx.args.jobs}")
+        ctx.log(f"  Jobs:   {ctx.args.jobs if ctx.args.jobs is not None else 'auto'}")
 
         try:
             pipeline = build_pipeline(pipeline_ctx)
