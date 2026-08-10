@@ -27,8 +27,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 Licensing structure
 
-New pstrain code is Copyright (c) 2026 Kevin Lenzo and is licensed under the
-BSD 2-Clause terms above. Vendored and derived CMU SphinxTrain, SphinxBase, and
-Sphinx-3 components under csrc/ remain Copyright (c) Carnegie Mellon University
-and are licensed under the CMU BSD-style license in csrc/LICENSE.sphinx. See
-THIRD_PARTY_NOTICES.md for component provenance and all applicable notices.
+The CMU SphinxTrain, SphinxBase, and Sphinx-3 components under csrc/ are
+modified vendored code, so both licenses apply in layers. The CMU base remains
+Copyright (c) Carnegie Mellon University under the CMU BSD-style license in
+csrc/LICENSE.sphinx. Modifications for pstrain are Copyright (c) 2026 Kevin
+Lenzo under the BSD 2-Clause terms above. The git repository history is the
+authoritative record of the modifications. See THIRD_PARTY_NOTICES.md for
+component provenance and all applicable notices.

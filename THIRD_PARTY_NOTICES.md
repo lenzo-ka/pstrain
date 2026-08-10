@@ -1,8 +1,11 @@
 # Third-party notices
 
-This file records the notices for third-party source carried in `csrc/`. The
-source files remain subject to their own notices in addition to the license for
-new pstrain code in [LICENSE](LICENSE).
+This file records the notices for third-party source carried in `csrc/`. These
+CMU components are modified vendored code, so both licenses apply in layers:
+the base remains Copyright (c) Carnegie Mellon University under
+`csrc/LICENSE.sphinx`, while the pstrain modifications are Copyright (c) 2026
+Kevin Lenzo under the BSD 2-Clause license in [LICENSE](LICENSE). The git
+repository history is the authoritative record of what changed.
 
 ## CMU SphinxTrain, SphinxBase, and Sphinx-3
 
