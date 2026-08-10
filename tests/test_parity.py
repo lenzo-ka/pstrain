@@ -6,7 +6,6 @@ to the C binaries when shelling out.
 
 from __future__ import annotations
 
-import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -121,7 +120,7 @@ TEST T EH S T
     import struct
 
     mfc_path = data_dir / "test.mfc"
-    with open(mfc_path, "wb") as f:
+    with mfc_path.open("wb") as f:
         f.write(struct.pack("<i", n_frames * veclen))
         f.write(features.astype("<f").tobytes())
 
@@ -556,6 +555,6 @@ class TestCommandBuilderShellScript:
                 capture_output=True,
                 text=True,
             )
-            os.unlink(f.name)
+            Path(f.name).unlink()
 
             assert result.returncode == 0, f"Bash syntax error: {result.stderr}"

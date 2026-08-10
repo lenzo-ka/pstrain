@@ -73,12 +73,10 @@ def count_params(
         param_type = ParamType[param_type.upper()]
 
     # Validate required arguments based on param_type
-    if param_type in (ParamType.STATE, ParamType.CB):
-        if seg_dir is None:
-            raise ValueError(f"param_type {param_type.name} requires seg_dir")
-    if param_type == ParamType.CB:
-        if ts2cb_path is None:
-            raise ValueError("param_type CB requires ts2cb_path")
+    if param_type in (ParamType.STATE, ParamType.CB) and seg_dir is None:
+        raise ValueError(f"param_type {param_type.name} requires seg_dir")
+    if param_type == ParamType.CB and ts2cb_path is None:
+        raise ValueError("param_type CB requires ts2cb_path")
 
     ret = lib.st2_param_cnt(
         str(mdef_path).encode(),

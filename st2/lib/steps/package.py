@@ -41,7 +41,7 @@ def create_noisedict(
         shutil.copy(filler_dict_path, output_path)
     else:
         # Create minimal noisedict (matches st2/data/filler.dict)
-        with open(output_path, "w") as f:
+        with output_path.open("w") as f:
             f.write("<sil> SIL\n")
             f.write("<s> SIL\n")
             f.write("</s> SIL\n")
@@ -98,10 +98,7 @@ def package_model(
             f"cannot package model: trained model directory lacks feat.params: {source_feat_params}"
         )
 
-    if model_name:
-        package_dir = output_dir / model_name
-    else:
-        package_dir = output_dir
+    package_dir = output_dir / model_name if model_name else output_dir
 
     # Create directory structure
     acoustic_dir = package_dir / "acoustic"
@@ -208,5 +205,5 @@ License
 -------
 See the project repository for license information.
 """
-    with open(output_path, "w") as f:
+    with output_path.open("w") as f:
         f.write(content)

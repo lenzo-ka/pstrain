@@ -97,9 +97,8 @@ class StepContext:
         if self.dry_run:
             self._emit(" ".join(shlex.quote(p) for p in cmd_parts))
             return 0
-        else:
-            result = subprocess.run(cmd_parts)
-            return result.returncode
+        result = subprocess.run(cmd_parts)
+        return result.returncode
 
     def comment(self, text: str) -> None:
         """Add a comment."""

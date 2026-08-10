@@ -251,7 +251,7 @@ def load_transcripts(transcript_file: Path) -> dict[str, str]:
     """
     transcripts = {}
 
-    with open(transcript_file, encoding="utf-8", errors="replace") as f:
+    with transcript_file.open(encoding="utf-8", errors="replace") as f:
         for line in f:
             line = line.strip()
             if not line:

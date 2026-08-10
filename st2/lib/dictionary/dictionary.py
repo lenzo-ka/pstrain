@@ -70,7 +70,7 @@ class Dictionary:
         dictionary = cls()
 
         try:
-            with open(path, encoding="utf-8") as f:
+            with path.open(encoding="utf-8") as f:
                 for line_num, line in enumerate(f, start=1):
                     line = line.strip()
 
@@ -342,7 +342,7 @@ class Dictionary:
             - Variants: word(2), word(3), etc.
             - UTF-8 encoding
         """
-        with open(path, "w", encoding="utf-8") as f:
+        with path.open("w", encoding="utf-8") as f:
             # Write entries sorted by base word, then by variant number
             for base_word in sorted(self._variants.keys()):
                 for variant_key in self._variants[base_word]:

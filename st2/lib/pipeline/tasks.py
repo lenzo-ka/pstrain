@@ -189,7 +189,7 @@ def _make_flat_task(ctx: PipelineContext) -> Task:
         from st2.lib.flat import init_flat_model
 
         out_dir.mkdir(parents=True, exist_ok=True)
-        with open(phoneset) as f:
+        with phoneset.open() as f:
             phones = [line.strip() for line in f if line.strip()]
         init_flat_model(
             phones,

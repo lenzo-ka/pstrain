@@ -273,7 +273,7 @@ def _read_wav(path: Path) -> npt.NDArray[np.int16]:
 
     Simple reader for standard 16-bit mono/stereo WAV files.
     """
-    with open(path, "rb") as f:
+    with path.open("rb") as f:
         # Read RIFF header
         riff = f.read(4)
         if riff != b"RIFF":
@@ -338,7 +338,7 @@ def _write_sphinx_mfc(features: npt.NDArray[np.float32], path: Path) -> None:
     n_frames, veclen = features.shape
     n_floats = n_frames * veclen
 
-    with open(path, "wb") as f:
+    with path.open("wb") as f:
         # Header: total number of floats
         f.write(struct.pack("<i", n_floats))
         # Data: float32 features
@@ -354,7 +354,7 @@ def read_sphinx_mfc(path: Path) -> npt.NDArray[np.float32]:
     Returns:
         Feature array of shape (n_frames, veclen)
     """
-    with open(path, "rb") as f:
+    with path.open("rb") as f:
         # Read header
         n_floats = struct.unpack("<i", f.read(4))[0]
         # Read data

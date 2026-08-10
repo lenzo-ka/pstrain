@@ -190,11 +190,11 @@ class AlignCommand(Command):
         if ctx.args.ctm and job.results:
             ctm_path = Path(ctx.args.ctm)
             ctm_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(ctm_path, "w") as fh:
+            with ctm_path.open("w") as fh:
                 for utt_id in transcripts:
                     if utt_id in job.results:
                         save_ctm(job.results[utt_id], ctm_path.parent / f"{utt_id}.ctm")
-                        with open(ctm_path.parent / f"{utt_id}.ctm") as src:
+                        with (ctm_path.parent / f"{utt_id}.ctm").open() as src:
                             fh.write(src.read())
                         (ctm_path.parent / f"{utt_id}.ctm").unlink()
             ctx.log(f"CTM saved to: {ctm_path}")

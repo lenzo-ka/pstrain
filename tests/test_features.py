@@ -32,7 +32,7 @@ def _write_sphinx_mfc(path: Path, features: np.ndarray) -> None:
     """Write features in Sphinx MFC format."""
     n_frames, n_cep = features.shape
     header = n_frames * n_cep
-    with open(path, "wb") as f:
+    with path.open("wb") as f:
         f.write(struct.pack("<i", header))
         features.astype(np.float32).tofile(f)
 

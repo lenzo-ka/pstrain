@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -295,10 +296,8 @@ def validate_project(project_dir: Path, experiment: str = "default") -> Validati
         for split in ["train", "test", "dev"]:
             trans_file = experiment_dir / "etc" / f"{split}.transcription"
             if trans_file.exists():
-                try:
+                with contextlib.suppress(Exception):
                     all_fileids.extend(get_fileids(trans_file))
-                except Exception:
-                    pass
 
         # Check which audio files exist
         found = 0

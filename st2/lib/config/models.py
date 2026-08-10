@@ -422,7 +422,7 @@ class ST2Config(BaseModel):
         """Load configuration from YAML file."""
         import yaml
 
-        with open(path, encoding="utf-8") as f:
+        with path.open(encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
         return cls.model_validate(data)
 
@@ -431,7 +431,7 @@ class ST2Config(BaseModel):
         import yaml
 
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
+        with path.open("w", encoding="utf-8") as f:
             yaml.dump(self.to_dict(), f, default_flow_style=False, sort_keys=False)
 
     @classmethod

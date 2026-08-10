@@ -336,7 +336,7 @@ def compare_senones(
         g2 = senone2.as_single_gaussian()
         return compare_states(g1, g2)
 
-    elif method == "monte_carlo":
+    if method == "monte_carlo":
         n_samples = 10000
         kl_12 = _monte_carlo_kl(senone1, senone2, n_samples)
         kl_21 = _monte_carlo_kl(senone2, senone1, n_samples)
@@ -346,11 +346,10 @@ def compare_senones(
             "symmetric_kl_mc": (kl_12 + kl_21) / 2.0,
         }
 
-    elif method == "component_matching":
+    if method == "component_matching":
         return _compare_senone_components(senone1, senone2)
 
-    else:
-        raise ValueError(f"Unknown method: {method}")
+    raise ValueError(f"Unknown method: {method}")
 
 
 def _monte_carlo_kl(senone_p: Senone, senone_q: Senone, n_samples: int) -> float:

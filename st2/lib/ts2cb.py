@@ -155,7 +155,7 @@ def _parse_mdef_n_tied_state(mdef_path: Path) -> int:
     Raises:
         RuntimeError: If mdef file is invalid.
     """
-    with open(mdef_path) as f:
+    with mdef_path.open() as f:
         for line in f:
             line = line.strip()
             if not line:

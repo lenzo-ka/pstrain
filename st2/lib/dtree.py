@@ -255,7 +255,7 @@ def parse_questions(questions_path: Path) -> dict[str, list[str]]:
     """
     questions: dict[str, list[str]] = {}
 
-    with open(questions_path) as f:
+    with questions_path.open() as f:
         for line in f:
             line = line.strip()
             if not line:
