@@ -7,7 +7,10 @@ by some other task or treated as required external files.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import shutil
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 
@@ -15,7 +18,7 @@ import pytest
 import yaml
 
 from pstrain.lib.pipeline import PipelineContext
-from pstrain.lib.pipeline.context import DEFAULT_CONFIGS, FeatParams
+from pstrain.lib.pipeline.context import DEFAULT_CONFIGS, FeatParams, SplitParams, TrainParams
 from pstrain.lib.pipeline.tasks import TARGETS, build_pipeline
 
 
@@ -155,6 +158,208 @@ def test_extract_task_forwards_preemphasis_alpha(empty_project: Path) -> None:
 
     assert isinstance(extract_task.fn, partial)
     assert extract_task.fn.args[2]["alpha"] == 0.42
+
+
+def test_meaningful_feature_config_change_rebuilds_features(
+    empty_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs: list[float] = []
+
+    def extract(_audio: Path, output: Path, params: dict[str, object]) -> None:
+        runs.append(float(params["alpha"]))
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text("features")
+
+    monkeypatch.setattr("pstrain.lib.pipeline.tasks._extract_features_worker", extract)
+    configs = empty_project / "etc" / "configs.yaml"
+    configs.write_text("custom:\n  features:\n    alpha: 0.42\n")
+    first = build_pipeline(PipelineContext.from_config(empty_project, config_name="custom"))
+    assert first.run("features", jobs=1) == 0
+    old_feature = empty_project / "shared" / "features" / "custom" / "placeholder.mfc"
+    assert old_feature.read_text() == "features"
+
+    configs.write_text("custom:\n  features:\n    alpha: 0.21\n")
+    changed = build_pipeline(PipelineContext.from_config(empty_project, config_name="custom"))
+    stale = {entry.task.name for entry in changed.plan("features") if entry.stale}
+
+    assert "provenance:features" in stale
+    assert "extract:placeholder" in stale
+    assert changed.run("features", jobs=1) == 0
+    assert runs == [0.42, 0.21]
+
+
+def test_reverting_feature_config_rebuilds_features(
+    empty_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs: list[float] = []
+
+    def extract(_audio: Path, output: Path, params: dict[str, object]) -> None:
+        runs.append(float(params["alpha"]))
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text("features")
+
+    monkeypatch.setattr("pstrain.lib.pipeline.tasks._extract_features_worker", extract)
+    configs = empty_project / "etc" / "configs.yaml"
+
+    for alpha in (0.42, 0.21, 0.42):
+        configs.write_text(f"custom:\n  features:\n    alpha: {alpha}\n")
+        pipeline = build_pipeline(PipelineContext.from_config(empty_project, config_name="custom"))
+        assert pipeline.run("features", jobs=1) == 0
+
+    assert runs == [0.42, 0.21, 0.42]
+
+
+def test_irrelevant_config_edit_does_not_rebuild_features(
+    empty_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs: list[str] = []
+
+    def extract(_audio: Path, output: Path, _params: dict[str, object]) -> None:
+        runs.append("ran")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text("features")
+
+    monkeypatch.setattr("pstrain.lib.pipeline.tasks._extract_features_worker", extract)
+    configs = empty_project / "etc" / "configs.yaml"
+    configs.write_text("custom:\n  features:\n    alpha: 0.42\n")
+    pipeline = build_pipeline(PipelineContext.from_config(empty_project, config_name="custom"))
+    assert pipeline.run("features", jobs=1) == 0
+
+    configs.write_text(
+        "# formatting and an unrelated profile changed\n"
+        "unrelated:\n  training:\n    max_iterations: 3\n"
+        "custom: {features: {alpha: 0.42}}\n"
+    )
+    unchanged = build_pipeline(PipelineContext.from_config(empty_project, config_name="custom"))
+
+    assert not any(entry.stale for entry in unchanged.plan("features"))
+    assert unchanged.run("features", jobs=1) == 0
+    assert runs == ["ran"]
+
+
+def test_model_and_package_copy_build_provenance(
+    empty_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = PipelineContext.from_config(empty_project)
+    pipeline = build_pipeline(ctx)
+    tasks = pipeline.tasks()
+    tasks["provenance:training"].fn()
+
+    def init_flat_model(_phones: list[str], output_dir: Path, **_kwargs: object) -> None:
+        for name in ("mdef", "means", "variances", "mixture_weights", "transition_matrices"):
+            (output_dir / name).write_text(name)
+
+    def package_model(
+        *, model_dir: Path, output_dir: Path, model_name: str, **_kwargs: object
+    ) -> None:
+        package_dir = output_dir / model_name
+        acoustic = package_dir / "acoustic"
+        acoustic.mkdir(parents=True)
+        for name in (
+            "feat.params",
+            "mdef",
+            "means",
+            "variances",
+            "mixture_weights",
+            "transition_matrices",
+        ):
+            shutil.copyfile(model_dir / name, acoustic / name)
+        (acoustic / "noisedict").write_text("")
+        (package_dir / "README.txt").write_text("")
+
+    monkeypatch.setattr("pstrain.lib.flat.init_flat_model", init_flat_model)
+    monkeypatch.setattr("pstrain.lib.steps.package.package_model", package_model)
+    tasks["flat"].fn()
+
+    package_task = tasks["package-ci-8g"]
+    ci_8g_dir = ctx.model_dir("ci-8g")
+    ci_8g_dir.mkdir(parents=True)
+    for source in ctx.model_files("flat"):
+        shutil.copyfile(source, ci_8g_dir / source.name)
+    package_task.fn()
+
+    expected = ctx.provenance_document("training")
+    assert json.loads((ctx.model_dir("flat") / "provenance.json").read_text()) == expected
+    package_provenance = ctx.dist_dir / "ci-8g-default" / "provenance.json"
+    assert json.loads(package_provenance.read_text()) == expected
+
+
+def test_stage_fingerprints_cover_only_effective_relevant_values(empty_project: Path) -> None:
+    base = PipelineContext.from_config(empty_project)
+    feature_change = replace(base, feat=FeatParams(alpha=0.5))
+    training_change = replace(base, train=TrainParams(max_iterations=3))
+    split_change = replace(base, split=SplitParams(seed=99))
+
+    assert feature_change.provenance_path("features") != base.provenance_path("features")
+    assert training_change.provenance_path("features") == base.provenance_path("features")
+    assert split_change.provenance_path("features") == base.provenance_path("features")
+    assert split_change.provenance_path("split") != base.provenance_path("split")
+    assert training_change.provenance_path("split") == base.provenance_path("split")
+    for changed in (feature_change, training_change, split_change):
+        assert changed.provenance_path("training") != base.provenance_path("training")
+
+    document = base.provenance_document("training")
+    assert document["fingerprint"] in base.provenance_path("training").name
+
+
+def test_native_library_identity_is_content_based_not_path_based(
+    empty_project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first_lib = tmp_path / "first" / "libpstrainc.so"
+    second_lib = tmp_path / "second" / "libpstrainc.so"
+    first_lib.parent.mkdir()
+    second_lib.parent.mkdir()
+    library_bytes = b"identical build"
+    first_lib.write_bytes(library_bytes)
+    second_lib.write_bytes(library_bytes)
+    selected = first_lib
+    monkeypatch.setattr("pstrain.lib.pipeline.context.get_lib_path", lambda: selected)
+
+    ctx = PipelineContext.from_config(empty_project)
+    first_path = ctx.provenance_path("training")
+    selected = second_lib
+    second_path = ctx.provenance_path("training")
+
+    assert first_path == second_path
+    assert ctx.provenance_payload("training")["native_library"] == {
+        "sha256": hashlib.sha256(library_bytes).hexdigest()
+    }
+    assert ctx.provenance_document("training")["native_library"] == {
+        "path": str(second_lib.resolve()),
+        "sha256": hashlib.sha256(library_bytes).hexdigest(),
+    }
+
+
+def test_native_library_content_changes_fingerprint(
+    empty_project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    library = tmp_path / "libpstrainc.so"
+    library.write_bytes(b"first build")
+    monkeypatch.setattr("pstrain.lib.pipeline.context.get_lib_path", lambda: library)
+    ctx = PipelineContext.from_config(empty_project)
+
+    first_path = ctx.provenance_path("training")
+    library.write_bytes(b"second build")
+    second_path = ctx.provenance_path("training")
+
+    assert first_path != second_path
+
+
+def test_missing_native_library_is_recorded(
+    empty_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("pstrain.lib.pipeline.context.get_lib_path", lambda: None)
+
+    payload = PipelineContext.from_config(empty_project).provenance_payload("features")
+
+    assert payload["native_library"] == {"state": "absent"}
+
+
+def test_provenance_rejects_non_finite_config(empty_project: Path) -> None:
+    ctx = PipelineContext(project_dir=empty_project, feat=FeatParams(alpha=float("nan")))
+
+    with pytest.raises(ValueError, match="Out of range float values"):
+        ctx.provenance_path("features")
 
 
 def test_nested_and_flat_audio_fanout_uses_relative_fileids(empty_project: Path) -> None:

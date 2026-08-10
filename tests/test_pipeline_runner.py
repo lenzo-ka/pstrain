@@ -10,6 +10,7 @@ actual pstrain training code.
 from __future__ import annotations
 
 import functools
+import os
 import time
 from concurrent.futures import Future
 from pathlib import Path
@@ -42,6 +43,12 @@ def _make_touch_task(name: str, out: Path, *, inputs: tuple[Path, ...] = ()) -> 
         inputs=inputs,
         outputs=(out,),
     )
+
+
+def _mark_complete(task: Task) -> None:
+    marker = task.completion_marker
+    assert marker is not None
+    marker.write_text("complete")
 
 
 def test_simple_linear_chain_runs_in_order(tmp_path: Path) -> None:
@@ -92,6 +99,8 @@ def test_skip_when_up_to_date(tmp_path: Path) -> None:
         )
     )
     pl.register_target("ci-1g", ci)
+    for task in pl.tasks().values():
+        _mark_complete(task)
 
     rc = pl.run("ci-1g")
     assert rc == 0
@@ -130,7 +139,6 @@ def test_force_reruns_everything(tmp_path: Path) -> None:
         )
     )
     pl.register_target("ci-1g", ci)
-
     rc = pl.run("ci-1g", force=True)
     assert rc == 0
     assert ran == ["flat", "ci-1g"]
@@ -167,10 +175,52 @@ def test_stale_input_triggers_rerun(tmp_path: Path) -> None:
         )
     )
     pl.register_target("ci-1g", ci)
+    _mark_complete(pl.tasks()["flat"])
 
     rc = pl.run("ci-1g")
     assert rc == 0
     assert ran == ["ci-1g"]  # flat is up to date; only ci-1g reruns
+
+
+def test_equal_mtime_input_triggers_rerun(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    output = tmp_path / "output"
+    source.write_text("source")
+    output.write_text("old")
+    task = _make_touch_task("build", output, inputs=(source,))
+    _mark_complete(task)
+    same_mtime = output.stat().st_mtime_ns
+    source.write_text("changed")
+    source.touch()
+    os.utime(source, ns=(same_mtime, same_mtime))
+
+    pl = Pipeline()
+    pl.add(task)
+    pl.register_target("build", output)
+
+    assert pl.plan("build")[0].stale
+    assert pl.run("build") == 0
+    assert output.read_text() == "build"
+
+
+def test_failed_rebuild_removes_completion_marker(tmp_path: Path) -> None:
+    output = tmp_path / "artifact"
+
+    def partial_then_fail() -> None:
+        output.write_text("partial")
+        raise RuntimeError("interrupted")
+
+    task = Task("build", partial_then_fail, outputs=(output,))
+    output.write_text("previously complete")
+    _mark_complete(task)
+    pl = Pipeline()
+    pl.add(task)
+    pl.register_target("build", output)
+
+    assert pl.run("build", force=True) != 0
+    assert task.completion_marker is not None
+    assert not task.completion_marker.exists()
+    assert pl.plan("build")[0].stale
 
 
 def test_dry_run_does_not_execute(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

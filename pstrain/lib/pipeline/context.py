@@ -25,11 +25,38 @@ Path conventions (mirroring the prior Snakefile):
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields
+import hashlib
+import json
+from dataclasses import asdict, dataclass, field, fields
+from functools import cache
 from pathlib import Path
 from typing import Any, Self
 
 import yaml
+
+from pstrain import __version__
+from pstrain.lib.paths import get_lib_path
+
+
+@cache
+def _sha256_file(path: Path, size: int, mtime_ns: int) -> str:
+    """Hash each observed native-library version once per Python process."""
+    del size, mtime_ns  # They form the cache key and detect in-place rebuilds.
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _native_library_identity() -> dict[str, str]:
+    """Return path-independent content identity for the library used by CFFI."""
+    lib_path = get_lib_path()
+    if lib_path is None:
+        return {"state": "absent"}
+    resolved = lib_path.resolve()
+    stat = resolved.stat()
+    return {"sha256": _sha256_file(resolved, stat.st_size, stat.st_mtime_ns)}
 
 
 @dataclass(frozen=True)
@@ -287,7 +314,60 @@ class PipelineContext:
             d / "mixture_weights",
             d / "transition_matrices",
             d / "feat.params",
+            d / "provenance.json",
         ]
+
+    def provenance_payload(self, stage: str) -> dict[str, Any]:
+        """Canonical effective configuration governing a pipeline stage."""
+        payload: dict[str, Any] = {
+            "stage": stage,
+            "tool_version": __version__,
+            "native_library": _native_library_identity(),
+        }
+        if stage == "features":
+            payload["features"] = asdict(self.feat)
+        elif stage == "split":
+            payload["split"] = asdict(self.split)
+        elif stage == "training":
+            payload.update(
+                features=asdict(self.feat),
+                training=asdict(self.train),
+                split=asdict(self.split),
+            )
+        else:
+            raise ValueError(f"unknown provenance stage: {stage!r}")
+        return payload
+
+    def provenance_path(self, stage: str) -> Path:
+        """Content-addressed path for a stage's effective configuration."""
+        canonical = json.dumps(
+            self.provenance_payload(stage),
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode()
+        fingerprint = hashlib.sha256(canonical).hexdigest()
+        return (
+            self.project_dir
+            / ".pstrain"
+            / "provenance"
+            / self.experiment
+            / self.config_name
+            / f"{stage}-{fingerprint}.json"
+        )
+
+    def provenance_document(self, stage: str) -> dict[str, Any]:
+        """Serializable provenance, including its effective-config fingerprint."""
+        payload = self.provenance_payload(stage)
+        fingerprint = self.provenance_path(stage).stem.removeprefix(f"{stage}-")
+        document = {"fingerprint": fingerprint, **payload}
+        lib_path = get_lib_path()
+        if lib_path is not None:
+            document["native_library"] = {
+                **payload["native_library"],
+                "path": str(lib_path.resolve()),
+            }
+        return document
 
     @property
     def trees_dir(self) -> Path:
