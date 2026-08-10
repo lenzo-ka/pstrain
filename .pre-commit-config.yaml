@@ -1,10 +1,13 @@
 # Pre-commit hooks for st2
 # Install: pip install pre-commit && pre-commit install
 
+default_language_version:
+  python: python3.11
+
 repos:
   # Basic file checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
         exclude: ^(build/|\.eggs/)
@@ -23,24 +26,27 @@ repos:
 
   # Python code quality - Ruff (fast linter and formatter)
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.1.15
+    rev: v0.15.20
     hooks:
       # Run the linter
       - id: ruff
         args: [--fix]
+        files: ^(st2|tests)/
         exclude: ^(build/|csrc/libs/libsphinxbase/(fe|util)/.*\.py$)
       # Run the formatter
       - id: ruff-format
+        files: ^(st2|tests)/
         exclude: ^(build/|csrc/libs/libsphinxbase/(fe|util)/.*\.py$)
 
   # Type checking with mypy
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.8.0
+    rev: v2.1.0
     hooks:
       - id: mypy
         additional_dependencies: [pydantic>=2.0, types-PyYAML, pytest>=7.0]
         exclude: ^(build/|\.eggs/|csrc/)
-        args: [--no-strict-optional, --ignore-missing-imports]
+        args: [st2, --ignore-missing-imports]
+        pass_filenames: false
 
 # Exclude certain paths globally
 exclude: |
@@ -54,4 +60,4 @@ exclude: |
       \.ruff_cache/|
       __pycache__/|
       \.pytest_cache/
-  )$
+  )

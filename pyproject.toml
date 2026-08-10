@@ -110,7 +110,7 @@ archs = ["x86_64", "arm64"]
 
 [tool.cibuildwheel.linux]
 # x86_64 only in CI. aarch64 Linux wheels would build under QEMU emulation on
-# the x86 runner, which recompiles the large vendored C library four times
+# the x86 runner, which recompiles the large vendored C library three times
 # (cp311-cp313) emulated and takes hours. Add aarch64 back on a native ARM
 # runner or a release-only job when arm64 Linux wheels are needed.
 archs = ["x86_64"]
