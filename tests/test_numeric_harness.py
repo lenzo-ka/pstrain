@@ -66,7 +66,7 @@ def _trainer(ctx: PipelineContext, *, multipron: bool = True) -> BWTrainer:
         model / "variances",
         model / "mixture_weights",
         model / "transition_matrices",
-        BWConfig(a_beam=1e-200, multipron=multipron),
+        BWConfig(pass2var=True, a_beam=1e-200, multipron=multipron),
     )
     trainer.set_dict(ctx.shared_dir / "dictionary.dict", ctx.filler_dict)
     return trainer
@@ -183,9 +183,10 @@ def test_real_training_retry_is_accounted_once_and_conserves_stats(
         fileids,
         transcription,
         flat_project.shared_dir / "dictionary.dict",
-        flat_project.filler_dict,
+        first_pass_2passvar=True,
+        filler_dict=flat_project.filler_dict,
         n_iter=1,
-        config=BWConfig(a_beam=1e-1),
+        config=BWConfig(pass2var=True, a_beam=1e-1),
         retry_beam_factor=1e199,
     )
     row = result.trajectory[0]
@@ -228,7 +229,8 @@ def test_iteration_checkpoints_are_opt_in_and_replace_stale_passes(
         "dictionary": flat_project.shared_dir / "dictionary.dict",
         "filler_dict": flat_project.filler_dict,
         "min_iterations": 4,
-        "config": BWConfig(a_beam=1e-200),
+        "config": BWConfig(pass2var=True, a_beam=1e-200),
+        "first_pass_2passvar": False,
     }
 
     monkeypatch.delenv("PSTRAIN_BW_CHECKPOINTS", raising=False)
@@ -387,7 +389,7 @@ def test_cd_variant_boundaries_expand_both_triphone_contexts(
         model / "variances",
         model / "mixture_weights",
         model / "transition_matrices",
-        BWConfig(a_beam=1e-200, topn=1, multipron=True),
+        BWConfig(pass2var=True, a_beam=1e-200, topn=1, multipron=True),
     )
     trainer.set_dict(full_project.shared_dir / "dictionary.dict", full_project.filler_dict)
 
@@ -440,7 +442,7 @@ def test_m4_real_utterances_reach_shared_final_state(
         model / "variances",
         model / "mixture_weights",
         model / "transition_matrices",
-        BWConfig(a_beam=1e-90, multipron=True),
+        BWConfig(pass2var=True, a_beam=1e-90, multipron=True),
     )
     trainer.set_dict(_M4_FIXTURE / "dictionary.dict", _M4_FIXTURE / "filler.dict")
     mfcc = read_sphinx_mfc(_M4_FIXTURE / f"{fileid}.mfc")
@@ -556,9 +558,10 @@ def test_seeded_bw_reruns_are_bit_identical(flat_project: PipelineContext, tmp_p
             fileids,
             transcription,
             flat_project.shared_dir / "dictionary.dict",
-            flat_project.filler_dict,
+            first_pass_2passvar=False,
+            filler_dict=flat_project.filler_dict,
             n_iter=1,
-            config=BWConfig(a_beam=1e-200),
+            config=BWConfig(pass2var=True, a_beam=1e-200),
         )
     for filename in (
         "means",

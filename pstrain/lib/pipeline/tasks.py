@@ -346,6 +346,7 @@ def _make_bw_train_task(
             convergence_ratio=schedule.convergence_ratio,
             min_iterations=schedule.min_iterations,
             config=BWConfig(
+                pass2var=True,
                 a_beam=ctx.train.a_beam,
                 b_beam=ctx.train.b_beam,
                 topn=topn,
@@ -415,6 +416,7 @@ def _make_split_and_train_task(
             convergence_ratio=schedule.convergence_ratio,
             min_iterations=schedule.min_iterations,
             config=BWConfig(
+                pass2var=True,
                 a_beam=ctx.train.a_beam,
                 b_beam=ctx.train.b_beam,
                 topn=topn,

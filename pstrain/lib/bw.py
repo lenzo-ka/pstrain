@@ -26,6 +26,9 @@ __all__ = ["BWConfig", "BWResult", "HMM", "BWTrainer"]
 class BWConfig:
     """Configuration for Baum-Welch training."""
 
+    # Variance accumulation is an explicit policy choice.  Callers must not
+    # inherit a default that can disagree with their training stage.
+    pass2var: bool
     # Beam probabilities closer to zero are wider (less pruning); larger values
     # impose a higher pruning threshold and are tighter in this engine.
     # SphinxTrain defaults: abeam=1e-90, bbeam=1e-10
@@ -39,7 +42,6 @@ class BWConfig:
     var_reest: bool = True
     mixw_reest: bool = True
     tmat_reest: bool = True
-    pass2var: bool = True  # 2-pass variance to match SphinxTrain -2passvar yes
     multipron: bool = True  # Multi-pron training: build wide graphs that sum
     # posteriors across pronunciation variants. Set to False to fall back to
     # the legacy linear path that always uses the first listed variant per
@@ -118,7 +120,7 @@ class BWTrainer:
         vars_path: Path,
         mixw_path: Path,
         tmat_path: Path,
-        config: BWConfig | None = None,
+        config: BWConfig,
     ) -> None:
         """Initialize BW trainer.
 
@@ -130,7 +132,7 @@ class BWTrainer:
             tmat_path: Path to transition matrices file
             config: Training configuration
         """
-        self.config = config or BWConfig()
+        self.config = config
         self._ffi, self._lib = _pstrainc._init()
 
         # Create C config struct

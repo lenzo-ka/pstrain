@@ -147,7 +147,7 @@ def test_bw_preserves_extreme_forward_density_scale(tmp_path: Path) -> None:
         vars_path=model_dir / "variances",
         mixw_path=model_dir / "mixture_weights",
         tmat_path=model_dir / "transition_matrices",
-        config=BWConfig(a_beam=1e-200, multipron=False),
+        config=BWConfig(pass2var=True, a_beam=1e-200, multipron=False),
     )
     trainer.set_dict(ctx.shared_dir / "dictionary.dict", ctx.filler_dict)
 

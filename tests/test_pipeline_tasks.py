@@ -568,8 +568,8 @@ def test_bw_config_multipron_default_on() -> None:
     get the new behavior unless they explicitly opt out."""
     from pstrain.lib.bw import BWConfig
 
-    assert BWConfig().multipron is True
-    assert BWConfig(multipron=False).multipron is False
+    assert BWConfig(pass2var=True).multipron is True
+    assert BWConfig(pass2var=True, multipron=False).multipron is False
 
 
 def test_bw_mixture_floor_is_higher_only_for_tied_cd_stages() -> None:
@@ -620,6 +620,35 @@ def test_slt_profile_resolves_per_stage_schedule(empty_project: Path) -> None:
     assert (ci_first_2pass, untied_first_2pass, tied_first_2pass) == (False, True, False)
 
 
+def test_stage_variance_policy_reaches_first_engine_iteration(empty_project: Path) -> None:
+    """CI is one-pass and untied is centered at the orchestration/engine seam."""
+    from pstrain.lib.bw import BWConfig
+    from pstrain.lib.pipeline.tasks import _bw_policy_for_stage
+    from pstrain.lib.steps.train import _config_for_iteration
+
+    ctx = PipelineContext.from_config(empty_project)
+    base = BWConfig(pass2var=True)
+    observed = {}
+    for stage in ("ci-1g", "cd-untied"):
+        _, first_pass_2passvar = _bw_policy_for_stage(ctx, stage)
+        observed[stage] = _config_for_iteration(
+            base,
+            multipron=True,
+            iteration=1,
+            first_pass_2passvar=first_pass_2passvar,
+        ).pass2var
+
+    assert observed == {"ci-1g": False, "cd-untied": True}
+
+
+def test_bw_config_requires_explicit_variance_policy() -> None:
+    """Library callers cannot inherit a free-floating variance default."""
+    from pstrain.lib.bw import BWConfig
+
+    with pytest.raises(TypeError, match="pass2var"):
+        BWConfig()  # type: ignore[call-arg]
+
+
 def test_configured_bw_parameters_reach_training_call(
     empty_project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -664,16 +693,23 @@ def test_configured_bw_parameters_reach_training_call(
 
     def fake_bw(**kwargs: object) -> TrainingResult:
         from pstrain.lib.bw import BWTrainer
+        from pstrain.lib.steps.train import _config_for_iteration
 
         captured.update(kwargs)
         model = Path(kwargs["model_dir"])  # type: ignore[arg-type]
+        engine_config = _config_for_iteration(
+            kwargs["config"],  # type: ignore[arg-type]
+            multipron=bool(kwargs["multipron"]),
+            iteration=1,
+            first_pass_2passvar=bool(kwargs["first_pass_2passvar"]),
+        )
         trainer = BWTrainer(
             model / "mdef",
             model / "means",
             model / "variances",
             model / "mixture_weights",
             model / "transition_matrices",
-            config=kwargs["config"],  # type: ignore[arg-type]
+            config=engine_config,
         )
         del trainer
         output = Path(kwargs["output_dir"])  # type: ignore[arg-type]
@@ -699,7 +735,7 @@ def test_configured_bw_parameters_reach_training_call(
     assert c_config.topn == 1
     assert c_config.mixw_floor == 1e-8
     assert c_config.tmat_floor == 1e-4
-    assert c_config.pass2var == 1
+    assert c_config.pass2var == 0
     assert captured["convergence_ratio"] == 0.004
     assert captured["min_iterations"] == 3
     assert captured["n_iter"] == 7
