@@ -155,7 +155,7 @@ DEFAULT_CONFIGS: dict[str, dict[str, Any]] = {
         "features": {
             "samprate": 8000,
             "ncep": 13,
-            "nfilt": 25,
+            "nfilt": 15,
             "nfft": 256,
             "lowerf": 200,
             "upperf": 3500,

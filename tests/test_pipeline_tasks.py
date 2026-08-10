@@ -495,7 +495,9 @@ def test_named_config_overrides_defaults(empty_project: Path) -> None:
     """The 'telephone' config should change sample rate and filter count."""
     ctx = PipelineContext.from_config(empty_project, config_name="telephone")
     assert ctx.feat.samprate == 8000
-    assert ctx.feat.nfilt == 25
+    assert ctx.feat.nfilt == 15
+    assert ctx.feat.lowerf == 200
+    assert ctx.feat.upperf == 3500
     # And the features dir reflects the config name.
     assert ctx.features_dir.name == "telephone"
 

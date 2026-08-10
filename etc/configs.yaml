@@ -41,7 +41,8 @@ telephone:
   features:
     samprate: 8000
     ncep: 13
-    nfilt: 25
+    # SphinxTrain's sphinx_train.cfg template narrowband (8 kHz) tuning.
+    nfilt: 15
     nfft: 256
     lowerf: 200
     upperf: 3500
