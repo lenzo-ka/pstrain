@@ -117,16 +117,17 @@ This is an early alpha; a few rough edges are known and tracked:
 
 ## Acknowledgements
 
-pstrain builds on decades of work by the [CMU Sphinx](https://github.com/cmusphinx)
-project. The vendored C under `csrc/` derives from CMU SphinxTrain, SphinxBase,
-and Sphinx-3, and is used under the CMU BSD-style license.
+pstrain descends from decades of generous work by the
+[CMU Sphinx](https://github.com/cmusphinx) community and carries CMU
+SphinxTrain, SphinxBase, and Sphinx-3 code forward in its C implementation. We
+are grateful to the people and institutions that made that lineage possible;
+see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for its notices and credits.
 
 ## License
 
-The pstrain Python package and the new C session layer (`csrc/libs/libpstrain/`) are
-licensed under the BSD 2-Clause license — see [LICENSE](LICENSE).
-
-The vendored CMU Sphinx C code under `csrc/` has been modified as part of pstrain
-and is dual-licensed: the original portions under the CMU BSD-style license
-(see [`csrc/LICENSE.sphinx`](csrc/LICENSE.sphinx)) and the pstrain modifications
-under BSD 2-Clause. See [`csrc/NOTICE.md`](csrc/NOTICE.md) for the full breakdown.
+New pstrain code is licensed under the BSD 2-Clause license. CMU-derived code
+carries both layers: CMU's BSD-style license applies to the base, and Kevin
+Lenzo's BSD 2-Clause license applies to the pstrain modifications, with git
+history recording those changes. See [LICENSE](LICENSE),
+[csrc/LICENSE.sphinx](csrc/LICENSE.sphinx), and
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the full structure.
