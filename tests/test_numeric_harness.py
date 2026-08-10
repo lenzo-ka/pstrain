@@ -15,6 +15,7 @@ from pstrain.lib import _pstrainc
 from pstrain.lib.bw import BWConfig, BWTrainer
 from pstrain.lib.features import read_sphinx_mfc
 from pstrain.lib.pipeline import PipelineContext
+from pstrain.lib.pipeline.tasks import TARGETS
 from pstrain.lib.steps.train import run_bw_training
 from tests.clib import requires_c_library
 from tests.numeric_harness import (
@@ -30,6 +31,15 @@ from tests.numeric_harness import (
     write_golden_subset,
 )
 
+_CHECKPOINT_MODEL_FILES = {
+    "mdef",
+    "means",
+    "variances",
+    "mixture_weights",
+    "transition_matrices",
+    "gauden_counts",
+}
+
 
 @pytest.fixture(scope="module")
 def flat_project(tmp_path_factory: pytest.TempPathFactory) -> PipelineContext:
@@ -40,7 +50,11 @@ def flat_project(tmp_path_factory: pytest.TempPathFactory) -> PipelineContext:
 @pytest.fixture(scope="module")
 def full_project(tmp_path_factory: pytest.TempPathFactory) -> PipelineContext:
     """One full 1→2→4→8 run shared by split and tree invariants."""
-    return create_project(tmp_path_factory.mktemp("numeric-full") / "project", "cd-8g")
+    return create_project(
+        tmp_path_factory.mktemp("numeric-full") / "project",
+        "cd-8g",
+        checkpoint_iterations=True,
+    )
 
 
 def _trainer(ctx: PipelineContext, *, multipron: bool = True) -> BWTrainer:
@@ -200,16 +214,61 @@ def _assert_normalized_model(model_dir: Path) -> None:
 
 
 @requires_c_library
+def test_iteration_checkpoints_are_opt_in_and_replace_stale_passes(
+    flat_project: PipelineContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Normal training emits no checkpoints; the diagnostic mode is stage-clean."""
+    fileids, transcription = write_golden_subset(flat_project)
+    kwargs = {
+        "model_dir": flat_project.model_dir("flat"),
+        "features_dir": flat_project.features_dir,
+        "train_fileids": fileids,
+        "transcription": transcription,
+        "dictionary": flat_project.shared_dir / "dictionary.dict",
+        "filler_dict": flat_project.filler_dict,
+        "min_iterations": 4,
+        "config": BWConfig(a_beam=1e-200),
+    }
+
+    monkeypatch.delenv("PSTRAIN_BW_CHECKPOINTS", raising=False)
+    default_output = tmp_path / "default-model"
+    run_bw_training(output_dir=default_output, n_iter=1, **kwargs)
+    assert not (default_output / "iterations").exists()
+
+    enabled_output = tmp_path / "checkpointed-model"
+    stale = enabled_output / "iterations" / "99"
+    stale.mkdir(parents=True)
+    (stale / "stale").write_text("stale")
+    monkeypatch.setenv("PSTRAIN_BW_CHECKPOINTS", "1")
+    run_bw_training(output_dir=enabled_output, n_iter=2, **kwargs)
+    assert [path.name for path in sorted((enabled_output / "iterations").iterdir())] == [
+        "01",
+        "02",
+    ]
+    for checkpoint in (enabled_output / "iterations").iterdir():
+        assert {path.name for path in checkpoint.iterdir()} == set(_CHECKPOINT_MODEL_FILES)
+
+
+@requires_c_library
 def test_updates_and_split_schedule_preserve_invariants(full_project: PipelineContext) -> None:
     """Choke points D/E: each pass/split stays valid at exactly 1→2→4→8."""
+    exercised_specs = TARGETS[
+        : next(i for i, spec in enumerate(TARGETS) if spec.name == "cd-8g") + 1
+    ]
+    bw_stages = [
+        spec.name for spec in exercised_specs if spec.kind in {"ci", "cd"} and spec.name != "flat"
+    ]
     senones: int | None = None
-    for density in (1, 2, 4, 8):
-        model = full_project.model_dir(f"cd-{density}g")
+    for stage in bw_stages:
+        model = full_project.model_dir(stage)
         checkpoints = sorted((model / "iterations").iterdir())
-        assert checkpoints, f"no per-pass checkpoints for cd-{density}g"
+        assert checkpoints, f"no per-pass checkpoints for {stage}"
         for checkpoint in checkpoints:
             _assert_normalized_model(checkpoint)
         _assert_normalized_model(model)
+
+    for density in (1, 2, 4, 8):
+        model = full_project.model_dir(f"cd-{density}g")
         mixw, n_mixw, _, actual_density = _pstrainc.read_mixw(str(model / "mixture_weights"))
         assert actual_density == density
         if senones is None:
@@ -222,12 +281,6 @@ def test_updates_and_split_schedule_preserve_invariants(full_project: PipelineCo
         # unobserved density is a reviewable numerical event, never hidden.
         unobserved_report = np.argwhere(~observed).tolist()
         assert observed.all(), f"unobserved densities at {density}g: {unobserved_report}"
-
-    ci_model = full_project.model_dir("ci-1g")
-    ci_checkpoints = sorted((ci_model / "iterations").iterdir())
-    assert ci_checkpoints, "no per-pass checkpoints for ci-1g"
-    for checkpoint in ci_checkpoints:
-        _assert_normalized_model(checkpoint)
 
 
 def _ci_state_ids(mdef: Path, phone: str) -> list[int]:

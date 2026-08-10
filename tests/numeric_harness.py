@@ -15,7 +15,7 @@ from pstrain.lib import _pstrainc
 from pstrain.lib.bw import BWConfig
 from pstrain.lib.features import read_sphinx_mfc
 from pstrain.lib.pipeline import PipelineContext
-from pstrain.lib.pipeline.tasks import build_pipeline
+from pstrain.lib.pipeline.tasks import TARGETS, build_pipeline
 from pstrain.lib.setup import setup_project
 from pstrain.lib.steps.train import TrainingResult, run_bw_training
 
@@ -33,7 +33,9 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def create_project(project_dir: Path, target: str = "flat") -> PipelineContext:
+def create_project(
+    project_dir: Path, target: str = "flat", *, checkpoint_iterations: bool = False
+) -> PipelineContext:
     """Create the fixed mini corpus project and build through ``target``."""
     setup_project(
         project_dir,
@@ -50,8 +52,31 @@ def create_project(project_dir: Path, target: str = "flat") -> PipelineContext:
         split=replace(ctx.split, seed=SEED),
     )
     assert ctx.split.seed == SEED
-    if build_pipeline(ctx).run(target, jobs=1) != 0:
-        raise RuntimeError(f"numeric fixture pipeline failed at {target}")
+    previous_checkpoints = os.environ.get("PSTRAIN_BW_CHECKPOINTS")
+    try:
+        if checkpoint_iterations:
+            os.environ["PSTRAIN_BW_CHECKPOINTS"] = "1"
+        else:
+            os.environ.pop("PSTRAIN_BW_CHECKPOINTS", None)
+        pipeline = build_pipeline(ctx)
+        targets = [target]
+        if checkpoint_iterations:
+            exercised_specs = TARGETS[
+                : next(i for i, spec in enumerate(TARGETS) if spec.name == target) + 1
+            ]
+            targets = [
+                spec.name
+                for spec in exercised_specs
+                if spec.kind in {"ci", "cd"} and spec.name != "flat"
+            ]
+        for build_target in targets:
+            if pipeline.run(build_target, jobs=1) != 0:
+                raise RuntimeError(f"numeric fixture pipeline failed at {build_target}")
+    finally:
+        if previous_checkpoints is None:
+            os.environ.pop("PSTRAIN_BW_CHECKPOINTS", None)
+        else:
+            os.environ["PSTRAIN_BW_CHECKPOINTS"] = previous_checkpoints
     return ctx
 
 

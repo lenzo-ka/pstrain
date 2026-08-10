@@ -6,6 +6,7 @@ Orchestrates Baum-Welch training using the CFFI-wrapped BWTrainer.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -192,6 +193,10 @@ def run_bw_training(
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    checkpoints_enabled = os.environ.get("PSTRAIN_BW_CHECKPOINTS") == "1"
+    if checkpoints_enabled:
+        shutil.rmtree(output_dir / "iterations", ignore_errors=True)
+
     # Copy mdef (unchanged during training)
     shutil.copy(model_dir / "mdef", output_dir / "mdef")
 
@@ -360,7 +365,8 @@ def run_bw_training(
             mixw_path=output_dir / "mixture_weights",
             tmat_path=output_dir / "transition_matrices",
         )
-        _checkpoint_iteration(output_dir, iteration)
+        if checkpoints_enabled:
+            _checkpoint_iteration(output_dir, iteration)
 
         # Check convergence
         if iteration > 1:
