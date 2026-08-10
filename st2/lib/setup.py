@@ -44,18 +44,38 @@ def setup_project(
         Dict with setup status and paths
     """
     project_dir = project_dir.resolve()
+    audio_dir = project_dir / "audio"
+
+    if config_path is not None:
+        config_path = Path(config_path).resolve()
+        if not config_path.is_file():
+            raise FileNotFoundError(f"Config file does not exist: {config_path}")
+
+    if audio_path is not None:
+        audio_path = Path(audio_path).resolve()
+        if link_audio:
+            try:
+                audio_path.relative_to(project_dir)
+            except ValueError:
+                pass
+            else:
+                raise ValueError(
+                    "Cannot link project audio from inside the project directory: "
+                    f"{audio_path}"
+                )
 
     # Create directory structure
     project_dir.mkdir(parents=True, exist_ok=True)
     (project_dir / "etc").mkdir(exist_ok=True)
-    (project_dir / "audio").mkdir(exist_ok=True)
+    if not (link_audio and audio_path is not None):
+        audio_dir.mkdir(exist_ok=True)
     (project_dir / "shared").mkdir(exist_ok=True)
     (project_dir / "shared" / "features").mkdir(exist_ok=True)
-    (project_dir / "experiments").mkdir(exist_ok=True)
+    (project_dir / "experiments" / "default" / "etc").mkdir(parents=True, exist_ok=True)
 
     # Create or load configuration
     config_file = project_dir / "etc" / "config.yaml"
-    if config_path and config_path.exists():
+    if config_path:
         if clobber or not config_file.exists():
             config = ST2Config.from_yaml(config_path)
             config.to_yaml(config_file)
@@ -79,26 +99,26 @@ def setup_project(
                 shutil.copy(transcription_path, dest_transcription)
 
     # Handle audio files
-    audio_dir = project_dir / "audio"
     if audio_path:
-        audio_path = Path(audio_path).resolve()
-
         if link_audio:
             # Symlink entire audio directory
-            if clobber and audio_dir.exists():
+            if clobber and (audio_dir.exists() or audio_dir.is_symlink()):
                 if audio_dir.is_symlink():
                     audio_dir.unlink()
                 elif audio_dir.is_dir():
                     shutil.rmtree(audio_dir)
-            if not audio_dir.exists():
+            if not audio_dir.exists() and not audio_dir.is_symlink():
                 try:
                     audio_dir.symlink_to(audio_path)
                 except OSError:
                     # Fall back to individual file symlinks if directory symlink fails
                     audio_dir.mkdir(exist_ok=True)
                     if audio_path.is_dir():
-                        for audio_file in audio_path.glob("*.wav"):
-                            link_path = audio_dir / audio_file.name
+                        for audio_file in audio_path.rglob("*"):
+                            if not audio_file.is_file():
+                                continue
+                            link_path = audio_dir / audio_file.relative_to(audio_path)
+                            link_path.parent.mkdir(parents=True, exist_ok=True)
                             if clobber or not link_path.exists():
                                 if link_path.exists():
                                     link_path.unlink()
@@ -106,9 +126,12 @@ def setup_project(
         else:
             # Copy audio files
             if audio_path.is_dir():
-                for audio_file in audio_path.glob("*.wav"):
-                    dest_file = audio_dir / audio_file.name
+                for audio_file in audio_path.rglob("*"):
+                    if not audio_file.is_file():
+                        continue
+                    dest_file = audio_dir / audio_file.relative_to(audio_path)
                     if clobber or not dest_file.exists():
+                        dest_file.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy(audio_file, dest_file)
             else:
                 dest_file = audio_dir / audio_path.name
