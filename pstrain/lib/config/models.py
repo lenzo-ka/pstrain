@@ -161,40 +161,12 @@ class CITrainingConfig(BaseModel):
     """CI (context-independent, monophone) training configuration."""
 
     n_gaussians: int = Field(1, ge=1, description="Initial number of Gaussians per state")
-    n_iterations: int = Field(10, ge=1, le=100, description="Maximum training iterations")
-    convergence_threshold: float = Field(
-        0.001, gt=0, description="Convergence threshold (fractional log-likelihood improvement)"
-    )
-    min_iterations: int = Field(
-        1, ge=1, description="Minimum iterations before checking convergence"
-    )
-
-    # Beams
-    abeam: float = Field(1e-90, gt=0, description="Alpha beam for BW forward pass")
-    bbeam: float = Field(1e-10, gt=0, description="Beta beam for BW backward pass")
-
-    # Floors
-    varfloor: float = Field(1e-4, gt=0, description="Variance floor")
-    mixw_floor: float = Field(1e-8, gt=0, description="Mixture weight floor")
-
-    # Gaussian selection
-    topn: int = Field(1, ge=1, description="Number of top Gaussians to use in BW")
 
 
 class CDUntiedConfig(BaseModel):
     """CD-Untied (untied triphone) training configuration."""
 
     n_gaussians: int = Field(1, ge=1, description="Number of Gaussians for untied models")
-    n_iterations: int = Field(10, ge=1, le=100, description="Maximum training iterations")
-    convergence_threshold: float = Field(0.001, gt=0, description="Convergence threshold")
-    min_iterations: int = Field(1, ge=1, description="Minimum iterations")
-
-    abeam: float = Field(1e-90, gt=0, description="Alpha beam")
-    bbeam: float = Field(1e-10, gt=0, description="Beta beam")
-    varfloor: float = Field(1e-4, gt=0, description="Variance floor")
-    mixw_floor: float = Field(1e-5, gt=0, description="Mixture weight floor")
-    tmat_floor: float = Field(1e-5, gt=0, description="Transition probability floor")
-    topn: int = Field(8, ge=1, description="Number of top Gaussians")
 
 
 class CDTiedConfig(BaseModel):
@@ -202,16 +174,6 @@ class CDTiedConfig(BaseModel):
 
     n_gaussians: int = Field(8, ge=1, description="Number of Gaussians per state")
     n_senones: int = Field(200, ge=10, description="Target number of senones (tied states)")
-    n_iterations: int = Field(10, ge=1, le=100, description="Maximum training iterations")
-    convergence_threshold: float = Field(0.001, gt=0, description="Convergence threshold")
-    min_iterations: int = Field(1, ge=1, description="Minimum iterations")
-
-    abeam: float = Field(1e-90, gt=0, description="Alpha beam")
-    bbeam: float = Field(1e-10, gt=0, description="Beta beam")
-    varfloor: float = Field(1e-4, gt=0, description="Variance floor")
-    mixw_floor: float = Field(1e-5, gt=0, description="Mixture weight floor")
-    tmat_floor: float = Field(1e-5, gt=0, description="Transition probability floor")
-    topn: int = Field(8, ge=1, description="Number of top Gaussians")
 
 
 class CDConfig(BaseModel):

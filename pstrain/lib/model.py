@@ -171,15 +171,6 @@ class CIModel(Model):
             Dictionary of parameter names to default values for CI model training
         """
         return {
-            "max_iterations": 10,
-            "min_iterations": 3,
-            "convergence_threshold": 0.001,
-            "abeam": 1e-90,
-            "bbeam": 1e-10,
-            "topn": 1,
-            "varfloor": 1e-4,
-            "mixw_floor": 1e-8,
-            "2passvar": False,  # First iteration uses False, subsequent use True
             "save_alignments": False,
             "gaussian_splitting": None,  # None = no splitting, or list like [1, 2, 4, 8]
             "n_iterations_after_split": 3,  # Iterations after each Gaussian split
@@ -235,15 +226,6 @@ class CDModel(Model):
             Dictionary of parameter names to default values for CD model training
         """
         return {
-            "max_iterations": 10,
-            "min_iterations": 3,
-            "convergence_threshold": 0.001,
-            "abeam": 1e-90,
-            "bbeam": 1e-10,
-            "topn": 4,
-            "varfloor": 1e-4,
-            "mixw_floor": 1e-8,
-            "2passvar": False,
             "save_alignments": False,
             "gaussian_splitting": None,  # None = no splitting, or list like [1, 2, 4, 8]
             "n_iterations_after_split": 3,  # Iterations after each Gaussian split

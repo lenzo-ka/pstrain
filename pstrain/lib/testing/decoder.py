@@ -60,19 +60,11 @@ class Decoder:
     and optional language model. The decoder can then decode multiple audio files
     efficiently by reusing the same instance.
 
-    Beam Width Configuration:
-        CI models need wider beams (1e-80) due to lower acoustic discriminability.
-        CD models can use narrower beams (1e-48) for faster decoding.
-        The decoder auto-detects CI vs CD from the model path if beams not specified.
+    Defaults match SphinxTrain's ``decode/psdecode.pl`` recipe.
     """
 
-    # Default beams for CI models (wider - prevents DAG errors)
-    CI_BEAM = 1e-80
-    CI_WBEAM = 1e-40
-
-    # Default beams for CD models (narrower - faster, PocketSphinx defaults)
-    CD_BEAM = 1e-48
-    CD_WBEAM = 7e-29
+    DEFAULT_BEAM = 1e-80
+    DEFAULT_WBEAM = 1e-40
 
     def __init__(
         self,
@@ -83,6 +75,13 @@ class Decoder:
         beam: float | None = None,
         wbeam: float | None = None,
         pl_window: int | None = None,
+        lw: float = 10.0,
+        wip: float = 0.2,
+        pbeam: float = 1e-80,
+        lpbeam: float = 1e-80,
+        lponlybeam: float = 1e-80,
+        fwdflatbeam: float = 1e-80,
+        fwdflatwbeam: float = 1e-40,
     ):
         """Initialize decoder.
 
@@ -105,21 +104,12 @@ class Decoder:
         self.lm = Path(lm) if lm else None
         self._decoder = None
 
-        # Auto-detect model type (CI vs CD) for beam selection
-        # Use specific patterns to avoid false matches (e.g., "citadel" matching "ci")
-        model_path_str = str(self.model_dir).lower()
-        is_ci_model = (
-            "/ci-" in model_path_str or "/ci/" in model_path_str or model_path_str.endswith("/ci")
-        )
-
-        # Use provided beams or auto-select based on model type
         if beam is None:
-            beam = self.CI_BEAM if is_ci_model else self.CD_BEAM
+            beam = self.DEFAULT_BEAM
         if wbeam is None:
-            wbeam = self.CI_WBEAM if is_ci_model else self.CD_WBEAM
+            wbeam = self.DEFAULT_WBEAM
 
-        model_type = "CI" if is_ci_model else "CD"
-        logger.info(f"Using {model_type} beam settings: beam={beam}, wbeam={wbeam}")
+        logger.info("Using decode beam settings: beam=%s, wbeam=%s", beam, wbeam)
 
         # Validate paths - don't silently ignore missing files
         if not self.model_dir.exists():
@@ -140,6 +130,15 @@ class Decoder:
                 "dict": str(self.dict_file),
                 "beam": beam,
                 "wbeam": wbeam,
+                "lw": lw,
+                "fwdflatlw": lw,
+                "bestpathlw": lw,
+                "wip": wip,
+                "pbeam": pbeam,
+                "lpbeam": lpbeam,
+                "lponlybeam": lponlybeam,
+                "fwdflatbeam": fwdflatbeam,
+                "fwdflatwbeam": fwdflatwbeam,
             }
 
             if pl_window is not None:
