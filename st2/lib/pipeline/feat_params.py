@@ -22,11 +22,15 @@ def feat_params_lines(feat: FeatParams) -> list[str]:
         f"-agc {feat.agc}\n",
         f"-cmn {feat.cmn}\n",
         f"-varnorm {feat.varnorm}\n",
-        # These sphinx_fe defaults are invariant in ST2's extraction path;
-        # writing them explicitly prevents decoder-version defaults drifting.
+        # Invariants of ST2's extraction path: unit_area/round_filters are the
+        # sphinxbase fe defaults it never overrides, and st2_fe_create pins
+        # remove_dc/remove_noise in its synthetic command line
+        # (csrc/libs/libst2/st2_fe.c). Writing them explicitly prevents
+        # decoder-version defaults drifting from the training front end.
         "-unit_area yes\n",
         "-round_filters yes\n",
-        "-remove_dc yes\n",
+        "-remove_dc no\n",
+        "-remove_noise yes\n",
     ]
 
 

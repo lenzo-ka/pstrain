@@ -30,7 +30,8 @@ def test_default_feat_params_contains_complete_training_front_end() -> None:
         "-varnorm": "no",
         "-unit_area": "yes",
         "-round_filters": "yes",
-        "-remove_dc": "yes",
+        "-remove_dc": "no",
+        "-remove_noise": "yes",
     }
 
 
