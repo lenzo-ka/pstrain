@@ -5,7 +5,7 @@
 pstrain is a toolkit for training HMM/GMM acoustic models, in the lineage of CMU
 SphinxTrain but rebuilt to be cleaner and well organized: an efficient C
 substrate (`libpstrainc`) driven in-process from Python via CFFI, orchestrated by a
-small Python pipeline runner. No shell-outs, no Perl.
+small Python pipeline runner.
 
 > **Status: alpha.** The continuous-model training backbone works end to end;
 > APIs and on-disk layouts may still change. See [Known issues](#known-issues).
