@@ -28,7 +28,7 @@ from st2.lib.steps.cd_pipeline import (
 )
 from st2.lib.steps.ci_hmm import CIHMMStep, ci_hmm_step
 from st2.lib.steps.features import FeaturesStep, features_step
-from st2.lib.steps.package import create_feat_params, create_noisedict, package_model
+from st2.lib.steps.package import create_noisedict, package_model
 from st2.lib.steps.split import run_split
 from st2.lib.steps.train import TrainingResult, run_bw_training
 
@@ -59,6 +59,5 @@ __all__ = [
     "run_init_cd_tied",
     # Packaging functions
     "package_model",
-    "create_feat_params",
     "create_noisedict",
 ]
