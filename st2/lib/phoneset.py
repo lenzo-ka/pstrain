@@ -44,7 +44,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 
 if TYPE_CHECKING:
     from st2.lib.dictionary import Dictionary
@@ -69,7 +69,7 @@ class Phoneset:
         self._phones = phones
 
     @classmethod
-    def from_file(cls, path: Path) -> Phoneset:
+    def from_file(cls, path: Path) -> Self:
         """Load phoneset from file.
 
         File format:
@@ -111,7 +111,7 @@ class Phoneset:
     @classmethod
     def from_dictionary(
         cls, dictionary: Dictionary, include_sil: bool = True, silence_phone: str = "SIL"
-    ) -> Phoneset:
+    ) -> Self:
         """Extract phoneset from dictionary.
 
         Args:

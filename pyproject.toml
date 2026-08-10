@@ -135,7 +135,6 @@ select = [
 ]
 ignore = [
     "E501",   # line too long (handled by formatter)
-    "UP042",  # migrated to StrEnum in the modernization commit
 ]
 
 [tool.ruff.lint.isort]

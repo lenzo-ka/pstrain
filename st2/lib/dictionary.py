@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Self
 
 __all__ = ["Dictionary"]
 
@@ -20,7 +21,7 @@ class Dictionary:
         self._entries = entries
 
     @classmethod
-    def from_file(cls, dict_path: Path) -> Dictionary:
+    def from_file(cls, dict_path: Path) -> Self:
         """Load dictionary from file.
 
         Args:

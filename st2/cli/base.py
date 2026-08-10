@@ -11,7 +11,7 @@ import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 
 def format_json(data: Any, indent: int = 2, sort_keys: bool = False) -> str:
@@ -821,12 +821,12 @@ class CommandResult:
     exit_code: int = 0
 
     @classmethod
-    def ok(cls, message: str = "", data: dict[str, Any] | None = None) -> CommandResult:
+    def ok(cls, message: str = "", data: dict[str, Any] | None = None) -> Self:
         """Create successful result."""
         return cls(success=True, message=message, data=data or {}, exit_code=0)
 
     @classmethod
-    def fail(cls, message: str, exit_code: int = 1) -> CommandResult:
+    def fail(cls, message: str, exit_code: int = 1) -> Self:
         """Create failure result."""
         return cls(success=False, message=message, exit_code=exit_code)
 

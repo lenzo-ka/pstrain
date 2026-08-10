@@ -6,7 +6,7 @@ Global defaults that apply to all projects unless overridden.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 import yaml
 from pydantic import BaseModel, Field
@@ -103,7 +103,7 @@ class ST2UserConfig(BaseModel):
         return cls.get_config_dir() / "config.yaml"
 
     @classmethod
-    def load(cls, config_file: Path | None = None) -> ST2UserConfig:
+    def load(cls, config_file: Path | None = None) -> Self:
         """Load user configuration.
 
         Args:

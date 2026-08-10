@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import wave
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 import numpy as np
 
@@ -165,7 +165,7 @@ class Aligner:
         if Aligner._active is self:
             Aligner._active = None
 
-    def __enter__(self) -> Aligner:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *exc: object) -> None:
