@@ -651,11 +651,13 @@ def test_configured_bw_parameters_reach_training_call(
     assert config.b_beam == 1e-9
     assert config.topn == 1
     assert config.mixw_floor == 1e-8
+    assert config.tmat_floor == 1e-4
     c_config: Any = captured["c_config"]
     assert c_config.a_beam == 1e-123
     assert c_config.b_beam == 1e-9
     assert c_config.topn == 1
     assert c_config.mixw_floor == 1e-8
+    assert c_config.tmat_floor == 1e-4
     assert captured["convergence_ratio"] == 0.004
     assert captured["min_iterations"] == 3
     assert captured["max_skip_fraction"] == 0.02

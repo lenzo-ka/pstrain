@@ -254,6 +254,7 @@ typedef struct pstrain_bw_config_s {
     uint32 topn;
     float32 spthresh;
     float32 mixw_floor;
+    float32 tmat_floor;
     int32 mixw_reest;
     int32 tmat_reest;
     int32 mean_reest;

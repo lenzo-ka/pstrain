@@ -108,6 +108,7 @@ struct pstrain_bw_context_s {
     uint32 topn;
     float32 spthresh;
     float32 mixw_floor;
+    float32 tmat_floor;
     int32 mixw_reest;
     int32 tmat_reest;
     int32 mean_reest;
@@ -141,6 +142,9 @@ pstrain_bw_init(const char *mdef_path,
     ctx->topn = config ? config->topn : 1;
     ctx->spthresh = config ? config->spthresh : 0.0;
     ctx->mixw_floor = config ? config->mixw_floor : 1e-8;
+    /* Provenance: upstream bw/train_cmd_ln.c supplies the live -tpfloor
+     * default because the SphinxTrain Perl stage drivers do not override it. */
+    ctx->tmat_floor = config ? config->tmat_floor : 1e-4;
     ctx->mixw_reest = config ? config->mixw_reest : 1;
     ctx->tmat_reest = config ? config->tmat_reest : 1;
     ctx->mean_reest = config ? config->mean_reest : 1;
@@ -205,7 +209,7 @@ pstrain_bw_init(const char *mdef_path,
 
     /* Read transition matrices */
     E_INFO("Reading transition matrices from %s\n", tmat_path);
-    if (mod_inv_read_tmat(ctx->inv, tmat_path, 1e-5) != S3_SUCCESS) {
+    if (mod_inv_read_tmat(ctx->inv, tmat_path, ctx->tmat_floor) != S3_SUCCESS) {
         E_ERROR("Failed to read transition matrices\n");
         goto error;
     }
