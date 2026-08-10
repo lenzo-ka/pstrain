@@ -302,15 +302,16 @@ def test_stage_fingerprints_cover_only_effective_relevant_values(empty_project: 
     assert document["fingerprint"] in base.provenance_path("training").name
 
 
-def test_native_library_content_changes_fingerprint(
+def test_native_library_identity_is_content_based_not_path_based(
     empty_project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     first_lib = tmp_path / "first" / "libpstrainc.so"
     second_lib = tmp_path / "second" / "libpstrainc.so"
     first_lib.parent.mkdir()
     second_lib.parent.mkdir()
-    first_lib.write_bytes(b"first build")
-    second_lib.write_bytes(b"second build")
+    library_bytes = b"identical build"
+    first_lib.write_bytes(library_bytes)
+    second_lib.write_bytes(library_bytes)
     selected = first_lib
     monkeypatch.setattr("pstrain.lib.pipeline.context.get_lib_path", lambda: selected)
 
@@ -319,11 +320,29 @@ def test_native_library_content_changes_fingerprint(
     selected = second_lib
     second_path = ctx.provenance_path("training")
 
+    assert first_path == second_path
+    assert ctx.provenance_payload("training")["native_library"] == {
+        "sha256": hashlib.sha256(library_bytes).hexdigest()
+    }
+    assert ctx.provenance_document("training")["native_library"] == {
+        "path": str(second_lib.resolve()),
+        "sha256": hashlib.sha256(library_bytes).hexdigest(),
+    }
+
+
+def test_native_library_content_changes_fingerprint(
+    empty_project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    library = tmp_path / "libpstrainc.so"
+    library.write_bytes(b"first build")
+    monkeypatch.setattr("pstrain.lib.pipeline.context.get_lib_path", lambda: library)
+    ctx = PipelineContext.from_config(empty_project)
+
+    first_path = ctx.provenance_path("training")
+    library.write_bytes(b"second build")
+    second_path = ctx.provenance_path("training")
+
     assert first_path != second_path
-    assert (
-        ctx.provenance_payload("training")["native_library"]["sha256"]
-        == hashlib.sha256(b"second build").hexdigest()
-    )
 
 
 def test_missing_native_library_is_recorded(

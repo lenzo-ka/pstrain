@@ -5,6 +5,10 @@ what the previous `Snakefile` did: one builder function per task, plus a
 top-level `build_pipeline(ctx)` factory that registers everything for a
 given `PipelineContext`.
 
+Concurrent runs of the same experiment remain unsupported by the pipeline's
+mtime-based DAG. A stage-scoped file lock nevertheless serializes provenance
+replacement so its at-most-one-fingerprint invariant holds across processes.
+
 Two kinds of tasks:
 
 * **Linear chain** (flat -> ci-1g -> ci-2g -> ... -> cd-32g, plus trees and
@@ -25,11 +29,13 @@ Targets exposed to `pstrain build`:
 
 from __future__ import annotations
 
+import fcntl
 import functools
 import json
 import os
 import shutil
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -82,6 +88,17 @@ def _build_tree_worker(
 # parameters; the wrapping `Task.fn` takes no args.
 
 
+@contextmanager
+def _provenance_lock(directory: Path, stage: str) -> Iterator[None]:
+    """Exclusively lock one stage's provenance replacement critical section."""
+    with (directory / f".{stage}.lock").open("a", encoding="utf-8") as lockfile:
+        fcntl.flock(lockfile, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lockfile, fcntl.LOCK_UN)
+
+
 def _make_provenance_task(ctx: PipelineContext, stage: str) -> Task:
     """Materialize the sole active content-addressed stage configuration."""
     output = ctx.provenance_path(stage)
@@ -94,10 +111,11 @@ def _make_provenance_task(ctx: PipelineContext, stage: str) -> Task:
             + "\n",
             encoding="utf-8",
         )
-        for sibling in output.parent.glob(f"{stage}-*.json"):
-            if sibling != output:
-                sibling.unlink()
-        temporary.replace(output)
+        with _provenance_lock(output.parent, stage):
+            for sibling in output.parent.glob(f"{stage}-*.json"):
+                if sibling != output:
+                    sibling.unlink()
+            temporary.replace(output)
 
     return Task(
         name=f"provenance:{stage}",

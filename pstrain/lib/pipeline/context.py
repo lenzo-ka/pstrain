@@ -50,16 +50,13 @@ def _sha256_file(path: Path, size: int, mtime_ns: int) -> str:
 
 
 def _native_library_identity() -> dict[str, str]:
-    """Identify the library selected by the same discovery used by CFFI."""
+    """Return path-independent content identity for the library used by CFFI."""
     lib_path = get_lib_path()
     if lib_path is None:
         return {"state": "absent"}
     resolved = lib_path.resolve()
     stat = resolved.stat()
-    return {
-        "path": str(resolved),
-        "sha256": _sha256_file(resolved, stat.st_size, stat.st_mtime_ns),
-    }
+    return {"sha256": _sha256_file(resolved, stat.st_size, stat.st_mtime_ns)}
 
 
 @dataclass(frozen=True)
@@ -363,7 +360,14 @@ class PipelineContext:
         """Serializable provenance, including its effective-config fingerprint."""
         payload = self.provenance_payload(stage)
         fingerprint = self.provenance_path(stage).stem.removeprefix(f"{stage}-")
-        return {"fingerprint": fingerprint, **payload}
+        document = {"fingerprint": fingerprint, **payload}
+        lib_path = get_lib_path()
+        if lib_path is not None:
+            document["native_library"] = {
+                **payload["native_library"],
+                "path": str(lib_path.resolve()),
+            }
+        return document
 
     @property
     def trees_dir(self) -> Path:
