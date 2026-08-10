@@ -39,6 +39,7 @@ _CHECKPOINT_MODEL_FILES = {
     "transition_matrices",
     "gauden_counts",
 }
+_M4_FIXTURE = Path(__file__).parent / "fixtures" / "multipron_final_state"
 
 
 @pytest.fixture(scope="module")
@@ -316,6 +317,89 @@ def test_multipron_second_variant_receives_occupancy(
     on = float(occupancies[True][ao_states].sum())
     assert off == 0.0
     assert on > 1.0
+
+
+@requires_c_library
+def test_multipron_variants_share_utterance_final_state(
+    flat_project: PipelineContext, tmp_path: Path
+) -> None:
+    """M4: every last-word pronunciation can terminate through one </s>."""
+    engineered = tmp_path / "terminal-variants.dict"
+    base = (flat_project.shared_dir / "dictionary.dict").read_text()
+    # The recording says the normal AO TH ER pronunciation. Put a deliberately
+    # bad pronunciation last: before M4, context expansion duplicated </s> and
+    # made only this last (K-ending) branch lead to n_state - 1.
+    engineered.write_text(base + f"author(2) {' '.join(['K'] * 150)}\n")
+    mfcc = read_sphinx_mfc(flat_project.features_dir / "arctic_a0001.mfc")
+
+    trainer = _trainer(flat_project)
+    trainer.set_dict(engineered, flat_project.filler_dict)
+    n_state = trainer._ffi.new("uint32 *")
+    states = trainer._lib.pstrain_bw_build_state_seq(trainer._ctx, b"<s> author </s>", n_state)
+    assert states != trainer._ffi.NULL
+    try:
+        terminal_exits = [index for index in range(n_state[0]) if states[index].n_next == 0]
+        assert terminal_exits == [n_state[0] - 1]
+
+        terminal_exit = terminal_exits[0]
+        terminal_phone = states[terminal_exit].phn
+        terminal_starts = [
+            index
+            for index in range(n_state[0])
+            if states[index].phn == terminal_phone and states[index].m_state == 0
+        ]
+        assert len(terminal_starts) == 2  # initial <s> and one terminal </s>
+        terminal_start = terminal_starts[-1]
+        branch_count = 2  # author and author(2)
+        fan_in = [
+            states[terminal_start].prior_state[offset]
+            for offset in range(states[terminal_start].n_prior)
+            if states[states[terminal_start].prior_state[offset]].phn != terminal_phone
+        ]
+        assert len(fan_in) == branch_count
+
+        reachable = {terminal_exit}
+        pending = [terminal_exit]
+        while pending:
+            state_id = pending.pop()
+            for offset in range(states[state_id].n_prior):
+                predecessor = states[state_id].prior_state[offset]
+                if predecessor not in reachable:
+                    reachable.add(predecessor)
+                    pending.append(predecessor)
+        assert reachable == set(range(n_state[0]))
+    finally:
+        trainer._lib.pstrain_bw_free_state_seq(states, n_state[0])
+
+    assert trainer.process_utterance_mfcc(mfcc, "<s> author </s>")
+    assert not trainer.final_state_not_reached
+
+
+@requires_c_library
+@pytest.mark.parametrize("fileid", ["arctic_a0257", "arctic_a0336", "arctic_b0424"])
+def test_m4_real_utterances_reach_shared_final_state(
+    fileid: str,
+) -> None:
+    """M4: representative shared and pstrain-only SLT failures train."""
+    model = _M4_FIXTURE / "model"
+    transcripts = {
+        fields[0]: fields[1]
+        for line in (_M4_FIXTURE / "transcription.txt").read_text().splitlines()
+        if (fields := line.split(maxsplit=1))
+    }
+    trainer = BWTrainer(
+        model / "mdef",
+        model / "means",
+        model / "variances",
+        model / "mixture_weights",
+        model / "transition_matrices",
+        BWConfig(a_beam=1e-90, multipron=True),
+    )
+    trainer.set_dict(_M4_FIXTURE / "dictionary.dict", _M4_FIXTURE / "filler.dict")
+    mfcc = read_sphinx_mfc(_M4_FIXTURE / f"{fileid}.mfc")
+
+    assert trainer.process_utterance_mfcc(mfcc, f"<s> {transcripts[fileid]} </s>")
+    assert not trainer.final_state_not_reached
 
 
 def _mdef_rows(path: Path) -> Iterator[list[str]]:

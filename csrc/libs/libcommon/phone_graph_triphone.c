@@ -47,14 +47,27 @@ typedef struct split_info_s {
 /* Classify every old slot: how many copies, which CI phone each copy
  * is for. */
 static split_info_t *
-classify_slots(const phone_graph_t *in, uint32 *total_new)
+classify_slots(const phone_graph_t *in,
+               acmod_set_t *acmod_set,
+               uint32 *total_new)
 {
     uint32 i, u, v;
     split_info_t *info = ckd_calloc(in->n, sizeof(split_info_t));
     uint32 running = 0;
 
     for (i = 0; i < in->n; i++) {
-        if (in->n_prior[i] <= 1) {
+        /* Fillers are deliberately left as CI models by
+         * cvt2triphone_graph(), so their left context is irrelevant.
+         * In particular, splitting utterance-final </s> (SIL) creates
+         * several terminal HMM exits while forward/backward has exactly
+         * one designated final state (n_state - 1). Keep one filler slot
+         * so every incoming pronunciation path reaches that shared final.
+         * Transition weights and beam thresholds are unchanged. The shared
+         * fan-in intentionally changes path/pruning structure: predecessor
+         * alpha mass is summed before pruning, preserving pronunciation
+         * posterior summation at the single terminal state. */
+        if (in->n_prior[i] <= 1
+            || acmod_set_has_attrib(acmod_set, in->phone[i], "filler")) {
             info[i].n_copies = 1;
             info[i].group_ci = ckd_calloc(1, sizeof(acmod_id_t));
             info[i].group_ci[0] = (in->n_prior[i] == 1)
@@ -117,15 +130,15 @@ copy_for_predecessor_ci(const split_info_t *info, uint32 c, acmod_id_t pred_ci)
 }
 
 phone_graph_t *
-phone_graph_split_contexts(const phone_graph_t *in)
+phone_graph_split_contexts(const phone_graph_t *in, acmod_set_t *acmod_set)
 {
     uint32 i, u, g, total_new;
     phone_graph_t *out;
     split_info_t *info;
 
-    if (!in) return NULL;
+    if (!in || !acmod_set) return NULL;
 
-    info = classify_slots(in, &total_new);
+    info = classify_slots(in, acmod_set, &total_new);
 
     /* Fast path: no slot needs splitting. Make a structural copy of
      * the input so caller-side semantics stay uniform (caller frees

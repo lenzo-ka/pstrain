@@ -96,8 +96,9 @@ phone_graph_print(const phone_graph_t *graph, acmod_set_t *acmod_set);
 
 /*
  * Return a copy of `in` in which every slot has at most one distinct
- * CI-phone predecessor — i.e. every slot has an unambiguous left
- * context for triphone resolution. Where the input has a slot whose
+ * CI-phone predecessor — i.e. every non-filler slot has an unambiguous
+ * left context for triphone resolution. Filler phones stay CI models and
+ * are therefore never duplicated. Where the input has a slot whose
  * predecessors carry multiple distinct CI phones, that slot is
  * duplicated once per distinct predecessor CI phone, and the
  * predecessor edges are partitioned accordingly.
@@ -109,7 +110,7 @@ phone_graph_print(const phone_graph_t *graph, acmod_set_t *acmod_set);
  * each with phone_graph_free().
  */
 phone_graph_t *
-phone_graph_split_contexts(const phone_graph_t *in);
+phone_graph_split_contexts(const phone_graph_t *in, acmod_set_t *acmod_set);
 
 /*
  * Walk an already-unambiguous-context graph (typically the output of

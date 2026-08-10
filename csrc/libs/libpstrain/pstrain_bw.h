@@ -35,6 +35,7 @@ typedef struct pstrain_bw_config_s {
  * Opaque training context
  */
 typedef struct pstrain_bw_context_s pstrain_bw_context_t;
+typedef struct state_s state_t;
 
 /**
  * Initialize BW training context
@@ -97,6 +98,15 @@ pstrain_bw_set_multipron(pstrain_bw_context_t *ctx, int enable);
 /** Set the forward pruning beam for a retry, returning the previous value. */
 float64
 pstrain_bw_set_a_beam(pstrain_bw_context_t *ctx, float64 a_beam);
+
+/** Build/free an utterance state sequence for structural inspection. */
+state_t *
+pstrain_bw_build_state_seq(pstrain_bw_context_t *ctx,
+                           const char *transcript,
+                           uint32 *n_state);
+
+void
+pstrain_bw_free_state_seq(state_t *state_seq, uint32 n_state);
 
 /**
  * Process utterance with transcript text

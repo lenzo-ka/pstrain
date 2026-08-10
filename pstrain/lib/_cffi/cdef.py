@@ -264,6 +264,27 @@ typedef struct pstrain_bw_config_s {
 
 typedef struct pstrain_bw_context_s pstrain_bw_context_t;
 
+typedef struct state_s {
+    uint32 mixw;
+    uint32 cb;
+    uint32 ci_cb;
+    uint32 ci_mixw;
+    uint32 n_prior;
+    uint32 *prior_state;
+    float32 *prior_tprob;
+    uint32 n_next;
+    uint32 *next_state;
+    float32 *next_tprob;
+    uint32 tmat;
+    uint32 m_state;
+    uint32 l_mixw;
+    uint32 l_cb;
+    uint32 l_ci_mixw;
+    uint32 l_ci_cb;
+    float32 *tacc;
+    uint32 phn;
+} state_t;
+
 pstrain_bw_context_t *pstrain_bw_init(const char *mdef_path,
                               const char *means_path,
                               const char *vars_path,
@@ -276,6 +297,10 @@ int pstrain_bw_set_dict(pstrain_bw_context_t *ctx,
                     const char *filler_dict_path);
 int pstrain_bw_set_multipron(pstrain_bw_context_t *ctx, int enable);
 float64 pstrain_bw_set_a_beam(pstrain_bw_context_t *ctx, float64 a_beam);
+state_t *pstrain_bw_build_state_seq(pstrain_bw_context_t *ctx,
+                                const char *transcript,
+                                uint32 *n_state);
+void pstrain_bw_free_state_seq(state_t *state_seq, uint32 n_state);
 int pstrain_bw_process_utt_text(pstrain_bw_context_t *ctx,
                             const float *features,
                             uint32 n_frames,

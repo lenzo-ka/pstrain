@@ -149,7 +149,7 @@ state_t *next_utt_states_graph(uint32 *n_state,
 	return NULL;
     }
 
-    split = phone_graph_split_contexts(graph);
+    split = phone_graph_split_contexts(graph, inv->acmod_set);
     phone_graph_free(graph);
     if (split == NULL) {
 	E_ERROR("phone_graph_split_contexts failed\n");
