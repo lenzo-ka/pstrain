@@ -1,3 +1,6 @@
+# local untracked cache
+untracked/
+
 # Python
 __pycache__/
 *.py[cod]
