@@ -376,6 +376,47 @@ def test_multipron_variants_share_utterance_final_state(
 
 
 @requires_c_library
+def test_cd_variant_boundaries_expand_both_triphone_contexts(
+    full_project: PipelineContext,
+) -> None:
+    """M4b: fan-out and fan-in both select the matching untied triphone."""
+    model = full_project.model_dir("cd-untied")
+    trainer = BWTrainer(
+        model / "mdef",
+        model / "means",
+        model / "variances",
+        model / "mixture_weights",
+        model / "transition_matrices",
+        BWConfig(a_beam=1e-200, topn=1, multipron=True),
+    )
+    trainer.set_dict(full_project.shared_dir / "dictionary.dict", full_project.filler_dict)
+
+    rows = {tuple(row[:4]) for row in _mdef_rows(model / "mdef")}
+    assert {
+        ("AH", "SIL", "AH", "s"),
+        ("AH", "SIL", "AE", "s"),
+        ("EY", "SIL", "AH", "s"),
+        ("EY", "SIL", "AE", "s"),
+    } <= rows
+
+    # `a` has AH/EY variants and `and` has AH/AE initial phones.  Thus the
+    # word boundary requires two right-context copies of each `a` variant and
+    # two left-context copies of each `and` variant.  There are 14 phone HMMs:
+    # two shared SILs, four `a` copies, four first-phone `and` copies, and the
+    # four remaining phones in the two `and` variants.
+    n_state = trainer._ffi.new("uint32 *")
+    states = trainer._lib.pstrain_bw_build_state_seq(trainer._ctx, b"<s> a and </s>", n_state)
+    assert states != trainer._ffi.NULL
+    try:
+        phone_starts = [index for index in range(n_state[0]) if states[index].m_state == 0]
+        assert len(phone_starts) == 14
+        terminal_exits = [index for index in range(n_state[0]) if states[index].n_next == 0]
+        assert terminal_exits == [n_state[0] - 1]
+    finally:
+        trainer._lib.pstrain_bw_free_state_seq(states, n_state[0])
+
+
+@requires_c_library
 @pytest.mark.parametrize("fileid", ["arctic_a0257", "arctic_a0336", "arctic_b0424"])
 def test_m4_real_utterances_reach_shared_final_state(
     fileid: str,

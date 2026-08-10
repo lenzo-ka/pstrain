@@ -266,7 +266,6 @@ pstrain_mdef_gen_untied(const char *phone_list_path,
     int32 cilistsize = 0;
     int32 ncd = 0;
     int32 cdheapsize = 0;
-    int32 threshold;
     int ret = -1;
 
     if (!phone_list_path || !dict_path || !transcript_path || !output_path) {
@@ -307,12 +306,15 @@ pstrain_mdef_gen_untied(const char *phone_list_path,
         goto cleanup;
     }
 
-    /* Find threshold for pruning */
-    threshold = find_threshold(CDhash);
-    E_INFO("Using occurrence threshold: %d\n", threshold);
-
-    /* Build heap with triphones above threshold */
-    if (make_CD_heap(CDhash, threshold, &CDheap, &cdheapsize) != S3_SUCCESS) {
+    /* The BW pronunciation graph can select every dictionary variant and
+     * constructs cross-word left/right context products.  count_triphones()
+     * follows only the primary dictionary entry, so occurrence pruning here
+     * omits models that the graph is allowed to request.  Such slots fall
+     * back to CI states; after those zero-occupancy states are re-estimated,
+     * an otherwise valid utterance path can become numerically dead.  Keep
+     * the complete dictionary-producible set already enumerated above so
+     * graph topology and untied-model initialization have the same domain. */
+    if (make_CD_heap(CDhash, -1, &CDheap, &cdheapsize) != S3_SUCCESS) {
         E_ERROR("Failed to build triphone heap\n");
         goto cleanup;
     }

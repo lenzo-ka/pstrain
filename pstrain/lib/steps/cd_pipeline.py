@@ -44,8 +44,9 @@ def run_untied_mdef(
 ) -> dict[str, int]:
     """Generate untied triphone mdef from transcripts.
 
-    Creates a model definition file containing all triphones observed
-    in the training transcripts.
+    Creates a model definition containing every dictionary-producible
+    triphone.  This includes alternate-pronunciation cross-word contexts
+    that the multipron training graph can select.
 
     Args:
         phone_list: Path to phone list file (one phone per line)

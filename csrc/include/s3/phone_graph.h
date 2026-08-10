@@ -95,13 +95,11 @@ void
 phone_graph_print(const phone_graph_t *graph, acmod_set_t *acmod_set);
 
 /*
- * Return a copy of `in` in which every slot has at most one distinct
- * CI-phone predecessor — i.e. every non-filler slot has an unambiguous
- * left context for triphone resolution. Filler phones stay CI models and
- * are therefore never duplicated. Where the input has a slot whose
- * predecessors carry multiple distinct CI phones, that slot is
- * duplicated once per distinct predecessor CI phone, and the
- * predecessor edges are partitioned accordingly.
+ * Return a copy of `in` in which every non-filler slot has unambiguous
+ * left and right CI contexts for triphone resolution. A slot is duplicated
+ * over the cross-product of its distinct predecessor and successor phones,
+ * and edges connect only context-compatible copies. Filler phones stay CI
+ * models and are never duplicated, preserving one shared terminal SIL.
  *
  * For an input with no ambiguous-context slots (the single-pron
  * case), the output is structurally identical to the input.
