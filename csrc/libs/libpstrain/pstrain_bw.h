@@ -8,6 +8,8 @@
 
 #include <sphinxbase/prim_type.h>
 
+#define PSTRAIN_BW_FINAL_STATE_NOT_REACHED -2
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -20,6 +22,8 @@ typedef struct pstrain_bw_config_s {
     float64 b_beam;      /**< Backward beam (default: 1e-10) */
     uint32 topn;         /**< Gaussians evaluated per codebook (default: 1) */
     float32 spthresh;    /**< State pruning threshold (default: 0) */
+    float32 mixw_floor;  /**< Mixture-weight floor (default: 1e-8) */
+    float32 tmat_floor;  /**< Transition-probability floor (default: 1e-4) */
     int32 mixw_reest;    /**< Re-estimate mixture weights (default: 1) */
     int32 tmat_reest;    /**< Re-estimate transition matrices (default: 1) */
     int32 mean_reest;    /**< Re-estimate means (default: 1) */
@@ -89,6 +93,10 @@ pstrain_bw_set_dict(pstrain_bw_context_t *ctx,
  */
 int
 pstrain_bw_set_multipron(pstrain_bw_context_t *ctx, int enable);
+
+/** Set the forward pruning beam for a retry, returning the previous value. */
+float64
+pstrain_bw_set_a_beam(pstrain_bw_context_t *ctx, float64 a_beam);
 
 /**
  * Process utterance with transcript text

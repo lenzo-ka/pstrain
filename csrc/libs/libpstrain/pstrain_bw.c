@@ -107,6 +107,8 @@ struct pstrain_bw_context_s {
     float64 b_beam;
     uint32 topn;
     float32 spthresh;
+    float32 mixw_floor;
+    float32 tmat_floor;
     int32 mixw_reest;
     int32 tmat_reest;
     int32 mean_reest;
@@ -139,6 +141,10 @@ pstrain_bw_init(const char *mdef_path,
     ctx->b_beam = config ? config->b_beam : 1e-10;  /* SphinxTrain default */
     ctx->topn = config ? config->topn : 1;
     ctx->spthresh = config ? config->spthresh : 0.0;
+    ctx->mixw_floor = config ? config->mixw_floor : 1e-8;
+    /* Provenance: upstream bw/train_cmd_ln.c supplies the live -tpfloor
+     * default because the SphinxTrain Perl stage drivers do not override it. */
+    ctx->tmat_floor = config ? config->tmat_floor : 1e-4;
     ctx->mixw_reest = config ? config->mixw_reest : 1;
     ctx->tmat_reest = config ? config->tmat_reest : 1;
     ctx->mean_reest = config ? config->mean_reest : 1;
@@ -196,14 +202,14 @@ pstrain_bw_init(const char *mdef_path,
 
     /* Read mixture weights */
     E_INFO("Reading mixture weights from %s\n", mixw_path);
-    if (mod_inv_read_mixw(ctx->inv, ctx->mdef, mixw_path, 1e-8) != S3_SUCCESS) {
+    if (mod_inv_read_mixw(ctx->inv, ctx->mdef, mixw_path, ctx->mixw_floor) != S3_SUCCESS) {
         E_ERROR("Failed to read mixture weights\n");
         goto error;
     }
 
     /* Read transition matrices */
     E_INFO("Reading transition matrices from %s\n", tmat_path);
-    if (mod_inv_read_tmat(ctx->inv, tmat_path, 1e-5) != S3_SUCCESS) {
+    if (mod_inv_read_tmat(ctx->inv, tmat_path, ctx->tmat_floor) != S3_SUCCESS) {
         E_ERROR("Failed to read transition matrices\n");
         goto error;
     }
@@ -310,6 +316,18 @@ pstrain_bw_set_multipron(pstrain_bw_context_t *ctx, int enable)
     if (!ctx) return -1;
     ctx->multipron = enable ? 1 : 0;
     return 0;
+}
+
+float64
+pstrain_bw_set_a_beam(pstrain_bw_context_t *ctx, float64 a_beam)
+{
+    float64 previous;
+
+    if (!ctx || a_beam <= 0.0)
+        return 0.0;
+    previous = ctx->a_beam;
+    ctx->a_beam = a_beam;
+    return previous;
 }
 
 /*
@@ -551,7 +569,8 @@ pstrain_bw_process_utt_mfcc(pstrain_bw_context_t *ctx,
 
     if (ret != S3_SUCCESS) {
         E_ERROR("baum_welch_update failed\n");
-        return -1;
+        return ret == PSTRAIN_BW_FINAL_STATE_NOT_REACHED
+            ? PSTRAIN_BW_FINAL_STATE_NOT_REACHED : -1;
     }
 
     ctx->total_log_lik += log_forw_prob;

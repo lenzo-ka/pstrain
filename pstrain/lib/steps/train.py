@@ -9,6 +9,11 @@ import logging
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import numpy as np
+    import numpy.typing as npt
 
 from pstrain.lib.bw import BWConfig, BWTrainer
 from pstrain.lib.features import read_sphinx_mfc
@@ -19,6 +24,60 @@ from pstrain.lib.validate import validate_files_exist
 logger = logging.getLogger(__name__)
 
 __all__ = ["run_bw_training", "TrainingResult"]
+
+
+def _convergence_delta(current: float, previous: float) -> float:
+    """Return SphinxTrain's signed per-frame log-likelihood delta."""
+    if previous == 0:
+        return 1.0 if current > 0 else -1.0 if current < 0 else 0.0
+    return current - previous
+
+
+def _has_converged(
+    current: float,
+    previous: float,
+    iteration: int,
+    threshold: float,
+    min_iterations: int,
+) -> bool:
+    """Apply the upstream convergence decision after a non-initial iteration."""
+    return _convergence_delta(current, previous) <= threshold and iteration >= min_iterations
+
+
+def _process_with_final_state_retry(
+    trainer: BWTrainer,
+    mfcc: npt.NDArray[np.float32],
+    transcript: str,
+    normal_beam: float,
+    retry_beam_factor: float,
+    fileid: str,
+) -> bool:
+    """Process an update, retrying only a forward-final-state pruning failure.
+
+    ``BWTrainer`` is a mutable native session and must not be shared between
+    threads. The debug assertion makes concurrent entry at this mutation seam
+    fail instead of allowing another call to observe the temporary beam.
+    """
+    assert not trainer._retry_transaction_active, "BWTrainer cannot be shared across threads"
+    trainer._retry_transaction_active = True
+    try:
+        success = trainer.process_utterance_mfcc(mfcc, transcript)
+        if success or not trainer.final_state_not_reached or retry_beam_factor <= 1.0:
+            return success
+
+        retry_beam = normal_beam / retry_beam_factor
+        logger.warning(
+            "Final state not reached for %s; retrying once with a_beam=%.3g",
+            fileid,
+            retry_beam,
+        )
+        previous_beam = trainer.set_a_beam(retry_beam)
+        try:
+            return trainer.process_utterance_mfcc(mfcc, transcript)
+        finally:
+            trainer.set_a_beam(previous_beam)
+    finally:
+        trainer._retry_transaction_active = False
 
 
 @dataclass
@@ -43,9 +102,11 @@ def run_bw_training(
     filler_dict: Path | None = None,
     n_iter: int = 10,
     convergence_ratio: float = 0.001,
+    min_iterations: int = 1,
     config: BWConfig | None = None,
     multipron: bool = True,
     max_skip_fraction: float = 0.05,
+    retry_beam_factor: float = 1e10,
 ) -> TrainingResult:
     """Run Baum-Welch training iterations.
 
@@ -59,9 +120,14 @@ def run_bw_training(
         dictionary: Pronunciation dictionary path
         filler_dict: Filler dictionary path (optional)
         n_iter: Maximum training iterations
-        convergence_ratio: Convergence threshold (relative change in likelihood)
+        convergence_ratio: Maximum signed absolute change in average log
+            likelihood per frame for convergence
+        min_iterations: Minimum number of completed iterations before convergence
         config: BW training configuration
         max_skip_fraction: Fail when skipped utterances exceed this fraction.
+        retry_beam_factor: Widen the forward beam by this factor for one retry
+            when pruning prevents the final state from being reached. Set to 1
+            to disable retries.
 
     Returns:
         TrainingResult with training statistics
@@ -79,7 +145,6 @@ def run_bw_training(
         [model_dir / f for f in MODEL_FILES_REQUIRED] + [train_fileids, transcription, dictionary],
         context="BW training",
     )
-
     # Load transcriptions
     transcripts = parse_transcription_file(transcription)
     logger.info("Loaded %d transcripts", len(transcripts))
@@ -162,7 +227,16 @@ def run_bw_training(
                 transcript = f"<s> {text} </s>"
 
                 # Use process_utterance_mfcc - C handles CMN+deltas
-                if trainer.process_utterance_mfcc(mfcc, transcript):
+                success = _process_with_final_state_retry(
+                    trainer,
+                    mfcc,
+                    transcript,
+                    iter_config.a_beam,
+                    retry_beam_factor,
+                    fileid,
+                )
+
+                if success:
                     processed += 1
                 else:
                     logger.warning("Failed to process: %s", fileid)
@@ -230,10 +304,23 @@ def run_bw_training(
         )
 
         # Check convergence
-        if iteration > 1 and prev_likelihood != 0:
-            change = abs(stats.avg_log_prob - prev_likelihood) / abs(prev_likelihood)
-            logger.info("Relative change: %.6f (threshold: %.6f)", change, convergence_ratio)
-            if change < convergence_ratio:
+        if iteration > 1:
+            change = _convergence_delta(stats.avg_log_prob, prev_likelihood)
+            logger.info("Convergence ratio: %.6f (threshold: %.6f)", change, convergence_ratio)
+            if change < 0:
+                logger.warning(
+                    "WARNING: negative convergence ratio at iteration %d; check BW inputs and logs",
+                    iteration,
+                )
+            # SphinxTrain continues only for a strictly greater delta, and
+            # otherwise enforces CFG_MIN_ITERATIONS before declaring convergence.
+            if _has_converged(
+                stats.avg_log_prob,
+                prev_likelihood,
+                iteration,
+                convergence_ratio,
+                min_iterations,
+            ):
                 if total_skipped:
                     logger.warning(
                         "WARNING: BW training skipped %d utterance updates in total",

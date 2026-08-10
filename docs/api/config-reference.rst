@@ -217,7 +217,7 @@ training
 ``training.cd.tied.convergence_threshold``
    :Type: ``float``
    :Default: ``0.001``
-   :Description: Convergence threshold
+   :Description: Maximum signed absolute change in average log likelihood per frame
 
 ``training.cd.tied.min_iterations``
    :Type: ``int``
@@ -272,7 +272,7 @@ training
 ``training.cd.untied.convergence_threshold``
    :Type: ``float``
    :Default: ``0.001``
-   :Description: Convergence threshold
+   :Description: Maximum signed absolute change in average log likelihood per frame
 
 ``training.cd.untied.min_iterations``
    :Type: ``int``
@@ -296,7 +296,7 @@ training
 
 ``training.cd.untied.tmat_floor``
    :Type: ``float``
-   :Default: ``1e-05``
+   :Default: ``0.0001``
    :Description: Transition probability floor
 
 ``training.cd.untied.topn``
@@ -322,7 +322,7 @@ training
 ``training.ci.convergence_threshold``
    :Type: ``float``
    :Default: ``0.001``
-   :Description: Convergence threshold (fractional log-likelihood improvement)
+   :Description: Maximum signed absolute change in average log likelihood per frame
 
 ``training.ci.min_iterations``
    :Type: ``int``

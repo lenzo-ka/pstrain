@@ -98,11 +98,15 @@ class TrainParams:
     max_iterations: int = 10
     a_beam: float = 1e-90
     b_beam: float = 1e-10
-    # Kept at 0.001: A7 measurement found that using SphinxTrain's literal
-    # 0.1 in pstrain's relative-likelihood criterion worsens WER.
+    # Signed absolute change in average log likelihood per frame. Kept at
+    # 0.001: A7 measurement found that SphinxTrain's literal 0.1 worsens WER.
     convergence_ratio: float = 0.001
+    min_iterations: int = 1
     # Warn on every skipped update; fail a stage above five percent.
     max_skip_fraction: float = 0.05
+    # Retry forward-final-state pruning failures once at a beam this many
+    # times wider (1e-90 / 1e10 = 1e-100).
+    retry_beam_factor: float = 1e10
     # Tuned by SphinxTrain scripts/40.buildtrees/buildtree.pl for 3-state HMMs.
     tree_state_weights: tuple[float, ...] = (1.0, 0.05, 0.0)
     tree_ssplitmax: int = 7

@@ -570,6 +570,35 @@ def test_bw_config_multipron_default_on() -> None:
     assert BWConfig(multipron=False).multipron is False
 
 
+def test_bw_mixture_floor_is_higher_only_for_tied_cd_stages() -> None:
+    from pstrain.lib.pipeline.tasks import _mixw_floor_for_stage
+
+    assert _mixw_floor_for_stage("ci-8g") == 1e-8
+    assert _mixw_floor_for_stage("cd-untied") == 1e-8
+    assert _mixw_floor_for_stage("cd-1g") == 1e-5
+    assert _mixw_floor_for_stage("cd-8g") == 1e-5
+
+
+def test_bw_transition_floor_mapping_covers_every_training_stage() -> None:
+    from pstrain.lib.pipeline.tasks import _tmat_floor_for_stage
+
+    bw_stages = [spec.name for spec in TARGETS if spec.kind in {"ci", "cd"} and spec.name != "flat"]
+    actual = {stage: _tmat_floor_for_stage(stage) for stage in bw_stages}
+    assert actual == {
+        "ci-1g": 1e-4,
+        "ci-2g": 1e-4,
+        "ci-4g": 1e-4,
+        "ci-8g": 1e-4,
+        "cd-untied": 1e-4,
+        "cd-1g": 1e-5,
+        "cd-2g": 1e-5,
+        "cd-4g": 1e-5,
+        "cd-8g": 1e-5,
+        "cd-16g": 1e-5,
+        "cd-32g": 1e-5,
+    }
+
+
 def test_configured_bw_parameters_reach_training_call(
     empty_project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -578,7 +607,8 @@ def test_configured_bw_parameters_reach_training_call(
 
     (empty_project / "etc" / "configs.yaml").write_text(
         "default:\n  training:\n    a_beam: 1e-123\n    b_beam: 1e-9\n"
-        "    convergence_ratio: 0.004\n    max_skip_fraction: 0.02\n"
+        "    convergence_ratio: 0.004\n    min_iterations: 3\n"
+        "    max_skip_fraction: 0.02\n    retry_beam_factor: 1e12\n"
     )
     ctx = PipelineContext.from_config(empty_project)
     flat = ctx.model_dir("flat")
@@ -640,9 +670,15 @@ def test_configured_bw_parameters_reach_training_call(
     assert config.a_beam == 1e-123
     assert config.b_beam == 1e-9
     assert config.topn == 1
+    assert config.mixw_floor == 1e-8
+    assert config.tmat_floor == 1e-4
     c_config: Any = captured["c_config"]
     assert c_config.a_beam == 1e-123
     assert c_config.b_beam == 1e-9
     assert c_config.topn == 1
+    assert c_config.mixw_floor == 1e-8
+    assert c_config.tmat_floor == 1e-4
     assert captured["convergence_ratio"] == 0.004
+    assert captured["min_iterations"] == 3
     assert captured["max_skip_fraction"] == 0.02
+    assert captured["retry_beam_factor"] == 1e12

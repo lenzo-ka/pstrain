@@ -419,7 +419,7 @@ backward_update(float64 **active_alpha,
 	     active_astate[n_obs-1][q_f] != (n_state-1); q_f++);
     if (q_f == n_active_astate[n_obs-1]) {
 	E_ERROR("Failed to align audio to transcript: final state of the search is not reached\n");
-	return S3_ERROR;
+	return BW_FINAL_STATE_NOT_REACHED;
     }
 
     /* Set pruning threshold for such that all unpruned paths for some

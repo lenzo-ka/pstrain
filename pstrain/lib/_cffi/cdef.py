@@ -253,6 +253,8 @@ typedef struct pstrain_bw_config_s {
     float64 b_beam;
     uint32 topn;
     float32 spthresh;
+    float32 mixw_floor;
+    float32 tmat_floor;
     int32 mixw_reest;
     int32 tmat_reest;
     int32 mean_reest;
@@ -273,6 +275,7 @@ int pstrain_bw_set_dict(pstrain_bw_context_t *ctx,
                     const char *dict_path,
                     const char *filler_dict_path);
 int pstrain_bw_set_multipron(pstrain_bw_context_t *ctx, int enable);
+float64 pstrain_bw_set_a_beam(pstrain_bw_context_t *ctx, float64 a_beam);
 int pstrain_bw_process_utt_text(pstrain_bw_context_t *ctx,
                             const float *features,
                             uint32 n_frames,

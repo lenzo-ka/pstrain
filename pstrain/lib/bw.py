@@ -33,6 +33,8 @@ class BWConfig:
     b_beam: float = 1e-10  # Backward beam (beta beam)
     topn: int = 1  # Number of Gaussian densities evaluated per codebook
     spthresh: float = 0.0  # State pruning threshold
+    mixw_floor: float = 1e-8  # CI and CD-untied SphinxTrain -mwfloor
+    tmat_floor: float = 1e-4  # Upstream bw -tpfloor default
     mean_reest: bool = True
     var_reest: bool = True
     mixw_reest: bool = True
@@ -103,7 +105,11 @@ class HMM:
 
 
 class BWTrainer:
-    """Baum-Welch trainer using CFFI."""
+    """Baum-Welch trainer using CFFI.
+
+    A trainer owns one mutable native session and must not be shared across
+    threads. In debug mode, the retry transaction asserts this contract.
+    """
 
     def __init__(
         self,
@@ -133,6 +139,8 @@ class BWTrainer:
         c_config.b_beam = self.config.b_beam
         c_config.topn = self.config.topn
         c_config.spthresh = self.config.spthresh
+        c_config.mixw_floor = self.config.mixw_floor
+        c_config.tmat_floor = self.config.tmat_floor
         c_config.mean_reest = 1 if self.config.mean_reest else 0
         c_config.var_reest = 1 if self.config.var_reest else 0
         c_config.mixw_reest = 1 if self.config.mixw_reest else 0
@@ -157,6 +165,8 @@ class BWTrainer:
             raise RuntimeError("Failed to set multipron flag")
 
         self._dict_set = False
+        self._last_process_result = 0
+        self._retry_transaction_active = False
 
     def __del__(self) -> None:
         """Clean up C context."""
@@ -254,8 +264,22 @@ class BWTrainer:
             n_frames,
             transcript.encode(),
         )
-
+        self._last_process_result = ret
         return bool(ret == 0)
+
+    @property
+    def final_state_not_reached(self) -> bool:
+        """Whether forward pruning lost the final state on the last MFCC update."""
+        return self._last_process_result == -2
+
+    def set_a_beam(self, a_beam: float) -> float:
+        """Set the forward beam and return its previous value."""
+        if a_beam <= 0:
+            raise ValueError("a_beam must be positive")
+        previous = float(self._lib.pstrain_bw_set_a_beam(self._ctx, a_beam))
+        if previous <= 0:
+            raise RuntimeError("Failed to set forward beam")
+        return previous
 
     def process_utterance(
         self,

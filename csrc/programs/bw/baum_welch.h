@@ -57,6 +57,8 @@
 #include <s3/model_inventory.h>
 #include <s3/s3phseg_io.h>
 
+#define BW_FINAL_STATE_NOT_REACHED -2
+
 
 /**
  * \struct bw_timers_s
