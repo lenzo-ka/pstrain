@@ -116,7 +116,7 @@ archs = ["x86_64", "arm64"]
 # (cp310-cp313) emulated and takes hours. Add aarch64 back on a native ARM
 # runner or a release-only job when arm64 Linux wheels are needed.
 archs = ["x86_64"]
-manylinux-x86_64-image = "manylinux2014"
+manylinux-x86_64-image = "manylinux_2_28"
 
 # Windows is unsupported for now (vendored C does not build under MSVC); the
 # build-wheels matrix omits the Windows runner. See .github/workflows/build.yml.
