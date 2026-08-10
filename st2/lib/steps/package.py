@@ -95,8 +95,7 @@ def package_model(
     source_feat_params = model_dir / "feat.params"
     if not source_feat_params.is_file():
         raise FileNotFoundError(
-            f"cannot package model: trained model directory lacks feat.params: "
-            f"{source_feat_params}"
+            f"cannot package model: trained model directory lacks feat.params: {source_feat_params}"
         )
 
     if model_name:
