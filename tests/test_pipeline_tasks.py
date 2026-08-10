@@ -148,9 +148,7 @@ def test_extract_task_forwards_lifter(empty_project: Path, monkeypatch: pytest.M
 
 
 def test_extract_task_forwards_preemphasis_alpha(empty_project: Path) -> None:
-    (empty_project / "etc" / "configs.yaml").write_text(
-        "custom:\n  features:\n    alpha: 0.42\n"
-    )
+    (empty_project / "etc" / "configs.yaml").write_text("custom:\n  features:\n    alpha: 0.42\n")
     ctx = PipelineContext.from_config(empty_project, config_name="custom")
 
     extract_task = build_pipeline(ctx).tasks()["extract:placeholder"]
@@ -330,9 +328,7 @@ def test_shipped_profiles_equal_builtin_defaults() -> None:
 def test_unknown_profile_parameter_names_context(
     empty_project: Path, block: str, key: str, expected: str
 ) -> None:
-    (empty_project / "etc" / "configs.yaml").write_text(
-        f"sphinxtrain:\n  {block}:\n    {key}: 1\n"
-    )
+    (empty_project / "etc" / "configs.yaml").write_text(f"sphinxtrain:\n  {block}:\n    {key}: 1\n")
 
     with pytest.raises(
         ValueError,
