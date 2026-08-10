@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import signal
+import socket
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -47,6 +48,32 @@ def test_unrouted_operation_is_rejected_before_any_worker_starts(tmp_path: Path)
 
 def test_guarded_set_is_exactly_the_contained_three() -> None:
     assert set(native_worker.GUARDED_OPERATIONS) == {"prune_tree", "make_quests", "mdef_gen_ci"}
+
+
+def test_startup_pipe_failure_cleans_diagnostic_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    diagnostic = tmp_path / "diagnostic.log"
+
+    def make_diagnostic(*args: object, **kwargs: object) -> tuple[int, str]:
+        return os.open(diagnostic, os.O_RDWR | os.O_CREAT), str(diagnostic)
+
+    context = native_worker.multiprocessing.get_context("spawn")
+    monkeypatch.setattr(native_worker.tempfile, "mkstemp", make_diagnostic)
+    monkeypatch.setattr(context, "Pipe", lambda: (_ for _ in ()).throw(OSError("no pipe")))
+    monkeypatch.setattr(native_worker.multiprocessing, "get_context", lambda method: context)
+
+    with pytest.raises(native_worker.PstrainWorkerError, match="cannot start native worker"):
+        native_worker._owned_worker()._start()
+    assert not diagnostic.exists()
+    assert native_worker._owned_worker()._diagnostic_path is None
+
+
+def test_oversized_request_is_rejected_before_worker_starts(tmp_path: Path) -> None:
+    oversized = "x" * native_worker._MAX_REQUEST_BYTES
+    with pytest.raises(native_worker.PstrainInvalidInputError, match="maximum is 65536 bytes"):
+        native_worker.call("_fault_exit_zero", (oversized,), (tmp_path / "input",))
+    assert native_worker._owned_worker().pid is None
 
 
 @requires_c_library
@@ -163,6 +190,34 @@ def test_worker_killed_while_idle_respawns_transparently(tmp_path: Path) -> None
     mdef.generate_ci_mdef(phones, second)
     assert native_worker._owned_worker().pid != old_pid
     assert second.exists()
+
+
+@requires_c_library
+def test_wedged_worker_send_times_out_and_next_call_respawns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    phones = _phone_list(tmp_path)
+    mdef.generate_ci_mdef(phones, tmp_path / "first.mdef")
+    worker = native_worker._owned_worker()
+    old_pid = worker.pid
+    assert old_pid is not None and worker._connection is not None
+
+    duplicate = socket.socket(fileno=os.dup(worker._connection.fileno()))
+    try:
+        duplicate.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 1024)
+    finally:
+        duplicate.close()
+    os.kill(old_pid, signal.SIGSTOP)
+    monkeypatch.setattr(native_worker, "_REQUEST_TIMEOUT", 0.2)
+
+    payload = "x" * (native_worker._MAX_REQUEST_BYTES - 1024)
+    with pytest.raises(native_worker.PstrainWorkerError, match="timed out during"):
+        native_worker.call("_fault_exit_zero", (payload,), (tmp_path / "input",))
+
+    recovered = tmp_path / "recovered.mdef"
+    mdef.generate_ci_mdef(phones, recovered)
+    assert recovered.exists()
+    assert native_worker._owned_worker().pid != old_pid
 
 
 @requires_c_library

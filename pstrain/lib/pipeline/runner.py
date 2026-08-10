@@ -346,13 +346,14 @@ def _run_one(task: Task) -> int:
 def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> int:
     """Run a batch of independent tasks in a process pool.
 
-    A no-op probe starts a worker before any real work is submitted. If the
-    pool cannot be constructed or the probe does not come back, the batch is
-    aborted: it is never quietly rerun in this process. Guarded native
+    A no-op probe proves that the pool can start before any real work is
+    submitted. If construction or the probe fails, the batch is aborted: it is
+    never quietly rerun in this process. Guarded native
     operations exist precisely so that malformed input cannot end the
     interpreter, and running them here after isolation failed would hand that
-    guarantee back. Once the probe succeeds, an infrastructure error may mean a
-    real task started, so the batch fails rather than being rerun.
+    guarantee back. Additional workers may start lazily after submission and
+    fail after other tasks complete. The batch then fails; completed tasks keep
+    their valid manifests, while unfinished tasks remain stale for the rerun.
     """
     group_name = batch[0].task.parallel_group
     n = len(batch)

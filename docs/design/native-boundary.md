@@ -81,6 +81,9 @@ Those two sites are now compiled out of the library build
   everything.
 - Any death — signal, nonzero exit, clean exit mid-request, transport EOF — is
   classified, raised, and followed by a fresh helper on the next call.
+- Requests are limited to a 64 KiB serialized payload. The owner rejects larger
+  requests before sending, and one deadline covers both a non-blocking pipe send
+  and the response wait; expiry kills the helper so the next call starts fresh.
 
 ## No silent fallback
 
@@ -88,4 +91,8 @@ When process isolation cannot be established, guarded work **fails**; it never
 quietly runs in-process instead. The pipeline runner used to fall back to inline
 execution when its process pool could not start. Under containment that would be
 a silent revert to exactly the unsafe path containment exists to remove, so the
-batch is aborted with a `PstrainWorkerError` instead.
+batch is aborted with a `PstrainWorkerError` instead. The startup probe proves
+that the pool can start before task submission, not that every executor worker
+has already started. A lazily started worker can still fail after other tasks
+complete; that aborts the batch, with completed tasks and their provenance and
+completion manifests remaining valid while unfinished tasks remain stale.

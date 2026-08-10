@@ -24,16 +24,21 @@ import atexit
 import contextlib
 import multiprocessing
 import os
+import select
+import struct
 import tempfile
 import threading
+import time
 from dataclasses import dataclass
 from multiprocessing.connection import Connection, wait
 from multiprocessing.process import BaseProcess
+from multiprocessing.reduction import ForkingPickler
 from pathlib import Path
 from typing import Any, NoReturn
 
 _START_TIMEOUT = 30.0
 _REQUEST_TIMEOUT = 300.0
+_MAX_REQUEST_BYTES = 64 * 1024
 _DIAGNOSTIC_TAIL_BYTES = 64 * 1024
 
 #: The ``contained-3`` set: the only native operations routed through the helper.
@@ -241,17 +246,26 @@ class _NativeWorker:
         fd, path = tempfile.mkstemp(prefix="pstrain-native-", suffix=".log")
         os.close(fd)
         self._diagnostic_path = path
-        context = multiprocessing.get_context("spawn")
-        parent, child = context.Pipe()
-        process = context.Process(target=_worker_main, args=(child, _WorkerState(path)))
+        parent: Connection | None = None
+        child: Connection | None = None
+        started = False
         try:
+            context = multiprocessing.get_context("spawn")
+            parent, child = context.Pipe()
+            process = context.Process(target=_worker_main, args=(child, _WorkerState(path)))
             process.start()
-        except (OSError, RuntimeError, ValueError) as exc:
-            parent.close()
-            child.close()
-            self._diagnostic_path = None
-            Path(path).unlink(missing_ok=True)
+            started = True
+        except Exception as exc:
             raise PstrainWorkerError(f"cannot start native worker: {exc}") from exc
+        finally:
+            if not started:
+                if parent is not None:
+                    parent.close()
+                if child is not None:
+                    child.close()
+                self._diagnostic_path = None
+                Path(path).unlink(missing_ok=True)
+        assert parent is not None and child is not None
         child.close()
         self._process, self._connection = process, parent
         ready = wait([parent, process.sentinel], timeout=_START_TIMEOUT)
@@ -266,30 +280,39 @@ class _NativeWorker:
         raise PstrainWorkerError(f"native worker failed to start: {diagnostic or 'no diagnostic'}")
 
     def call(self, operation: str, arguments: tuple[Any, ...], inputs: tuple[str, ...]) -> int:
+        request_id = self._request_id + 1
+        request = bytes(ForkingPickler.dumps((request_id, operation, arguments)))
+        if len(request) > _MAX_REQUEST_BYTES:
+            raise PstrainInvalidInputError(
+                operation,
+                inputs,
+                f"serialized native-worker request is {len(request)} bytes; "
+                f"maximum is {_MAX_REQUEST_BYTES} bytes",
+            )
+        deadline = time.monotonic() + _REQUEST_TIMEOUT
         if self._process is None or not self._process.is_alive():
             self._start()
         assert self._connection is not None and self._process is not None
-        self._request_id += 1
-        request_id = self._request_id
+        self._request_id = request_id
         self._truncate_diagnostic()
         try:
-            self._connection.send((request_id, operation, arguments))
+            self._send_request(request, deadline)
         except (BrokenPipeError, EOFError, OSError):
             # The helper died between requests; respawn and send once more.
             self._discard()
             self._start()
             assert self._connection is not None and self._process is not None
-            self._connection.send((request_id, operation, arguments))
+            try:
+                self._send_request(request, deadline)
+            except TimeoutError:
+                self._raise_timeout(operation)
+        except TimeoutError:
+            self._raise_timeout(operation)
 
-        ready = wait([self._connection, self._process.sentinel], timeout=_REQUEST_TIMEOUT)
+        remaining = max(0.0, deadline - time.monotonic())
+        ready = wait([self._connection, self._process.sentinel], timeout=remaining)
         if not ready:
-            self._process.kill()
-            self._process.join()
-            diagnostic = self._tail()
-            self._discard()
-            raise PstrainWorkerError(
-                f"native worker timed out during {operation}: {diagnostic or 'no diagnostic'}"
-            )
+            self._raise_timeout(operation)
         if self._connection in ready:
             try:
                 message = self._connection.recv()
@@ -311,6 +334,39 @@ class _NativeWorker:
                 raise PstrainNativeError(operation, inputs, diagnostic, int(payload))
             return 0
         return self._raise_death(operation, inputs, eof=False)
+
+    def _send_request(self, payload: bytes, deadline: float) -> None:
+        """Send one bounded request without allowing a full pipe to hang."""
+        assert self._connection is not None
+        framed = struct.pack("!i", len(payload)) + payload
+        descriptor = self._connection.fileno()
+        os.set_blocking(descriptor, False)
+        sent = 0
+        try:
+            while sent < len(framed):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError
+                _, writable, _ = select.select([], [descriptor], [], remaining)
+                if not writable:
+                    raise TimeoutError
+                try:
+                    sent += os.write(descriptor, framed[sent:])
+                except BlockingIOError:
+                    continue
+        finally:
+            with contextlib.suppress(OSError):
+                os.set_blocking(descriptor, True)
+
+    def _raise_timeout(self, operation: str) -> NoReturn:
+        assert self._process is not None
+        self._process.kill()
+        self._process.join()
+        diagnostic = self._tail()
+        self._discard()
+        raise PstrainWorkerError(
+            f"native worker timed out during {operation}: {diagnostic or 'no diagnostic'}"
+        )
 
     def _truncate_diagnostic(self) -> None:
         """Start each request with an empty diagnostic file."""
@@ -366,6 +422,8 @@ def call(operation: str, arguments: tuple[Any, ...], inputs: tuple[Path | str, .
 
     Raises:
         PstrainInvalidInputError: The operation is not routed through the helper.
+            Requests whose serialized representation exceeds 64 KiB are also
+            rejected before anything is sent.
         PstrainWorkerError: The helper could not be started, or timed out.
         PstrainNativeCrashError: The helper died on a signal.
         PstrainWorkerProtocolError: The helper exited cleanly mid-request.
