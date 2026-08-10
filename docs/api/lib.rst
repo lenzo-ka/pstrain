@@ -68,6 +68,18 @@ Models
    :undoc-members:
    :show-inheritance:
 
+Native Worker
+-------------
+
+Crash containment for the guarded native operations. See
+:doc:`../design/native-boundary` for which operations are guarded, which are
+not, and what each exception means.
+
+.. automodule:: pstrain.lib.native_worker
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Low-level C Bindings
 --------------------
 

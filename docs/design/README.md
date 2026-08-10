@@ -6,6 +6,10 @@ while making decisions; the current source of truth is the code in
 
 ## Current architecture
 
+* [`native-boundary.md`](native-boundary.md) — the boundary between
+  Python and the vendored C library: which operations run inside a
+  contained helper process, which are still unguarded, and how native
+  failures are classified.
 * [`pipeline-runner.md`](pipeline-runner.md) — the task runner that
   orchestrates training (`pstrain.lib.pipeline`). Replaces an earlier
   Snakemake-based design.
