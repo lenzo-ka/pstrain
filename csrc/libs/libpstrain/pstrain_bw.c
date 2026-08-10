@@ -366,6 +366,30 @@ build_utt_state_seq(pstrain_bw_context_t *ctx,
                                  trans_copy);
 }
 
+state_t *
+pstrain_bw_build_state_seq(pstrain_bw_context_t *ctx,
+                           const char *transcript,
+                           uint32 *n_state)
+{
+    state_t *state_seq;
+    char *trans_copy;
+    int needs_free;
+
+    if (!ctx || !ctx->lex || !transcript || !n_state || !ctx->multipron)
+        return NULL;
+    trans_copy = ckd_salloc(transcript);
+    state_seq = build_utt_state_seq(ctx, trans_copy, n_state, &needs_free);
+    ckd_free(trans_copy);
+    return state_seq;
+}
+
+void
+pstrain_bw_free_state_seq(state_t *state_seq, uint32 n_state)
+{
+    if (state_seq)
+        state_seq_free(state_seq, n_state);
+}
+
 int
 pstrain_bw_process_utt_text(pstrain_bw_context_t *ctx,
                         const float *features,
