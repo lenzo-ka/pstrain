@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from st2.data import get_data_file, get_data_path
+from pstrain.data import get_data_file, get_data_path
 
 
 def test_data_path_exists() -> None:

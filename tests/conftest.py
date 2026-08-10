@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-# Single source of truth for libst2c availability. Re-exported here so tests
+# Single source of truth for libpstrainc availability. Re-exported here so tests
 # and other conftests can `from tests.clib import ...` or rely on the marker.
 from tests.clib import (  # noqa: F401
     C_LIBRARY_AVAILABLE,
@@ -30,15 +30,15 @@ _PROJECT_ROOT = Path(__file__).parent.parent
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Abort collection if ST2_REQUIRE_CLIB is set but libst2c can't load.
+    """Abort collection if PSTRAIN_REQUIRE_CLIB is set but libpstrainc can't load.
 
     Without this, a misconfigured CI job (lib not built, wrong path) would
     silently skip the entire CFFI/parity tier and still report green.
     """
     if require_clib_env() and not c_library_available():
         raise pytest.UsageError(
-            "ST2_REQUIRE_CLIB is set but libst2c could not be loaded. "
-            "Build it first (e.g. 'make build-c') or unset ST2_REQUIRE_CLIB."
+            "PSTRAIN_REQUIRE_CLIB is set but libpstrainc could not be loaded. "
+            "Build it first (e.g. 'make build-c') or unset PSTRAIN_REQUIRE_CLIB."
         )
 
 
@@ -56,7 +56,7 @@ def project_root() -> Path:
 @pytest.fixture
 def sample_data_dir() -> Path:
     """Return the sample data directory."""
-    return _PROJECT_ROOT / "st2" / "data" / "sample"
+    return _PROJECT_ROOT / "pstrain" / "data" / "sample"
 
 
 @pytest.fixture

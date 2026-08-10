@@ -1,4 +1,4 @@
-"""Tests for the forced alignment package (st2.lib.alignment)."""
+"""Tests for the forced alignment package (pstrain.lib.alignment)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from st2.lib.alignment import (
+from pstrain.lib.alignment import (
     AlignedSegment,
     Aligner,
     AlignmentJob,

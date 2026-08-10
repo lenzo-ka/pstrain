@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from st2.lib.commands import ST2_BINARIES, Command, CommandBuilder
+from pstrain.lib.commands import PSTRAIN_BINARIES, Command, CommandBuilder
 
 
 class TestCommand:
@@ -161,11 +161,11 @@ class TestBinaryRegistry:
             "map_adapt",
         ]
         for name in expected:
-            assert name in ST2_BINARIES
+            assert name in PSTRAIN_BINARIES
 
     def test_find_binary_in_path(self) -> None:
         """Test finding binary in PATH."""
-        from st2.lib.commands import find_binary
+        from pstrain.lib.commands import find_binary
 
         # Should find common utilities
         find_binary("ls")

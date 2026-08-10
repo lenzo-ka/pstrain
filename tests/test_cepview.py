@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from st2.lib.cepview import view_cepstra
+from pstrain.lib.cepview import view_cepstra
 
 
 class TestViewCepstra:
@@ -99,7 +99,7 @@ class TestViewCepstraShellout:
 
     def test_import(self) -> None:
         """Test that shell-out function can be imported."""
-        from st2.lib.cepview import view_cepstra_shellout
+        from pstrain.lib.cepview import view_cepstra_shellout
 
         assert callable(view_cepstra_shellout)
 
@@ -107,7 +107,7 @@ class TestViewCepstraShellout:
         """Test handling of missing binary."""
         import subprocess
 
-        from st2.lib.cepview import view_cepstra_shellout
+        from pstrain.lib.cepview import view_cepstra_shellout
 
         mfc_path = tmp_path / "test.mfc"
         mfc_path.write_bytes(b"\x00" * 100)

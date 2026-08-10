@@ -13,9 +13,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from st2.lib import _st2c
-from st2.lib.commands import CommandBuilder, find_binary
-from st2.lib.paths import get_bin_dir
+from pstrain.lib import _pstrainc
+from pstrain.lib.commands import CommandBuilder, find_binary
+from pstrain.lib.paths import get_bin_dir
 
 # =============================================================================
 # Test fixtures
@@ -23,18 +23,18 @@ from st2.lib.paths import get_bin_dir
 
 
 def binary_available(name: str) -> bool:
-    """Check if an ST2 C binary is available.
+    """Check if a pstrain C binary is available.
 
-    Looks on PATH and, crucially, in st2's own build output directory
+    Looks on PATH and, crucially, in pstrain's own build output directory
     (get_bin_dir() → build/bin/ for a dev build, the bundled wheel bin dir
-    otherwise). st2 builds these 30 CLI programs itself, so the CFFI-vs-CLI
+    otherwise). pstrain builds these 30 CLI programs itself, so the CFFI-vs-CLI
     parity tests can and should run without a separate SphinxTrain install.
     """
     return _resolve_bin(name) is not None
 
 
 def _resolve_bin(name: str) -> Path | None:
-    """Resolve an ST2 binary to a concrete path (PATH or st2's build dir)."""
+    """Resolve a pstrain binary to a concrete path (PATH or pstrain's build dir)."""
     found = find_binary(name)
     if found is not None:
         return found
@@ -62,13 +62,13 @@ def test_data_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     # Means and variances
     means = rng.random((n_phones, n_feat, n_density, veclen)).astype(np.float32)
     variances = np.abs(rng.random((n_phones, n_feat, n_density, veclen)).astype(np.float32)) + 0.01
-    _st2c.write_gau(str(data_dir / "means"), means)
-    _st2c.write_gau(str(data_dir / "variances"), variances)
+    _pstrainc.write_gau(str(data_dir / "means"), means)
+    _pstrainc.write_gau(str(data_dir / "variances"), variances)
 
     # Mixture weights (normalized)
     mixw = rng.random((n_phones * n_state, n_feat, n_density)).astype(np.float32)
     mixw = mixw / mixw.sum(axis=-1, keepdims=True)
-    _st2c.write_mixw(str(data_dir / "mixture_weights"), mixw)
+    _pstrainc.write_mixw(str(data_dir / "mixture_weights"), mixw)
 
     # Transition matrices
     # Tmat format: (n_tmat, n_state_pm, n_state_pm+1)
@@ -84,7 +84,7 @@ def test_data_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
                 tmat[i, j, j + 1] = 0.4
             else:
                 tmat[i, j, n_state_pm] = 0.4  # Exit
-    _st2c.write_tmat(str(data_dir / "transition_matrices"), tmat)
+    _pstrainc.write_tmat(str(data_dir / "transition_matrices"), tmat)
 
     # Create simple mdef file
     mdef_content = """0.3
@@ -141,14 +141,14 @@ class TestGauParity:
     def test_read_write_roundtrip(self, test_data_dir: Path) -> None:
         """Test that read/write cycle preserves data."""
         means_path = test_data_dir / "means"
-        means, n_mgau, n_feat, n_density, veclen = _st2c.read_gau(str(means_path))
+        means, n_mgau, n_feat, n_density, veclen = _pstrainc.read_gau(str(means_path))
 
         # Write to new location
         out_path = test_data_dir / "means_copy"
-        _st2c.write_gau(str(out_path), means)
+        _pstrainc.write_gau(str(out_path), means)
 
         # Read back
-        means2, n_mgau2, n_feat2, n_density2, veclen2 = _st2c.read_gau(str(out_path))
+        means2, n_mgau2, n_feat2, n_density2, veclen2 = _pstrainc.read_gau(str(out_path))
 
         assert n_mgau == n_mgau2
         assert n_feat == n_feat2
@@ -162,14 +162,14 @@ class TestMixwParity:
     def test_read_write_roundtrip(self, test_data_dir: Path) -> None:
         """Test that read/write cycle preserves data."""
         mixw_path = test_data_dir / "mixture_weights"
-        mixw, n_mixw, n_feat, n_density = _st2c.read_mixw(str(mixw_path))
+        mixw, n_mixw, n_feat, n_density = _pstrainc.read_mixw(str(mixw_path))
 
         # Write to new location
         out_path = test_data_dir / "mixw_copy"
-        _st2c.write_mixw(str(out_path), mixw)
+        _pstrainc.write_mixw(str(out_path), mixw)
 
         # Read back
-        mixw2, n_mixw2, n_feat2, n_density2 = _st2c.read_mixw(str(out_path))
+        mixw2, n_mixw2, n_feat2, n_density2 = _pstrainc.read_mixw(str(out_path))
 
         assert n_mixw == n_mixw2
         assert n_feat == n_feat2
@@ -189,7 +189,7 @@ class TestTmatParity:
         tmat_path = test_data_dir / "transition_matrices"
 
         # Read existing file
-        tmat, n_tmat, n_state = _st2c.read_tmat(str(tmat_path))
+        tmat, n_tmat, n_state = _pstrainc.read_tmat(str(tmat_path))
 
         # Basic sanity checks
         assert n_tmat == 5
@@ -212,9 +212,9 @@ class TestSphinxFeParity:
     @pytest.mark.skipif(not binary_available("sphinx_fe"), reason="sphinx_fe not found")
     @pytest.mark.xfail(
         strict=True,
-        reason="Known gap: the CFFI feature path (st2_fe_create, a 'simplified' "
+        reason="Known gap: the CFFI feature path (pstrain_fe_create, a 'simplified' "
         "front-end that ignores remove_noise/transform/lifter/unit_area — see "
-        "st2/lib/features.py:123) does not match the sphinx_fe CLI, which applies "
+        "pstrain/lib/features.py:123) does not match the sphinx_fe CLI, which applies "
         "them. Cepstra differ by ~30 on average even with dither off. Aligning "
         "the two front-ends is feature-config work (plan Phase 2/7), not a "
         "Phase-1 fix; xfail(strict) so this flips red the moment they converge.",
@@ -251,12 +251,12 @@ class TestSphinxFeParity:
 
         # CFFI
         cffi_output = test_data_dir / "cffi_features.mfc"
-        from st2.lib.features import extract_features
+        from pstrain.lib.features import extract_features
 
         extract_features(audio_path, cffi_output)
 
         # Compare
-        from st2.lib.features import read_sphinx_mfc
+        from pstrain.lib.features import read_sphinx_mfc
 
         shell_feats = read_sphinx_mfc(shell_output)
         cffi_feats = read_sphinx_mfc(cffi_output)
@@ -271,14 +271,14 @@ class TestPrintpParity:
     @pytest.mark.skipif(not binary_available("printp"), reason="printp not found")
     def test_print_mixw(self, test_data_dir: Path) -> None:
         """Test that native and shell-out print same mixture weights."""
-        from st2.lib.printp import format_mixw, print_params_shellout
+        from pstrain.lib.printp import format_mixw, print_params_shellout
 
         mixw_path = test_data_dir / "mixture_weights"
 
         # Get native output
         native_output = format_mixw(mixw_path, sigfig=4)
 
-        # Get shell output from st2's own printp binary.
+        # Get shell output from pstrain's own printp binary.
         shell_output = print_params_shellout(
             mixw_path=mixw_path, sigfig=4, bin_path=_resolve_bin("printp")
         )
@@ -316,7 +316,7 @@ class TestCepviewParity:
     @pytest.mark.skipif(not binary_available("sphinx_cepview"), reason="sphinx_cepview not found")
     def test_view_features(self, test_data_dir: Path) -> None:
         """Test that native and shell-out view same features."""
-        from st2.lib.cepview import check_parity
+        from pstrain.lib.cepview import check_parity
 
         mfc_path = test_data_dir / "test.mfc"
         assert check_parity(
@@ -377,7 +377,7 @@ class TestMakeQuestsParity:
     )
     def test_questions_generation(self, test_data_dir: Path) -> None:
         """CFFI vs shell-out question generation (needs a realistic model)."""
-        from st2.lib.dtree import make_quests
+        from pstrain.lib.dtree import make_quests
 
         shell_quests = test_data_dir / "shell_quests.txt"
         builder = CommandBuilder()
@@ -414,7 +414,7 @@ class TestCliDryRun:
 
     def test_dry_run_feature_extraction(self) -> None:
         """Test that dry-run emits valid sphinx_fe command."""
-        from st2.cli.base import FeatureExtractAction
+        from pstrain.cli.base import FeatureExtractAction
 
         action = FeatureExtractAction(
             input_file=Path("/tmp/audio.wav"),
@@ -433,7 +433,7 @@ class TestCliDryRun:
 
     def test_dry_run_baum_welch(self) -> None:
         """Test that dry-run emits valid bw command."""
-        from st2.cli.base import BaumWelchAction
+        from pstrain.cli.base import BaumWelchAction
 
         action = BaumWelchAction(
             mdef=Path("/model/mdef"),
@@ -455,7 +455,7 @@ class TestCliDryRun:
 
     def test_dry_run_inc_comp(self) -> None:
         """Test that dry-run emits valid inc_comp command."""
-        from st2.cli.base import SplitGaussiansAction
+        from pstrain.cli.base import SplitGaussiansAction
 
         action = SplitGaussiansAction(
             inmeanfn=Path("/model/means"),
@@ -473,7 +473,7 @@ class TestCliDryRun:
 
     def test_dry_run_make_quests(self) -> None:
         """Test that dry-run emits valid make_quests command."""
-        from st2.cli.base import MakeQuestsAction
+        from pstrain.cli.base import MakeQuestsAction
 
         action = MakeQuestsAction(
             moddeffn=Path("/model/mdef"),

@@ -6,10 +6,10 @@ from typing import Any
 import numpy as np
 import pytest
 
-from st2.lib import _st2c, split
+from pstrain.lib import _pstrainc, split
 
 # Check if library is available
-# libst2c availability comes from the shared helper (real loader-based
+# libpstrainc availability comes from the shared helper (real loader-based
 # detection); see tests/clib.py.
 from tests.clib import C_LIBRARY_AVAILABLE as _lib_exists
 
@@ -36,7 +36,7 @@ def model_with_counts(tmp_path: Path) -> dict[str, Any]:
     # Create means (random but reasonable values)
     means = rng.standard_normal((n_tied_state, n_feat, n_density, veclen)).astype(np.float32)
     mean_path = model_dir / "means"
-    assert _st2c.write_gau(str(mean_path), means) == 0
+    assert _pstrainc.write_gau(str(mean_path), means) == 0
 
     # Create variances (must be positive)
     variances = (
@@ -44,18 +44,18 @@ def model_with_counts(tmp_path: Path) -> dict[str, Any]:
         + 0.1
     )
     var_path = model_dir / "variances"
-    assert _st2c.write_gau(str(var_path), variances) == 0
+    assert _pstrainc.write_gau(str(var_path), variances) == 0
 
     # Create uniform mixture weights
     mixw = np.ones((n_tied_state, n_feat, n_density), dtype=np.float32) / n_density
     mixw_path = model_dir / "mixture_weights"
-    assert _st2c.write_mixw(str(mixw_path), mixw) == 0
+    assert _pstrainc.write_mixw(str(mixw_path), mixw) == 0
 
     # Create density counts (simulate training observation counts)
     # Some states seen more than others
     dnom = rng.exponential(100, (n_tied_state, n_feat, n_density)).astype(np.float32)
     dnom_path = model_dir / "gauden_counts"
-    assert _st2c.write_dnom(str(dnom_path), dnom) == 0
+    assert _pstrainc.write_dnom(str(dnom_path), dnom) == 0
 
     return {
         "model_dir": model_dir,
@@ -70,7 +70,7 @@ def model_with_counts(tmp_path: Path) -> dict[str, Any]:
     }
 
 
-@pytest.mark.skipif(not _lib_exists, reason="libst2c not built")
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
 class TestDnomIO:
     """Test density count read/write."""
 
@@ -79,9 +79,9 @@ class TestDnomIO:
         dnom = np.random.exponential(100, (10, 1, 2)).astype(np.float32)
         path = tmp_path / "test_dnom"
 
-        assert _st2c.write_dnom(str(path), dnom) == 0
+        assert _pstrainc.write_dnom(str(path), dnom) == 0
 
-        read_dnom, n_cb, n_feat, n_density = _st2c.read_dnom(str(path))
+        read_dnom, n_cb, n_feat, n_density = _pstrainc.read_dnom(str(path))
 
         assert n_cb == 10
         assert n_feat == 1
@@ -89,7 +89,7 @@ class TestDnomIO:
         np.testing.assert_allclose(read_dnom, dnom, rtol=1e-5)
 
 
-@pytest.mark.skipif(not _lib_exists, reason="libst2c not built")
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
 class TestSplitGaussians:
     """Test Gaussian splitting functionality."""
 
@@ -111,7 +111,9 @@ class TestSplitGaussians:
         )
 
         # Read back and verify dimensions
-        new_mixw, n_mixw, n_feat, n_density = _st2c.read_mixw(str(output_dir / "mixture_weights"))
+        new_mixw, n_mixw, n_feat, n_density = _pstrainc.read_mixw(
+            str(output_dir / "mixture_weights")
+        )
 
         assert n_mixw == mc["n_tied_state"]
         assert n_feat == mc["n_feat"]
@@ -140,7 +142,7 @@ class TestSplitGaussians:
         orig_sums = mc["mixw"].sum(axis=2)
 
         # New weights should also sum to 1 per state
-        new_mixw, _, _, _ = _st2c.read_mixw(str(output_dir / "mixture_weights"))
+        new_mixw, _, _, _ = _pstrainc.read_mixw(str(output_dir / "mixture_weights"))
         new_sums = new_mixw.sum(axis=2)
 
         np.testing.assert_allclose(new_sums, orig_sums, rtol=1e-5)
@@ -163,7 +165,7 @@ class TestSplitGaussians:
         )
 
         # Read new means
-        new_means, n_mgau, n_feat, n_density, veclen = _st2c.read_gau(str(output_dir / "means"))
+        new_means, n_mgau, n_feat, n_density, veclen = _pstrainc.read_gau(str(output_dir / "means"))
 
         # Original mean and variance
         orig_mean = mc["means"][:, :, 0, :]  # First (only) Gaussian
@@ -200,7 +202,7 @@ class TestSplitGaussians:
         )
 
         # Read new variances
-        new_vars, _, _, _, veclen = _st2c.read_gau(str(output_dir / "variances"))
+        new_vars, _, _, _, veclen = _pstrainc.read_gau(str(output_dir / "variances"))
 
         # Both new Gaussians should have same variance as original
         orig_var = mc["variances"][:, :, 0, :]
@@ -211,7 +213,7 @@ class TestSplitGaussians:
         np.testing.assert_allclose(new_var_b, orig_var, rtol=1e-5)
 
 
-@pytest.mark.skipif(not _lib_exists, reason="libst2c not built")
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
 class TestDoubleGaussians:
     """Test convenience function for doubling Gaussians."""
 
@@ -227,7 +229,7 @@ class TestDoubleGaussians:
         )
 
         # Verify files updated
-        new_mixw, _, _, n_density = _st2c.read_mixw(str(result["mixture_weights"]))
+        new_mixw, _, _, n_density = _pstrainc.read_mixw(str(result["mixture_weights"]))
         assert n_density == 2
 
     def test_double_gaussians_to_new_dir(
@@ -249,15 +251,15 @@ class TestDoubleGaussians:
         assert (output_dir / "mixture_weights").exists()
 
         # Original still has 1 density
-        orig_mixw, _, _, n_density = _st2c.read_mixw(str(mc["model_dir"] / "mixture_weights"))
+        orig_mixw, _, _, n_density = _pstrainc.read_mixw(str(mc["model_dir"] / "mixture_weights"))
         assert n_density == 1
 
         # New has 2 densities
-        new_mixw, _, _, n_density = _st2c.read_mixw(str(result["mixture_weights"]))
+        new_mixw, _, _, n_density = _pstrainc.read_mixw(str(result["mixture_weights"]))
         assert n_density == 2
 
 
-@pytest.mark.skipif(not _lib_exists, reason="libst2c not built")
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
 class TestSplitErrors:
     """Test error handling for split functions."""
 
@@ -276,7 +278,7 @@ class TestSplitErrors:
             )
 
 
-@pytest.mark.skipif(not _lib_exists, reason="libst2c not built")
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
 class TestKMeans:
     """Test k-means clustering functionality."""
 
@@ -324,7 +326,7 @@ class TestKMeans:
         assert set(labels).issubset({0, 1, 2, 3, 4})
 
 
-@pytest.mark.skipif(not _lib_exists, reason="libst2c not built")
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
 class TestKMeansInit:
     """Test k-means based Gaussian initialization."""
 

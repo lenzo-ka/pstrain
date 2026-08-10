@@ -1,6 +1,6 @@
 """Basic version test."""
 
-from st2 import __version__
+from pstrain import __version__
 
 
 def test_version() -> None:

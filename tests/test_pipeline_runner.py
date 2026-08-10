@@ -1,10 +1,10 @@
-"""Tests for st2.lib.pipeline.runner.
+"""Tests for pstrain.lib.pipeline.runner.
 
 Focus on the runner's behavior in isolation: dependency resolution, topo
 sort, staleness detection, dry-run output, and parallel fan-out execution.
 
 These tests use trivial file-touching tasks; they do not exercise any
-actual ST2 training code.
+actual pstrain training code.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from st2.lib.pipeline import Pipeline, Task, UnknownTargetError, runner
+from pstrain.lib.pipeline import Pipeline, Task, UnknownTargetError, runner
 
 
 def _touch(path: Path, contents: str = "") -> None:

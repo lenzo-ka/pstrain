@@ -1,0 +1,277 @@
+"""Model testing and WER evaluation."""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from pstrain.lib.model import MODEL_FILES_REQUIRED
+from pstrain.lib.testing.decoder import Decoder, check_pocketsphinx
+from pstrain.lib.testing.wer import WERResult, aggregate_wer, calculate_wer
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class TestResult:
+    """Result from model testing with all jiwer metrics.
+
+    Attributes:
+        model_dir: Path to the model directory tested
+        model_name: Name of the model (e.g., "cd-8g")
+        n_utterances: Number of test utterances
+        n_decoded: Number of successfully decoded utterances
+        wer_result: Aggregated WER metrics (source of truth for all WER fields)
+        timestamp: When the test was run
+        per_utterance: Per-utterance results (optional)
+    """
+
+    model_dir: Path
+    model_name: str
+    n_utterances: int
+    n_decoded: int
+    wer_result: WERResult
+    timestamp: datetime = field(default_factory=datetime.now)
+    per_utterance: dict[str, dict[str, Any]] | None = None
+
+    # Delegation properties for backward compatibility
+    @property
+    def wer(self) -> float:
+        return self.wer_result.wer
+
+    @property
+    def mer(self) -> float:
+        return self.wer_result.mer
+
+    @property
+    def wil(self) -> float:
+        return self.wer_result.wil
+
+    @property
+    def wip(self) -> float:
+        return self.wer_result.wip
+
+    @property
+    def hits(self) -> int:
+        return self.wer_result.hits
+
+    @property
+    def substitutions(self) -> int:
+        return self.wer_result.substitutions
+
+    @property
+    def deletions(self) -> int:
+        return self.wer_result.deletions
+
+    @property
+    def insertions(self) -> int:
+        return self.wer_result.insertions
+
+    @property
+    def ref_words(self) -> int:
+        return self.wer_result.ref_words
+
+    @property
+    def hyp_words(self) -> int:
+        return self.wer_result.hyp_words
+
+    @property
+    def cer(self) -> float | None:
+        return self.wer_result.cer
+
+    @property
+    def accuracy(self) -> float:
+        return self.wer_result.accuracy
+
+    @property
+    def errors(self) -> int:
+        return self.wer_result.errors
+
+    @property
+    def total_words(self) -> int:
+        return self.wer_result.total_words
+
+    @property
+    def correct(self) -> int:
+        return self.wer_result.correct
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        result = {
+            "model_dir": str(self.model_dir),
+            "model_name": self.model_name,
+            "n_utterances": self.n_utterances,
+            "n_decoded": self.n_decoded,
+            "timestamp": self.timestamp.isoformat(),
+            "per_utterance": self.per_utterance,
+        }
+        result.update(self.wer_result.to_dict())
+        return result
+
+
+def test_model(
+    model_dir: Path,
+    test_audio_dir: Path,
+    test_transcripts: dict[str, str],
+    dict_file: Path,
+    filler_dict: Path | None = None,
+    lm: Path | None = None,
+    verbose: bool = False,
+    compute_cer: bool = False,
+) -> TestResult:
+    """Test an acoustic model and calculate all WER metrics.
+
+    Args:
+        model_dir: Path to acoustic model directory
+        test_audio_dir: Directory containing test audio files
+        test_transcripts: Dict mapping utterance_id to reference transcript
+        dict_file: Path to pronunciation dictionary
+        filler_dict: Optional filler dictionary
+        lm: Optional language model (ARPA format)
+        verbose: Store per-utterance results
+        compute_cer: Also compute Character Error Rate
+
+    Returns:
+        TestResult with all jiwer metrics
+
+    Raises:
+        ImportError: If PocketSphinx not available
+        RuntimeError: If testing fails
+    """
+    model_dir = Path(model_dir)
+    test_audio_dir = Path(test_audio_dir)
+    dict_file = Path(dict_file)
+
+    # Check PocketSphinx availability
+    available, msg = check_pocketsphinx()
+    if not available:
+        raise ImportError(msg)
+
+    # Validate model directory
+    for fname in MODEL_FILES_REQUIRED:
+        if not (model_dir / fname).exists():
+            raise FileNotFoundError(f"Model file not found: {model_dir / fname}")
+
+    # Determine model name from directory
+    model_name = model_dir.parent.name if model_dir.name == "default" else model_dir.name
+
+    logger.info("Testing model: %s", model_dir)
+    logger.info("Test utterances: %d", len(test_transcripts))
+
+    # Initialize decoder
+    decoder = Decoder(
+        model_dir=model_dir,
+        dict_file=dict_file,
+        filler_dict=filler_dict,
+        lm=lm,
+    )
+
+    # Decode test utterances and calculate WER
+    wer_results: list[WERResult] = []
+    per_utterance: dict[str, dict[str, Any]] = {}
+    n_decoded = 0
+
+    for utt_id, reference in test_transcripts.items():
+        # Find audio file
+        audio_file = test_audio_dir / f"{utt_id}.wav"
+        if not audio_file.exists():
+            logger.warning("Audio file not found: %s", audio_file)
+            continue
+
+        # Decode
+        result = decoder.decode_file(audio_file)
+
+        if result.success:
+            n_decoded += 1
+            hypothesis = result.hypothesis
+
+            # Calculate WER for this utterance
+            wer_result = calculate_wer(reference, hypothesis, compute_cer=compute_cer)
+            wer_results.append(wer_result)
+
+            if verbose:
+                per_utterance[utt_id] = {
+                    "reference": reference,
+                    "hypothesis": hypothesis,
+                    "wer": wer_result.wer,
+                    "mer": wer_result.mer,
+                    "wil": wer_result.wil,
+                    "wip": wer_result.wip,
+                    "cer": wer_result.cer,
+                    "hits": wer_result.hits,
+                    "substitutions": wer_result.substitutions,
+                    "deletions": wer_result.deletions,
+                    "insertions": wer_result.insertions,
+                }
+        else:
+            logger.warning("Decoding failed for %s: %s", utt_id, result.error)
+
+    # Aggregate results
+    if wer_results:
+        total = aggregate_wer(wer_results)
+    else:
+        total = WERResult(
+            wer=1.0,
+            mer=1.0,
+            wil=1.0,
+            wip=0.0,
+            hits=0,
+            substitutions=0,
+            deletions=0,
+            insertions=0,
+            ref_words=0,
+            hyp_words=0,
+        )
+
+    logger.info("WER: %.2f%% (%d/%d decoded)", total.wer * 100, n_decoded, len(test_transcripts))
+
+    return TestResult(
+        model_dir=model_dir,
+        model_name=model_name,
+        n_utterances=len(test_transcripts),
+        n_decoded=n_decoded,
+        wer_result=total,
+        per_utterance=per_utterance if verbose else None,
+    )
+
+
+def load_transcripts(transcript_file: Path) -> dict[str, str]:
+    """Load transcripts from a Sphinx-format transcription file.
+
+    Format: <s> word word word </s> (utterance_id)
+
+    Args:
+        transcript_file: Path to transcription file
+
+    Returns:
+        Dict mapping utterance_id to transcript text
+    """
+    transcripts = {}
+
+    with transcript_file.open(encoding="utf-8", errors="replace") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+
+            # Parse: <s> text </s> (utt_id)
+            if line.startswith("<s>") and "(" in line:
+                # Extract utterance ID
+                paren_start = line.rfind("(")
+                paren_end = line.rfind(")")
+                if paren_start > 0 and paren_end > paren_start:
+                    utt_id = line[paren_start + 1 : paren_end].strip()
+
+                    # Extract text between <s> and </s>
+                    text_part = line[:paren_start].strip()
+                    if text_part.startswith("<s>"):
+                        text_part = text_part[3:]
+                    if text_part.endswith("</s>"):
+                        text_part = text_part[:-4]
+
+                    transcripts[utt_id] = text_part.strip()
+
+    return transcripts

@@ -9,12 +9,12 @@ import pytest
 import yaml
 from pytest import MonkeyPatch
 
-from st2.cli.cli import main
-from st2.lib.dictionary import Dictionary
-from st2.lib.phoneset import Phoneset
-from st2.lib.pipeline.context import DEFAULT_CONFIGS, PipelineContext
-from st2.lib.setup import setup_project
-from st2.lib.validate import validate_project
+from pstrain.cli.cli import main
+from pstrain.lib.dictionary import Dictionary
+from pstrain.lib.phoneset import Phoneset
+from pstrain.lib.pipeline.context import DEFAULT_CONFIGS, PipelineContext
+from pstrain.lib.setup import setup_project
+from pstrain.lib.validate import validate_project
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_arctic"
 
@@ -25,7 +25,7 @@ def test_setup_cli_creates_project_with_wideband_config(
     """The CLI delegates a complete setup to the library implementation."""
     project = tmp_path / "project"
     argv = [
-        "st2",
+        "pstrain",
         "setup",
         str(project),
         "--transcription",
@@ -110,7 +110,7 @@ def test_complete_fresh_setup_validates_before_split(
 ) -> None:
     project = tmp_path / "project"
     args = [
-        "st2",
+        "pstrain",
         "setup",
         str(project),
         "--transcription",
@@ -128,7 +128,7 @@ def test_complete_fresh_setup_validates_before_split(
     assert main() == 0
     report = validate_project(project)
     assert report.is_valid
-    assert "Split outputs are missing; run st2 split" in report.warnings
+    assert "Split outputs are missing; run pstrain split" in report.warnings
     assert (project / "experiments" / "default" / "etc").is_dir()
 
 
@@ -137,7 +137,7 @@ def test_setup_dry_run_describes_link_and_creates_nothing(
 ) -> None:
     project = tmp_path / "project"
     args = [
-        "st2",
+        "pstrain",
         "setup",
         str(project),
         "--audio",
@@ -167,7 +167,7 @@ def test_setup_missing_config_errors(tmp_path: Path, monkeypatch: MonkeyPatch) -
         setup_project(project, config_path=missing)
     assert not project.exists()
 
-    monkeypatch.setattr(sys, "argv", ["st2", "setup", str(project), "--config", str(missing)])
+    monkeypatch.setattr(sys, "argv", ["pstrain", "setup", str(project), "--config", str(missing)])
     assert main() == 1
     assert not project.exists()
 
@@ -180,7 +180,7 @@ def test_setup_dry_run_missing_dictionary_errors_without_creating_project(
     monkeypatch.setattr(
         sys,
         "argv",
-        ["st2", "setup", str(project), "--dictionary", str(missing), "--dry-run"],
+        ["pstrain", "setup", str(project), "--dictionary", str(missing), "--dry-run"],
     )
 
     assert main() == 1
@@ -197,7 +197,7 @@ def test_setup_cli_rejects_transcription_directory_without_creating_project(
     transcription_dir = tmp_path / "transcription"
     transcription_dir.mkdir()
     project = tmp_path / "project"
-    argv = ["st2", "setup", str(project), "--transcription", str(transcription_dir)]
+    argv = ["pstrain", "setup", str(project), "--transcription", str(transcription_dir)]
     if dry_run:
         argv.append("--dry-run")
     monkeypatch.setattr(sys, "argv", argv)
@@ -212,7 +212,7 @@ def test_setup_cli_accepts_audio_directory(tmp_path: Path, monkeypatch: MonkeyPa
     audio_dir.mkdir()
     (audio_dir / "sample.wav").write_bytes(b"audio")
     project = tmp_path / "project"
-    monkeypatch.setattr(sys, "argv", ["st2", "setup", str(project), "--audio", str(audio_dir)])
+    monkeypatch.setattr(sys, "argv", ["pstrain", "setup", str(project), "--audio", str(audio_dir)])
 
     assert main() == 0
     assert (project / "audio" / "sample.wav").read_bytes() == b"audio"
@@ -291,7 +291,7 @@ def test_validate_corpusless_project_is_invalid(tmp_path: Path) -> None:
 
     assert not report.is_valid
     assert "no transcription; project has no corpus to train on" in report.errors
-    assert "Split outputs are missing; run st2 split" not in report.warnings
+    assert "Split outputs are missing; run pstrain split" not in report.warnings
 
 
 def test_validate_empty_transcription_is_invalid(tmp_path: Path) -> None:
@@ -303,7 +303,7 @@ def test_validate_empty_transcription_is_invalid(tmp_path: Path) -> None:
 
     assert not report.is_valid
     assert "no transcription; project has no corpus to train on" in report.errors
-    assert "Split outputs are missing; run st2 split" not in report.warnings
+    assert "Split outputs are missing; run pstrain split" not in report.warnings
 
 
 def test_validate_partial_split_is_invalid(tmp_path: Path) -> None:

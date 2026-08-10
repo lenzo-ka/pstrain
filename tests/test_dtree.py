@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from st2.lib import dtree
+from pstrain.lib import dtree
 
 # Check if library exists
-# libst2c availability comes from the shared helper (real loader-based
+# libpstrainc availability comes from the shared helper (real loader-based
 # detection); see tests/clib.py.
 from tests.clib import C_LIBRARY_AVAILABLE as _lib_exists
 
@@ -72,7 +72,7 @@ QUESTION1 AE
         assert "QUESTION1" in result
 
 
-@pytest.mark.skipif(not _lib_exists, reason="libst2c not built")
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
 class TestMakeQuests:
     """Tests for phonetic question generation."""
 
@@ -104,7 +104,7 @@ class TestMakeQuests:
         pass
 
 
-@pytest.mark.skipif(not _lib_exists, reason="libst2c not built")
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
 class TestBuildTree:
     """Tests for decision tree building."""
 
@@ -132,7 +132,7 @@ class TestBuildTree:
             )
 
 
-@pytest.mark.skipif(not _lib_exists, reason="libst2c not built")
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
 class TestTieStates:
     """Tests for state tying."""
 
@@ -155,7 +155,7 @@ class TestTieStates:
             assert "not yet implemented" in str(e).lower() or "Failed" in str(e)
 
 
-@pytest.mark.skipif(not _lib_exists, reason="libst2c not built")
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
 class TestPruneTree:
     """Tests for decision tree pruning."""
 

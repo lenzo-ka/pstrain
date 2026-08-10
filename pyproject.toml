@@ -1,14 +1,14 @@
 [project]
-name = "st2"
+name = "pstrain"
 version = "0.1.0"
-description = "ST2 - Acoustic model training toolkit"
+description = "pstrain, the Peace Train - acoustic model training toolkit"
 readme = "README.md"
 license = {text = "BSD-2-Clause"}
 requires-python = ">=3.11"
 authors = [
     { name = "Kevin Lenzo", email = "kevinlenzo@gmail.com" }
 ]
-keywords = ["speech", "acoustic-model", "hmm", "training", "sphinx"]
+keywords = ["pstrain", "speech", "acoustic-model", "hmm", "training", "pocketsphinx", "sphinx"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -32,11 +32,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Forced alignment runs entirely against libst2c via CFFI; no extra
+# Forced alignment runs entirely against libpstrainc via CFFI; no extra
 # Python dependencies are required beyond the core ones.
 align = []
 # PocketSphinx is needed only by the unconstrained-decoding path used
-# by `st2 test` (st2.lib.testing.decoder). Forced alignment does not
+# by `pstrain test` (pstrain.lib.testing.decoder). Forced alignment does not
 # touch it.
 test = [
     "pocketsphinx>=5.0.0",
@@ -55,15 +55,15 @@ docs = [
     "myst-parser>=1.0",
 ]
 all = [
-    "st2[align,test,dev,docs]",
+    "pstrain[align,test,dev,docs]",
 ]
 
 [project.scripts]
-st2 = "st2.cli:main"
+pstrain = "pstrain.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/lenzo-ka/st2"
-Repository = "https://github.com/lenzo-ka/st2"
+Homepage = "https://github.com/lenzo-ka/pstrain"
+Repository = "https://github.com/lenzo-ka/pstrain"
 
 [build-system]
 requires = ["scikit-build-core>=0.8"]
@@ -72,9 +72,9 @@ build-backend = "scikit_build_core.build"
 [tool.scikit-build]
 build.verbose = true
 logging.level = "INFO"
-wheel.packages = ["st2"]
-# Install library and binaries to st2/_lib/
-wheel.install-dir = "st2/_lib"
+wheel.packages = ["pstrain"]
+# Install library and binaries to pstrain/_lib/
+wheel.install-dir = "pstrain/_lib"
 # Require cmake 3.15+ for scikit-build-core
 cmake.version = ">=3.15"
 
@@ -94,14 +94,14 @@ skip = [
     "*-musllinux*",
 ]
 # Test the built wheels
-# Smoke-test the *installed* wheel: import it and load the bundled libst2c.
+# Smoke-test the *installed* wheel: import it and load the bundled libpstrainc.
 # We deliberately do NOT run `pytest {project}/tests` here — pytest inserts the
-# project root onto sys.path, which imports the source `st2/` package (no
+# project root onto sys.path, which imports the source `pstrain/` package (no
 # bundled library) instead of the wheel, so every CFFI test would "not find
-# libst2c". Running `python -c` from cibuildwheel's neutral working directory
+# libpstrainc". Running `python -c` from cibuildwheel's neutral working directory
 # imports the installed wheel and verifies the C substrate loads. The full
 # test suite (including parity) runs against a dev build in the Tests workflow.
-test-command = "python -c \"import st2; from st2.lib import _st2c; _st2c.get_lib(); print('wheel OK', st2.__version__)\""
+test-command = "python -c \"import pstrain; from pstrain.lib import _pstrainc; _pstrainc.get_lib(); print('wheel OK', pstrain.__version__)\""
 
 [tool.cibuildwheel.macos]
 archs = ["x86_64", "arm64"]
@@ -141,7 +141,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["st2"]
+known-first-party = ["pstrain"]
 
 [tool.mypy]
 # Target 3.12 so mypy can parse modern third-party stubs (e.g. NumPy's use of

@@ -6,7 +6,7 @@ and asserts it produces a valid, finite CI acoustic model.
 
 This is the safety net Phase 1 exists to provide: a PR that breaks BW
 training, flat init, or feature extraction turns this test red. Everything
-here runs in-process against libst2c via CFFI (no CLI binaries needed), so
+here runs in-process against libpstrainc via CFFI (no CLI binaries needed), so
 the only requirement is a built C library.
 """
 
@@ -60,9 +60,9 @@ def _mdef_senone_assignments(path: Path) -> tuple[list[int], list[int]]:
 @requires_c_library
 def test_build_ci_1g_produces_finite_model(tmp_path: Path) -> None:
     """features → flat → ci-1g yields a finite, converged CI model."""
-    from st2.lib.pipeline import PipelineContext
-    from st2.lib.pipeline.tasks import build_pipeline
-    from st2.lib.setup import setup_project
+    from pstrain.lib.pipeline import PipelineContext
+    from pstrain.lib.pipeline.tasks import build_pipeline
+    from pstrain.lib.setup import setup_project
 
     project_dir = tmp_path / "proj"
 
@@ -86,11 +86,11 @@ def test_build_ci_1g_produces_finite_model(tmp_path: Path) -> None:
     # Every model parameter must be finite. Unobserved/degenerate states are
     # the classic way BW produces NaN/inf; this is the assertion that catches
     # a broken trainer or a phoneset with untrained phones.
-    from st2.lib import _st2c
+    from pstrain.lib import _pstrainc
 
-    means = _st2c.read_gau(str(model_dir / "means"))[0]
-    variances = _st2c.read_gau(str(model_dir / "variances"))[0]
-    mixw = _st2c.read_mixw(str(model_dir / "mixture_weights"))[0]
+    means = _pstrainc.read_gau(str(model_dir / "means"))[0]
+    variances = _pstrainc.read_gau(str(model_dir / "variances"))[0]
+    mixw = _pstrainc.read_mixw(str(model_dir / "mixture_weights"))[0]
 
     assert np.isfinite(means).all(), "non-finite values in means"
     assert np.isfinite(variances).all(), "non-finite values in variances"
@@ -103,9 +103,9 @@ def test_build_ci_1g_produces_finite_model(tmp_path: Path) -> None:
 @requires_c_library
 def test_features_extracted_for_every_utterance(tmp_path: Path) -> None:
     """Feature extraction fans out to one .mfc per fixture utterance."""
-    from st2.lib.pipeline import PipelineContext
-    from st2.lib.pipeline.tasks import build_pipeline
-    from st2.lib.setup import setup_project
+    from pstrain.lib.pipeline import PipelineContext
+    from pstrain.lib.pipeline.tasks import build_pipeline
+    from pstrain.lib.setup import setup_project
 
     project_dir = tmp_path / "proj"
     setup_project(
@@ -129,11 +129,11 @@ def test_features_extracted_for_every_utterance(tmp_path: Path) -> None:
 @requires_c_library
 def test_build_cd_1g_produces_genuine_tied_model(tmp_path: Path) -> None:
     """The complete CI → CD pipeline builds real trees and a valid tied model."""
-    from st2.lib import _st2c
-    from st2.lib.pipeline import PipelineContext
-    from st2.lib.pipeline.tasks import build_pipeline
-    from st2.lib.setup import setup_project
-    from st2.lib.steps.cd_pipeline import filter_tree_phones
+    from pstrain.lib import _pstrainc
+    from pstrain.lib.pipeline import PipelineContext
+    from pstrain.lib.pipeline.tasks import build_pipeline
+    from pstrain.lib.setup import setup_project
+    from pstrain.lib.steps.cd_pipeline import filter_tree_phones
 
     project_dir = tmp_path / "proj"
     setup_project(
@@ -195,13 +195,13 @@ def test_build_cd_1g_produces_genuine_tied_model(tmp_path: Path) -> None:
     assert actual_cd_senones == expected_cd_senones, "CD senones do not cover the tied-state range"
 
     model_dir = ctx.model_dir("cd-1g")
-    means, n_mgau, n_feat, n_density, veclen = _st2c.read_gau(str(model_dir / "means"))
-    ci_means_info = _st2c.read_gau(str(ctx.model_dir("ci-1g") / "means"))
-    variances = _st2c.read_gau(str(model_dir / "variances"))[0]
-    mixw, n_mixw, mixw_feat, mixw_density = _st2c.read_mixw(str(model_dir / "mixture_weights"))
-    transition_matrices, n_tmat, n_state = _st2c.read_tmat(str(model_dir / "transition_matrices"))[
-        :3
-    ]
+    means, n_mgau, n_feat, n_density, veclen = _pstrainc.read_gau(str(model_dir / "means"))
+    ci_means_info = _pstrainc.read_gau(str(ctx.model_dir("ci-1g") / "means"))
+    variances = _pstrainc.read_gau(str(model_dir / "variances"))[0]
+    mixw, n_mixw, mixw_feat, mixw_density = _pstrainc.read_mixw(str(model_dir / "mixture_weights"))
+    transition_matrices, n_tmat, n_state = _pstrainc.read_tmat(
+        str(model_dir / "transition_matrices")
+    )[:3]
 
     assert (n_mgau, n_mixw) == (tied_senones, tied_senones)
     assert (n_feat, n_density, veclen) == ci_means_info[2:]

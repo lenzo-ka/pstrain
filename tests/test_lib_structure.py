@@ -2,9 +2,9 @@
 
 import pytest
 
-from st2 import __version__
+from pstrain import __version__
 
-# libst2c availability comes from the shared helper (real loader-based
+# libpstrainc availability comes from the shared helper (real loader-based
 # detection); see tests/clib.py.
 from tests.clib import c_library_available as _lib_exists
 
@@ -16,23 +16,23 @@ def test_version() -> None:
 
 def test_lib_public_api() -> None:
     """Test that public API functions are available."""
-    from st2.lib import (
+    from pstrain.lib import (
         ConfigManager,
-        ST2Config,
+        PstrainConfig,
         setup_project,
         validate_project,
     )
 
-    assert ST2Config is not None
+    assert PstrainConfig is not None
     assert ConfigManager is not None
     assert callable(setup_project)
     assert callable(validate_project)
 
 
 @pytest.mark.skipif(not _lib_exists(), reason="C library not built")
-def test_st2c_bindings() -> None:
+def test_pstrainc_bindings() -> None:
     """Test that C bindings work (requires built library)."""
-    from st2.lib._st2c import get_ffi, get_lib
+    from pstrain.lib._pstrainc import get_ffi, get_lib
 
     ffi = get_ffi()
     lib = get_lib()
@@ -44,7 +44,7 @@ def test_st2c_bindings() -> None:
 @pytest.mark.skipif(not _lib_exists(), reason="C library not built")
 def test_lib_singleton() -> None:
     """Test that get_lib returns the same instance."""
-    from st2.lib._st2c import get_lib
+    from pstrain.lib._pstrainc import get_lib
 
     lib1 = get_lib()
     lib2 = get_lib()
@@ -54,7 +54,7 @@ def test_lib_singleton() -> None:
 @pytest.mark.skipif(not _lib_exists(), reason="C library not built")
 def test_ffi_singleton() -> None:
     """Test that get_ffi returns the same instance."""
-    from st2.lib._st2c import get_ffi
+    from pstrain.lib._pstrainc import get_ffi
 
     ffi1 = get_ffi()
     ffi2 = get_ffi()
@@ -64,7 +64,7 @@ def test_ffi_singleton() -> None:
 @pytest.mark.skipif(not _lib_exists(), reason="C library not built")
 def test_library_has_functions() -> None:
     """Test that the library has expected functions."""
-    from st2.lib._st2c import get_lib
+    from pstrain.lib._pstrainc import get_lib
 
     lib = get_lib()
     # Check for some key functions
@@ -79,7 +79,7 @@ def test_library_has_functions() -> None:
 @pytest.mark.skipif(not _lib_exists(), reason="C library not built")
 def test_ffi_can_create_types() -> None:
     """Test that FFI can create C types."""
-    from st2.lib._st2c import get_ffi
+    from pstrain.lib._pstrainc import get_ffi
 
     ffi = get_ffi()
     # Create some basic types
