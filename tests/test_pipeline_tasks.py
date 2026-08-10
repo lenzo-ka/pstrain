@@ -13,6 +13,8 @@ import shutil
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 import yaml
@@ -566,3 +568,81 @@ def test_bw_config_multipron_default_on() -> None:
 
     assert BWConfig().multipron is True
     assert BWConfig(multipron=False).multipron is False
+
+
+def test_configured_bw_parameters_reach_training_call(
+    empty_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The public training profile must drive the actual BW call."""
+    from pstrain.lib.steps.train import TrainingResult
+
+    (empty_project / "etc" / "configs.yaml").write_text(
+        "default:\n  training:\n    a_beam: 1e-123\n    b_beam: 1e-9\n"
+        "    convergence_ratio: 0.004\n    max_skip_fraction: 0.02\n"
+    )
+    ctx = PipelineContext.from_config(empty_project)
+    flat = ctx.model_dir("flat")
+    flat.mkdir(parents=True)
+    for name in ("mdef", "means", "variances", "mixture_weights", "transition_matrices"):
+        (flat / name).write_text(name)
+
+    captured: dict[str, object] = {}
+
+    class FakeFFI:
+        NULL = None
+
+        @staticmethod
+        def new(cdecl: str) -> SimpleNamespace:
+            assert cdecl == "pstrain_bw_config_t *"
+            return SimpleNamespace()
+
+    class FakeLib:
+        def pstrain_bw_init(self, *args: object) -> object:
+            captured["c_config"] = args[-1]
+            return object()
+
+        @staticmethod
+        def pstrain_bw_set_multipron(ctx: object, enabled: int) -> int:
+            return 0
+
+        @staticmethod
+        def pstrain_bw_free(ctx: object) -> None:
+            pass
+
+    monkeypatch.setattr("pstrain.lib._pstrainc._init", lambda: (FakeFFI(), FakeLib()))
+
+    def fake_bw(**kwargs: object) -> TrainingResult:
+        from pstrain.lib.bw import BWTrainer
+
+        captured.update(kwargs)
+        model = Path(kwargs["model_dir"])  # type: ignore[arg-type]
+        trainer = BWTrainer(
+            model / "mdef",
+            model / "means",
+            model / "variances",
+            model / "mixture_weights",
+            model / "transition_matrices",
+            config=kwargs["config"],  # type: ignore[arg-type]
+        )
+        del trainer
+        output = Path(kwargs["output_dir"])  # type: ignore[arg-type]
+        output.mkdir(parents=True, exist_ok=True)
+        for name in ("means", "variances", "mixture_weights", "transition_matrices"):
+            (output / name).write_text(name)
+        return TrainingResult(1, False, -1.0, 1, 1)
+
+    monkeypatch.setattr("pstrain.lib.steps.train.run_bw_training", fake_bw)
+    tasks = build_pipeline(ctx).tasks()
+    tasks["provenance:training"].fn()
+    tasks["ci-1g"].fn()
+
+    config: Any = captured["config"]
+    assert config.a_beam == 1e-123
+    assert config.b_beam == 1e-9
+    assert config.topn == 1
+    c_config: Any = captured["c_config"]
+    assert c_config.a_beam == 1e-123
+    assert c_config.b_beam == 1e-9
+    assert c_config.topn == 1
+    assert captured["convergence_ratio"] == 0.004
+    assert captured["max_skip_fraction"] == 0.02

@@ -25,16 +25,10 @@ class CIHMMStep(Step):
     description = "Train context-independent HMM models using Baum-Welch"
     script = "bw"
 
-    default_params = {
-        "max_iterations": 10,
-        "min_iterations": 3,
-        "convergence_threshold": 0.001,
-        "topn": 1,
-        "abeam": 1e-90,
-        "bbeam": 1e-10,
-        "varfloor": 1e-4,
-        "mixw_floor": 1e-8,
-    }
+    # Training parameters belong to PipelineContext/TrainParams.  This legacy
+    # step delegates to the pipeline and therefore must not advertise a second,
+    # ignored parameter surface.
+    default_params: dict[str, Any] = {}
 
     def get_inputs(self, ctx: StepContext) -> list[Path]:
         """Get input files for CI HMM training."""
@@ -67,43 +61,11 @@ class CIHMMStep(Step):
     def add_arguments(self, parser: argparse.ArgumentParser) -> None:
         """Add CI HMM specific arguments."""
         super().add_arguments(parser)
-        parser.add_argument(
-            "--max-iterations",
-            type=int,
-            default=self.default_params["max_iterations"],
-            help=f"Maximum training iterations (default: {self.default_params['max_iterations']})",
-        )
-        parser.add_argument(
-            "--min-iterations",
-            type=int,
-            default=self.default_params["min_iterations"],
-            help=f"Minimum iterations before convergence check (default: {self.default_params['min_iterations']})",
-        )
-        parser.add_argument(
-            "--convergence-threshold",
-            type=float,
-            default=self.default_params["convergence_threshold"],
-            help=f"Convergence threshold (default: {self.default_params['convergence_threshold']})",
-        )
-        parser.add_argument(
-            "--topn",
-            type=int,
-            default=self.default_params["topn"],
-            help=f"Top N Gaussians (default: {self.default_params['topn']})",
-        )
 
     def get_params_from_args(self, args: argparse.Namespace) -> dict[str, Any]:
         """Extract training parameters from args."""
-        return {
-            "max_iterations": args.max_iterations,
-            "min_iterations": args.min_iterations,
-            "convergence_threshold": args.convergence_threshold,
-            "topn": args.topn,
-            "abeam": self.default_params["abeam"],
-            "bbeam": self.default_params["bbeam"],
-            "varfloor": self.default_params["varfloor"],
-            "mixw_floor": self.default_params["mixw_floor"],
-        }
+        del args
+        return {}
 
     def execute(self, ctx: StepContext, **params: Any) -> int:
         """Execute CI HMM training by delegating to the pipeline runner.

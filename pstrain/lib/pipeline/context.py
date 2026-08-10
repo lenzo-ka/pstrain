@@ -96,6 +96,23 @@ class TrainParams:
     n_state: int = 3
     n_senones: int = 200
     max_iterations: int = 10
+    a_beam: float = 1e-90
+    b_beam: float = 1e-10
+    # Kept at 0.001: A7 measurement found that using SphinxTrain's literal
+    # 0.1 in pstrain's relative-likelihood criterion worsens WER.
+    convergence_ratio: float = 0.001
+    # Warn on every skipped update; fail a stage above five percent.
+    max_skip_fraction: float = 0.05
+    # Tuned by SphinxTrain scripts/40.buildtrees/buildtree.pl for 3-state HMMs.
+    tree_state_weights: tuple[float, ...] = (1.0, 0.05, 0.0)
+    tree_ssplitmax: int = 7
+    tree_ssplitthr: float = 0.0
+    tree_csplitmax: int = 2000
+    tree_csplitthr: float = 0.0
+    tree_mwfloor: float = 1e-8
+    question_npermute: int = 12
+    question_quests_per_state: int = 20
+    question_niter: int = 1
     # Multi-pronunciation training: build wide utterance graphs that
     # sum Baum-Welch posteriors across pronunciation variants. On by
     # default; set to False to fall back to the legacy linear path that
@@ -220,6 +237,24 @@ def _validate_params(
         raise ValueError(f"unknown {parameter} parameter {unknown[0]!r} in profile {profile!r}")
 
 
+def _coerce_dataclass_values(values: dict[str, Any], params_type: type[Any]) -> dict[str, Any]:
+    """Coerce YAML scalars to the runtime types of dataclass defaults."""
+    defaults = params_type()
+    coerced = dict(values)
+    for item in fields(params_type):
+        if item.name not in coerced:
+            continue
+        default = getattr(defaults, item.name)
+        value = coerced[item.name]
+        if isinstance(default, tuple):
+            coerced[item.name] = tuple(value)
+        elif isinstance(default, float):
+            coerced[item.name] = float(value)
+        elif isinstance(default, int) and not isinstance(default, bool):
+            coerced[item.name] = int(value)
+    return coerced
+
+
 def load_configs(project_dir: Path) -> dict[str, dict[str, Any]]:
     """Load named configurations from `project_dir/etc/configs.yaml`,
     merged on top of the built-in defaults."""
@@ -271,9 +306,9 @@ class PipelineContext:
             experiment=experiment,
             config_name=config_name,
             description=cfg.get("description", ""),
-            feat=FeatParams(**feature_values),
-            train=TrainParams(**training_values),
-            split=SplitParams(**split_values),
+            feat=FeatParams(**_coerce_dataclass_values(feature_values, FeatParams)),
+            train=TrainParams(**_coerce_dataclass_values(training_values, TrainParams)),
+            split=SplitParams(**_coerce_dataclass_values(split_values, SplitParams)),
         )
 
     @property
@@ -358,7 +393,7 @@ class PipelineContext:
 
     def provenance_document(self, stage: str) -> dict[str, Any]:
         """Serializable provenance, including its effective-config fingerprint."""
-        payload = self.provenance_payload(stage)
+        payload = json.loads(json.dumps(self.provenance_payload(stage), allow_nan=False))
         fingerprint = self.provenance_path(stage).stem.removeprefix(f"{stage}-")
         document = {"fingerprint": fingerprint, **payload}
         lib_path = get_lib_path()

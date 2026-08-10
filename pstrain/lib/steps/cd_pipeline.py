@@ -302,6 +302,9 @@ def run_make_questions(
     ci_model_dir: Path,
     output_path: Path,
     continuous: bool = True,
+    npermute: int = 12,
+    quests_per_state: int = 20,
+    niter: int = 1,
 ) -> Path:
     """Generate phonetic questions for decision tree building.
 
@@ -328,6 +331,9 @@ def run_make_questions(
         mean_path=ci_model_dir / "means" if continuous else None,
         var_path=ci_model_dir / "variances" if continuous else None,
         continuous=continuous,
+        npermute=npermute,
+        quests_per_state=quests_per_state,
+        niter=niter,
     )
 
     logger.info("Generated questions: %s", output_path)
@@ -357,6 +363,12 @@ def build_tree_one(
     phone: str,
     state: int,
     continuous: bool = True,
+    state_weights: tuple[float, ...] = (1.0, 0.05, 0.0),
+    ssplitmax: int = 7,
+    ssplitthr: float = 0.0,
+    csplitmax: int = 2000,
+    csplitthr: float = 0.0,
+    mwfloor: float = 1e-8,
 ) -> None:
     """Build a single decision tree file for one (phone, state).
 
@@ -375,6 +387,14 @@ def build_tree_one(
             mean_path=untied_model_dir / "means" if continuous else None,
             var_path=untied_model_dir / "variances" if continuous else None,
             continuous=continuous,
+            # Tuned 3-state vector and split recipe from SphinxTrain's
+            # scripts/40.buildtrees/buildtree.pl.
+            state_weights=np.asarray(state_weights, dtype=np.float32),
+            ssplitmax=ssplitmax,
+            ssplitthr=ssplitthr,
+            csplitmax=csplitmax,
+            csplitthr=csplitthr,
+            mwfloor=mwfloor,
         )
     except RuntimeError as exc:
         logger.warning("Failed to build tree for %s state %d: %s", phone, state, exc)

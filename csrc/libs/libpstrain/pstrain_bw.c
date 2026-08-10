@@ -105,6 +105,7 @@ struct pstrain_bw_context_s {
     /* Config */
     float64 a_beam;
     float64 b_beam;
+    uint32 topn;
     float32 spthresh;
     int32 mixw_reest;
     int32 tmat_reest;
@@ -136,6 +137,7 @@ pstrain_bw_init(const char *mdef_path,
     /* Set config with defaults */
     ctx->a_beam = config ? config->a_beam : 1e-90;
     ctx->b_beam = config ? config->b_beam : 1e-10;  /* SphinxTrain default */
+    ctx->topn = config ? config->topn : 1;
     ctx->spthresh = config ? config->spthresh : 0.0;
     ctx->mixw_reest = config ? config->mixw_reest : 1;
     ctx->tmat_reest = config ? config->tmat_reest : 1;
@@ -206,9 +208,10 @@ pstrain_bw_init(const char *mdef_path,
         goto error;
     }
 
-    /* Read Gaussians - use topn=1 since we typically have 1 density for flat models */
+    /* Larger topn evaluates more densities.  Upstream uses every density for
+     * CI and CD-tied BW, and one density for CD-untied BW. */
     E_INFO("Reading Gaussians from %s and %s\n", means_path, vars_path);
-    if (mod_inv_read_gauden(ctx->inv, means_path, vars_path, 0.0001, 1, 0) != S3_SUCCESS) {
+    if (mod_inv_read_gauden(ctx->inv, means_path, vars_path, 0.0001, ctx->topn, 0) != S3_SUCCESS) {
         E_ERROR("Failed to read Gaussians\n");
         goto error;
     }

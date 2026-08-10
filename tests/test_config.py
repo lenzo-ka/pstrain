@@ -71,8 +71,22 @@ class TestTrainingConfig:
         """Test nested CI training config."""
         cfg = TrainingConfig()
         assert cfg.ci.n_gaussians == 1
-        assert cfg.ci.n_iterations == 10
-        assert cfg.ci.min_iterations >= 1
+        # This legacy schema is not consumed by the pipeline, so it must not
+        # declare engine knobs that would be silently ignored.
+        assert not hasattr(cfg.ci, "n_iterations")
+        assert not hasattr(cfg.ci, "abeam")
+
+    def test_removed_training_knob_fails_with_migration_hint(self, tmp_path: Path) -> None:
+        """Legacy engine knobs must not load and then disappear silently."""
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("training:\n  ci:\n    abeam: 1e-100\n")
+
+        with pytest.raises(ValueError) as exc_info:
+            PstrainConfig.from_yaml(config_path)
+
+        message = str(exc_info.value)
+        assert "abeam" in message
+        assert "etc/configs.yaml" in message
 
 
 class TestPstrainConfig:

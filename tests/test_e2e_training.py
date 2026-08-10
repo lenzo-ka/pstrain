@@ -12,6 +12,7 @@ the only requirement is a built C library.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -127,8 +128,8 @@ def test_features_extracted_for_every_utterance(tmp_path: Path) -> None:
 
 
 @requires_c_library
-def test_build_cd_1g_produces_genuine_tied_model(tmp_path: Path) -> None:
-    """The complete CI → CD pipeline builds real trees and a valid tied model."""
+def test_build_cd_8g_produces_genuine_tied_model(tmp_path: Path) -> None:
+    """The complete CI → CD pipeline builds trees and trains all 8 densities."""
     from pstrain.lib import _pstrainc
     from pstrain.lib.pipeline import PipelineContext
     from pstrain.lib.pipeline.tasks import build_pipeline
@@ -146,9 +147,12 @@ def test_build_cd_1g_produces_genuine_tied_model(tmp_path: Path) -> None:
     )
 
     ctx = PipelineContext.from_config(project_dir)
+    # A8's saved-stage beam regression uses this deliberately wide value;
+    # the public/upstream-compatible default remains 1e-90.
+    ctx = replace(ctx, train=replace(ctx.train, a_beam=1e-200))
     # Measured locally at 1.7 seconds (Apple M-series, Python 3.12, jobs=2).
-    rc = build_pipeline(ctx).run("cd-1g", jobs=2)
-    assert rc == 0, "pipeline run of cd-1g failed"
+    rc = build_pipeline(ctx).run("cd-8g", jobs=2)
+    assert rc == 0, "pipeline run of cd-8g failed"
 
     for stage in ("cd-untied", "cd-1g-init", "cd-1g"):
         for name in MODEL_FILES:
@@ -213,5 +217,11 @@ def test_build_cd_1g_produces_genuine_tied_model(tmp_path: Path) -> None:
     assert np.isfinite(means).all()
     assert np.isfinite(variances).all()
     assert np.isfinite(mixw).all()
+
+    counts, _, _, n_density = _pstrainc.read_dnom(str(ctx.model_dir("cd-8g") / "gauden_counts"))
+    assert n_density == 8
+    # topn=1 can update only one density for each state.  This assertion
+    # proves the tied-stage BW pass accumulates posterior mass in several.
+    assert np.any(np.count_nonzero(counts > 0, axis=2) > 1)
     assert (variances > 0).all()
     np.testing.assert_allclose(mixw.sum(axis=-1), 1.0, rtol=1e-5, atol=1e-6)

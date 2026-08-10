@@ -26,16 +26,7 @@ class CDHMMUntiedStep(Step):
     description = "Train context-dependent untied HMM models using Baum-Welch"
     script = "bw"
 
-    default_params: dict[str, Any] = {
-        "max_iterations": 10,
-        "min_iterations": 3,
-        "convergence_threshold": 0.001,
-        "topn": 4,
-        "abeam": 1e-90,
-        "bbeam": 1e-10,
-        "varfloor": 1e-4,
-        "mixw_floor": 1e-8,
-    }
+    default_params: dict[str, Any] = {}
 
     def get_inputs(self, ctx: StepContext) -> list[Path]:
         """Get input files for CD HMM untied training."""
@@ -66,18 +57,6 @@ class CDHMMUntiedStep(Step):
     def add_arguments(self, parser: argparse.ArgumentParser) -> None:
         """Add CD HMM untied specific arguments."""
         super().add_arguments(parser)
-        parser.add_argument(
-            "--max-iterations",
-            type=int,
-            default=self.default_params["max_iterations"],
-            help=f"Maximum iterations (default: {self.default_params['max_iterations']})",
-        )
-        parser.add_argument(
-            "--topn",
-            type=int,
-            default=self.default_params["topn"],
-            help=f"Top N Gaussians (default: {self.default_params['topn']})",
-        )
 
     def execute(self, ctx: StepContext, **params: Any) -> int:
         """Execute CD HMM untied training by delegating to the pipeline runner.

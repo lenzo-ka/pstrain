@@ -17,7 +17,8 @@ extern "C" {
  */
 typedef struct pstrain_bw_config_s {
     float64 a_beam;      /**< Forward beam (default: 1e-90) */
-    float64 b_beam;      /**< Backward beam (default: 1e-90) */
+    float64 b_beam;      /**< Backward beam (default: 1e-10) */
+    uint32 topn;         /**< Gaussians evaluated per codebook (default: 1) */
     float32 spthresh;    /**< State pruning threshold (default: 0) */
     int32 mixw_reest;    /**< Re-estimate mixture weights (default: 1) */
     int32 tmat_reest;    /**< Re-estimate transition matrices (default: 1) */

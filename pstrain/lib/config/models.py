@@ -15,7 +15,28 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+class StrictPipelineConfig(BaseModel):
+    """Reject stale keys in config sections mirrored by the active pipeline."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_unknown_keys(cls, data: Any) -> Any:
+        """Point legacy configuration users at the active profile schema."""
+        if isinstance(data, dict):
+            unknown = sorted(set(data) - set(cls.model_fields))
+            if unknown:
+                keys = ", ".join(repr(key) for key in unknown)
+                raise ValueError(
+                    f"unknown configuration key(s) {keys}; move active feature/training "
+                    "settings to a named profile in etc/configs.yaml and use its current "
+                    "parameter names"
+                )
+        return data
 
 
 class ParallelConfig(BaseModel):
@@ -57,7 +78,7 @@ class AudioConfig(BaseModel):
         return v
 
 
-class FeatureConfig(BaseModel):
+class FeatureConfig(StrictPipelineConfig):
     """Feature extraction configuration.
 
     These parameters control sphinx_fe. They are passed via CLI args,
@@ -157,64 +178,26 @@ class FeatureConfig(BaseModel):
         ]
 
 
-class CITrainingConfig(BaseModel):
+class CITrainingConfig(StrictPipelineConfig):
     """CI (context-independent, monophone) training configuration."""
 
     n_gaussians: int = Field(1, ge=1, description="Initial number of Gaussians per state")
-    n_iterations: int = Field(10, ge=1, le=100, description="Maximum training iterations")
-    convergence_threshold: float = Field(
-        0.001, gt=0, description="Convergence threshold (fractional log-likelihood improvement)"
-    )
-    min_iterations: int = Field(
-        1, ge=1, description="Minimum iterations before checking convergence"
-    )
-
-    # Beams
-    abeam: float = Field(1e-90, gt=0, description="Alpha beam for BW forward pass")
-    bbeam: float = Field(1e-10, gt=0, description="Beta beam for BW backward pass")
-
-    # Floors
-    varfloor: float = Field(1e-4, gt=0, description="Variance floor")
-    mixw_floor: float = Field(1e-8, gt=0, description="Mixture weight floor")
-
-    # Gaussian selection
-    topn: int = Field(1, ge=1, description="Number of top Gaussians to use in BW")
 
 
-class CDUntiedConfig(BaseModel):
+class CDUntiedConfig(StrictPipelineConfig):
     """CD-Untied (untied triphone) training configuration."""
 
     n_gaussians: int = Field(1, ge=1, description="Number of Gaussians for untied models")
-    n_iterations: int = Field(10, ge=1, le=100, description="Maximum training iterations")
-    convergence_threshold: float = Field(0.001, gt=0, description="Convergence threshold")
-    min_iterations: int = Field(1, ge=1, description="Minimum iterations")
-
-    abeam: float = Field(1e-90, gt=0, description="Alpha beam")
-    bbeam: float = Field(1e-10, gt=0, description="Beta beam")
-    varfloor: float = Field(1e-4, gt=0, description="Variance floor")
-    mixw_floor: float = Field(1e-5, gt=0, description="Mixture weight floor")
-    tmat_floor: float = Field(1e-5, gt=0, description="Transition probability floor")
-    topn: int = Field(8, ge=1, description="Number of top Gaussians")
 
 
-class CDTiedConfig(BaseModel):
+class CDTiedConfig(StrictPipelineConfig):
     """CD-Tied (tied triphone) training configuration."""
 
     n_gaussians: int = Field(8, ge=1, description="Number of Gaussians per state")
     n_senones: int = Field(200, ge=10, description="Target number of senones (tied states)")
-    n_iterations: int = Field(10, ge=1, le=100, description="Maximum training iterations")
-    convergence_threshold: float = Field(0.001, gt=0, description="Convergence threshold")
-    min_iterations: int = Field(1, ge=1, description="Minimum iterations")
-
-    abeam: float = Field(1e-90, gt=0, description="Alpha beam")
-    bbeam: float = Field(1e-10, gt=0, description="Beta beam")
-    varfloor: float = Field(1e-4, gt=0, description="Variance floor")
-    mixw_floor: float = Field(1e-5, gt=0, description="Mixture weight floor")
-    tmat_floor: float = Field(1e-5, gt=0, description="Transition probability floor")
-    topn: int = Field(8, ge=1, description="Number of top Gaussians")
 
 
-class CDConfig(BaseModel):
+class CDConfig(StrictPipelineConfig):
     """CD (context-dependent, triphone) training configuration."""
 
     untied: CDUntiedConfig = Field(
@@ -227,7 +210,7 @@ class CDConfig(BaseModel):
     )
 
 
-class GaussianIncrementConfig(BaseModel):
+class GaussianIncrementConfig(StrictPipelineConfig):
     """Gaussian increment (splitting) configuration."""
 
     enabled: bool = Field(False, description="Enable Gaussian splitting")
@@ -252,7 +235,7 @@ class GaussianIncrementConfig(BaseModel):
         return v
 
 
-class DecisionTreeConfig(BaseModel):
+class DecisionTreeConfig(StrictPipelineConfig):
     """Decision tree clustering configuration."""
 
     questions_file: Path | None = Field(
@@ -262,7 +245,7 @@ class DecisionTreeConfig(BaseModel):
     max_depth: int = Field(50, ge=1, description="Maximum tree depth")
 
 
-class TrainingConfig(BaseModel):
+class TrainingConfig(StrictPipelineConfig):
     """Complete training configuration."""
 
     n_states: int = Field(

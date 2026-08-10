@@ -26,11 +26,12 @@ __all__ = ["BWConfig", "BWResult", "HMM", "BWTrainer"]
 class BWConfig:
     """Configuration for Baum-Welch training."""
 
-    # Beam widths: smaller = tighter (more pruning), larger = wider (less pruning)
+    # Beam probabilities closer to zero are wider (less pruning); larger values
+    # impose a higher pruning threshold and are tighter in this engine.
     # SphinxTrain defaults: abeam=1e-90, bbeam=1e-10
-    # Note: With flat models or high-variance features, wider beams may be needed
-    a_beam: float = 1e-50  # Forward beam (alpha beam) - widened for stability
+    a_beam: float = 1e-90  # Forward beam (alpha beam)
     b_beam: float = 1e-10  # Backward beam (beta beam)
+    topn: int = 1  # Number of Gaussian densities evaluated per codebook
     spthresh: float = 0.0  # State pruning threshold
     mean_reest: bool = True
     var_reest: bool = True
@@ -130,6 +131,7 @@ class BWTrainer:
         c_config = self._ffi.new("pstrain_bw_config_t *")
         c_config.a_beam = self.config.a_beam
         c_config.b_beam = self.config.b_beam
+        c_config.topn = self.config.topn
         c_config.spthresh = self.config.spthresh
         c_config.mean_reest = 1 if self.config.mean_reest else 0
         c_config.var_reest = 1 if self.config.var_reest else 0
