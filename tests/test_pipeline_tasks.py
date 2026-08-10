@@ -566,3 +566,42 @@ def test_bw_config_multipron_default_on() -> None:
 
     assert BWConfig().multipron is True
     assert BWConfig(multipron=False).multipron is False
+
+
+def test_configured_bw_parameters_reach_training_call(
+    empty_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The public training profile must drive the actual BW call."""
+    from pstrain.lib.steps.train import TrainingResult
+
+    (empty_project / "etc" / "configs.yaml").write_text(
+        "default:\n  training:\n    a_beam: 1e-123\n    b_beam: 1e-9\n"
+        "    convergence_ratio: 0.004\n    max_skip_fraction: 0.02\n"
+    )
+    ctx = PipelineContext.from_config(empty_project)
+    flat = ctx.model_dir("flat")
+    flat.mkdir(parents=True)
+    for name in ("mdef", "means", "variances", "mixture_weights", "transition_matrices"):
+        (flat / name).write_text(name)
+
+    captured: dict[str, object] = {}
+
+    def fake_bw(**kwargs: object) -> TrainingResult:
+        captured.update(kwargs)
+        output = Path(kwargs["output_dir"])  # type: ignore[arg-type]
+        output.mkdir(parents=True, exist_ok=True)
+        for name in ("means", "variances", "mixture_weights", "transition_matrices"):
+            (output / name).write_text(name)
+        return TrainingResult(1, False, -1.0, 1, 1)
+
+    monkeypatch.setattr("pstrain.lib.steps.train.run_bw_training", fake_bw)
+    tasks = build_pipeline(ctx).tasks()
+    tasks["provenance:training"].fn()
+    tasks["ci-1g"].fn()
+
+    config = captured["config"]
+    assert config.a_beam == 1e-123  # type: ignore[union-attr]
+    assert config.b_beam == 1e-9  # type: ignore[union-attr]
+    assert config.topn == 1  # type: ignore[union-attr]
+    assert captured["convergence_ratio"] == 0.004
+    assert captured["max_skip_fraction"] == 0.02

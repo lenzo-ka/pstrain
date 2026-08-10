@@ -71,8 +71,10 @@ class TestTrainingConfig:
         """Test nested CI training config."""
         cfg = TrainingConfig()
         assert cfg.ci.n_gaussians == 1
-        assert cfg.ci.n_iterations == 10
-        assert cfg.ci.min_iterations >= 1
+        # This legacy schema is not consumed by the pipeline, so it must not
+        # declare engine knobs that would be silently ignored.
+        assert not hasattr(cfg.ci, "n_iterations")
+        assert not hasattr(cfg.ci, "abeam")
 
 
 class TestPstrainConfig:
