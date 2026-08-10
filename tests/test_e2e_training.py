@@ -19,6 +19,25 @@ import numpy as np
 from tests.clib import requires_c_library
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_arctic"
+MODEL_FILES = (
+    "mdef",
+    "means",
+    "variances",
+    "mixture_weights",
+    "transition_matrices",
+    "feat.params",
+)
+
+
+def _mdef_counts(path: Path) -> dict[str, int]:
+    """Read the integer count fields from a text mdef header."""
+    counts: dict[str, int] = {}
+    with path.open() as handle:
+        for line in handle:
+            fields = line.split()
+            if len(fields) == 2 and fields[0].isdigit():
+                counts[fields[1]] = int(fields[0])
+    return counts
 
 
 @requires_c_library
@@ -88,3 +107,84 @@ def test_features_extracted_for_every_utterance(tmp_path: Path) -> None:
     n_wav = len(list((FIXTURE / "wav").glob("*.wav")))
     mfcs = list(ctx.features_dir.glob("*.mfc"))
     assert len(mfcs) == n_wav, f"expected {n_wav} .mfc files, got {len(mfcs)}"
+
+
+@requires_c_library
+def test_build_cd_1g_produces_genuine_tied_model(tmp_path: Path) -> None:
+    """The complete CI → CD pipeline builds real trees and a valid tied model."""
+    from st2.lib import _st2c
+    from st2.lib.pipeline import PipelineContext
+    from st2.lib.pipeline.tasks import build_pipeline
+    from st2.lib.setup import setup_project
+    from st2.lib.steps.cd_pipeline import filter_tree_phones
+
+    project_dir = tmp_path / "proj"
+    setup_project(
+        project_dir,
+        transcription_path=FIXTURE / "transcription.txt",
+        audio_path=FIXTURE / "wav",
+        dictionary_path=FIXTURE / "dictionary.dict",
+        phoneset_path=FIXTURE / "phoneset.txt",
+        filler_dict_path=FIXTURE / "filler.dict",
+    )
+
+    ctx = PipelineContext.from_config(project_dir)
+    # Measured locally at 1.7 seconds (Apple M-series, Python 3.12, jobs=2).
+    rc = build_pipeline(ctx).run("cd-1g", jobs=2)
+    assert rc == 0, "pipeline run of cd-1g failed"
+
+    for stage in ("cd-untied", "cd-1g-init", "cd-1g"):
+        for name in MODEL_FILES:
+            assert (ctx.model_dir(stage) / name).exists(), f"missing {stage} model file: {name}"
+
+    questions = ctx.trees_dir / "questions"
+    alltriphones = ctx.architecture_dir / "alltriphones.mdef"
+    assert questions.exists(), "missing phonetic questions"
+    assert alltriphones.exists(), "missing all-triphones mdef"
+
+    phones = filter_tree_phones(ctx.shared_dir / "phoneset.txt")
+    expected_trees = {
+        f"{phone}-{state}.dtree" for phone in phones for state in range(ctx.train.n_state)
+    }
+    unpruned = {path.name: path for path in (ctx.trees_dir / "unpruned").glob("*.dtree")}
+    pruned = {path.name: path for path in (ctx.trees_dir / "pruned").glob("*.dtree")}
+    assert set(unpruned) == expected_trees, "missing or unexpected unpruned decision trees"
+    assert set(pruned) == expected_trees, "missing or unexpected pruned decision trees"
+
+    # build_tree_one() masks a C tree-build failure with this one-line stub.
+    stub_prefix = "# Trivial tree for "
+    for tree in (*unpruned.values(), *pruned.values()):
+        assert not tree.read_text().startswith(stub_prefix), f"stub decision tree: {tree.name}"
+
+    ci_counts = _mdef_counts(ctx.model_dir("ci-1g") / "mdef")
+    alltri_counts = _mdef_counts(alltriphones)
+    tied_counts = _mdef_counts(ctx.model_dir("cd-1g") / "mdef")
+    ci_senones = ci_counts["n_tied_state"]
+    tied_senones = tied_counts["n_tied_state"]
+    assert ci_senones < tied_senones <= ctx.train.n_senones + ci_senones
+    assert 1 < tied_senones < alltri_counts["n_tied_state"], "state tying is identity or degenerate"
+    # Fixed seed + fixture + pruning target make this exact count deterministic:
+    # 108 CI senones are retained and the trees contribute the requested 200.
+    assert tied_senones == 308
+
+    model_dir = ctx.model_dir("cd-1g")
+    means, n_mgau, n_feat, n_density, veclen = _st2c.read_gau(str(model_dir / "means"))
+    ci_means_info = _st2c.read_gau(str(ctx.model_dir("ci-1g") / "means"))
+    variances = _st2c.read_gau(str(model_dir / "variances"))[0]
+    mixw, n_mixw, mixw_feat, mixw_density = _st2c.read_mixw(str(model_dir / "mixture_weights"))
+    transition_matrices, n_tmat, n_state = _st2c.read_tmat(str(model_dir / "transition_matrices"))[
+        :3
+    ]
+
+    assert (n_mgau, n_mixw) == (tied_senones, tied_senones)
+    assert (n_feat, n_density, veclen) == ci_means_info[2:]
+    assert (mixw_feat, mixw_density) == (n_feat, n_density)
+    assert ctx.feat.ncep == 13
+    assert n_state == ctx.train.n_state + 1
+    assert n_tmat == ci_counts["n_tied_tmat"]
+    assert transition_matrices.shape[1:] == (ctx.train.n_state, n_state)
+    assert np.isfinite(means).all()
+    assert np.isfinite(variances).all()
+    assert np.isfinite(mixw).all()
+    assert (variances > 0).all()
+    np.testing.assert_allclose(mixw.sum(axis=-1), 1.0, rtol=1e-5, atol=1e-6)
