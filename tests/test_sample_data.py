@@ -1,6 +1,6 @@
 """Test sample data access and usage."""
 
-from st2.data import (
+from pstrain.data import (
     get_sample_audio,
     get_sample_path,
     get_sample_transcript,

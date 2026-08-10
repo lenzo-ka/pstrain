@@ -27,9 +27,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 This project incorporates C source derived from CMU SphinxTrain, SphinxBase,
 and Sphinx-3 (the vendored code under csrc/), which has been modified as part of
-ST2. That code is dual-licensed: the original portions remain under the Carnegie
+pstrain. That code is dual-licensed: the original portions remain under the Carnegie
 Mellon University BSD-style license (reproduced in full in csrc/LICENSE.sphinx,
-with per-file CMU copyright notices retained), and the ST2 modifications are
-licensed under the BSD 2-Clause terms above. Those terms also apply to the ST2
-Python package and to the new C code under csrc/libs/libst2/. See csrc/NOTICE.md
+with per-file CMU copyright notices retained), and the pstrain modifications are
+licensed under the BSD 2-Clause terms above. Those terms also apply to the pstrain
+Python package and to the new C code under csrc/libs/libpstrain/. See csrc/NOTICE.md
 for a breakdown.

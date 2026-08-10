@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from st2.lib.model import MODEL_FILES_REQUIRED
-from st2.lib.pipeline.context import FeatParams
-from st2.lib.pipeline.feat_params import feat_params_lines, write_feat_params
-from st2.lib.steps.package import package_model
+from pstrain.lib.model import MODEL_FILES_REQUIRED
+from pstrain.lib.pipeline.context import FeatParams
+from pstrain.lib.pipeline.feat_params import feat_params_lines, write_feat_params
+from pstrain.lib.steps.package import package_model
 
 
 def _parse_feat_params(path: Path) -> dict[str, str]:

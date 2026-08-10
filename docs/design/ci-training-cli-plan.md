@@ -21,13 +21,13 @@ setup → features → flat → ci
 
 ## CLI Commands
 
-### 1. `st2 features` - Extract Features
+### 1. `pstrain features` - Extract Features
 
 **Purpose:** Extract acoustic features from audio files using `sphinx_fe`.
 
 **Command:**
 ```bash
-st2 features [--project-dir DIR] [--experiment NAME] [--config PATH] [options]
+pstrain features [--project-dir DIR] [--experiment NAME] [--config PATH] [options]
 ```
 
 **Key Options:**
@@ -64,25 +64,25 @@ st2 features [--project-dir DIR] [--experiment NAME] [--config PATH] [options]
 **Example:**
 ```bash
 # Extract features for all audio files
-st2 features --project-dir my_project
+pstrain features --project-dir my_project
 
 # Extract features for specific experiment
-st2 features --project-dir my_project --experiment baseline
+pstrain features --project-dir my_project --experiment baseline
 
 # Extract features with custom config
-st2 features --project-dir my_project --config custom_feat.yaml
+pstrain features --project-dir my_project --config custom_feat.yaml
 ```
 
 ---
 
-### 2. `st2 split` - Split Data into Train/Test
+### 2. `pstrain split` - Split Data into Train/Test
 
 **Purpose:** Split corpus into training and test sets.
 
 
 **Command:**
 ```bash
-st2 split [--project-dir DIR] [--experiment NAME] [options]
+pstrain split [--project-dir DIR] [--experiment NAME] [options]
 ```
 
 **Key Options:**
@@ -104,26 +104,26 @@ st2 split [--project-dir DIR] [--experiment NAME] [options]
 **Example:**
 ```bash
 # Split data (80/20 train/test)
-st2 split --project-dir my_project
+pstrain split --project-dir my_project
 
 # Split with custom ratio
-st2 split --project-dir my_project --train-ratio 0.9
+pstrain split --project-dir my_project --train-ratio 0.9
 
 # Split with specific seed
-st2 split --project-dir my_project --seed 123
+pstrain split --project-dir my_project --seed 123
 ```
 
 **Note:** This is a Python-only command (no C program). It reads the transcription file and splits it deterministically.
 
 ---
 
-### 3. `st2 flat` - Initialize Flat Models
+### 3. `pstrain flat` - Initialize Flat Models
 
 **Purpose:** Create initial flat (uniform) HMM models using `mk_flat`.
 
 **Command:**
 ```bash
-st2 flat [--project-dir DIR] [--experiment NAME] [options]
+pstrain flat [--project-dir DIR] [--experiment NAME] [options]
 ```
 
 **Key Options:**
@@ -161,21 +161,21 @@ st2 flat [--project-dir DIR] [--experiment NAME] [options]
 **Example:**
 ```bash
 # Initialize flat models
-st2 flat --project-dir my_project --experiment baseline
+pstrain flat --project-dir my_project --experiment baseline
 
 # Initialize with custom topology
-st2 flat --project-dir my_project --topo custom_topo.txt
+pstrain flat --project-dir my_project --topo custom_topo.txt
 ```
 
 ---
 
-### 4. `st2 ci` - Train CI Models
+### 4. `pstrain ci` - Train CI Models
 
 **Purpose:** Train CI models using Baum-Welch algorithm (`bw` program) with iterations.
 
 **Command:**
 ```bash
-st2 ci [--project-dir DIR] [--experiment NAME] [options]
+pstrain ci [--project-dir DIR] [--experiment NAME] [options]
 ```
 
 **Key Options:**
@@ -248,30 +248,30 @@ st2 ci [--project-dir DIR] [--experiment NAME] [options]
 **Example:**
 ```bash
 # Train CI models with default parameters (starts from flat)
-st2 ci --project-dir my_project --experiment baseline --config baseline
+pstrain ci --project-dir my_project --experiment baseline --config baseline
 
 # Train with custom iteration settings (different config, starts from flat)
-st2 ci --project-dir my_project --experiment baseline --config high_iter --max-iterations 15 --convergence-threshold 0.0005
+pstrain ci --project-dir my_project --experiment baseline --config high_iter --max-iterations 15 --convergence-threshold 0.0005
 
 # Train with alignments saved (another config, starts from flat)
-st2 ci --project-dir my_project --experiment baseline --config with_alignments --save-alignments
+pstrain ci --project-dir my_project --experiment baseline --config with_alignments --save-alignments
 
 # Train with different feature set (different config, starts from flat)
-st2 ci --project-dir my_project --experiment baseline --config lda_features --features-dir ../shared/features/lda_29cep
+pstrain ci --project-dir my_project --experiment baseline --config lda_features --features-dir ../shared/features/lda_29cep
 
 # Gaussian splitting workflow: Start from 1G, then split to 2G, 4G, etc.
 # Step 1: Train 1G model (from flat)
-st2 flat --config 1g
-st2 ci --config 1g --topn 1
+pstrain flat --config 1g
+pstrain ci --config 1g --topn 1
 
 # Step 2: Split to 2G (starts from 1G model)
-st2 ci --config 2g --from 1g --topn 2
+pstrain ci --config 2g --from 1g --topn 2
 
 # Step 3: Split to 4G (starts from 2G model)
-st2 ci --config 4g --from 2g --topn 4
+pstrain ci --config 4g --from 2g --topn 4
 
 # Step 4: Split to 8G (starts from 4G model)
-st2 ci --config 8g --from 4g --topn 8
+pstrain ci --config 8g --from 4g --topn 8
 ```
 
 ---
@@ -283,35 +283,35 @@ st2 ci --config 8g --from 4g --topn 8
 cd my_project
 
 # 2. Extract features (can run in parallel with split)
-st2 features
+pstrain features
 
 # 3. Split data (can run in parallel with features)
-st2 split
+pstrain split
 
 # 4. Initialize flat models (needs features and dictionary)
-st2 flat --config baseline
+pstrain flat --config baseline
 
 # 5. Train CI models (needs flat, features, dictionary, split)
-st2 ci --config baseline
+pstrain ci --config baseline
 
 # Gaussian splitting workflow:
 # Step 1: Train 1G from flat
-st2 flat --config 1g
-st2 ci --config 1g --topn 1
+pstrain flat --config 1g
+pstrain ci --config 1g --topn 1
 
 # Step 2: Split to 2G (starts from 1G model, not flat)
-st2 ci --config 2g --from 1g --topn 2
+pstrain ci --config 2g --from 1g --topn 2
 
 # Step 3: Split to 4G (starts from 2G model)
-st2 ci --config 4g --from 2g --topn 4
+pstrain ci --config 4g --from 2g --topn 4
 
 # Step 4: Split to 8G (starts from 4G model)
-st2 ci --config 8g --from 4g --topn 8
+pstrain ci --config 8g --from 4g --topn 8
 ```
 
 **Or as a single command (future):**
 ```bash
-st2 train-ci --project-dir my_project --experiment baseline --config baseline
+pstrain train-ci --project-dir my_project --experiment baseline --config baseline
 ```
 
 ## CI Model Configurations
@@ -337,9 +337,9 @@ Each configuration gets its own directory:
 - **From Another Model**: Use `--from NAME` to start from an existing model (e.g., for Gaussian splitting)
 
 **Gaussian Splitting Workflow:**
-1. Train 1G model from flat: `st2 flat --config 1g` → `st2 ci --config 1g`
-2. Split to 2G from 1G: `st2 ci --config 2g --from 1g`
-3. Split to 4G from 2G: `st2 ci --config 4g --from 2g`
+1. Train 1G model from flat: `pstrain flat --config 1g` → `pstrain ci --config 1g`
+2. Split to 2G from 1G: `pstrain ci --config 2g --from 1g`
+3. Split to 4G from 2G: `pstrain ci --config 4g --from 2g`
 4. Continue as needed...
 
 This allows:
@@ -354,31 +354,31 @@ This allows:
 
 ### Phase 1: Individual Commands (Stub)
 
-1. **`st2 features`**
-   - [ ] Create `st2/cli/features.py`
+1. **`pstrain features`**
+   - [ ] Create `pstrain/cli/features.py`
    - [ ] Parse command-line arguments
    - [ ] Generate control file from audio directory
    - [ ] Call `sphinx_fe` wrapper (to be implemented)
    - [ ] Handle feature set ID generation
    - [ ] Support batch and single-file modes
 
-2. **`st2 split`**
-   - [ ] Create `st2/cli/split.py`
+2. **`pstrain split`**
+   - [ ] Create `pstrain/cli/split.py`
    - [ ] Parse command-line arguments
    - [ ] Read transcription file
    - [ ] Split deterministically (with seed)
    - [ ] Write train/test transcriptions
    - [ ] Generate control files
 
-3. **`st2 flat`**
-   - [ ] Create `st2/cli/flat.py`
+3. **`pstrain flat`**
+   - [ ] Create `pstrain/cli/flat.py`
    - [ ] Parse command-line arguments
    - [ ] Validate inputs (dictionary, phoneset, features)
    - [ ] Call `mk_flat` wrapper (to be implemented)
    - [ ] Verify outputs
 
-4. **`st2 ci`**
-   - [ ] Create `st2/cli/ci.py`
+4. **`pstrain ci`**
+   - [ ] Create `pstrain/cli/ci.py`
    - [ ] Parse command-line arguments
    - [ ] Implement iteration loop
    - [ ] Call `bw` wrapper (to be implemented) for each iteration
@@ -390,23 +390,23 @@ This allows:
 ### Phase 2: Library Functions
 
 1. **Feature Extraction**
-   - [ ] `st2/lib/features.py` - `extract_features()` function
+   - [ ] `pstrain/lib/features.py` - `extract_features()` function
    - [ ] Wrapper for `sphinx_fe` C program
    - [ ] Control file generation
    - [ ] Feature set ID computation
 
 2. **Data Splitting**
-   - [ ] `st2/lib/split.py` - `split_data()` function
+   - [ ] `pstrain/lib/split.py` - `split_data()` function
    - [ ] Deterministic splitting with seed
    - [ ] Control file generation
 
 3. **Flat Initialization**
-   - [ ] `st2/lib/flat.py` - `init_flat()` function
+   - [ ] `pstrain/lib/flat.py` - `init_flat()` function
    - [ ] Wrapper for `mk_flat` C program
    - [ ] Model definition generation
 
 4. **CI Training**
-   - [ ] `st2/lib/ci.py` - `train_ci()` function
+   - [ ] `pstrain/lib/ci.py` - `train_ci()` function
    - [ ] Wrapper for `bw` C program
    - [ ] Iteration loop logic
    - [ ] Convergence checking
@@ -415,7 +415,7 @@ This allows:
 ### Phase 3: Integration
 
 1. **Workflow Command**
-   - [ ] `st2 train-ci` - Run complete CI training pipeline
+   - [ ] `pstrain train-ci` - Run complete CI training pipeline
    - [ ] Handles dependencies automatically
    - [ ] Supports parallel execution where possible
 

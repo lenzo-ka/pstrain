@@ -1,6 +1,6 @@
 # CI Model Building Requirements
 
-This document outlines what's needed to build Context-Independent (CI) acoustic models in ST2.
+This document outlines what's needed to build Context-Independent (CI) acoustic models in pstrain.
 
 ## Overview
 
@@ -92,7 +92,7 @@ CI models are monophone (context-independent) HMM-GMM acoustic models trained us
   2. Split Gaussians (e.g., 1G → 2G) using `mixw_interp` or similar
   3. Retrain with more Gaussians using `bw` (starts from split model, not flat)
   4. Repeat until target count reached
-- **ST2 Implementation:** Use `--from-ci-config` to start CI training from a previous CI model instead of flat
+- **pstrain Implementation:** Use `--from-ci-config` to start CI training from a previous CI model instead of flat
 
 ## CI Training Parameters
 
@@ -133,7 +133,7 @@ split (corpus) ────┼──→ flat (features, dictionary, phone_file)
 - `flat` needs both `features` AND `setup` (dictionary, phone_file)
 - `ci` needs `flat`, `features`, `dictionary`, AND `split` (for training transcriptions)
 
-## Implementation for ST2
+## Implementation for pstrain
 
 ### Phase 1: Prerequisites
 - [ ] **Setup stage** - Project initialization, dictionary creation

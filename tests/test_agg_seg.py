@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from st2.lib.agg_seg import SegType
+from pstrain.lib.agg_seg import SegType
 
 # Check if library exists
-# libst2c availability comes from the shared helper (real loader-based
+# libpstrainc availability comes from the shared helper (real loader-based
 # detection); see tests/clib.py.
 from tests.clib import C_LIBRARY_AVAILABLE as _lib_exists
 
@@ -33,7 +33,7 @@ class TestAggregateSegmentsValidation:
 
     def test_st_requires_mdef_path(self, tmp_path: Path) -> None:
         """Test that ST mode requires mdef_path."""
-        from st2.lib.agg_seg import aggregate_segments
+        from pstrain.lib.agg_seg import aggregate_segments
 
         ctl = tmp_path / "test.ctl"
         ctl.touch()
@@ -53,7 +53,7 @@ class TestAggregateSegmentsValidation:
 
     def test_st_requires_ts2cb_path(self, tmp_path: Path) -> None:
         """Test that ST mode requires ts2cb_path."""
-        from st2.lib.agg_seg import aggregate_segments
+        from pstrain.lib.agg_seg import aggregate_segments
 
         ctl = tmp_path / "test.ctl"
         ctl.touch()
@@ -75,7 +75,7 @@ class TestAggregateSegmentsValidation:
 
     def test_phn_requires_mdef_path(self, tmp_path: Path) -> None:
         """Test that PHN mode requires mdef_path."""
-        from st2.lib.agg_seg import aggregate_segments
+        from pstrain.lib.agg_seg import aggregate_segments
 
         ctl = tmp_path / "test.ctl"
         ctl.touch()
@@ -95,7 +95,7 @@ class TestAggregateSegmentsValidation:
 
     def test_phn_requires_dict_path(self, tmp_path: Path) -> None:
         """Test that PHN mode requires dict_path."""
-        from st2.lib.agg_seg import aggregate_segments
+        from pstrain.lib.agg_seg import aggregate_segments
 
         ctl = tmp_path / "test.ctl"
         ctl.touch()
@@ -127,16 +127,16 @@ class TestAggregateSegmentsValidation:
         assert converted == SegType.ALL
 
 
-@pytest.mark.skipif(not _lib_exists, reason="libst2c not built")
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
 class TestCffiIntegration:
     """Integration tests for CFFI bindings."""
 
     def test_cffi_function_exists(self) -> None:
-        """Test that st2_agg_seg function exists in library."""
-        from st2.lib import _st2c
+        """Test that pstrain_agg_seg function exists in library."""
+        from pstrain.lib import _pstrainc
 
-        lib = _st2c.get_lib()
-        assert hasattr(lib, "st2_agg_seg")
+        lib = _pstrainc.get_lib()
+        assert hasattr(lib, "pstrain_agg_seg")
 
     def test_segtype_constants_defined(self) -> None:
         """Test that segtype constants match Python enum."""

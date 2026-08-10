@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fix CMakeLists.txt files in programs to use st2c instead of sphinxtrain."""
+"""Fix CMakeLists.txt files in programs to use pstrainc instead of sphinxtrain."""
 
 from pathlib import Path
 
@@ -8,8 +8,8 @@ csrc = Path(__file__).parent.parent / "csrc" / "programs"
 for cmake_file in csrc.rglob("CMakeLists.txt"):
     content = cmake_file.read_text()
 
-    # Replace sphinxtrain with st2c
-    content = content.replace("sphinxtrain", "st2c")
+    # Replace sphinxtrain with pstrainc
+    content = content.replace("sphinxtrain", "pstrainc")
 
     # Fix include paths
     content = content.replace("${CMAKE_SOURCE_DIR}/include", "${CMAKE_SOURCE_DIR}/csrc/include")

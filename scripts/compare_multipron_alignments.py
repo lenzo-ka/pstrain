@@ -16,13 +16,13 @@ Usage:
 How to produce the two model dirs (cd-1g example):
 
   # 1. Build with multipron=True (the default)
-  st2 build cd-1g -j 4
+  pstrain build cd-1g -j 4
   cp -r shared/models/cd-1g/default /tmp/cd-1g.multipron
 
   # 2. Set multipron_training=false in etc/configs.yaml, wipe affected
   #    model dirs, rebuild
   rm -rf shared/models/ci-1g shared/models/cd-*
-  st2 build cd-1g -j 4
+  pstrain build cd-1g -j 4
   cp -r shared/models/cd-1g/default /tmp/cd-1g.linear
 
   # 3. Restore configs.yaml and run the comparison

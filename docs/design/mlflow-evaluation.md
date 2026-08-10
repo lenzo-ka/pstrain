@@ -161,7 +161,7 @@ This project trains **traditional acoustic models** (HMM/GMM-based), not neural 
 - MLflow Tracking API for logging
 - MLflow UI for browsing
 - MLflow Model Registry (if needed)
-- Skip MLflow Projects (use the ST2 pipeline runner instead)
+- Skip MLflow Projects (use the pstrain pipeline runner instead)
 
 **Integration:**
 - Log parameters/metrics from pipeline tasks
@@ -232,7 +232,7 @@ This project trains **traditional acoustic models** (HMM/GMM-based), not neural 
    - Store step parameters in `steps` table
 
 2. **Simple comparison tool**
-   - CLI command: `st2 compare-builds <build1> <build2>`
+   - CLI command: `pstrain compare-builds <build1> <build2>`
    - SQL queries to compare parameters/metrics
 
 3. **Simple UI (optional, later)**
@@ -257,8 +257,8 @@ This project trains **traditional acoustic models** (HMM/GMM-based), not neural 
 - [ ] Add `config` JSON column to `builds` table
 - [ ] Add `parameters` JSON column to `steps` table
 - [ ] Add `metrics` JSON column to `steps` table (for evaluation metrics)
-- [ ] Create `st2/lib/tracking.py` for parameter/metric logging
-- [ ] Add `st2 compare-builds` CLI command
+- [ ] Create `pstrain/lib/tracking.py` for parameter/metric logging
+- [ ] Add `pstrain compare-builds` CLI command
 - [ ] Document tracking usage
 
 **Deliverables:**

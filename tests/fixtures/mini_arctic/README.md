@@ -16,7 +16,7 @@ needs, purely as a test asset.
 
 - `wav/arctic_a00NN.wav` — 10 utterances, 16 kHz / 16-bit / mono PCM.
 - `transcription.txt` — simple `<fileid> <words...>` format (the format
-  `st2 setup --transcription` expects).
+  `pstrain setup --transcription` expects).
 - `dictionary.dict` — pronunciation dictionary subset to exactly the
   vocabulary in `transcription.txt`.
 - `phoneset.txt` — the phones used by `dictionary.dict` **plus `SIL`** (the

@@ -2,14 +2,14 @@
  * @file main_align.h
  * @brief In-process entry points exposed by sphinx3_align.
  *
- * Lets the libst2 wrapper in csrc/libs/libst2/st2_align.c drive the aligner
+ * Lets the libpstrain wrapper in csrc/libs/libpstrain/pstrain_align.c drive the aligner
  * without going through main(). The standalone CLI in main_align.c still
  * uses the same symbols; the library wrapper just bypasses the argv-parsing
  * and control/transcript-file handling.
  */
 
-#ifndef _ST2_MAIN_ALIGN_H_
-#define _ST2_MAIN_ALIGN_H_
+#ifndef _PSTRAIN_MAIN_ALIGN_H_
+#define _PSTRAIN_MAIN_ALIGN_H_
 
 #include <sphinxbase/prim_type.h>
 #include <sphinxbase/cmd_ln.h>
@@ -64,4 +64,4 @@ void align_utt_release(void);
 }
 #endif
 
-#endif /* _ST2_MAIN_ALIGN_H_ */
+#endif /* _PSTRAIN_MAIN_ALIGN_H_ */

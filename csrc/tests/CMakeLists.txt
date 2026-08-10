@@ -1,12 +1,12 @@
-# C smoke tests for libst2c, registered with CTest.
+# C smoke tests for libpstrainc, registered with CTest.
 #
-# These link the static st2c library and exercise the real C entry points
+# These link the static pstrainc library and exercise the real C entry points
 # (currently libio model-file round-trips). Kept deliberately small: the
 # heavy numerical coverage lives in the Python/CFFI test suite; this tier
-# exists so the C-tests CI job fails when libst2c itself breaks.
+# exists so the C-tests CI job fails when libpstrainc itself breaks.
 
 add_executable(test_io_roundtrip test_io_roundtrip.c)
-target_link_libraries(test_io_roundtrip st2c)
+target_link_libraries(test_io_roundtrip pstrainc)
 target_include_directories(test_io_roundtrip
   PRIVATE ${CMAKE_BINARY_DIR}
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}

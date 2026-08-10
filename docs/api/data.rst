@@ -3,7 +3,7 @@ Data Utilities
 
 Package data access utilities.
 
-.. automodule:: st2.data
+.. automodule:: pstrain.data
    :members:
    :undoc-members:
    :show-inheritance:

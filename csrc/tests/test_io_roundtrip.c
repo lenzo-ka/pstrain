@@ -1,13 +1,13 @@
 /*
- * Smoke test for libst2c model-file I/O (libio).
+ * Smoke test for libpstrainc model-file I/O (libio).
  *
  * Round-trips mixture weights, Gaussian parameters, and transition
  * matrices through the S3 binary format and asserts the data survives
- * unchanged. This is the minimal "does libst2c actually link and work"
+ * unchanged. This is the minimal "does libpstrainc actually link and work"
  * check wired into ctest, so the C-tests CI job asserts something real
  * instead of passing on an empty test set.
  *
- * Exercises the same read/write/alloc/free paths that st2/lib/_cffi/io.py
+ * Exercises the same read/write/alloc/free paths that pstrain/lib/_cffi/io.py
  * drives from Python.
  */
 #include <math.h>
@@ -186,6 +186,6 @@ main(int argc, char *argv[])
     if (test_tmat(path))
         return 1;
 
-    printf("PASS: libst2c I/O round-trip (mixw, gau, tmat)\n");
+    printf("PASS: libpstrainc I/O round-trip (mixw, gau, tmat)\n");
     return 0;
 }

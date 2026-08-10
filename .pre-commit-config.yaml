@@ -1,4 +1,4 @@
-# Pre-commit hooks for st2
+# Pre-commit hooks for pstrain
 # Install: pip install pre-commit && pre-commit install
 
 default_language_version:
@@ -31,11 +31,11 @@ repos:
       # Run the linter
       - id: ruff
         args: [--fix]
-        files: ^(st2|tests)/
+        files: ^(pstrain|tests)/
         exclude: ^(build/|csrc/libs/libsphinxbase/(fe|util)/.*\.py$)
       # Run the formatter
       - id: ruff-format
-        files: ^(st2|tests)/
+        files: ^(pstrain|tests)/
         exclude: ^(build/|csrc/libs/libsphinxbase/(fe|util)/.*\.py$)
 
   # Type checking with mypy
@@ -45,7 +45,7 @@ repos:
       - id: mypy
         additional_dependencies: [pydantic>=2.0, types-PyYAML, pytest>=7.0]
         exclude: ^(build/|\.eggs/|csrc/)
-        args: [st2, --ignore-missing-imports]
+        args: [pstrain, --ignore-missing-imports]
         pass_filenames: false
 
 # Exclude certain paths globally

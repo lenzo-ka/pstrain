@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
-project(st2c VERSION 0.1.0 LANGUAGES C)
+project(pstrainc VERSION 0.1.0 LANGUAGES C)
 
-# st2 C library and programs
+# pstrain C library and programs
 
 # All library source files
 set(LIB_SRCS
@@ -105,25 +105,25 @@ set(LIB_SRCS
   libs/libcommon/mk_sseq.c
   libs/libcommon/lexicon.c
 
-  # libst2 - st2 helper functions
-  libs/libst2/st2_fe.c
-  libs/libst2/st2_bw.c
-  libs/libst2/st2_flat.c
-  libs/libst2/st2_inc_comp.c
-  libs/libst2/st2_kmeans.c
-  libs/libst2/st2_mdef_gen.c
-  libs/libst2/st2_dtree.c
-  libs/libst2/st2_agg_seg.c
-  libs/libst2/st2_param_cnt.c
-  libs/libst2/st2_kdtree.c
-  libs/libst2/st2_delint.c
-  libs/libst2/st2_map_adapt.c
-  libs/libst2/st2_align.c
+  # libpstrain - pstrain helper functions
+  libs/libpstrain/pstrain_fe.c
+  libs/libpstrain/pstrain_bw.c
+  libs/libpstrain/pstrain_flat.c
+  libs/libpstrain/pstrain_inc_comp.c
+  libs/libpstrain/pstrain_kmeans.c
+  libs/libpstrain/pstrain_mdef_gen.c
+  libs/libpstrain/pstrain_dtree.c
+  libs/libpstrain/pstrain_agg_seg.c
+  libs/libpstrain/pstrain_param_cnt.c
+  libs/libpstrain/pstrain_kdtree.c
+  libs/libpstrain/pstrain_delint.c
+  libs/libpstrain/pstrain_map_adapt.c
+  libs/libpstrain/pstrain_align.c
 
   # sphinx3 forced aligner (vendored from sphinx3, formerly under
-  # programs/sphinx3_align). Compiled into the library so st2_align
+  # programs/sphinx3_align). Compiled into the library so pstrain_align
   # can drive it in-process; main_align.c's main() is excluded via
-  # ST2_LIBRARY_BUILD.
+  # PSTRAIN_LIBRARY_BUILD.
   programs/sphinx3_align/adaptor.c
   programs/sphinx3_align/approx_cont_mgau.c
   programs/sphinx3_align/ascr.c
@@ -221,22 +221,22 @@ find_library(MATH_LIBRARY m)
 # Build the main static library
 if(NOT LAPACK_FOUND)
   message(STATUS "System LAPACK not found, using internal version")
-  add_library(st2c STATIC ${LIB_SRCS} ${LAPACK_SRCS})
+  add_library(pstrainc STATIC ${LIB_SRCS} ${LAPACK_SRCS})
 else()
-  add_library(st2c STATIC ${LIB_SRCS})
-  target_link_libraries(st2c PUBLIC ${LAPACK_LIBRARIES})
+  add_library(pstrainc STATIC ${LIB_SRCS})
+  target_link_libraries(pstrainc PUBLIC ${LAPACK_LIBRARIES})
 endif()
 
 # Also build shared library for development
 if(NOT LAPACK_FOUND)
-  add_library(st2c_shared SHARED ${LIB_SRCS} ${LAPACK_SRCS})
+  add_library(pstrainc_shared SHARED ${LIB_SRCS} ${LAPACK_SRCS})
 else()
-  add_library(st2c_shared SHARED ${LIB_SRCS})
-  target_link_libraries(st2c_shared PUBLIC ${LAPACK_LIBRARIES})
+  add_library(pstrainc_shared SHARED ${LIB_SRCS})
+  target_link_libraries(pstrainc_shared PUBLIC ${LAPACK_LIBRARIES})
 endif()
-set_target_properties(st2c_shared PROPERTIES OUTPUT_NAME st2c)
+set_target_properties(pstrainc_shared PROPERTIES OUTPUT_NAME pstrainc)
 
-target_include_directories(st2c
+target_include_directories(pstrainc
   PRIVATE ${CMAKE_BINARY_DIR}
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/programs/bw
@@ -252,7 +252,7 @@ target_include_directories(st2c
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_include_directories(st2c_shared
+target_include_directories(pstrainc_shared
   PRIVATE ${CMAKE_BINARY_DIR}
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/programs/bw
@@ -268,9 +268,9 @@ target_include_directories(st2c_shared
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Define ST2_LIBRARY_BUILD to exclude main() functions from program sources
-target_compile_definitions(st2c PRIVATE ST2_LIBRARY_BUILD)
-target_compile_definitions(st2c_shared PRIVATE ST2_LIBRARY_BUILD)
+# Define PSTRAIN_LIBRARY_BUILD to exclude main() functions from program sources
+target_compile_definitions(pstrainc PRIVATE PSTRAIN_LIBRARY_BUILD)
+target_compile_definitions(pstrainc_shared PRIVATE PSTRAIN_LIBRARY_BUILD)
 
 # Symbol-namespace the sphinx3_align translation units so they don't
 # collide with the (similarly-named, differently-implemented) copies in
@@ -295,11 +295,11 @@ set_source_files_properties(${S3A_SOURCES} PROPERTIES
 )
 
 if(MATH_LIBRARY)
-  target_link_libraries(st2c PUBLIC ${MATH_LIBRARY})
-  target_link_libraries(st2c_shared PUBLIC ${MATH_LIBRARY})
+  target_link_libraries(pstrainc PUBLIC ${MATH_LIBRARY})
+  target_link_libraries(pstrainc_shared PUBLIC ${MATH_LIBRARY})
 endif()
 
-set_target_properties(st2c PROPERTIES
+set_target_properties(pstrainc PROPERTIES
   VERSION ${PROJECT_VERSION}
   SOVERSION 0
   POSITION_INDEPENDENT_CODE ON
@@ -309,13 +309,13 @@ set_target_properties(st2c PROPERTIES
 # Export all symbols on all platforms
 if(BUILD_SHARED_LIBS)
   if(WIN32)
-    set_target_properties(st2c PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    set_target_properties(pstrainc PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
   endif()
 endif()
 
 # Install library and headers
 include(GNUInstallDirs)
-install(TARGETS st2c st2c_shared
+install(TARGETS pstrainc pstrainc_shared
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})

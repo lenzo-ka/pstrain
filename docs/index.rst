@@ -1,7 +1,7 @@
-ST2 Documentation
+pstrain Documentation
 ==================
 
-ST2 is an acoustic model training toolkit.
+pstrain is an acoustic model training toolkit.
 
 .. toctree::
    :maxdepth: 2

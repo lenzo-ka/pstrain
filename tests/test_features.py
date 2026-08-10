@@ -11,7 +11,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from st2.lib.features import (
+from pstrain.lib.features import (
     FeatureExtractor,
     FEParams,
     extract_features,
@@ -44,7 +44,7 @@ pytestmark = requires_c_library
 @pytest.fixture
 def sample_audio_path() -> Path:
     """Path to sample audio file."""
-    return Path(__file__).parent.parent / "st2" / "data" / "sample" / "kevin-alice-16k.wav"
+    return Path(__file__).parent.parent / "pstrain" / "data" / "sample" / "kevin-alice-16k.wav"
 
 
 class TestFEParams:

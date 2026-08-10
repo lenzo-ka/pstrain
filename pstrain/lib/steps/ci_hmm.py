@@ -1,0 +1,137 @@
+"""Step 20: CI HMM training (context-independent models).
+
+Trains context-independent HMM models using Baum-Welch algorithm.
+
+Usage:
+    Library: from pstrain.lib.steps.ci_hmm import CIHMMStep
+    CLI: python -m pstrain.lib.steps.ci_hmm [args]
+    pstrain CLI: pstrain step 20 [args]
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+from typing import Any
+
+from pstrain.lib.steps.base import Step, StepContext
+
+
+class CIHMMStep(Step):
+    """CI HMM training step."""
+
+    name = "ci_hmm"
+    description = "Train context-independent HMM models using Baum-Welch"
+    script = "bw"
+
+    default_params = {
+        "max_iterations": 10,
+        "min_iterations": 3,
+        "convergence_threshold": 0.001,
+        "topn": 1,
+        "abeam": 1e-90,
+        "bbeam": 1e-10,
+        "varfloor": 1e-4,
+        "mixw_floor": 1e-8,
+    }
+
+    def get_inputs(self, ctx: StepContext) -> list[Path]:
+        """Get input files for CI HMM training."""
+        flat = ctx.flat_dir("ci")
+        return [
+            flat / "mdef",
+            flat / "means",
+            flat / "variances",
+            flat / "mixture_weights",
+            flat / "transition_matrices",
+            ctx.shared_dir / "dictionary.dict",
+            ctx.experiment_dir / "etc" / "train.fileids",
+            ctx.experiment_dir / "etc" / "train.transcription",
+            ctx.shared_dir / "features" / "default",
+            ctx.shared_dir / "features" / "default" / "feat.params",
+        ]
+
+    def get_outputs(self, ctx: StepContext) -> list[Path]:
+        """Get output files from CI HMM training."""
+        hmm = ctx.hmm_dir("ci")
+        return [
+            hmm / "mdef",
+            hmm / "means",
+            hmm / "variances",
+            hmm / "mixture_weights",
+            hmm / "transition_matrices",
+            hmm / "feat.params",
+        ]
+
+    def add_arguments(self, parser: argparse.ArgumentParser) -> None:
+        """Add CI HMM specific arguments."""
+        super().add_arguments(parser)
+        parser.add_argument(
+            "--max-iterations",
+            type=int,
+            default=self.default_params["max_iterations"],
+            help=f"Maximum training iterations (default: {self.default_params['max_iterations']})",
+        )
+        parser.add_argument(
+            "--min-iterations",
+            type=int,
+            default=self.default_params["min_iterations"],
+            help=f"Minimum iterations before convergence check (default: {self.default_params['min_iterations']})",
+        )
+        parser.add_argument(
+            "--convergence-threshold",
+            type=float,
+            default=self.default_params["convergence_threshold"],
+            help=f"Convergence threshold (default: {self.default_params['convergence_threshold']})",
+        )
+        parser.add_argument(
+            "--topn",
+            type=int,
+            default=self.default_params["topn"],
+            help=f"Top N Gaussians (default: {self.default_params['topn']})",
+        )
+
+    def get_params_from_args(self, args: argparse.Namespace) -> dict[str, Any]:
+        """Extract training parameters from args."""
+        return {
+            "max_iterations": args.max_iterations,
+            "min_iterations": args.min_iterations,
+            "convergence_threshold": args.convergence_threshold,
+            "topn": args.topn,
+            "abeam": self.default_params["abeam"],
+            "bbeam": self.default_params["bbeam"],
+            "varfloor": self.default_params["varfloor"],
+            "mixw_floor": self.default_params["mixw_floor"],
+        }
+
+    def execute(self, ctx: StepContext, **params: Any) -> int:
+        """Execute CI HMM training by delegating to the pipeline runner.
+
+        The pipeline does the right thing for stale dependencies: if `flat`
+        or features are missing/older than their inputs, those tasks will
+        run too. Use `pstrain build ci-1g` for the same effect from the CLI.
+        """
+        from pstrain.lib.pipeline import PipelineContext
+        from pstrain.lib.pipeline.tasks import build_pipeline
+
+        pl_ctx = PipelineContext.from_config(
+            ctx.project_dir,
+            experiment=ctx.experiment,
+            config_name=ctx.config,
+        )
+        ctx.comment(f"Step {self.name}: {self.description}")
+        ctx.comment(f"  Experiment: {ctx.experiment}, Config: {ctx.config}")
+        return build_pipeline(pl_ctx).run("ci-1g", dry_run=ctx.dry_run)
+
+
+ci_hmm_step = CIHMMStep()
+
+
+def main() -> int:
+    """CLI entry point."""
+    return ci_hmm_step.main()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

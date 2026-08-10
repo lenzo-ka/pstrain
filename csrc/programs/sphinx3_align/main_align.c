@@ -78,7 +78,7 @@
 
 */
 
-/* Accessor for the library wrapper in csrc/libs/libst2/st2_align.c; the
+/* Accessor for the library wrapper in csrc/libs/libpstrain/pstrain_align.c; the
  * wrapper builds its own cmd_ln_t against the same option spec the CLI
  * binary uses. */
 arg_t *cmd_ln_get_defn_for_align(void);
@@ -164,7 +164,7 @@ cmd_ln_get_defn_for_align(void)
 /** These are the definition of HMMs.
  *
  * Module-level storage. Exposed (non-static) so the library wrapper in
- * csrc/libs/libst2/st2_align.c can drive a single aligner instance
+ * csrc/libs/libpstrain/pstrain_align.c can drive a single aligner instance
  * without duplicating the model-loading code below. Per-instance
  * promotion is mechanical if a second concurrent aligner ever lands.
  */
@@ -1026,7 +1026,7 @@ utt_align(void *data, utt_res_t * ur, int32 sf, int32 ef, char *uttid)
 
 }
 
-#ifndef ST2_LIBRARY_BUILD
+#ifndef PSTRAIN_LIBRARY_BUILD
 int
 main(int32 argc, char *argv[])
 {
@@ -1164,4 +1164,4 @@ main(int32 argc, char *argv[])
     cmd_ln_free_r(config);
     return 0;
 }
-#endif /* ST2_LIBRARY_BUILD */
+#endif /* PSTRAIN_LIBRARY_BUILD */

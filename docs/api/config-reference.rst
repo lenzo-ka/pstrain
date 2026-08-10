@@ -1,7 +1,7 @@
 Configuration Reference
 =======================
 
-All configuration parameters for ST2.
+All configuration parameters for pstrain.
 
 
 audio

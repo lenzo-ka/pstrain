@@ -1,16 +1,16 @@
 # Pipeline runner
 
-ST2 uses a small Python-native task runner in `st2.lib.pipeline` to
+pstrain uses a small Python-native task runner in `pstrain.lib.pipeline` to
 orchestrate the training workflow. This document describes what it is,
 how it works, and why we built it instead of using Snakemake.
 
 ## What it is
 
 ```
-st2/lib/pipeline/
+pstrain/lib/pipeline/
   runner.py     # Task, Pipeline, staleness, topo sort, execution
   context.py    # PipelineContext, config loading
-  tasks.py      # Concrete tasks for the ST2 workflow
+  tasks.py      # Concrete tasks for the pstrain workflow
 ```
 
 * **`Task`** — an immutable dataclass: `name`, `fn` (callable),
@@ -25,9 +25,9 @@ st2/lib/pipeline/
 
 The CLI entry points are:
 
-* `st2 build <target>` — build a named target (e.g. `cd-8g`).
-* `st2 features` — shortcut for `st2 build features`.
-* `st2 step <name>` — single-step debugging entry that delegates to
+* `pstrain build <target>` — build a named target (e.g. `cd-8g`).
+* `pstrain features` — shortcut for `pstrain build features`.
+* `pstrain step <name>` — single-step debugging entry that delegates to
   the same pipeline.
 
 ## How it works
@@ -91,7 +91,7 @@ small enough that Snakemake's pull-ins didn't pay off:
 * The DAG has ~15 logical nodes plus a fan-out over fileids. Not the
   large, branching, multi-sample DAG Snakemake is designed for.
 * Every Snakefile rule's `run:` block just called into
-  `st2.lib.steps.run_*` Python functions. Snakemake was a thin shim,
+  `pstrain.lib.steps.run_*` Python functions. Snakemake was a thin shim,
   not actually orchestrating shell commands or managing envs.
 * Snakemake pulls ~25 transitive dependencies (gitpython, jinja2,
   pulp, nbformat, ...) for what amounts to "if output is older than
@@ -101,7 +101,7 @@ small enough that Snakemake's pull-ins didn't pay off:
   and `Step` classes.
 
 The runner replaces ~1100 lines of `Snakefile` + `features.smk` +
-`targets.yaml` with ~400 lines of Python in `st2/lib/pipeline/`.
+`targets.yaml` with ~400 lines of Python in `pstrain/lib/pipeline/`.
 Adds zero runtime dependencies. Everything is one process, importable
 and debuggable.
 
@@ -109,7 +109,7 @@ and debuggable.
 
 * **Cluster execution** (Slurm, Kubernetes, etc.). If you need to run
   training on a cluster, Snakemake or Dagster would be a better fit.
-* **Per-task conda envs.** ST2 has one Python environment.
+* **Per-task conda envs.** pstrain has one Python environment.
 * **Content-hash staleness.** Mtime parity with Snakemake is enough;
   layer a content-hash check on top if a real need shows up.
 
@@ -124,14 +124,14 @@ targets.
 
 Opt out per-config by setting `training.multipron_training: false`
 in `etc/configs.yaml`; that config's runs fall through to the
-legacy linear path (bit-identical to st2's pre-multipron behavior).
+legacy linear path (bit-identical to pstrain's pre-multipron behavior).
 
 See [`multi-pron-training.md`](multi-pron-training.md) for the full
 design and the as-built layout.
 
 ## Adding a new pipeline node
 
-1. In `st2/lib/pipeline/tasks.py`, write a builder that closes over
+1. In `pstrain/lib/pipeline/tasks.py`, write a builder that closes over
    `ctx` and returns a `Task`:
 
    ```python
@@ -140,7 +140,7 @@ design and the as-built layout.
        out = ctx.model_dir("my-thing")
 
        def run() -> None:
-           from st2.lib.something import do_thing
+           from pstrain.lib.something import do_thing
            do_thing(src=src, out=out)
 
        return Task(
@@ -170,4 +170,4 @@ design and the as-built layout.
   registered, the cd-8g plan includes the full chain in dependency
   order.
 * `tests/test_pipeline_integration.py` — end-to-end training runs
-  against a real audio corpus (CMU Arctic via `ST2_TEST_PROJECT`).
+  against a real audio corpus (CMU Arctic via `PSTRAIN_TEST_PROJECT`).

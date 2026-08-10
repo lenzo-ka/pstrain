@@ -3,7 +3,7 @@ API Reference
 
 Python API documentation.
 
-The recommended way to use ST2 programmatically is via the ``st2.api`` module,
+The recommended way to use pstrain programmatically is via the ``pstrain.api`` module,
 which provides all public functions for project setup, validation, model
 creation, and training workflows.
 

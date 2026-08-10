@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from st2.lib.param_cnt import ParamType, count_params
+from pstrain.lib.param_cnt import ParamType, count_params
 
 # Check if library exists
-# libst2c availability comes from the shared helper (real loader-based
+# libpstrainc availability comes from the shared helper (real loader-based
 # detection); see tests/clib.py.
 from tests.clib import C_LIBRARY_AVAILABLE as _lib_exists
 
@@ -129,22 +129,22 @@ class TestCountParamsStringConversion:
         assert result == ParamType.PHONE
 
 
-@pytest.mark.skipif(not _lib_exists, reason="libst2c not built")
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
 class TestCffiIntegration:
     """Tests that CFFI functions exist and are callable."""
 
     def test_cffi_function_exists(self) -> None:
-        """Test that st2_param_cnt function is declared in CFFI."""
-        from st2.lib import _st2c
+        """Test that pstrain_param_cnt function is declared in CFFI."""
+        from pstrain.lib import _pstrainc
 
-        lib = _st2c.get_lib()
-        assert hasattr(lib, "st2_param_cnt")
+        lib = _pstrainc.get_lib()
+        assert hasattr(lib, "pstrain_param_cnt")
 
     def test_cffi_constants_exist(self) -> None:
         """Test that PARAM_CNT_* constants are declared in CFFI."""
-        from st2.lib import _st2c
+        from pstrain.lib import _pstrainc
 
-        lib = _st2c.get_lib()
+        lib = _pstrainc.get_lib()
         assert lib.PARAM_CNT_STATE == 0
         assert lib.PARAM_CNT_CB == 1
         assert lib.PARAM_CNT_PHONE == 2

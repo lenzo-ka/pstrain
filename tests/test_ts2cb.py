@@ -5,16 +5,16 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from st2.lib import ts2cb
-from st2.lib.ts2cb import TyingType
+from pstrain.lib import ts2cb
+from pstrain.lib.ts2cb import TyingType
 
 # Check if library exists
-# libst2c availability comes from the shared helper (real loader-based
+# libpstrainc availability comes from the shared helper (real loader-based
 # detection); see tests/clib.py.
 from tests.clib import C_LIBRARY_AVAILABLE as _lib_exists
 
 
-@pytest.mark.skipif(not _lib_exists, reason="libst2c not built")
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
 class TestCreateTs2cb:
     """Tests for creating ts2cb mappings."""
 
@@ -55,7 +55,7 @@ class TestCreateTs2cb:
             ts2cb.create_ts2cb(100, "invalid")
 
 
-@pytest.mark.skipif(not _lib_exists, reason="libst2c not built")
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
 class TestTs2cbIO:
     """Tests for ts2cb file I/O."""
 
@@ -104,7 +104,7 @@ class TestTs2cbIO:
             ts2cb.read_ts2cb(tmp_path / "nonexistent.ts2cb")
 
 
-@pytest.mark.skipif(not _lib_exists, reason="libst2c not built")
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
 class TestCreateAndWriteTs2cb:
     """Tests for the combined create and write function."""
 

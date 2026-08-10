@@ -6,25 +6,25 @@ import numpy as np
 import pytest
 
 # Check if library exists
-# libst2c availability comes from the shared helper (real loader-based
+# libpstrainc availability comes from the shared helper (real loader-based
 # detection); see tests/clib.py.
 from tests.clib import C_LIBRARY_AVAILABLE as _lib_exists
 
 
-@pytest.mark.skipif(not _lib_exists, reason="libst2c not built")
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
 class TestFormatGau:
     """Tests for format_gau function."""
 
     def test_basic_format(self, tmp_path: Path) -> None:
         """Test basic Gaussian formatting."""
-        from st2.lib import _st2c
-        from st2.lib.printp import format_gau
+        from pstrain.lib import _pstrainc
+        from pstrain.lib.printp import format_gau
 
         # Create a simple Gaussian file
         gau_path = tmp_path / "means"
         n_mgau, n_feat, n_density, veclen = 2, 1, 4, 13
         gau = np.random.randn(n_mgau, n_feat, n_density, veclen).astype(np.float32)
-        _st2c.write_gau(str(gau_path), gau)
+        _pstrainc.write_gau(str(gau_path), gau)
 
         output = format_gau(gau_path)
 
@@ -35,14 +35,14 @@ class TestFormatGau:
         assert "density" in output
 
 
-@pytest.mark.skipif(not _lib_exists, reason="libst2c not built")
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
 class TestFormatMixw:
     """Tests for format_mixw function."""
 
     def test_basic_format(self, tmp_path: Path) -> None:
         """Test basic mixture weight formatting."""
-        from st2.lib import _st2c
-        from st2.lib.printp import format_mixw
+        from pstrain.lib import _pstrainc
+        from pstrain.lib.printp import format_mixw
 
         # Create a simple mixw file
         mixw_path = tmp_path / "mixw"
@@ -50,7 +50,7 @@ class TestFormatMixw:
         mixw = np.random.rand(n_mixw, n_feat, n_density).astype(np.float32)
         # Normalize
         mixw = mixw / mixw.sum(axis=2, keepdims=True)
-        _st2c.write_mixw(str(mixw_path), mixw)
+        _pstrainc.write_mixw(str(mixw_path), mixw)
 
         output = format_mixw(mixw_path)
 
@@ -60,14 +60,14 @@ class TestFormatMixw:
         assert "mixw [2 0]" in output
 
 
-@pytest.mark.skipif(not _lib_exists, reason="libst2c not built")
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
 class TestFormatTmat:
     """Tests for format_tmat function."""
 
     def test_basic_format(self, tmp_path: Path) -> None:
         """Test basic transition matrix formatting."""
-        from st2.lib import _st2c
-        from st2.lib.printp import format_tmat
+        from pstrain.lib import _pstrainc
+        from pstrain.lib.printp import format_tmat
 
         # Create a simple tmat file
         tmat_path = tmp_path / "tmat"
@@ -79,7 +79,7 @@ class TestFormatTmat:
             for i in range(n_state - 1):
                 tmat[t, i, i] = 0.5  # self-loop
                 tmat[t, i, i + 1] = 0.5  # forward
-        _st2c.write_tmat(str(tmat_path), tmat)
+        _pstrainc.write_tmat(str(tmat_path), tmat)
 
         output = format_tmat(tmat_path)
 
@@ -93,7 +93,7 @@ class TestPrintParamsShellout:
 
     def test_import(self) -> None:
         """Test that shell-out function can be imported."""
-        from st2.lib.printp import print_params_shellout
+        from pstrain.lib.printp import print_params_shellout
 
         assert callable(print_params_shellout)
 
@@ -101,7 +101,7 @@ class TestPrintParamsShellout:
         """Test handling of missing binary."""
         import subprocess
 
-        from st2.lib.printp import print_params_shellout
+        from pstrain.lib.printp import print_params_shellout
 
         with pytest.raises((subprocess.CalledProcessError, FileNotFoundError)):
             print_params_shellout(

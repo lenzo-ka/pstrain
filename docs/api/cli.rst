@@ -3,7 +3,7 @@ CLI API
 
 Command-line interface.
 
-.. automodule:: st2.cli
+.. automodule:: pstrain.cli
    :members:
    :undoc-members:
    :show-inheritance:

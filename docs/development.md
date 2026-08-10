@@ -26,7 +26,7 @@ pytest
 ruff check .
 
 # Type checking
-mypy st2
+mypy pstrain
 
 # Formatting
 ruff format .

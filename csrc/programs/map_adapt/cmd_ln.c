@@ -36,7 +36,7 @@
 /* defines, parses and (partially) validates the arguments
    given on the command line */
 
-#ifndef ST2_LIBRARY_BUILD
+#ifndef PSTRAIN_LIBRARY_BUILD
 int
 parse_cmd_ln(int argc, char *argv[])
 {
@@ -56,4 +56,4 @@ parse_cmd_ln(int argc, char *argv[])
 
     return 0;
 }
-#endif /* ST2_LIBRARY_BUILD */
+#endif /* PSTRAIN_LIBRARY_BUILD */

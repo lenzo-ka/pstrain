@@ -1,4 +1,4 @@
-"""Tests for st2.lib.pipeline.tasks.
+"""Tests for pstrain.lib.pipeline.tasks.
 
 Validates that the task graph builds cleanly, every registered target
 resolves to a known output, and every task's declared inputs are produced
@@ -14,9 +14,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from st2.lib.pipeline import PipelineContext
-from st2.lib.pipeline.context import DEFAULT_CONFIGS, FeatParams
-from st2.lib.pipeline.tasks import TARGETS, build_pipeline
+from pstrain.lib.pipeline import PipelineContext
+from pstrain.lib.pipeline.context import DEFAULT_CONFIGS, FeatParams
+from pstrain.lib.pipeline.tasks import TARGETS, build_pipeline
 
 
 @pytest.fixture
@@ -140,7 +140,7 @@ def test_extract_task_forwards_lifter(empty_project: Path, monkeypatch: pytest.M
     def capture(_audio: Path, _output: Path, params: dict[str, object]) -> None:
         captured.update(params)
 
-    monkeypatch.setattr("st2.lib.pipeline.tasks._extract_features_worker", capture)
+    monkeypatch.setattr("pstrain.lib.pipeline.tasks._extract_features_worker", capture)
     ctx = PipelineContext(project_dir=empty_project, feat=FeatParams(lifter=17))
     build_pipeline(ctx).tasks()["extract:placeholder"].fn()
 
@@ -355,7 +355,7 @@ def test_multipron_training_can_be_disabled(empty_project: Path) -> None:
 def test_bw_config_multipron_default_on() -> None:
     """BWConfig also defaults multipron on so library callers
     get the new behavior unless they explicitly opt out."""
-    from st2.lib.bw import BWConfig
+    from pstrain.lib.bw import BWConfig
 
     assert BWConfig().multipron is True
     assert BWConfig(multipron=False).multipron is False

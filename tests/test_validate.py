@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from st2.lib.validate import validate_project
+from pstrain.lib.validate import validate_project
 
 
 def test_nested_audio_reports_transcription_fileid_mismatch(tmp_path: Path) -> None:

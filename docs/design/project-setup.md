@@ -1,6 +1,6 @@
 # Project Setup Design
 
-This document outlines how to set up a project structure in ST2.
+This document outlines how to set up a project structure in pstrain.
 
 ## Overview
 
@@ -163,7 +163,7 @@ project/
 ## CLI Command
 
 ```bash
-st2 setup [project_dir] [options]
+pstrain setup [project_dir] [options]
 ```
 
 **Project Directory:**
@@ -184,7 +184,7 @@ st2 setup [project_dir] [options]
 Initialize in current directory:
 ```bash
 cd my_project
-st2 setup \
+pstrain setup \
   --transcription /path/to/all.transcription \
   --audio /path/to/audio \
   --dictionary /path/to/dictionary.dict
@@ -192,7 +192,7 @@ st2 setup \
 
 Initialize in specified directory:
 ```bash
-st2 setup my_project \
+pstrain setup my_project \
   --transcription /path/to/all.transcription \
   --audio /path/to/audio \
   --dictionary /path/to/dictionary.dict
@@ -200,7 +200,7 @@ st2 setup my_project \
 
 Initialize with all options:
 ```bash
-st2 setup my_project \
+pstrain setup my_project \
   --config /path/to/config.yaml \
   --transcription /path/to/all.transcription \
   --audio /path/to/audio \
@@ -220,13 +220,13 @@ arctic_a0003 good morning
 - Audio file: `audio/arctic_a0001.wav`
 - Must match exactly (case-sensitive)
 
-## Implementation for ST2
+## Implementation for pstrain
 
 ### Phase 0: Project Setup (NEW - First Priority)
 
 #### TODO 0.1: Setup CLI Command
-- [ ] Create `st2/cli/setup.py` module
-- [ ] Add `st2 setup` command to main CLI
+- [ ] Create `pstrain/cli/setup.py` module
+- [ ] Add `pstrain setup` command to main CLI
 - [ ] Parse command-line arguments:
   - [ ] `project_dir` (optional positional) - If provided, use that directory; if omitted, use current directory
   - [ ] `--config`, `--transcription`, `--audio`, `--dictionary`, `--phoneset`, `--filler-dict`
@@ -238,7 +238,7 @@ arctic_a0003 good morning
 - [ ] Call setup function
 
 #### TODO 0.2: Setup Function
-- [ ] Create `st2/lib/setup.py` module
+- [ ] Create `pstrain/lib/setup.py` module
 - [ ] Implement `setup_project(project_dir: Path, ...)` function
 - [ ] Handle project directory:
   - [ ] Accept `project_dir` as Path (absolute or relative)
@@ -253,25 +253,25 @@ arctic_a0003 good morning
 - [ ] Return setup status and paths
 
 #### TODO 0.3: Configuration Management
-- [ ] Create `st2/lib/config.py` module
+- [ ] Create `pstrain/lib/config.py` module
 - [ ] Implement config loading/saving
 - [ ] Create default config template
 - [ ] Validate config schema
 - [ ] Support config overrides
 
 #### TODO 0.4: Dictionary and Phoneset Handling
-- [ ] Create `st2/lib/dictionary.py` module
+- [ ] Create `pstrain/lib/dictionary.py` module
 - [ ] Implement dictionary loading/validation
 - [ ] Support filler dictionary
 - [ ] Validate dictionary format (UTF-8, proper structure)
-- [ ] Create `st2/lib/phoneset.py` module
+- [ ] Create `pstrain/lib/phoneset.py` module
 - [ ] Implement phoneset loading/validation
 - [ ] Extract phoneset from dictionary
 - [ ] Validate dictionary phones against phoneset
 - [ ] Support phoneset file format (one phone per line, # comments)
 
 #### TODO 0.5: Transcription File Handling
-- [ ] Create `st2/lib/transcription.py` module
+- [ ] Create `pstrain/lib/transcription.py` module
 - [ ] Implement transcription file parsing
 - [ ] Format: `<fileid> <word1> <word2> ...` (one line per utterance)
 - [ ] Extract fileid list from transcription
@@ -279,7 +279,7 @@ arctic_a0003 good morning
 - [ ] Validate all words in transcripts are in dictionary
 
 #### TODO 0.6: Feature Set Identification
-- [ ] Create `st2/lib/features.py` module
+- [ ] Create `pstrain/lib/features.py` module
 - [ ] Implement `get_feature_set_id(audio_config, feature_config)` function
 - [ ] Generate deterministic identifier from audio + feature parameters
 - [ ] Use hash or descriptive name (e.g., `mfcc_13`, `lda_29`)
@@ -287,7 +287,7 @@ arctic_a0003 good morning
 - [ ] Document feature directory naming convention
 
 #### TODO 0.7: Project Validation
-- [ ] Create `st2/lib/validate.py` module
+- [ ] Create `pstrain/lib/validate.py` module
 - [ ] Implement project structure validation
 - [ ] Check required files exist:
   - [ ] Configuration file
@@ -305,14 +305,14 @@ arctic_a0003 good morning
 - [ ] Validate feature directory structure (if features exist)
 
 **Deliverables:**
-- `st2/cli/setup.py` - Setup CLI command
-- `st2/lib/setup.py` - Setup implementation
-- `st2/lib/config.py` - Configuration management
-- `st2/lib/dictionary.py` - Dictionary handling
-- `st2/lib/phoneset.py` - Phoneset handling
-- `st2/lib/transcription.py` - Transcription file handling
-- `st2/lib/features.py` - Feature set identification
-- `st2/lib/validate.py` - Project validation
+- `pstrain/cli/setup.py` - Setup CLI command
+- `pstrain/lib/setup.py` - Setup implementation
+- `pstrain/lib/config.py` - Configuration management
+- `pstrain/lib/dictionary.py` - Dictionary handling
+- `pstrain/lib/phoneset.py` - Phoneset handling
+- `pstrain/lib/transcription.py` - Transcription file handling
+- `pstrain/lib/features.py` - Feature set identification
+- `pstrain/lib/validate.py` - Project validation
 - `tests/test_setup.py` - Unit tests
 - Documentation
 

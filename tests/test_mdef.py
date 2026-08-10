@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from st2.lib import mdef
+from pstrain.lib import mdef
 
 # Check if library is available
-# libst2c availability comes from the shared helper (real loader-based
+# libpstrainc availability comes from the shared helper (real loader-based
 # detection); see tests/clib.py.
 from tests.clib import C_LIBRARY_AVAILABLE as _lib_exists
 
@@ -60,7 +60,7 @@ def transcripts(tmp_path: Path) -> Path:
     return trans_file
 
 
-@pytest.mark.skipif(not _lib_exists, reason="libst2c not built")
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
 class TestGenerateCIMdef:
     """Test CI mdef generation."""
 
@@ -109,7 +109,7 @@ class TestGenerateCIMdef:
             mdef.generate_ci_mdef(tmp_path / "nonexistent", output)
 
 
-@pytest.mark.skipif(not _lib_exists, reason="libst2c not built")
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
 class TestGenerateAllTriphonesMdef:
     """Test all-triphones mdef generation."""
 
@@ -155,7 +155,7 @@ class TestGenerateAllTriphonesMdef:
         assert size_with >= size_without
 
 
-@pytest.mark.skipif(not _lib_exists, reason="libst2c not built")
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
 class TestGenerateUntiedMdef:
     """Test untied mdef generation."""
 
@@ -199,7 +199,7 @@ class TestGenerateUntiedMdef:
         assert untied_size <= all_size
 
 
-@pytest.mark.skipif(not _lib_exists, reason="libst2c not built")
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
 class TestCountTriphones:
     """Test triphone counting."""
 

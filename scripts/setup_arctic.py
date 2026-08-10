@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Set up CMU Arctic SLT corpus for st2 training.
+"""Set up CMU Arctic SLT corpus for pstrain training.
 
 This script:
 1. Copies wav files to audio/
@@ -167,7 +167,7 @@ def create_phoneset(dictionary_path: Path, output_path: Path) -> set[str]:
 
 
 def main() -> None:
-    print("Setting up CMU Arctic SLT corpus for st2...")
+    print("Setting up CMU Arctic SLT corpus for pstrain...")
 
     # Check prerequisites
     if not ARCTIC_DIR.exists():

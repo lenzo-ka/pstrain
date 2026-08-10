@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from st2.lib.config.models import (
+from pstrain.lib.config.models import (
     FeatureConfig,
-    ST2Config,
+    PstrainConfig,
     TrainingConfig,
 )
 
@@ -75,24 +75,24 @@ class TestTrainingConfig:
         assert cfg.ci.min_iterations >= 1
 
 
-class TestST2Config:
-    """Tests for main ST2Config model."""
+class TestPstrainConfig:
+    """Tests for main PstrainConfig model."""
 
     def test_default_values(self) -> None:
         """Test default config values."""
-        cfg = ST2Config()
+        cfg = PstrainConfig()
         assert isinstance(cfg.features, FeatureConfig)
         assert isinstance(cfg.training, TrainingConfig)
 
     def test_nested_access(self) -> None:
         """Test accessing nested settings."""
-        cfg = ST2Config()
+        cfg = PstrainConfig()
         assert cfg.features.num_ceps == 13
         assert cfg.training.n_states == 3
 
     def test_to_yaml_and_from_yaml(self) -> None:
         """Test YAML serialization roundtrip."""
-        original = ST2Config(name="my_project")
+        original = PstrainConfig(name="my_project")
         original.features.num_ceps = 26
         original.training.ci.n_gaussians = 4
 
@@ -103,7 +103,7 @@ class TestST2Config:
             original.to_yaml(config_path)
             assert config_path.exists()
 
-            restored = ST2Config.from_yaml(config_path)
+            restored = PstrainConfig.from_yaml(config_path)
             assert restored.name == "my_project"
             assert restored.features.num_ceps == 26
             assert restored.training.ci.n_gaussians == 4
@@ -113,7 +113,7 @@ class TestST2Config:
     def test_from_yaml_nonexistent_raises(self) -> None:
         """Test loading nonexistent file raises FileNotFoundError."""
         with pytest.raises(FileNotFoundError):
-            ST2Config.from_yaml(Path("/nonexistent/config.yaml"))
+            PstrainConfig.from_yaml(Path("/nonexistent/config.yaml"))
 
 
 class TestConfigValidation:
@@ -146,7 +146,7 @@ class TestConfigMerging:
 
     def test_partial_update(self) -> None:
         """Test partial config updates."""
-        cfg = ST2Config()
+        cfg = PstrainConfig()
         cfg.features.num_ceps = 26
         assert cfg.features.num_ceps == 26
         # Other values should remain defaults

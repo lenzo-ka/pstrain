@@ -22,7 +22,7 @@
 
 ### Secondary Goals
 
-1. **Library-first design**: All business logic in `st2.lib`, orchestration is thin wrapper
+1. **Library-first design**: All business logic in `pstrain.lib`, orchestration is thin wrapper
 2. **JSON-serializable outputs**: All pipeline results return JSON for web/API integration
 3. **Robust incremental execution**: Only rebuild what changed, skip completed work reliably
 4. **Resume capability**: Restart from any point, never redo completed computation
@@ -35,7 +35,7 @@
 ### Functional Requirements
 
 1. **Execute C programs** (sphinx_fe, bw, norm, etc.) as pipeline steps
-2. **Call Python functions** from `st2.lib` as pipeline steps
+2. **Call Python functions** from `pstrain.lib` as pipeline steps
 3. **Handle file dependencies**: Output of step N is input to step N+1
 4. **Support batch processing**: Process multiple files with wildcards
 5. **Configuration management**: YAML/JSON config files for pipeline parameters
@@ -125,7 +125,7 @@
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    User Interface                       │
-│  (CLI: st2 train, st2 extract-features, etc.)          │
+│  (CLI: pstrain train, pstrain extract-features, etc.)          │
 └────────────────────┬────────────────────────────────────┘
                      │
 ┌────────────────────▼────────────────────────────────────┐
@@ -136,7 +136,7 @@
         ┌────────────┼────────────┐
         │            │            │
 ┌───────▼────┐ ┌────▼────┐ ┌────▼──────────┐
-│  st2.lib   │ │ C CLI   │ │  Config       │
+│  pstrain.lib   │ │ C CLI   │ │  Config       │
 │  (Python   │ │ Programs │ │  Files       │
 │   API)     │ │          │ │  (YAML)       │
 └────────────┘ └──────────┘ └───────────────┘
@@ -145,9 +145,9 @@
 ### Key Components
 
 1. **Snakefile**: Defines pipeline rules and dependencies
-2. **st2.lib.tasks**: Python functions that wrap C programs and provide high-level API
+2. **pstrain.lib.tasks**: Python functions that wrap C programs and provide high-level API
 3. **Config files**: YAML configuration for pipeline parameters
-4. **CLI integration**: `st2.cli` commands that invoke Snakemake workflows
+4. **CLI integration**: `pstrain.cli` commands that invoke Snakemake workflows
 5. **Step registry**: Registry of available steps (from workflows and manual registration)
 6. **Step executor**: Unified execution engine for pipeline and standalone steps
 7. **Chunk system**: Reusable workflow components (simple and composed)
@@ -171,7 +171,7 @@
 - [ ] Document Snakemake setup in `docs/`
 
 #### TODO 1.2: Create Python task wrappers
-- [ ] Create `st2/lib/tasks.py` module
+- [ ] Create `pstrain/lib/tasks.py` module
 - [ ] Implement wrapper functions for key C programs:
   - [ ] `extract_features()` - wraps sphinx_fe
   - [ ] `normalize()` - wraps norm
@@ -190,7 +190,7 @@
   - [ ] Chunk parameters and inputs/outputs
   - [ ] Chunk metadata (name, description, version)
 - [ ] **Implement chunk registry**:
-  - [ ] `st2.lib.chunks` module
+  - [ ] `pstrain.lib.chunks` module
   - [ ] Chunk discovery (from config files)
   - [ ] Chunk validation
   - [ ] Chunk dependency resolution
@@ -215,12 +215,12 @@
 - [ ] Test with sample data
 
 #### TODO 1.5: CLI integration
-- [ ] Add `st2 train` command to `st2/cli.py`
-- [ ] Add `st2 workflow` command for running workflows
-- [ ] Add `st2 step` command for running individual steps:
-  - [ ] `st2 step extract-features --input audio.wav --output features.mfc`
-  - [ ] `st2 step normalize --input accum.acc --output norm.norm`
-  - [ ] `st2 step train --config train.yaml`
+- [ ] Add `pstrain train` command to `pstrain/cli.py`
+- [ ] Add `pstrain workflow` command for running workflows
+- [ ] Add `pstrain step` command for running individual steps:
+  - [ ] `pstrain step extract-features --input audio.wav --output features.mfc`
+  - [ ] `pstrain step normalize --input accum.acc --output norm.norm`
+  - [ ] `pstrain step train --config train.yaml`
 - [ ] Integrate with Snakemake programmatically
 - [ ] Add `--dry-run` flag
 - [ ] Add `--parallel N` flag
@@ -267,7 +267,7 @@
   - [ ] Dependency resolution
 - [ ] **Configuration management**:
   - [ ] Design YAML config schema for workflows
-  - [ ] Implement config loading in `st2.lib.tasks`
+  - [ ] Implement config loading in `pstrain.lib.tasks`
   - [ ] Support config inheritance/merging
   - [ ] Validate config files
   - [ ] Support chunk references in config
@@ -286,14 +286,14 @@
 - [ ] **Stop workflows**:
   - [ ] Handle Ctrl+C gracefully (SIGINT)
   - [ ] Handle SIGTERM for graceful shutdown
-  - [ ] `st2 stop <build-id>` CLI command
+  - [ ] `pstrain stop <build-id>` CLI command
   - [ ] Stop scheduling new jobs, let current jobs finish (graceful)
   - [ ] Force stop option (kill all jobs immediately)
   - [ ] Update build status to "cancelled" or "interrupted"
   - [ ] Save checkpoint before stopping
 - [ ] **Inspect state**:
-  - [ ] `st2 status <build-id>` - Show current workflow state
-  - [ ] `st2 list-builds` - List all builds with status
+  - [ ] `pstrain status <build-id>` - Show current workflow state
+  - [ ] `pstrain list-builds` - List all builds with status
   - [ ] Query what's running, what's done, what's pending
   - [ ] Show step-by-step progress
   - [ ] Show resource usage (CPU, memory, time)
@@ -307,9 +307,9 @@
   - [ ] Support querying products by step, phase, or build
   - [ ] Track file metadata (path, size, checksum, creation time)
 - [ ] **Phase cleanup**:
-  - [ ] `st2 clean <build-id> --phase <phase-name>` - Clean products from specific phase
-  - [ ] `st2 clean <build-id> --step <step-name>` - Clean products from specific step
-  - [ ] `st2 clean <build-id> --all` - Clean all products from build
+  - [ ] `pstrain clean <build-id> --phase <phase-name>` - Clean products from specific phase
+  - [ ] `pstrain clean <build-id> --step <step-name>` - Clean products from specific step
+  - [ ] `pstrain clean <build-id> --all` - Clean all products from build
   - [ ] List products before cleaning (dry-run mode)
   - [ ] Verify products are tracked before deletion
   - [ ] Handle partial cleanup (some files missing is OK)
@@ -320,8 +320,8 @@
   - [ ] Query build tracker for last successful step
   - [ ] Resume from last checkpoint, not from beginning
   - [ ] Handle partial outputs (clean up or reuse)
-  - [ ] `st2 restart <build-id>` CLI command
-  - [ ] `st2 restart <build-id> --from-phase <phase>` - Restart from specific phase (after cleanup)
+  - [ ] `pstrain restart <build-id>` CLI command
+  - [ ] `pstrain restart <build-id> --from-phase <phase>` - Restart from specific phase (after cleanup)
   - [ ] Validate outputs before resuming (don't trust incomplete files)
   - [ ] Use Snakemake's `--rerun-incomplete` flag
   - [ ] Mark incomplete files for rerun
@@ -343,7 +343,7 @@
 
 #### TODO 3.3: Build tracking system
 - [ ] Design build tracking schema (SQLite/JSON database)
-- [ ] Implement `st2.lib.tracker` module:
+- [ ] Implement `pstrain.lib.tracker` module:
   - [ ] `start_build()` - Record build start
   - [ ] `record_step()` - Track individual step execution
   - [ ] `finish_build()` - Record build completion/failure
@@ -365,7 +365,7 @@
   - [ ] Per-step log files
   - [ ] Build-level log aggregation
   - [ ] Log rotation and retention
-- [ ] Implement `st2.lib.logging` module:
+- [ ] Implement `pstrain.lib.logging` module:
   - [ ] `setup_logging()` - Configure logging
   - [ ] `get_logger()` - Get logger for module/step
   - [ ] Context managers for step logging
@@ -502,7 +502,7 @@
   - [ ] Handle parameter substitution
   - [ ] Map inputs/outputs between chunks
 - [ ] **Chunk registry**:
-  - [ ] `st2.lib.chunks` module
+  - [ ] `pstrain.lib.chunks` module
   - [ ] `register_chunk()` - Register chunk definition
   - [ ] `get_chunk()` - Get chunk by name
   - [ ] `list_chunks()` - List all available chunks
@@ -513,18 +513,18 @@
   - [ ] Input/output mapping
   - [ ] Dependency resolution
 - [ ] **CLI commands**:
-  - [ ] `st2 chunk list` - List available chunks
-  - [ ] `st2 chunk show <name>` - Show chunk definition
-  - [ ] `st2 chunk validate <file>` - Validate chunk file
-  - [ ] `st2 chunk run <name>` - Run chunk standalone
+  - [ ] `pstrain chunk list` - List available chunks
+  - [ ] `pstrain chunk show <name>` - Show chunk definition
+  - [ ] `pstrain chunk validate <file>` - Validate chunk file
+  - [ ] `pstrain chunk run <name>` - Run chunk standalone
 
 #### TODO 4.2: Standalone step execution
 - [ ] **CLI commands for individual steps**:
-  - [ ] `st2 step extract-features` - Run feature extraction
-  - [ ] `st2 step normalize` - Run normalization
-  - [ ] `st2 step train` - Run training step
-  - [ ] `st2 step list` - List available steps
-  - [ ] `st2 step status <step-id>` - Check step status
+  - [ ] `pstrain step extract-features` - Run feature extraction
+  - [ ] `pstrain step normalize` - Run normalization
+  - [ ] `pstrain step train` - Run training step
+  - [ ] `pstrain step list` - List available steps
+  - [ ] `pstrain step status <step-id>` - Check step status
 - [ ] **Step execution logic**:
   - [ ] Create standalone build record for tracking
   - [ ] Execute step with same logic as pipeline
@@ -539,10 +539,10 @@
   - [ ] Register steps in step registry
   - [ ] Generate CLI commands dynamically
 
-#### TODO 4.3: Integration with st2.lib
-- [ ] Ensure all `st2.lib` functions are workflow-compatible
-- [ ] Ensure all `st2.lib` functions are CLI-callable
-- [ ] Add workflow-specific utilities to `st2.lib`
+#### TODO 4.3: Integration with pstrain.lib
+- [ ] Ensure all `pstrain.lib` functions are workflow-compatible
+- [ ] Ensure all `pstrain.lib` functions are CLI-callable
+- [ ] Add workflow-specific utilities to `pstrain.lib`
 - [ ] Document workflow API
 - [ ] Document CLI step API
 
@@ -557,15 +557,15 @@
 
 #### TODO 4.4: Trace inspection and query interface
 - [ ] **Trace query API**:
-  - [ ] `st2.lib.traces.query()` - Query traces by attributes
-  - [ ] `st2.lib.traces.get_trace()` - Get full trace by trace_id
-  - [ ] `st2.lib.traces.get_call_chain()` - Get call chain for build
-  - [ ] `st2.lib.traces.compare()` - Compare multiple traces
+  - [ ] `pstrain.lib.traces.query()` - Query traces by attributes
+  - [ ] `pstrain.lib.traces.get_trace()` - Get full trace by trace_id
+  - [ ] `pstrain.lib.traces.get_call_chain()` - Get call chain for build
+  - [ ] `pstrain.lib.traces.compare()` - Compare multiple traces
 - [ ] **CLI commands**:
-  - [ ] `st2 traces query` - Query traces from CLI
-  - [ ] `st2 traces show <trace-id>` - Show trace details
-  - [ ] `st2 traces compare <trace-id1> <trace-id2>` - Compare traces
-  - [ ] `st2 traces export` - Export traces to Honeycomb/file
+  - [ ] `pstrain traces query` - Query traces from CLI
+  - [ ] `pstrain traces show <trace-id>` - Show trace details
+  - [ ] `pstrain traces compare <trace-id1> <trace-id2>` - Compare traces
+  - [ ] `pstrain traces export` - Export traces to Honeycomb/file
 - [ ] **Visualization**:
   - [ ] Generate trace visualization (HTML/JSON)
   - [ ] Call chain diagram
@@ -578,7 +578,7 @@
   - [ ] Query Honeycomb from CLI (optional)
 
 #### TODO 4.5: Testing
-- [ ] Unit tests for `st2.lib.tasks` functions
+- [ ] Unit tests for `pstrain.lib.tasks` functions
 - [ ] Integration tests for workflows
 - [ ] Test parallel execution correctness
 - [ ] Test error handling and recovery
@@ -601,7 +601,7 @@
 ## File Structure
 
 ```
-st2/
+pstrain/
 ├── lib/
 │   ├── tasks.py          # Python task wrappers
 │   ├── chunks.py         # Chunk registry and composition
@@ -680,7 +680,7 @@ chunk:
   step:
     program: "sphinx_fe"  # C program name
     # or
-    function: "st2.lib.tasks.extract_features"  # Python function
+    function: "pstrain.lib.tasks.extract_features"  # Python function
 
   inputs:
     - name: "audio_file"
@@ -807,7 +807,7 @@ parallelism:
 ### Chunk Registry Structure
 
 ```
-st2/
+pstrain/
 ├── chunks/
 │   ├── __init__.py
 │   ├── simple/
@@ -867,7 +867,7 @@ parallelism:
 9. ✅ Comprehensive logging at all levels
 10. ✅ Failure analysis helps identify and fix issues
 11. ✅ Can query "what builds failed?" and "why did this fail?"
-12. ✅ Can run individual steps from CLI (`st2 step <name>`)
+12. ✅ Can run individual steps from CLI (`pstrain step <name>`)
 13. ✅ Standalone steps tracked same as pipeline steps
 14. ✅ Pipeline can detect and reuse standalone-executed steps
 15. ✅ Unified tracking system handles both execution types
@@ -1152,7 +1152,7 @@ def should_skip_step(step_name, inputs, outputs, config_hash):
 **5. Unified Step Execution**
 - Steps can be executed:
   - As part of a pipeline (via Snakemake)
-  - Standalone from CLI (`st2 step <step-name>`)
+  - Standalone from CLI (`pstrain step <step-name>`)
 - Both execution types tracked in same database
 - Pipeline can detect and reuse standalone-executed steps
 - Standalone steps create their own "build" record for tracking
@@ -1185,7 +1185,7 @@ def should_skip_step(step_name, inputs, outputs, config_hash):
    - **Status:** ✅ Decided
 
 5. **Build storage**: SQLite for now, can migrate to PostgreSQL later
-   - **Decision:** SQLite database in `st2/builds/builds.db`
+   - **Decision:** SQLite database in `pstrain/builds/builds.db`
    - **Status:** ✅ Decided
 
 6. **Log retention**: Configurable retention policy
@@ -1255,7 +1255,7 @@ def should_skip_step(step_name, inputs, outputs, config_hash):
 **Implementation:**
 
 ```python
-# st2/lib/observability.py
+# pstrain/lib/observability.py
 from opentelemetry import trace
 from opentelemetry import metrics
 from opentelemetry.sdk.trace import TracerProvider
@@ -1266,7 +1266,7 @@ from opentelemetry.sdk.resources import Resource
 
 # Setup with rich resource attributes
 resource = Resource.create({
-    "service.name": "st2",
+    "service.name": "pstrain",
     "service.version": __version__,
     "deployment.environment": os.getenv("ENV", "development"),
 })
