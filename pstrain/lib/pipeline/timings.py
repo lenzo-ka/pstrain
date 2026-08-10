@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 1
 SUMMARY_THRESHOLD_SECONDS = 3.0
+STALE_TEMP_AGE_SECONDS = 60 * 60
 
 
 @dataclass(frozen=True)
@@ -55,44 +56,53 @@ class MeasuredTask:
 
 def measure(task: str, group: str, fn: Any) -> MeasuredTask:
     """Run ``fn`` while keeping measurement strictly observational."""
-    started_at = datetime.now(UTC)
-    wall_start = time.monotonic()
-    cpu_start = None
-    cpu_end = None
-    measurement_error: Exception | None = None
+    before: tuple[datetime, float, os.times_result] | None = None
+    pre_error: Exception | None = None
     try:
-        cpu_start = os.times()
+        _raise_injected_fault("pre")
+        before = (datetime.now(UTC), time.monotonic(), os.times())
     except Exception as exc:
-        measurement_error = exc
+        pre_error = exc
+
     error: Exception | None = None
     try:
         fn()
     except Exception as exc:
         error = exc
-    finally:
-        try:
-            cpu_end = os.times()
-        except Exception as exc:
-            if measurement_error is None:
-                measurement_error = exc
-    if measurement_error is not None or cpu_start is None or cpu_end is None:
-        logger.warning("Could not measure task %s: %s", task, measurement_error)
-        return MeasuredTask(timing=None, error=error)
-    wall = time.monotonic() - wall_start
-    timing = TaskTiming(
-        task=task,
-        stage=task_stage(task, group),
-        group=group,
-        wall=wall,
-        cpu_user=cpu_end.user - cpu_start.user,
-        cpu_sys=cpu_end.system - cpu_start.system,
-        cpu_children_user=cpu_end.children_user - cpu_start.children_user,
-        cpu_children_sys=cpu_end.children_system - cpu_start.children_system,
-        start=started_at.isoformat(),
-        end=datetime.now(UTC).isoformat(),
-        outcome="failed" if error is not None else "ok",
-    )
+
+    timing: TaskTiming | None = None
+    try:
+        if pre_error is not None:
+            raise pre_error
+        assert before is not None
+        started_at, wall_start, cpu_start = before
+        ended_at = datetime.now(UTC)
+        wall_end = time.monotonic()
+        cpu_end = os.times()
+        _raise_injected_fault("post")
+        timing = TaskTiming(
+            task=task,
+            stage=task_stage(task, group),
+            group=group,
+            wall=wall_end - wall_start,
+            cpu_user=cpu_end.user - cpu_start.user,
+            cpu_sys=cpu_end.system - cpu_start.system,
+            cpu_children_user=cpu_end.children_user - cpu_start.children_user,
+            cpu_children_sys=cpu_end.children_system - cpu_start.children_system,
+            start=started_at.isoformat(),
+            end=ended_at.isoformat(),
+            outcome="failed" if error is not None else "ok",
+        )
+    except Exception as exc:
+        with suppress(Exception):
+            logger.warning("Could not measure task %s: %s", task, exc)
     return MeasuredTask(timing=timing, error=error)
+
+
+def _raise_injected_fault(stage: str) -> None:
+    """Provide a process-safe measurement fault hook for regression tests."""
+    if os.environ.get("PSTRAIN_TIMINGS_FAULT") == stage:
+        raise RuntimeError(f"injected {stage} timing fault")
 
 
 def rollup(records: list[TaskTiming]) -> list[dict[str, float | str]]:
@@ -144,11 +154,14 @@ def timings_dir(project_dir: Path) -> Path:
 def write_document(project_dir: Path, document: dict[str, Any]) -> Path | None:
     """Atomically persist timings; observation failures are warnings only."""
     destination = timings_dir(project_dir) / f"{document['run_id']}.json"
-    temporary = destination.with_name(f".{destination.name}.tmp-{os.getpid()}")
+    temporary = destination.with_name(f".{destination.name}.tmp-{os.getpid()}-{uuid.uuid4().hex}")
     try:
         destination.parent.mkdir(parents=True, exist_ok=True)
+        now = time.time()
         for stale in destination.parent.glob(".*.json.tmp-*"):
-            stale.unlink(missing_ok=True)
+            with suppress(OSError):
+                if now - stale.stat().st_mtime > STALE_TEMP_AGE_SECONDS:
+                    stale.unlink(missing_ok=True)
         temporary.write_text(
             json.dumps(document, indent=2, sort_keys=True, allow_nan=False) + "\n",
             encoding="utf-8",

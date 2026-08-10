@@ -889,33 +889,15 @@ def test_timing_write_failure_does_not_fail_pipeline(
     assert "Could not write pipeline timings" in caplog.text
 
 
-@pytest.mark.parametrize("jobs", [1, 2])
-def test_measurement_failure_preserves_success_inline_and_pool(
+@pytest.mark.parametrize("fault", ["pre", "post"])
+def test_measurement_failure_preserves_success_inline(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
-    jobs: int,
+    fault: str,
 ) -> None:
     output = tmp_path / "output"
-
-    class InlinePool:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            pass
-
-        def submit(self, fn: object, *args: object, **kwargs: object) -> Future[object]:
-            future: Future[object] = Future()
-            future.set_result(fn(*args, **kwargs))  # type: ignore[operator]
-            return future
-
-        def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
-            assert wait
-            assert cancel_futures
-
-    def unavailable_times() -> os.times_result:
-        raise OSError("times unavailable")
-
-    monkeypatch.setattr(runner, "ProcessPoolExecutor", InlinePool)
-    monkeypatch.setattr(pipeline_timings.os, "times", unavailable_times)
+    monkeypatch.setenv("PSTRAIN_TIMINGS_FAULT", fault)
     pipeline = Pipeline(tmp_path)
     pipeline.add(
         Task(
@@ -928,9 +910,40 @@ def test_measurement_failure_preserves_success_inline_and_pool(
     pipeline.register_target("work", output)
 
     with caplog.at_level("WARNING"):
-        assert pipeline.run("work", jobs=jobs) == 0
+        assert pipeline.run("work", jobs=1) == 0
     assert output.read_text() == "done"
-    assert caplog.messages.count("Could not measure task work: times unavailable") == 1
+    assert caplog.messages.count(f"Could not measure task work: injected {fault} timing fault") == 1
+    artifacts = list((tmp_path / ".pstrain" / "timings").glob("*.json"))
+    assert len(artifacts) == 1
+    document = json.loads(artifacts[0].read_text())
+    assert document["status"] == "completed"
+    assert document["tasks_recorded"] == 0
+
+
+@pytest.mark.parametrize("fault", ["pre", "post"])
+def test_measurement_failure_preserves_success_in_spawn_pool(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+    fault: str,
+) -> None:
+    output = tmp_path / "output"
+    monkeypatch.setenv("PSTRAIN_TIMINGS_FAULT", fault)
+    pipeline = Pipeline(tmp_path)
+    pipeline.add(
+        Task(
+            "work",
+            functools.partial(Path.write_text, output, "done"),
+            outputs=(output,),
+            parallel_group="group",
+        )
+    )
+    pipeline.register_target("work", output)
+
+    assert pipeline.run("work", jobs=2) == 0
+    captured = capfd.readouterr()
+    assert output.read_text() == "done"
+    assert f"Could not measure task work: injected {fault} timing fault" in captured.err
     artifacts = list((tmp_path / ".pstrain" / "timings").glob("*.json"))
     assert len(artifacts) == 1
     document = json.loads(artifacts[0].read_text())
@@ -982,6 +995,8 @@ def test_timing_write_removes_stale_temporary_file(tmp_path: Path) -> None:
     directory.mkdir(parents=True)
     stale = directory / ".old.json.tmp-123"
     stale.write_text("partial")
+    old = time.time() - pipeline_timings.STALE_TEMP_AGE_SECONDS - 1
+    os.utime(stale, (old, old))
     document = pipeline_timings.build_document(
         [],
         run_id="new",
@@ -993,6 +1008,24 @@ def test_timing_write_removes_stale_temporary_file(tmp_path: Path) -> None:
 
     assert pipeline_timings.write_document(tmp_path, document) == directory / "new.json"
     assert not stale.exists()
+
+
+def test_timing_write_preserves_live_temporary_file(tmp_path: Path) -> None:
+    directory = tmp_path / ".pstrain" / "timings"
+    directory.mkdir(parents=True)
+    live = directory / ".concurrent.json.tmp-456-unique"
+    live.write_text("partial")
+    document = pipeline_timings.build_document(
+        [],
+        run_id="new",
+        target="target",
+        started="start",
+        ended="end",
+        status="completed",
+    )
+
+    assert pipeline_timings.write_document(tmp_path, document) == directory / "new.json"
+    assert live.exists()
 
 
 def test_rollup_schema_and_summary_are_value_tolerant() -> None:
