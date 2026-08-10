@@ -306,6 +306,11 @@ class _NativeWorker:
                 self._send_request(request, deadline)
             except TimeoutError:
                 self._raise_timeout(operation)
+            except (BrokenPipeError, EOFError, OSError):
+                # The fresh helper died during the retried send; give up loudly
+                # rather than leaving a connection holding a partial frame.
+                self._discard()
+                self._raise_death(operation, inputs, eof=True)
         except TimeoutError:
             self._raise_timeout(operation)
 

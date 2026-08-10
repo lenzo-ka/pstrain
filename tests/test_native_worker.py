@@ -7,6 +7,7 @@ as a typed exception with this interpreter still standing.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 import socket
@@ -208,16 +209,22 @@ def test_wedged_worker_send_times_out_and_next_call_respawns(
     finally:
         duplicate.close()
     os.kill(old_pid, signal.SIGSTOP)
-    monkeypatch.setattr(native_worker, "_REQUEST_TIMEOUT", 0.2)
+    try:
+        monkeypatch.setattr(native_worker, "_REQUEST_TIMEOUT", 0.2)
 
-    payload = "x" * (native_worker._MAX_REQUEST_BYTES - 1024)
-    with pytest.raises(native_worker.PstrainWorkerError, match="timed out during"):
-        native_worker.call("_fault_exit_zero", (payload,), (tmp_path / "input",))
+        payload = "x" * (native_worker._MAX_REQUEST_BYTES - 1024)
+        with pytest.raises(native_worker.PstrainWorkerError, match="timed out during"):
+            native_worker.call("_fault_exit_zero", (payload,), (tmp_path / "input",))
 
-    recovered = tmp_path / "recovered.mdef"
-    mdef.generate_ci_mdef(phones, recovered)
-    assert recovered.exists()
-    assert native_worker._owned_worker().pid != old_pid
+        recovered = tmp_path / "recovered.mdef"
+        mdef.generate_ci_mdef(phones, recovered)
+        assert recovered.exists()
+        assert native_worker._owned_worker().pid != old_pid
+    finally:
+        # Never leave a stopped helper behind: a failed assertion above would
+        # otherwise hang fixture teardown on a blocking send to a full pipe.
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(old_pid, signal.SIGCONT)
 
 
 @requires_c_library
