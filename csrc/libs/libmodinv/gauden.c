@@ -1351,8 +1351,10 @@ gauden_scale_densities_bwd(float64 ***den,		/* density array for a mixture Gauss
 	    for (k = 0; k < g->n_top; k++) {
 		/* scl is a log-domain offset, not a linear value. It may be
 		 * below log(DBL_MIN); only the difference must be exponentiable.
-		 * Reuse the exact forward offset to keep alpha and beta scaled
-		 * identically. */
+		 * Upstream SphinxTrain clamps it here; pstrain deliberately reuses
+		 * the exact forward offset so alpha and beta stay scaled identically.
+		 * This is a downstream numerical correction and a candidate for an
+		 * upstream contribution. */
 		den[c][j][k] = exp(den[c][j][k] - scl[j]);
 		assert(finite(den[c][j][k]));
 	    }

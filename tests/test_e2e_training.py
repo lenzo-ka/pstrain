@@ -103,6 +103,62 @@ def test_build_ci_1g_produces_finite_model(tmp_path: Path) -> None:
 
 
 @requires_c_library
+def test_bw_preserves_extreme_forward_density_scale(tmp_path: Path) -> None:
+    """Synthesized finite observations exercise BW below log(DBL_MIN)."""
+    from pstrain.lib import _pstrainc
+    from pstrain.lib.bw import BWConfig, BWTrainer
+    from pstrain.lib.pipeline import PipelineContext
+    from pstrain.lib.pipeline.tasks import build_pipeline
+    from pstrain.lib.setup import setup_project
+
+    project_dir = tmp_path / "proj"
+    setup_project(
+        project_dir,
+        transcription_path=FIXTURE / "transcription.txt",
+        audio_path=FIXTURE / "wav",
+        dictionary_path=FIXTURE / "dictionary.dict",
+        phoneset_path=FIXTURE / "phoneset.txt",
+        filler_dict_path=FIXTURE / "filler.dict",
+    )
+    ctx = PipelineContext.from_config(project_dir)
+    assert build_pipeline(ctx).run("flat", jobs=1) == 0
+
+    model_dir = ctx.model_dir("flat")
+    means = _pstrainc.read_gau(str(model_dir / "means"))[0]
+    variances = _pstrainc.read_gau(str(model_dir / "variances"))[0]
+    observation = np.full(39, float(means.max()) + 1000.0, dtype=np.float32)
+
+    # This is the diagonal-Gaussian calculation used by gauden_compute_log
+    # after its 0.0001 variance floor. Prove every codebook's real forward
+    # offset (best log density minus MAX_LOG_DEN=10) crosses log(DBL_MIN).
+    effective_vars = np.maximum(variances[:, 0, 0, :], 0.0001)
+    normalizers = -0.5 * (
+        observation.size * np.log(2.0 * np.pi) + np.log(effective_vars).sum(axis=1)
+    )
+    log_densities = normalizers - (
+        np.square(observation - means[:, 0, 0, :]) / (2.0 * effective_vars)
+    ).sum(axis=1)
+    assert float(log_densities.max() - 10.0) < np.log(np.finfo(np.float64).tiny)
+
+    features = np.repeat(observation[None, :], 160, axis=0)
+    trainer = BWTrainer(
+        mdef_path=model_dir / "mdef",
+        means_path=model_dir / "means",
+        vars_path=model_dir / "variances",
+        mixw_path=model_dir / "mixture_weights",
+        tmat_path=model_dir / "transition_matrices",
+        config=BWConfig(a_beam=1e-200, multipron=False),
+    )
+    trainer.set_dict(ctx.shared_dir / "dictionary.dict", ctx.filler_dict)
+
+    assert trainer.process_utterance_text(features, "<s> author </s>")
+    stats = trainer.get_stats()
+    assert stats.total_utts == 1
+    assert stats.total_frames == len(features)
+    assert np.isfinite(stats.total_log_lik)
+
+
+@requires_c_library
 def test_features_extracted_for_every_utterance(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
