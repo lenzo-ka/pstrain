@@ -1,0 +1,16 @@
+run	beam	stage_iteration	utterance	attempts	result
+post-coverage	1e-90	cd-untied/6	arctic_a0257	2	skipped
+post-coverage	1e-90	cd-untied/6	arctic_a0448	2	skipped
+post-coverage	1e-90	cd-untied/6	arctic_a0536	2	skipped
+post-coverage	1e-90	cd-untied/6	arctic_b0126	2	skipped
+post-coverage	1e-90	cd-untied/6	arctic_b0424	2	skipped
+beam-stability	1e-100	probe	arctic_a0257	1	failed
+beam-stability	1e-100	probe	arctic_a0448	1	failed
+beam-stability	1e-100	probe	arctic_a0536	1	failed
+beam-stability	1e-100	probe	arctic_b0126	1	failed
+beam-stability	1e-100	probe	arctic_b0424	1	failed
+beam-stability	1e-200	probe	arctic_a0257	1	failed
+beam-stability	1e-200	probe	arctic_a0448	1	failed
+beam-stability	1e-200	probe	arctic_a0536	1	failed
+beam-stability	1e-200	probe	arctic_b0126	1	failed
+beam-stability	1e-200	probe	arctic_b0424	1	failed

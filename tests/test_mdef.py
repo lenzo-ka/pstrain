@@ -176,29 +176,48 @@ class TestGenerateUntiedMdef:
         )
         assert output.exists()
 
-    def test_untied_only_observed_triphones(
+    @pytest.mark.parametrize("multipron", [False, True])
+    def test_untied_inventory_matches_training_mode(
         self,
         phone_list: Path,
         dictionary: Path,
         filler_dict: Path,
         transcripts: Path,
         tmp_path: Path,
+        multipron: bool,
     ) -> None:
-        """Test that untied mdef only contains observed triphones."""
+        """Linear is occurrence-pruned; multipron covers the graph domain."""
         output = tmp_path / "untied.mdef"
         mdef.generate_untied_mdef(
-            phone_list, dictionary, transcripts, output, filler_dict=filler_dict
+            phone_list,
+            dictionary,
+            transcripts,
+            output,
+            filler_dict=filler_dict,
+            multipron=multipron,
         )
 
         # Untied should have fewer triphones than all-triphones
         all_output = tmp_path / "all.mdef"
         mdef.generate_alltriphones_mdef(phone_list, dictionary, all_output, filler_dict=filler_dict)
 
-        # Untied usually smaller (pruned by occurrence)
-        untied_size = output.stat().st_size
-        all_size = all_output.stat().st_size
-        # May be equal if all triphones occur
-        assert untied_size <= all_size
+        def cd_rows(path: Path) -> set[tuple[str, str, str, str]]:
+            return {
+                (fields[0], fields[1], fields[2], fields[3])
+                for line in path.read_text().splitlines()
+                if len(fields := line.split()) >= 4 and fields[1] != "-"
+            }
+
+        untied_rows = cd_rows(output)
+        all_rows = cd_rows(all_output)
+        if multipron:
+            assert untied_rows == all_rows
+        else:
+            assert untied_rows < all_rows
+            # This dictionary-producible BAA start would require BAA to follow
+            # BAA; that sequence is absent from the transcript.
+            assert ("B", "AA", "AA", "b") in all_rows
+            assert ("B", "AA", "AA", "b") not in untied_rows
 
 
 @pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")

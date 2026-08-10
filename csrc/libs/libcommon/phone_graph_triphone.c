@@ -1,17 +1,14 @@
 /**
  * @file phone_graph_triphone.c
- * @brief Context-split + triphone resolution on a phone_graph_t.
+ * @brief Two-sided context cross-product and triphone resolution.
  *
  * Two operations live here:
  *
  *   phone_graph_split_contexts(in) -> out
- *     Build a new graph where every slot has at most one distinct
- *     CI-phone predecessor. Slots whose predecessors carry multiple
- *     CI phones are duplicated, one copy per distinct predecessor
- *     CI phone, and the predecessor edges are partitioned. All copies
- *     of a slot share the same outgoing-edge set, with each outgoing
- *     edge possibly retargeted via the same split rule applied to the
- *     successor.
+ *     Build a new graph where every non-filler slot has one unambiguous
+ *     (left CI phone, right CI phone) pair. Slots are duplicated over the
+ *     cross-product of distinct predecessor and successor contexts, and
+ *     edges connect only compatible copies. Fillers stay shared.
  *
  *   cvt2triphone_graph(graph, acmod_set) -> int
  *     Walks an already-unambiguous-context graph and replaces each
@@ -39,60 +36,84 @@
 
 /* Per-old-slot split metadata. */
 typedef struct split_info_s {
-    uint32     n_copies;     /* >=1; equals n distinct CI predecessor phones */
-    uint32     first_new;    /* offset in the new graph */
-    acmod_id_t *group_ci;    /* [n_copies] distinct CI phones, in order */
+    uint32 n_left;
+    uint32 n_right;
+    uint32 n_copies;
+    uint32 first_new;
+    acmod_id_t *left_ci;
+    acmod_id_t *right_ci;
 } split_info_t;
 
-/* Classify every old slot: how many copies, which CI phone each copy
- * is for. */
+static acmod_id_t
+context_phone(acmod_set_t *acmod_set, acmod_id_t phone, acmod_id_t sil)
+{
+    if (acmod_set_has_attrib(acmod_set, phone, "filler"))
+        return sil;
+    return acmod_set_base_phone(acmod_set, phone);
+}
+
+static acmod_id_t *
+distinct_contexts(const phone_graph_t *in,
+                  acmod_set_t *acmod_set,
+                  const uint32 *neighbors,
+                  uint32 n_neighbors,
+                  acmod_id_t sil,
+                  uint32 *n_distinct)
+{
+    acmod_id_t *distinct;
+    uint32 i, j;
+
+    distinct = ckd_calloc(n_neighbors ? n_neighbors : 1, sizeof(acmod_id_t));
+    *n_distinct = 0;
+    for (i = 0; i < n_neighbors; ++i) {
+        acmod_id_t ci = context_phone(acmod_set, in->phone[neighbors[i]], sil);
+        for (j = 0; j < *n_distinct; ++j) {
+            if (distinct[j] == ci)
+                break;
+        }
+        if (j == *n_distinct)
+            distinct[(*n_distinct)++] = ci;
+    }
+    if (*n_distinct == 0) {
+        distinct[0] = sil;
+        *n_distinct = 1;
+    }
+    return distinct;
+}
+
+/* Classify every old slot by its left/right CI-context cross-product. */
 static split_info_t *
 classify_slots(const phone_graph_t *in,
                acmod_set_t *acmod_set,
                uint32 *total_new)
 {
-    uint32 i, u, v;
+    uint32 i;
     split_info_t *info = ckd_calloc(in->n, sizeof(split_info_t));
     uint32 running = 0;
+    acmod_id_t sil = acmod_set_name2id(acmod_set, "SIL");
 
     for (i = 0; i < in->n; i++) {
-        /* Fillers are deliberately left as CI models by
-         * cvt2triphone_graph(), so their left context is irrelevant.
-         * In particular, splitting utterance-final </s> (SIL) creates
-         * several terminal HMM exits while forward/backward has exactly
-         * one designated final state (n_state - 1). Keep one filler slot
-         * so every incoming pronunciation path reaches that shared final.
-         * Transition weights and beam thresholds are unchanged. The shared
-         * fan-in intentionally changes path/pruning structure: predecessor
-         * alpha mass is summed before pruning, preserving pronunciation
-         * posterior summation at the single terminal state. */
-        if (in->n_prior[i] <= 1
-            || acmod_set_has_attrib(acmod_set, in->phone[i], "filler")) {
-            info[i].n_copies = 1;
-            info[i].group_ci = ckd_calloc(1, sizeof(acmod_id_t));
-            info[i].group_ci[0] = (in->n_prior[i] == 1)
-                                       ? in->phone[in->prior_idx[i][0]]
-                                       : 0;  /* unused for n_copies == 1 */
-            info[i].first_new = running;
-            running += 1;
-            continue;
-        }
-        /* Collect distinct predecessor CI phones, preserving the
-         * order of first occurrence (deterministic for parity). */
-        acmod_id_t *distinct = ckd_calloc(in->n_prior[i], sizeof(acmod_id_t));
-        uint32 n_distinct = 0;
-        for (u = 0; u < in->n_prior[i]; u++) {
-            acmod_id_t ci = in->phone[in->prior_idx[i][u]];
-            int found = 0;
-            for (v = 0; v < n_distinct; v++) {
-                if (distinct[v] == ci) { found = 1; break; }
-            }
-            if (!found) distinct[n_distinct++] = ci;
-        }
-        info[i].n_copies = n_distinct;
-        info[i].group_ci = distinct;     /* hand over ownership */
         info[i].first_new = running;
-        running += n_distinct;
+        if (acmod_set_has_attrib(acmod_set, in->phone[i], "filler")) {
+            /* Fillers remain CI and, crucially, utterance-final SIL remains
+             * one shared final HMM.  Its contexts are not model identity. */
+            info[i].n_left = info[i].n_right = info[i].n_copies = 1;
+            info[i].left_ci = ckd_calloc(1, sizeof(acmod_id_t));
+            info[i].right_ci = ckd_calloc(1, sizeof(acmod_id_t));
+            info[i].left_ci[0] = info[i].right_ci[0] = sil;
+        } else {
+            /* A slot's triphone identity depends on both sides.  Variant
+             * fan-in changes the left context and variant fan-out changes
+             * the right context, so materialize their cross-product. */
+            info[i].left_ci = distinct_contexts(in, acmod_set,
+                                                in->prior_idx[i], in->n_prior[i],
+                                                sil, &info[i].n_left);
+            info[i].right_ci = distinct_contexts(in, acmod_set,
+                                                 in->next_idx[i], in->n_next[i],
+                                                 sil, &info[i].n_right);
+            info[i].n_copies = info[i].n_left * info[i].n_right;
+        }
+        running += info[i].n_copies;
     }
 
     *total_new = running;
@@ -105,27 +126,21 @@ free_split_info(split_info_t *info, uint32 n)
     uint32 i;
     if (!info) return;
     for (i = 0; i < n; i++) {
-        if (info[i].group_ci) ckd_free(info[i].group_ci);
+        if (info[i].left_ci) ckd_free(info[i].left_ci);
+        if (info[i].right_ci) ckd_free(info[i].right_ci);
     }
     ckd_free(info);
 }
 
-/* Find which copy of slot `c` corresponds to predecessor CI phone
- * `pred_ci`. */
+/* Find the deterministic group index for one neighboring CI context. */
 static uint32
-copy_for_predecessor_ci(const split_info_t *info, uint32 c, acmod_id_t pred_ci)
+context_group(const acmod_id_t *contexts, uint32 n, acmod_id_t ci)
 {
     uint32 g;
-    if (info[c].n_copies == 1) {
-        return info[c].first_new;
-    }
-    for (g = 0; g < info[c].n_copies; g++) {
-        if (info[c].group_ci[g] == pred_ci) {
-            return info[c].first_new + g;
-        }
-    }
-    /* Should be unreachable if the split was computed correctly. */
-    assert(0 && "copy_for_predecessor_ci: predecessor CI not found");
+    for (g = 0; g < n; ++g)
+        if (contexts[g] == ci)
+            return g;
+    assert(0 && "context_group: edge context not found");
     return 0;
 }
 
@@ -133,12 +148,14 @@ phone_graph_t *
 phone_graph_split_contexts(const phone_graph_t *in, acmod_set_t *acmod_set)
 {
     uint32 i, u, g, total_new;
+    acmod_id_t sil;
     phone_graph_t *out;
     split_info_t *info;
 
     if (!in || !acmod_set) return NULL;
 
     info = classify_slots(in, acmod_set, &total_new);
+    sil = acmod_set_name2id(acmod_set, "SIL");
 
     /* Fast path: no slot needs splitting. Make a structural copy of
      * the input so caller-side semantics stay uniform (caller frees
@@ -208,13 +225,18 @@ phone_graph_split_contexts(const phone_graph_t *in, acmod_set_t *acmod_set)
         for (i = 0; i < in->n; i++) {
             for (u = 0; u < in->n_prior[i]; u++) {
                 uint32 p = in->prior_idx[i][u];
-                acmod_id_t pred_ci = in->phone[p];
-                uint32 c_target = copy_for_predecessor_ci(info, i, pred_ci);
-                uint32 pg;
-                for (pg = 0; pg < info[p].n_copies; pg++) {
-                    uint32 p_source = info[p].first_new + pg;
-                    ++out->n_next[p_source];
-                    ++out->n_prior[c_target];
+                acmod_id_t p_ci = context_phone(acmod_set, in->phone[p], sil);
+                acmod_id_t c_ci = context_phone(acmod_set, in->phone[i], sil);
+                uint32 p_right = context_group(info[p].right_ci, info[p].n_right, c_ci);
+                uint32 c_left = context_group(info[i].left_ci, info[i].n_left, p_ci);
+                uint32 pl, cr;
+                for (pl = 0; pl < info[p].n_left; ++pl) {
+                    uint32 p_source = info[p].first_new + pl * info[p].n_right + p_right;
+                    for (cr = 0; cr < info[i].n_right; ++cr) {
+                        uint32 c_target = info[i].first_new + c_left * info[i].n_right + cr;
+                        ++out->n_next[p_source];
+                        ++out->n_prior[c_target];
+                    }
                 }
             }
         }
@@ -233,13 +255,18 @@ phone_graph_split_contexts(const phone_graph_t *in, acmod_set_t *acmod_set)
         for (i = 0; i < in->n; i++) {
             for (u = 0; u < in->n_prior[i]; u++) {
                 uint32 p = in->prior_idx[i][u];
-                acmod_id_t pred_ci = in->phone[p];
-                uint32 c_target = copy_for_predecessor_ci(info, i, pred_ci);
-                uint32 pg;
-                for (pg = 0; pg < info[p].n_copies; pg++) {
-                    uint32 p_source = info[p].first_new + pg;
-                    out->next_idx[p_source][next_cursor[p_source]++] = c_target;
-                    out->prior_idx[c_target][prior_cursor[c_target]++] = p_source;
+                acmod_id_t p_ci = context_phone(acmod_set, in->phone[p], sil);
+                acmod_id_t c_ci = context_phone(acmod_set, in->phone[i], sil);
+                uint32 p_right = context_group(info[p].right_ci, info[p].n_right, c_ci);
+                uint32 c_left = context_group(info[i].left_ci, info[i].n_left, p_ci);
+                uint32 pl, cr;
+                for (pl = 0; pl < info[p].n_left; ++pl) {
+                    uint32 p_source = info[p].first_new + pl * info[p].n_right + p_right;
+                    for (cr = 0; cr < info[i].n_right; ++cr) {
+                        uint32 c_target = info[i].first_new + c_left * info[i].n_right + cr;
+                        out->next_idx[p_source][next_cursor[p_source]++] = c_target;
+                        out->prior_idx[c_target][prior_cursor[c_target]++] = p_source;
+                    }
                 }
             }
         }
@@ -307,10 +334,8 @@ cvt2triphone_graph(phone_graph_t *graph, acmod_set_t *acmod_set)
 
     /* Per-slot word position. Each slot inherits from a predecessor's
      * "outgoing" position state, with the boundary marker advancing
-     * it. Since the graph may have fan-in (all incoming arcs with the
-     * same CI predecessor, by construction of split_contexts), every
-     * predecessor produces the same word-position state at slot i —
-     * so we can compute posn per slot in topological order. We rely
+     * it. Context splitting preserves each original slot's word position,
+     * so every predecessor produces the same state at slot i. We rely
      * on the slot ordering produced by mk_phone_graph (per-variant
      * sequential, words in transcript order) which is a valid topo
      * order. */
@@ -351,12 +376,8 @@ cvt2triphone_graph(phone_graph_t *graph, acmod_set_t *acmod_set)
             }
         }
 
-        /* Right context: CI phone of any successor (the linear path
-         * uses phone[i+1]; for graph, all successors share the same
-         * CI center phone because they're variants of the next word's
-         * first phone — but wait, they DON'T: variants of word i+1
-         * start with potentially different phones. We don't split on
-         * the SUCCESSOR side here.) */
+        /* Right context: after context splitting, every successor copy has
+         * the same CI center phone. */
         if (graph->n_next[i] == 0) {
             r = sil;
         } else if (graph->n_next[i] == 1) {
@@ -367,17 +388,6 @@ cvt2triphone_graph(phone_graph_t *graph, acmod_set_t *acmod_set)
                 r = acmod_set_base_phone(acmod_set, succ_phone);
             }
         } else {
-            /* Multiple successors with possibly different CI phones.
-             * This slot is the last phone of a variant of word i, and
-             * the next word has multiple variants whose first phones
-             * may differ. We cannot fold those into a single triphone
-             * id without further splitting on the right context too.
-             *
-             * For now: use the FIRST successor's CI phone as the
-             * right context. This is an approximation that mirrors
-             * what the linear cvt2triphone path would do given the
-             * pron[1]-only behavior. A future refinement is to also
-             * split on right context. */
             acmod_id_t succ_phone = graph->phone[graph->next_idx[i][0]];
             if (acmod_set_has_attrib(acmod_set, succ_phone, "filler")) {
                 r = sil;

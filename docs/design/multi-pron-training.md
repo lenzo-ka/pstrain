@@ -126,8 +126,8 @@ edges: 0 -> 1 -> 2 ──┐
 ```
 
 `mk_phone_graph` constructs this; `phone_graph_split_contexts`
-duplicates the join phone (slot 6) per distinct CI predecessor when
-necessary so triphone resolution is unambiguous;
+duplicates non-fillers over the two-sided predecessor/successor context
+cross-product so triphone resolution is unambiguous;
 `cvt2triphone_graph` writes triphone ids in place; finally
 `state_seq_make_graph` produces a state-level HMM that
 forward/backward consumes unchanged.
@@ -178,16 +178,27 @@ model picks per word.
 * **OpenFST or K2-style FST machinery.** Overkill; our per-utterance
   graph is small.
 * **Touch the BW math.** The DAG engine already exists.
-* **Right-context split at the symmetric position.** The
-  left-context split (in `phone_graph_split_contexts`) handles join
-  phones where the previous word's variants end in different CI
-  phones. The mirror case — a multi-pron word's last phone being
-  followed by a multi-pron word whose variants *start* with
-  different CI phones — uses the first successor's CI phone as the
-  right context. In our test corpus that's bounded (~14% of
-  multi-pron words have first-phone-different variants). Worth
-  revisiting if a corpus shows the right-side bias matters; see
-  `_make_tree_tasks` mirror-of for the rough shape.
+* **Transcript-reachable inventory enumeration.** Multipron mode currently
+  initializes every dictionary-producible triphone so every graph path has a
+  model. A future optimization could enumerate only triphones reachable from
+  the actual transcript word boundaries while retaining all pronunciation
+  variants.
+
+## M4b SLT growth measurement
+
+The preserved 1,043-utterance CMU Arctic SLT parity run changed from 9,786
+to 10,052 untied triphone rows (+266, +2.72%). Parameter files grew from
+9,309,224 to 9,561,400 bytes (+252,176, +2.71%): mdef 491,359→504,926;
+means and variances 4,598,636→4,723,124 each; mixture weights
+117,976→121,168; transition matrices stayed 1,984 bytes. The measured
+CD-untied stage stayed within run noise (2.4s before, 2.2s after); peak RSS
+was not captured by the lane runner.
+
+For the engineered two-variant boundary, the phone graph changes from 12
+slots/14 directed edges under the former one-sided split to 14 slots/16
+directed edges under the two-sided cross-product. The two added slots and
+edges are position-local; this is additive across the two ambiguous boundary
+positions, not a corpus-wide pronunciation cross-product.
 * **SphinxTrain-style hard-Viterbi disambiguation transcript stage.**
   That was always a workaround for the lack of soft-posterior
   multi-pron, and produces the very bias trap we're fixing. The

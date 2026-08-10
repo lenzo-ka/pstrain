@@ -448,6 +448,7 @@ def _make_cd_untied_init_task(ctx: PipelineContext) -> Task:
             output=untied_mdef,
             filler_dict=ctx.filler_dict,
             n_state=ctx.train.n_state,
+            multipron=ctx.train.multipron_training,
         )
         run_init_cd_untied(
             ci_model_dir=ci_src,
@@ -553,6 +554,9 @@ def _make_tree_tasks(ctx: PipelineContext) -> list[Task]:
                             "csplitmax": ctx.train.tree_csplitmax,
                             "csplitthr": ctx.train.tree_csplitthr,
                             "mwfloor": ctx.train.tree_mwfloor,
+                            # SphinxTrain bldtree -cntthresh default and the
+                            # A7 parity audit value (parse_cmd_ln.c:121).
+                            "cntthresh": 1e-5,
                         },
                     ),
                     inputs=(*untied_inputs, questions),

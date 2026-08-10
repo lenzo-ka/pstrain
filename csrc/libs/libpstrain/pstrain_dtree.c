@@ -198,6 +198,7 @@ pstrain_build_tree(const char *mdef_path,
     quest_t *all_q = NULL;
     uint32 n_all_q;
     uint32 *id = NULL;
+    uint32 *model_acmod = NULL;
     float32 *state_wt = NULL;
     dtree_t *tr;
     FILE *fp;
@@ -281,12 +282,40 @@ pstrain_build_tree(const char *mdef_path,
     mixw_occ = (float32 ****)ckd_calloc_2d(n_model, n_state, sizeof(float32 **));
     mixw = (float32 ****)ckd_calloc_4d(n_model, n_state, n_stream, n_density, sizeof(float32));
 
-    /* Reindex mixing weights */
-    for (i = p_s, j = 0; i <= p_e; i++, j++) {
+    model_acmod = ckd_calloc(n_model, sizeof(uint32));
+
+    /* Match upstream bldtree/main.c: a model participates in question
+     * statistics only when every emitting-state/stream occupancy is at
+     * least -cntthresh (default 0.00001).  This matters for dictionary-wide
+     * untied inventories, whose unobserved models have zero occupancy. */
+    for (i = p_s, j = 0; i <= p_e; i++) {
+        int include = TRUE;
+        for (k = 0; k < n_state; k++) {
+            s = mdef->defn[i].state[k] - mixw_s;
+            for (m = 0; m < n_stream; m++) {
+                float32 count = 0.0f;
+                uint32 density;
+                for (density = 0; density < n_density; density++)
+                    count += in_mixw[s][m][density];
+                if (count < cntthresh)
+                    include = FALSE;
+            }
+        }
+        if (!include)
+            continue;
+        model_acmod[j] = i;
         for (k = 0; k < n_state; k++) {
             s = mdef->defn[i].state[k] - mixw_s;
             mixw_occ[j][k] = in_mixw[s];
         }
+        j++;
+    }
+    E_INFO("%u of %u models have observation count at least %f\n",
+           j, p_e - p_s + 1, cntthresh);
+    n_model = j;
+    if (n_model == 0) {
+        E_ERROR("No models meet count threshold %f\n", cntthresh);
+        return -1;
     }
 
     /* Normalize mixture weights */
@@ -335,7 +364,8 @@ pstrain_build_tree(const char *mdef_path,
         means = (float32 ****)ckd_calloc_4d(n_model, n_state, n_stream, sumveclen, sizeof(float32));
         vars = (float32 ****)ckd_calloc_4d(n_model, n_state, n_stream, sumveclen, sizeof(float32));
 
-        for (i = p_s, j = 0; i <= p_e; i++, j++) {
+        for (j = 0; j < n_model; j++) {
+            i = model_acmod[j];
             for (k = 0; k < n_state; k++) {
                 /* Use actual tied state index from mdef, not consecutive m++ */
                 uint32 ts = mdef->defn[i].state[k];
@@ -383,7 +413,8 @@ pstrain_build_tree(const char *mdef_path,
 
     /* Build decision tree features */
     dfeat = (uint32 **)ckd_calloc_2d(n_model, 4, sizeof(uint32));
-    for (i = p_s, j = 0; i <= p_e; i++, j++) {
+    for (j = 0; j < n_model; j++) {
+        i = model_acmod[j];
         acmod_set_id2tri(mdef->acmod_set, &b, &l, &r, &pn, i);
         dfeat[j][0] = (uint32)l;
         dfeat[j][1] = (uint32)b;
@@ -502,6 +533,7 @@ pstrain_build_tree(const char *mdef_path,
     /* Cleanup */
     free_tree(tr);
     ckd_free(id);
+    ckd_free(model_acmod);
     ckd_free(state_wt);
     ckd_free(all_q);
     ckd_free_2d((void **)dfeat);

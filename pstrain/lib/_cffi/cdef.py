@@ -465,7 +465,8 @@ int pstrain_mdef_gen_untied(const char *phone_list_path,
                         const char *transcript_path,
                         const char *output_path,
                         uint32 n_state,
-                        int32 ignore_wpos);
+                        int32 ignore_wpos,
+                        int32 multipron);
 
 // Count triphones in transcripts
 int pstrain_mdef_count_triphones(const char *phone_list_path,

@@ -3,9 +3,10 @@
 import contextlib
 from pathlib import Path
 
+import numpy as np
 import pytest
 
-from pstrain.lib import dtree, mdef, native_worker
+from pstrain.lib import _pstrainc, dtree, mdef, native_worker
 
 # Check if library exists
 # libpstrainc availability comes from the shared helper (real loader-based
@@ -166,6 +167,54 @@ class TestBuildTree:
                 mean_path=None,
                 var_path=None,
             )
+
+    def test_count_threshold_excludes_zero_occupancy_from_questions(
+        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    ) -> None:
+        """A dictionary-only triphone cannot steer the selected question."""
+        model = tmp_path / "mdef"
+        model.write_text(
+            """0.3
+3 n_base
+3 n_tri
+12 n_state_map
+6 n_tied_state
+3 n_tied_ci_state
+3 n_tied_tmat
+AA - - - n/a 0 0 N
+L1 - - - n/a 1 1 N
+L2 - - - n/a 2 2 N
+AA L1 L1 s n/a 0 3 N
+AA L1 L2 s n/a 0 4 N
+AA L2 L1 s n/a 0 5 N
+"""
+        )
+        mixw = np.ones((6, 1, 2), dtype=np.float32)
+        mixw[3] = (10.0, 0.0)
+        mixw[4] = (0.0, 10.0)
+        mixw[5] = (0.0, 0.0)
+        mixw_path = tmp_path / "mixw"
+        assert _pstrainc.write_mixw(str(mixw_path), mixw) == 0
+        questions = tmp_path / "questions"
+        questions.write_text("LEFT_ONE L1\nRIGHT_ONE L1\n")
+
+        filtered = tmp_path / "filtered.dtree"
+        dtree.build_tree(
+            model,
+            mixw_path,
+            questions,
+            filtered,
+            "AA",
+            0,
+            continuous=False,
+            ssplitmax=1,
+            csplitmax=1,
+            cntthresh=1e-5,
+        )
+        diagnostic = capfd.readouterr().err
+
+        assert "2 of 3 models have observation count at least 0.000010" in diagnostic
+        assert "(!LEFT_ONE 1)" in filtered.read_text().splitlines()[1]
 
 
 @pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")

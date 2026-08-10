@@ -84,11 +84,13 @@ def generate_untied_mdef(
     filler_dict: Path | None = None,
     n_state: int = 3,
     ignore_wpos: bool = False,
+    multipron: bool = True,
 ) -> None:
     """Generate untied mdef from transcripts.
 
-    Creates mdef with triphones observed in transcripts, pruned by
-    occurrence threshold.
+    In multipron mode, creates every dictionary-producible triphone so the
+    untied inventory covers every pronunciation-graph path. In linear mode,
+    uses upstream-compatible occurrence pruning.
 
     Args:
         phone_list: Path to CI phone list
@@ -98,6 +100,7 @@ def generate_untied_mdef(
         filler_dict: Path to filler dictionary (optional)
         n_state: Number of emitting states per phone
         ignore_wpos: If True, ignore word position
+        multipron: Whether the downstream trainer uses pronunciation graphs
 
     Raises:
         RuntimeError: If generation fails
@@ -111,6 +114,7 @@ def generate_untied_mdef(
         str(output).encode(),
         n_state,
         1 if ignore_wpos else 0,
+        1 if multipron else 0,
     )
     if ret != 0:
         raise RuntimeError(f"Failed to generate untied mdef: {output}")
