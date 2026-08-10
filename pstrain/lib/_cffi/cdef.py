@@ -251,6 +251,7 @@ int pstrain_kmeans_init(const float32 *features,
 typedef struct pstrain_bw_config_s {
     float64 a_beam;
     float64 b_beam;
+    uint32 topn;
     float32 spthresh;
     int32 mixw_reest;
     int32 tmat_reest;

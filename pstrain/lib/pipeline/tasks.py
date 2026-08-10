@@ -69,6 +69,7 @@ def _build_tree_worker(
     output_path: Path,
     phone: str,
     state: int,
+    params: dict[str, Any],
 ) -> None:
     """Module-level entry point used by the tree-building fan-out."""
     from pstrain.lib.steps.cd_pipeline import build_tree_one
@@ -81,6 +82,7 @@ def _build_tree_worker(
         phone=phone,
         state=state,
         continuous=True,
+        **params,
     )
 
 
@@ -296,8 +298,12 @@ def _make_bw_train_task(
     )
 
     def run() -> None:
+        from pstrain.lib.bw import BWConfig
         from pstrain.lib.steps.train import run_bw_training
 
+        # All non-split tasks consume a 1-density model (including CD-untied,
+        # where upstream deliberately selects one density).
+        topn = 1
         result = run_bw_training(
             model_dir=src_dir,
             output_dir=out_dir,
@@ -307,7 +313,15 @@ def _make_bw_train_task(
             dictionary=dictionary,
             filler_dict=ctx.filler_dict,
             n_iter=ctx.train.max_iterations,
+            convergence_ratio=ctx.train.convergence_ratio,
+            config=BWConfig(
+                a_beam=ctx.train.a_beam,
+                b_beam=ctx.train.b_beam,
+                topn=topn,
+                multipron=ctx.train.multipron_training,
+            ),
             multipron=ctx.train.multipron_training,
+            max_skip_fraction=ctx.train.max_skip_fraction,
         )
         if copy_mdef_from_src:
             shutil.copy(src_dir / "mdef", out_dir / "mdef")
@@ -342,10 +356,13 @@ def _make_split_and_train_task(
     out_dir = ctx.model_dir(out_model)
 
     def run() -> None:
+        from pstrain.lib.bw import BWConfig
         from pstrain.lib.steps.split import run_split
         from pstrain.lib.steps.train import run_bw_training
 
         run_split(input_model_dir=src_dir, output_model_dir=split_dir)
+        # Split stages are CI or CD-tied; upstream evaluates all densities.
+        topn = int(out_model.rsplit("-", 1)[-1].removesuffix("g"))
         result = run_bw_training(
             model_dir=split_dir,
             output_dir=out_dir,
@@ -355,7 +372,15 @@ def _make_split_and_train_task(
             dictionary=dictionary,
             filler_dict=ctx.filler_dict,
             n_iter=ctx.train.max_iterations,
+            convergence_ratio=ctx.train.convergence_ratio,
+            config=BWConfig(
+                a_beam=ctx.train.a_beam,
+                b_beam=ctx.train.b_beam,
+                topn=topn,
+                multipron=ctx.train.multipron_training,
+            ),
             multipron=ctx.train.multipron_training,
+            max_skip_fraction=ctx.train.max_skip_fraction,
         )
         write_feat_params(out_dir / "feat.params", ctx.feat)
         _record_model_provenance(ctx, out_dir)
@@ -441,6 +466,9 @@ def _make_questions_task(ctx: PipelineContext) -> Task:
             ci_model_dir=ctx.model_dir("ci-1g"),
             output_path=out_path,
             continuous=True,
+            npermute=ctx.train.question_npermute,
+            quests_per_state=ctx.train.question_quests_per_state,
+            niter=ctx.train.question_niter,
         )
 
     return Task(
@@ -491,6 +519,14 @@ def _make_tree_tasks(ctx: PipelineContext) -> list[Task]:
                         tree_path,
                         phone,
                         state,
+                        {
+                            "state_weights": ctx.train.tree_state_weights,
+                            "ssplitmax": ctx.train.tree_ssplitmax,
+                            "ssplitthr": ctx.train.tree_ssplitthr,
+                            "csplitmax": ctx.train.tree_csplitmax,
+                            "csplitthr": ctx.train.tree_csplitthr,
+                            "mwfloor": ctx.train.tree_mwfloor,
+                        },
                     ),
                     inputs=(*untied_inputs, questions),
                     outputs=(tree_path,),

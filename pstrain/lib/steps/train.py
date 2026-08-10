@@ -30,6 +30,7 @@ class TrainingResult:
     final_likelihood: float
     final_frames: int
     final_utts: int
+    total_skipped: int = 0
 
 
 def run_bw_training(
@@ -44,6 +45,7 @@ def run_bw_training(
     convergence_ratio: float = 0.001,
     config: BWConfig | None = None,
     multipron: bool = True,
+    max_skip_fraction: float = 0.05,
 ) -> TrainingResult:
     """Run Baum-Welch training iterations.
 
@@ -59,6 +61,7 @@ def run_bw_training(
         n_iter: Maximum training iterations
         convergence_ratio: Convergence threshold (relative change in likelihood)
         config: BW training configuration
+        max_skip_fraction: Fail when skipped utterances exceed this fraction.
 
     Returns:
         TrainingResult with training statistics
@@ -96,6 +99,7 @@ def run_bw_training(
     current_model = model_dir
     last_frames = 0
     last_utts = 0
+    total_skipped = 0
 
     for iteration in range(1, n_iter + 1):
         logger.info("Starting iteration %d/%d...", iteration, n_iter)
@@ -167,7 +171,26 @@ def run_bw_training(
                 logger.warning("Error processing %s: %s", fileid, e)
                 skipped += 1
 
-        logger.info("Processed %d utterances, skipped %d", processed, skipped)
+        total_skipped += skipped
+        if skipped:
+            logger.warning(
+                "WARNING: iteration %d skipped %d/%d utterance updates (%.2f%%)",
+                iteration,
+                skipped,
+                len(fileids),
+                100.0 * skipped / len(fileids),
+            )
+        else:
+            logger.info(
+                "Iteration %d processed %d utterances with zero skips", iteration, processed
+            )
+
+        skip_fraction = skipped / len(fileids) if fileids else 1.0
+        if skip_fraction > max_skip_fraction:
+            raise RuntimeError(
+                f"Iteration {iteration}: skipped {skipped}/{len(fileids)} utterances "
+                f"({skip_fraction:.2%}), above configured limit {max_skip_fraction:.2%}"
+            )
 
         if processed == 0:
             raise RuntimeError("No utterances processed successfully")
@@ -218,6 +241,7 @@ def run_bw_training(
                     final_likelihood=stats.avg_log_prob,
                     final_frames=stats.total_frames,
                     final_utts=stats.total_utts,
+                    total_skipped=total_skipped,
                 )
 
         prev_likelihood = stats.avg_log_prob
@@ -228,11 +252,16 @@ def run_bw_training(
         # Clean up trainer
         del trainer
 
-    logger.info("Completed %d iterations (did not converge)", n_iter)
+    if total_skipped:
+        logger.warning("WARNING: BW training skipped %d utterance updates in total", total_skipped)
+    logger.info(
+        "Completed %d iterations (did not converge); total skipped=%d", n_iter, total_skipped
+    )
     return TrainingResult(
         iterations=n_iter,
         converged=False,
         final_likelihood=prev_likelihood,
         final_frames=last_frames,
         final_utts=last_utts,
+        total_skipped=total_skipped,
     )

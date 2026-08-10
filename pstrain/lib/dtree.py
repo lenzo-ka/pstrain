@@ -27,12 +27,12 @@ def build_tree(
     var_path: Path | None = None,
     continuous: bool = True,
     ssplitmin: int = 1,
-    ssplitmax: int = 5,
-    ssplitthr: float = 8e-4,
+    ssplitmax: int = 7,
+    ssplitthr: float = 0.0,
     csplitmin: int = 1,
-    csplitmax: int = 100,
-    csplitthr: float = 8e-4,
-    mwfloor: float = 1e-4,
+    csplitmax: int = 2000,
+    csplitthr: float = 0.0,
+    mwfloor: float = 1e-8,
     varfloor: float = 1e-5,
     cntthresh: float = 1e-5,
     state_weights: npt.NDArray[np.float32] | None = None,
@@ -74,6 +74,7 @@ def build_tree(
 
     # Handle state weights
     if state_weights is not None:
+        state_weights = np.ascontiguousarray(state_weights, dtype=np.float32)
         stwt = ffi.cast("float32 *", state_weights.ctypes.data)
         n_stwt = len(state_weights)
     else:
@@ -152,10 +153,10 @@ def make_quests(
     mean_path: Path | None = None,
     var_path: Path | None = None,
     continuous: bool = True,
-    npermute: int = 6,
-    quests_per_state: int = 8,
+    npermute: int = 12,
+    quests_per_state: int = 20,
     varfloor: float = 1e-8,
-    niter: int = 0,
+    niter: int = 1,
 ) -> None:
     """Generate phonetic questions by clustering CI distributions.
 

@@ -391,8 +391,8 @@ backward_update(float64 **active_alpha,
     static float64 *p_op = NULL;
     static float64 *p_ci_op = NULL;
     float64 op;
-    static float64 **d_term = NULL;
-    static float64 **d_term_ci = NULL;
+    float64 **d_term = NULL;
+    float64 **d_term_ci = NULL;
 
     uint32 n_feat;
     uint32 n_density;
@@ -436,10 +436,11 @@ backward_update(float64 **active_alpha,
 	p_ci_op = ckd_calloc(n_feat, sizeof(float64));
     }
 
-    if (d_term == NULL) {
-	d_term    = (float64 **)ckd_calloc_2d(n_feat, n_top, sizeof(float64));
-	d_term_ci = (float64 **)ckd_calloc_2d(n_feat, n_top, sizeof(float64));
-    }
+    /* n_top can change between pipeline stages (1, 2, 4, 8).  These
+     * buffers were formerly static and retained their first-stage width,
+     * causing out-of-bounds writes as soon as topn grew above one. */
+    d_term = (float64 **)ckd_calloc_2d(n_feat, n_top, sizeof(float64));
+    d_term_ci = (float64 **)ckd_calloc_2d(n_feat, n_top, sizeof(float64));
 
     /* Allocate space for source/destination beta */
     beta_a = ckd_calloc(n_state, sizeof(float64));
@@ -1301,6 +1302,8 @@ free:
 
     ckd_free_3d((void ***)now_den);
     ckd_free_3d((void ***)now_den_idx);
+    ckd_free_2d((void **)d_term);
+    ckd_free_2d((void **)d_term_ci);
 
     return (retval);
 }
