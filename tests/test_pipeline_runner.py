@@ -12,6 +12,7 @@ from __future__ import annotations
 import functools
 import json
 import os
+import select
 import signal
 import subprocess
 import sys
@@ -610,8 +611,8 @@ def test_pipeline_rejects_overlapping_runs_and_cancel_targets_active_run(
 @pytest.mark.parametrize(
     ("execution", "expected_status", "expected_rc"),
     [
-        (runner._ExecutionResult(0, [], "completed"), "completed", 0),
-        (runner._ExecutionResult(1, [], "failed"), "aborted", 1),
+        (runner._ExecutionResult(1, [], "aborted", planned=1, verified=1), "completed", 0),
+        (runner._ExecutionResult(0, [], "completed", planned=1, verified=0), "aborted", 1),
     ],
 )
 def test_late_cancellation_status_depends_on_genuine_completion(
@@ -749,6 +750,11 @@ def test_second_sigint_hard_exits(tmp_path: Path) -> None:
         assert process.stdout is not None
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
+            readable, _, _ = select.select(
+                [process.stdout.fileno()], [], [], max(0.0, deadline - time.monotonic())
+            )
+            if not readable:
+                pytest.fail("timed out waiting for the first SIGINT handler announcement")
             line = process.stdout.readline()
             if "received SIGINT; stopping pipeline" in line:
                 break
@@ -758,7 +764,9 @@ def test_second_sigint_hard_exits(tmp_path: Path) -> None:
             pytest.fail("first SIGINT handler did not announce engagement")
         process.send_signal(signal.SIGINT)
         process.communicate(timeout=15)
-        assert process.returncode == 128 + signal.SIGINT
+        # Teardown may finish between the announcement read and this signal,
+        # restoring the default handler. Both forms are a hard SIGINT exit.
+        assert process.returncode in (128 + signal.SIGINT, -signal.SIGINT)
         deadline = time.monotonic() + 5
         while any(_pid_exists(pid) for pid in pids) and time.monotonic() < deadline:
             time.sleep(0.05)
@@ -787,6 +795,57 @@ def test_native_helper_dies_when_pool_worker_is_killed(tmp_path: Path) -> None:
         assert not _pid_exists(helper_pid)
     finally:
         _kill_fixture_tree(process, pids)
+
+
+def test_terminate_pool_kills_worker_registered_after_first_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scans = iter(({101}, {101, 202}, {101, 202}, {101, 202}))
+    killed: list[tuple[set[int], bool]] = []
+
+    class Pool:
+        def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
+            assert wait and cancel_futures
+
+    monkeypatch.setattr(runner, "_registered_worker_pids", lambda _path: next(scans))
+    monkeypatch.setattr(
+        runner,
+        "_kill_worker_pids",
+        lambda pids, *, graceful: killed.append((set(pids), graceful)),
+    )
+
+    runner._terminate_pool(Pool(), tmp_path)  # type: ignore[arg-type]
+
+    assert killed == [({101}, True), ({202}, True)]
+
+
+def test_terminate_pool_bounds_executor_shutdown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    release = threading.Event()
+    killed: list[tuple[set[int], bool]] = []
+    scans = iter((set(), set(), {303}))
+
+    class WedgedPool:
+        def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
+            assert wait and cancel_futures
+            release.wait(timeout=5)
+
+    monkeypatch.setattr(runner, "_SHUTDOWN_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(runner, "_registered_worker_pids", lambda _path: next(scans))
+    monkeypatch.setattr(
+        runner,
+        "_kill_worker_pids",
+        lambda pids, *, graceful: killed.append((set(pids), graceful)),
+    )
+    try:
+        with caplog.at_level("WARNING"):
+            runner._terminate_pool(WedgedPool(), tmp_path)  # type: ignore[arg-type]
+    finally:
+        release.set()
+
+    assert killed == [({303}, False)]
+    assert "shutdown exceeded" in caplog.text
 
 
 def test_pool_probe_failure_aborts_batch_without_inline_execution(

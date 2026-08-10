@@ -73,6 +73,8 @@ _MAX_FAILURES_TO_REPORT = 5
 # time for slow or heavily loaded hosts before treating startup as unavailable.
 _POOL_STARTUP_TIMEOUT_SECONDS = 30.0
 _SHUTDOWN_GRACE_SECONDS = 1.0
+_SHUTDOWN_TIMEOUT_SECONDS = 3.0
+_MAX_WORKER_KILL_SCANS = 5
 _PARENT_WATCH_INTERVAL_SECONDS = 0.2
 
 
@@ -127,6 +129,8 @@ class _ExecutionResult:
     rc: int
     timings: list[TaskTiming]
     status: str = "completed"
+    planned: int = 0
+    verified: int = 0
 
     def __iter__(self):  # type: ignore[no-untyped-def]
         yield self.rc
@@ -140,6 +144,8 @@ class _ExecutionResult:
                 self.rc == other.rc
                 and self.timings == other.timings
                 and self.status == other.status
+                and self.planned == other.planned
+                and self.verified == other.verified
             )
         return NotImplemented
 
@@ -315,9 +321,19 @@ class Pipeline:
                     worker_nice=self._worker_nice,
                     cancel_requested=cancellation,
                 )
-                genuinely_completed = execution.rc == 0 and execution.status == "completed"
-                if cancellation.is_set() and not genuinely_completed:
-                    execution = _ExecutionResult(1, execution.timings, "aborted")
+                planned = len(to_run)
+                verified = execution.verified
+                status = execution.status
+                if cancellation.is_set():
+                    status = "completed" if verified == planned else "aborted"
+                if status != execution.status:
+                    execution = _ExecutionResult(
+                        0 if status == "completed" else execution.rc or 1,
+                        execution.timings,
+                        status,
+                        planned,
+                        verified,
+                    )
                 rc = execution.rc
                 records = execution.timings
                 ended = datetime.now(UTC).isoformat()
@@ -435,7 +451,7 @@ def _execute(
     while pending:
         if cancellation.is_set():
             _print_cancelled_summary(len(executed), len(pending))
-            return _ExecutionResult(1, timings, "aborted")
+            return _ExecutionResult(1, timings, "aborted", len(entries), len(executed))
         entry = pending[0]
         group = entry.task.parallel_group
         if group and jobs > 1:
@@ -463,7 +479,15 @@ def _execute(
                 result_status = result.status
             timings.extend(batch_timings)
             if rc != 0:
-                return _ExecutionResult(rc, timings, result_status)
+                return _ExecutionResult(
+                    rc,
+                    timings,
+                    result_status,
+                    len(entries),
+                    len(executed) + result.verified
+                    if not isinstance(result, int)
+                    else len(executed),
+                )
             batch_names = {candidate.task.name for candidate in batch}
             executed.update(batch_names)
             pending = [candidate for candidate in pending if candidate.task.name not in batch_names]
@@ -471,10 +495,10 @@ def _execute(
             rc, inline_timings = _run_one(entry.task)
             timings.extend(inline_timings)
             if rc != 0:
-                return _ExecutionResult(rc, timings, "failed")
+                return _ExecutionResult(rc, timings, "failed", len(entries), len(executed))
             executed.add(entry.task.name)
             pending.pop(0)
-    return _ExecutionResult(0, timings)
+    return _ExecutionResult(0, timings, "completed", len(entries), len(executed))
 
 
 def _run_one(task: Task) -> _ExecutionResult:
@@ -586,7 +610,7 @@ def _run_parallel_batch(
         if cancellation.is_set():
             _terminate_pool(pool, Path(worker_registry.name))
             _print_cancelled_summary(completed, n - completed)
-            return _ExecutionResult(1, timings, "aborted")
+            return _ExecutionResult(1, timings, "aborted", n, completed)
     finally:
         if not cancellation.is_set():
             pool.shutdown(wait=True, cancel_futures=True)
@@ -598,9 +622,9 @@ def _run_parallel_batch(
             print(f"   {failed_name}: {failed_exc}")
         if len(failures) > _MAX_FAILURES_TO_REPORT:
             print(f"   ... and {len(failures) - _MAX_FAILURES_TO_REPORT} more")
-        return _ExecutionResult(1, timings, "failed")
+        return _ExecutionResult(1, timings, "failed", n, completed)
     print(f"   fan-out [{group_name}] done in {elapsed:.1f}s")
-    return _ExecutionResult(0, timings)
+    return _ExecutionResult(0, timings, "completed", n, completed)
 
 
 def _abort_unstartable_batch(*, group_name: str, exc: BaseException) -> int:
@@ -677,15 +701,63 @@ def _initialize_pool_worker(nice: int, worker_registry: str) -> None:
 
 def _terminate_pool(pool: ProcessPoolExecutor, worker_registry: Path) -> None:
     """TERM/KILL tracked worker sessions, then let the executor reap them."""
-    worker_pids = [int(path.name) for path in worker_registry.iterdir()]
+    seen: set[int] = set()
+    for _ in range(_MAX_WORKER_KILL_SCANS):
+        worker_pids = _registered_worker_pids(worker_registry) - seen
+        if not worker_pids:
+            break
+        seen.update(worker_pids)
+        _kill_worker_pids(worker_pids, graceful=True)
+
+    # One final scan closes the bounded loop without giving a last arrival a
+    # grace-period-sized opportunity to survive cancellation.
+    final_pids = _registered_worker_pids(worker_registry) - seen
+    if final_pids:
+        seen.update(final_pids)
+        _kill_worker_pids(final_pids, graceful=False)
+
+    shutdown_done = threading.Event()
+
+    def shutdown() -> None:
+        try:
+            pool.shutdown(wait=True, cancel_futures=True)
+        finally:
+            shutdown_done.set()
+
+    shutdown_thread = threading.Thread(target=shutdown, daemon=True, name="pstrain-pool-shutdown")
+    shutdown_thread.start()
+    shutdown_thread.join(_SHUTDOWN_TIMEOUT_SECONDS)
+    if not shutdown_done.is_set():
+        remaining = _registered_worker_pids(worker_registry)
+        logger.warning(
+            "Process-pool shutdown exceeded %.1fs; killing %d registered worker(s) and continuing",
+            _SHUTDOWN_TIMEOUT_SECONDS,
+            len(remaining),
+        )
+        _kill_worker_pids(remaining, graceful=False)
+
+
+def _registered_worker_pids(worker_registry: Path) -> set[int]:
+    pids: set[int] = set()
+    with suppress(FileNotFoundError):
+        for path in worker_registry.iterdir():
+            with suppress(ValueError):
+                pids.add(int(path.name))
+    return pids
+
+
+def _kill_worker_pids(worker_pids: set[int], *, graceful: bool) -> None:
+    initial_signal = signal.SIGTERM if graceful else signal.SIGKILL
     if os.name == "posix":
         for pid in worker_pids:
             with suppress(ProcessLookupError):
-                os.killpg(pid, signal.SIGTERM)
+                os.killpg(pid, initial_signal)
     else:
         for pid in worker_pids:
             with suppress(ProcessLookupError):
-                os.kill(pid, signal.SIGTERM)
+                os.kill(pid, initial_signal)
+    if not graceful:
+        return
     deadline = time.monotonic() + _SHUTDOWN_GRACE_SECONDS
     while time.monotonic() < deadline and any(_pid_is_alive(pid) for pid in worker_pids):
         time.sleep(0.01)
@@ -695,7 +767,6 @@ def _terminate_pool(pool: ProcessPoolExecutor, worker_registry: Path) -> None:
                 os.killpg(pid, signal.SIGKILL)
             else:
                 os.kill(pid, signal.SIGKILL)
-    pool.shutdown(wait=True, cancel_futures=True)
 
 
 def _pid_is_alive(pid: int) -> bool:
