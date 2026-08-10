@@ -24,6 +24,9 @@ class TimingsCommand(Command):
             return CommandResult.fail("no pipeline timing runs found")
         print(f"Run: {document['run_id']} ({path})")
         print(f"Target: {document['target']}")
+        status = document.get("status", "completed")
+        if status != "completed":
+            print(f"STATUS: {status.upper()}")
         print(format_summary(document))
         return CommandResult.ok()
 

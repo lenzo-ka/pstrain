@@ -831,15 +831,22 @@ def test_inline_and_pool_task_timings_are_persisted_and_rolled_up(tmp_path: Path
         "target",
         "start",
         "end",
+        "status",
+        "tasks_recorded",
+        "tasks_failed",
         "tasks",
         "stages",
     }
+    assert document["status"] == "completed"
+    assert document["tasks_recorded"] == 3
+    assert document["tasks_failed"] == 0
     assert document["schema_version"] == 1
     assert {item["task"] for item in document["tasks"]} == {
         "features:first",
         "features:second",
         "finish",
     }
+    assert {item["outcome"] for item in document["tasks"]} == {"ok"}
     features = next(item for item in document["stages"] if item["stage"] == "features")
     feature_tasks = [item for item in document["tasks"] if item["stage"] == "features"]
     assert features["wall"] == pytest.approx(sum(item["wall"] for item in feature_tasks))
@@ -856,9 +863,11 @@ def test_inline_and_pool_task_timings_are_persisted_and_rolled_up(tmp_path: Path
 
 def test_cpu_timing_includes_reaped_child(tmp_path: Path) -> None:
     output = tmp_path / "child-output"
-    timing = runner._worker(
+    measured = runner._worker(
         Task("child-cpu", functools.partial(_burn_cpu_in_child, output), outputs=(output,))
     )
+    assert measured.timing is not None
+    timing = measured.timing
     assert timing.cpu_children_user + timing.cpu_children_sys > 0
 
 
@@ -880,6 +889,112 @@ def test_timing_write_failure_does_not_fail_pipeline(
     assert "Could not write pipeline timings" in caplog.text
 
 
+@pytest.mark.parametrize("jobs", [1, 2])
+def test_measurement_failure_preserves_success_inline_and_pool(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    jobs: int,
+) -> None:
+    output = tmp_path / "output"
+
+    class InlinePool:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def submit(self, fn: object, *args: object, **kwargs: object) -> Future[object]:
+            future: Future[object] = Future()
+            future.set_result(fn(*args, **kwargs))  # type: ignore[operator]
+            return future
+
+        def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
+            assert wait
+            assert cancel_futures
+
+    def unavailable_times() -> os.times_result:
+        raise OSError("times unavailable")
+
+    monkeypatch.setattr(runner, "ProcessPoolExecutor", InlinePool)
+    monkeypatch.setattr(pipeline_timings.os, "times", unavailable_times)
+    pipeline = Pipeline(tmp_path)
+    pipeline.add(
+        Task(
+            "work",
+            functools.partial(Path.write_text, output, "done"),
+            outputs=(output,),
+            parallel_group="group",
+        )
+    )
+    pipeline.register_target("work", output)
+
+    with caplog.at_level("WARNING"):
+        assert pipeline.run("work", jobs=jobs) == 0
+    assert output.read_text() == "done"
+    assert caplog.messages.count("Could not measure task work: times unavailable") == 1
+    artifacts = list((tmp_path / ".pstrain" / "timings").glob("*.json"))
+    assert len(artifacts) == 1
+    document = json.loads(artifacts[0].read_text())
+    assert document["status"] == "completed"
+    assert document["tasks_recorded"] == 0
+
+
+def test_summary_failure_does_not_fail_pipeline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    output = tmp_path / "output"
+    pipeline = Pipeline(tmp_path)
+    pipeline.add(_make_touch_task("work", output))
+    pipeline.register_target("work", output)
+
+    def broken_summary(document: dict[str, object]) -> str:
+        raise RuntimeError("cannot render")
+
+    monkeypatch.setattr(runner, "format_summary", broken_summary)
+    assert pipeline.run("work", jobs=1, verbose=True) == 0
+    assert output.exists()
+    assert "Could not render pipeline timing summary: cannot render" in caplog.text
+
+
+def test_failed_task_is_recorded_and_run_status_is_failed(tmp_path: Path) -> None:
+    output = tmp_path / "output"
+
+    def fail_after_work() -> None:
+        time.sleep(0.01)
+        raise RuntimeError("deliberate failure")
+
+    pipeline = Pipeline(tmp_path)
+    pipeline.add(Task("failing", fail_after_work, outputs=(output,)))
+    pipeline.register_target("failing", output)
+
+    assert pipeline.run("failing", jobs=1) == 1
+    artifacts = list((tmp_path / ".pstrain" / "timings").glob("*.json"))
+    assert len(artifacts) == 1
+    document = json.loads(artifacts[0].read_text())
+    assert document["status"] == "failed"
+    assert document["tasks_recorded"] == 1
+    assert document["tasks_failed"] == 1
+    assert document["tasks"][0]["outcome"] == "failed"
+    assert document["tasks"][0]["wall"] > 0
+
+
+def test_timing_write_removes_stale_temporary_file(tmp_path: Path) -> None:
+    directory = tmp_path / ".pstrain" / "timings"
+    directory.mkdir(parents=True)
+    stale = directory / ".old.json.tmp-123"
+    stale.write_text("partial")
+    document = pipeline_timings.build_document(
+        [],
+        run_id="new",
+        target="target",
+        started="start",
+        ended="end",
+        status="completed",
+    )
+
+    assert pipeline_timings.write_document(tmp_path, document) == directory / "new.json"
+    assert not stale.exists()
+
+
 def test_rollup_schema_and_summary_are_value_tolerant() -> None:
     record = pipeline_timings.TaskTiming(
         task="features:a",
@@ -892,6 +1007,7 @@ def test_rollup_schema_and_summary_are_value_tolerant() -> None:
         cpu_children_sys=0.25,
         start="2026-08-10T00:00:00+00:00",
         end="2026-08-10T00:00:02+00:00",
+        outcome="ok",
     )
     document = pipeline_timings.build_document(
         [record],
@@ -899,6 +1015,7 @@ def test_rollup_schema_and_summary_are_value_tolerant() -> None:
         target="features",
         started=record.start,
         ended=record.end,
+        status="completed",
     )
     assert document["stages"] == [
         {"stage": "features", "wall": 2.0, "cpu": 1.5, "cpu_wall_ratio": 0.75}

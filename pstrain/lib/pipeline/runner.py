@@ -41,6 +41,7 @@ from pathlib import Path
 from pstrain.lib.native_worker import PstrainWorkerError
 from pstrain.lib.pipeline.timings import (
     SUMMARY_THRESHOLD_SECONDS,
+    MeasuredTask,
     TaskTiming,
     build_document,
     format_summary,
@@ -116,6 +117,7 @@ class _ExecutionResult:
 
     rc: int
     timings: list[TaskTiming]
+    status: str = "completed"
 
     def __iter__(self):  # type: ignore[no-untyped-def]
         yield self.rc
@@ -125,7 +127,11 @@ class _ExecutionResult:
         if isinstance(other, int):
             return self.rc == other
         if isinstance(other, _ExecutionResult):
-            return self.rc == other.rc and self.timings == other.timings
+            return (
+                self.rc == other.rc
+                and self.timings == other.timings
+                and self.status == other.status
+            )
         return NotImplemented
 
 
@@ -254,16 +260,28 @@ class Pipeline:
         run_id = new_run_id()
         started = datetime.now(UTC).isoformat()
         wall_start = time.monotonic()
-        rc, records = _execute(to_run, jobs=_resolve_jobs(jobs))
+        execution = _execute(to_run, jobs=_resolve_jobs(jobs))
+        rc = execution.rc
+        records = execution.timings
         ended = datetime.now(UTC).isoformat()
         document = build_document(
-            records, run_id=run_id, target=str(target), started=started, ended=ended
+            records,
+            run_id=run_id,
+            target=str(target),
+            started=started,
+            ended=ended,
+            status=execution.status,
         )
         if self._project_dir is not None:
             write_document(self._project_dir, document)
         if records and (verbose or time.monotonic() - wall_start > SUMMARY_THRESHOLD_SECONDS):
-            print()
-            print(format_summary(document))
+            try:
+                summary = format_summary(document)
+            except Exception as exc:
+                logger.warning("Could not render pipeline timing summary: %s", exc)
+            else:
+                print()
+                print(summary)
         return rc
 
     def _toposort_for(self, target: Path) -> list[str]:
@@ -334,7 +352,7 @@ def _resolve_jobs(jobs: int | None) -> int:
     return jobs
 
 
-def _execute(entries: list[_PlanEntry], *, jobs: int) -> tuple[int, list[TaskTiming]]:
+def _execute(entries: list[_PlanEntry], *, jobs: int) -> _ExecutionResult:
     """Execute entries, batching all dependency-ready members of a group."""
     pending = list(entries)
     producer_by_output = {
@@ -360,11 +378,13 @@ def _execute(entries: list[_PlanEntry], *, jobs: int) -> tuple[int, list[TaskTim
             result = _run_parallel_batch(batch, jobs=jobs)
             if isinstance(result, int):  # Compatibility with test/integration shims.
                 rc, batch_timings = result, []
+                result_status = "failed" if rc else "completed"
             else:
                 rc, batch_timings = result
+                result_status = result.status
             timings.extend(batch_timings)
             if rc != 0:
-                return rc, timings
+                return _ExecutionResult(rc, timings, result_status)
             batch_names = {candidate.task.name for candidate in batch}
             executed.update(batch_names)
             pending = [candidate for candidate in pending if candidate.task.name not in batch_names]
@@ -372,10 +392,10 @@ def _execute(entries: list[_PlanEntry], *, jobs: int) -> tuple[int, list[TaskTim
             rc, inline_timings = _run_one(entry.task)
             timings.extend(inline_timings)
             if rc != 0:
-                return rc, timings
+                return _ExecutionResult(rc, timings, "failed")
             executed.add(entry.task.name)
             pending.pop(0)
-    return 0, timings
+    return _ExecutionResult(0, timings)
 
 
 def _run_one(task: Task) -> _ExecutionResult:
@@ -383,15 +403,17 @@ def _run_one(task: Task) -> _ExecutionResult:
     logger.info("Running %s", task.name)
     print(f"-> {task.name}")
     start = time.monotonic()
-    try:
-        timing = measure(task.name, task.parallel_group, lambda: _execute_task(task))
-    except Exception as exc:
-        logger.exception("Task %s failed", task.name)
+    measured = measure(task.name, task.parallel_group, lambda: _execute_task(task))
+    if measured.error is not None:
+        exc = measured.error
+        logger.error("Task %s failed", task.name, exc_info=(type(exc), exc, exc.__traceback__))
         print(f"!! {task.name} failed: {exc}")
-        return _ExecutionResult(1, [])
+        return _ExecutionResult(
+            1, [measured.timing] if measured.timing is not None else [], "failed"
+        )
     elapsed = time.monotonic() - start
     print(f"   {task.name} done in {elapsed:.1f}s")
-    return _ExecutionResult(0, [timing])
+    return _ExecutionResult(0, [measured.timing] if measured.timing is not None else [])
 
 
 def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> _ExecutionResult:
@@ -419,7 +441,9 @@ def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> _ExecutionResu
             max_workers=workers, mp_context=multiprocessing.get_context("spawn")
         )
     except (OSError, BrokenProcessPool) as exc:
-        return _ExecutionResult(_abort_unstartable_batch(group_name=group_name, exc=exc), timings)
+        return _ExecutionResult(
+            _abort_unstartable_batch(group_name=group_name, exc=exc), timings, "aborted"
+        )
 
     try:
         probe = pool.submit(_pool_startup_probe)
@@ -428,13 +452,17 @@ def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> _ExecutionResu
         # Deliberately abandon a wedged worker process: leaking it is preferable
         # to hanging the entire run while waiting for shutdown.
         pool.shutdown(wait=False, cancel_futures=True)
-        return _ExecutionResult(_abort_unstartable_batch(group_name=group_name, exc=exc), timings)
+        return _ExecutionResult(
+            _abort_unstartable_batch(group_name=group_name, exc=exc), timings, "aborted"
+        )
     except (OSError, BrokenProcessPool) as exc:
         pool.shutdown(wait=True, cancel_futures=True)
-        return _ExecutionResult(_abort_unstartable_batch(group_name=group_name, exc=exc), timings)
+        return _ExecutionResult(
+            _abort_unstartable_batch(group_name=group_name, exc=exc), timings, "aborted"
+        )
 
     try:
-        future_to_task: dict[Future[TaskTiming], Task] = {}
+        future_to_task: dict[Future[MeasuredTask], Task] = {}
         for entry in batch:
             try:
                 future = pool.submit(_worker, entry.task)
@@ -447,9 +475,12 @@ def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> _ExecutionResu
         for fut in as_completed(future_to_task):
             task = future_to_task[fut]
             try:
-                timing = fut.result()
-                if timing is not None:  # Accommodate executor doubles used by callers/tests.
-                    timings.append(timing)
+                measured = fut.result()
+                if measured is not None:  # Accommodate executor doubles used by callers/tests.
+                    if measured.timing is not None:
+                        timings.append(measured.timing)
+                    if measured.error is not None:
+                        raise measured.error
                 _verify_outputs(task)
                 completed += 1
                 report_every = max(1, n // _PROGRESS_REPORT_BUCKETS)
@@ -467,7 +498,7 @@ def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> _ExecutionResu
             print(f"   {failed_name}: {failed_exc}")
         if len(failures) > _MAX_FAILURES_TO_REPORT:
             print(f"   ... and {len(failures) - _MAX_FAILURES_TO_REPORT} more")
-        return _ExecutionResult(1, timings)
+        return _ExecutionResult(1, timings, "failed")
     print(f"   fan-out [{group_name}] done in {elapsed:.1f}s")
     return _ExecutionResult(0, timings)
 
@@ -506,7 +537,7 @@ def _pool_startup_probe() -> None:
     """Importable no-op used to prove that a process-pool worker can start."""
 
 
-def _worker(task: Task) -> TaskTiming:
+def _worker(task: Task) -> MeasuredTask:
     """Entry point for ProcessPoolExecutor workers.
 
     Runs the task's callable. Must be importable at module top level so

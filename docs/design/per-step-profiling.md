@@ -23,4 +23,6 @@ claiming stronger attribution.
 default or a named run. A successful build prints the same stage table when it
 takes more than three seconds, and always when `pstrain build -v` is used.
 Timing persistence is atomic and observational: failures only log a warning and
-never change a task or build result.
+never change a task or build result. Persistence is a single end-of-run write,
+so a hard process crash leaves no artifact. A subsequent write removes stale
+temporary timing files left by an interrupted write.

@@ -33,6 +33,7 @@ class TaskTiming:
     cpu_children_sys: float
     start: str
     end: str
+    outcome: str
 
     @property
     def cpu_total(self) -> float:
@@ -44,16 +45,41 @@ def task_stage(name: str, group: str) -> str:
     return group or name.split(":", 1)[0]
 
 
-def measure(task: str, group: str, fn: Any) -> TaskTiming:
-    """Run ``fn`` and measure wall and process-family CPU around it."""
+@dataclass(frozen=True)
+class MeasuredTask:
+    """A task's observational record and its own execution error, if any."""
+
+    timing: TaskTiming | None
+    error: Exception | None
+
+
+def measure(task: str, group: str, fn: Any) -> MeasuredTask:
+    """Run ``fn`` while keeping measurement strictly observational."""
     started_at = datetime.now(UTC)
     wall_start = time.monotonic()
-    cpu_start = os.times()
-    fn()
-    cpu_end = os.times()
+    cpu_start = None
+    cpu_end = None
+    measurement_error: Exception | None = None
+    try:
+        cpu_start = os.times()
+    except Exception as exc:
+        measurement_error = exc
+    error: Exception | None = None
+    try:
+        fn()
+    except Exception as exc:
+        error = exc
+    finally:
+        try:
+            cpu_end = os.times()
+        except Exception as exc:
+            if measurement_error is None:
+                measurement_error = exc
+    if measurement_error is not None or cpu_start is None or cpu_end is None:
+        logger.warning("Could not measure task %s: %s", task, measurement_error)
+        return MeasuredTask(timing=None, error=error)
     wall = time.monotonic() - wall_start
-    ended_at = datetime.now(UTC)
-    return TaskTiming(
+    timing = TaskTiming(
         task=task,
         stage=task_stage(task, group),
         group=group,
@@ -63,8 +89,10 @@ def measure(task: str, group: str, fn: Any) -> TaskTiming:
         cpu_children_user=cpu_end.children_user - cpu_start.children_user,
         cpu_children_sys=cpu_end.children_system - cpu_start.children_system,
         start=started_at.isoformat(),
-        end=ended_at.isoformat(),
+        end=datetime.now(UTC).isoformat(),
+        outcome="failed" if error is not None else "ok",
     )
+    return MeasuredTask(timing=timing, error=error)
 
 
 def rollup(records: list[TaskTiming]) -> list[dict[str, float | str]]:
@@ -81,7 +109,13 @@ def rollup(records: list[TaskTiming]) -> list[dict[str, float | str]]:
 
 
 def build_document(
-    records: list[TaskTiming], *, run_id: str, target: str, started: str, ended: str
+    records: list[TaskTiming],
+    *,
+    run_id: str,
+    target: str,
+    started: str,
+    ended: str,
+    status: str,
 ) -> dict[str, Any]:
     """Build the stable JSON representation of a pipeline run."""
     return {
@@ -90,6 +124,9 @@ def build_document(
         "target": target,
         "start": started,
         "end": ended,
+        "status": status,
+        "tasks_recorded": len(records),
+        "tasks_failed": sum(record.outcome == "failed" for record in records),
         "tasks": [asdict(record) for record in records],
         "stages": rollup(records),
     }
@@ -110,6 +147,8 @@ def write_document(project_dir: Path, document: dict[str, Any]) -> Path | None:
     temporary = destination.with_name(f".{destination.name}.tmp-{os.getpid()}")
     try:
         destination.parent.mkdir(parents=True, exist_ok=True)
+        for stale in destination.parent.glob(".*.json.tmp-*"):
+            stale.unlink(missing_ok=True)
         temporary.write_text(
             json.dumps(document, indent=2, sort_keys=True, allow_nan=False) + "\n",
             encoding="utf-8",
