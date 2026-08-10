@@ -332,7 +332,7 @@ audio:
 
 features:
   num_ceps: 13
-  num_filters: 40
+  num_filters: 25
   lower_freq: 133.33334
   upper_freq: 6855.4976
   preemphasis: 0.97

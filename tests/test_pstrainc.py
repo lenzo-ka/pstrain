@@ -427,17 +427,36 @@ def test_logmath_wrapper() -> None:
 
 
 def test_pstrain_fe_create_default() -> None:
-    """Test pstrain_fe_create_default creates a valid FE."""
-    _, lib = _pstrainc._init()
+    """Test pstrain_fe_create_default uses the documented FE parameters."""
+    ffi, lib = _pstrainc._init()
 
     fe = lib.pstrain_fe_create_default()
+    explicit_fe = lib.pstrain_fe_create(16000.0, 25, 512, 130.0, 6800.0, 13, 0.97, 22)
     assert fe != _pstrainc.get_ffi().NULL
+    assert explicit_fe != ffi.NULL
 
-    # Check output size
-    output_size = lib.fe_get_output_size(fe)
-    assert output_size == 13  # default ncep
+    def extract(frontend: Any) -> np.ndarray:
+        samples = (12000 * np.sin(np.arange(16000) * 0.037)).astype(np.int16)
+        samples_buf = ffi.new("int16[]", samples.tolist())
+        samples_ptr = ffi.new("int16 const **", samples_buf)
+        nsamps = ffi.new("size_t *", len(samples))
+        rows = [ffi.new("mfcc_t[13]") for _ in range(100)]
+        cepstra = ffi.new("mfcc_t *[100]", rows)
+        nframes = ffi.new("int32 *", len(rows))
 
-    lib.fe_free(fe)
+        assert lib.fe_start_utt(frontend) == 0
+        assert lib.fe_process_frames(frontend, samples_ptr, nsamps, cepstra, nframes, ffi.NULL) == 0
+        return np.array([[rows[i][j] for j in range(13)] for i in range(nframes[0])])
+
+    try:
+        assert lib.fe_get_output_size(fe) == 13
+        default_features = extract(fe)
+        explicit_features = extract(explicit_fe)
+        assert default_features.shape[0] > 0
+        np.testing.assert_array_equal(default_features, explicit_features)
+    finally:
+        lib.fe_free(fe)
+        lib.fe_free(explicit_fe)
 
 
 def test_pstrain_fe_create_custom() -> None:

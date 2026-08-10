@@ -20,7 +20,7 @@ def test_default_feat_params_contains_complete_training_front_end() -> None:
     assert params == {
         "-samprate": "16000",
         "-ncep": "13",
-        "-nfilt": "40",
+        "-nfilt": "25",
         "-nfft": "512",
         "-lowerf": "130",
         "-upperf": "6800",
@@ -36,6 +36,12 @@ def test_default_feat_params_contains_complete_training_front_end() -> None:
         "-remove_dc": "no",
         "-remove_noise": "yes",
     }
+
+
+def test_default_feat_params_writer_emits_25_filters(tmp_path: Path) -> None:
+    output = write_feat_params(tmp_path / "feat.params", FeatParams())
+
+    assert _parse_feat_params(output)["-nfilt"] == "25"
 
 
 def test_packaging_copies_trained_feat_params_despite_config_drift(tmp_path: Path) -> None:

@@ -18,7 +18,7 @@
  * the given parameters. Uses defaults for any unspecified values.
  *
  * @param samprate Sample rate in Hz (e.g., 16000)
- * @param nfilt Number of mel filters (e.g., 40)
+ * @param nfilt Number of mel filters (e.g., 25 for SphinxTrain wideband)
  * @param nfft FFT size (e.g., 512)
  * @param lowerf Lower frequency bound (e.g., 130)
  * @param upperf Upper frequency bound (e.g., 6800)
@@ -91,7 +91,7 @@ pstrain_fe_create_default(void)
 {
     return pstrain_fe_create(
         16000.0f,  /* samprate */
-        40,        /* nfilt */
+        25,        /* nfilt: SphinxTrain wideband training default */
         512,       /* nfft */
         130.0f,    /* lowerf */
         6800.0f,   /* upperf */

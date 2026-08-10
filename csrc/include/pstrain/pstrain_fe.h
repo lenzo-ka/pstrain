@@ -17,7 +17,7 @@
  * the given parameters.
  *
  * @param samprate Sample rate in Hz (e.g., 16000)
- * @param nfilt Number of mel filters (e.g., 40)
+ * @param nfilt Number of mel filters (e.g., 25 for SphinxTrain wideband)
  * @param nfft FFT size (e.g., 512)
  * @param lowerf Lower frequency bound (e.g., 130)
  * @param upperf Upper frequency bound (e.g., 6800)
