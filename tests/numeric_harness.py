@@ -104,9 +104,10 @@ def train_golden(ctx: PipelineContext, output: Path) -> TrainingResult:
         transcription=transcription,
         dictionary=ctx.shared_dir / "dictionary.dict",
         filler_dict=ctx.filler_dict,
+        first_pass_2passvar=False,
         n_iter=3,
         min_iterations=4,
-        config=BWConfig(a_beam=1e-200),
+        config=BWConfig(pass2var=True, a_beam=1e-200),
     )
 
 

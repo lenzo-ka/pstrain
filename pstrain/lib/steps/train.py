@@ -128,6 +128,24 @@ class TrainingResult:
     trajectory: tuple[TrainingIteration, ...] = ()
 
 
+def _config_for_iteration(
+    config: BWConfig,
+    *,
+    multipron: bool,
+    iteration: int,
+    first_pass_2passvar: bool,
+) -> BWConfig:
+    """Resolve caller configuration with the mandatory stage variance policy."""
+    from dataclasses import replace
+
+    resolved = config
+    if iteration == 1:
+        resolved = replace(resolved, pass2var=first_pass_2passvar)
+    if resolved.multipron != multipron:
+        resolved = replace(resolved, multipron=multipron)
+    return resolved
+
+
 def run_bw_training(
     model_dir: Path,
     output_dir: Path,
@@ -135,11 +153,12 @@ def run_bw_training(
     train_fileids: Path,
     transcription: Path,
     dictionary: Path,
+    first_pass_2passvar: bool,
+    config: BWConfig,
     filler_dict: Path | None = None,
     n_iter: int = 10,
     convergence_ratio: float = 0.001,
     min_iterations: int = 1,
-    config: BWConfig | None = None,
     multipron: bool = True,
     max_skip_fraction: float = 0.05,
     retry_beam_factor: float = 1e10,
@@ -159,11 +178,15 @@ def run_bw_training(
         convergence_ratio: Maximum signed absolute change in average log
             likelihood per frame for convergence
         min_iterations: Minimum number of completed iterations before convergence
-        config: BW training configuration
+        config: BW training configuration, including the explicit variance
+            policy retained after the stage-specific first iteration.
         max_skip_fraction: Fail when skipped utterances exceed this fraction.
         retry_beam_factor: Widen the forward beam by this factor for one retry
             when pruning prevents the final state from being reached. Set to 1
             to disable retries.
+        first_pass_2passvar: Required stage policy for the first iteration.
+            ``True`` selects centered two-pass accumulation and ``False``
+            selects one-pass variance accumulation.
 
     Returns:
         TrainingResult with training statistics
@@ -210,20 +233,20 @@ def run_bw_training(
     for iteration in range(1, n_iter + 1):
         logger.info("Starting iteration %d/%d...", iteration, n_iter)
 
-        # Use 1-pass variance for first iteration, 2-pass thereafter
-        # This matches SphinxTrain behavior which uses -2passvar no for iter 1
-        from dataclasses import replace
-
-        if config is None:
-            iter_config = BWConfig(pass2var=(iteration > 1), multipron=multipron)
-        else:
-            iter_config = config
-            if iteration == 1 and config.pass2var:
-                iter_config = replace(iter_config, pass2var=False)
-                logger.info("Using 1-pass variance for iteration 1 (SphinxTrain-compatible)")
-            if multipron != iter_config.multipron:
-                iter_config = replace(iter_config, multipron=multipron)
-
+        # SphinxTrain's policy is stage-specific: CI and tied stages begin with
+        # one-pass variance, while stage 30 CD-untied uses -2passvar yes from
+        # its first pass (baum_welch.pl's unconditional $var2pass = "yes").
+        iter_config = _config_for_iteration(
+            config,
+            multipron=multipron,
+            iteration=iteration,
+            first_pass_2passvar=first_pass_2passvar,
+        )
+        if iteration == 1:
+            logger.info(
+                "Using stage policy: %s-pass variance for iteration 1",
+                2 if first_pass_2passvar else 1,
+            )
         # Create trainer for this iteration
         trainer = BWTrainer(
             mdef_path=current_model / "mdef",

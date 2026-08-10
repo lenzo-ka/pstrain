@@ -19,7 +19,9 @@ default:
   training:
     n_state: 3
     n_senones: 200
-    max_iterations: 10
+    ci: &ci_schedule {max_iterations: 10, min_iterations: 1, convergence_ratio: 0.001}
+    untied: &untied_schedule {max_iterations: 6, min_iterations: 1, convergence_ratio: 0.001}
+    tied: &tied_schedule {max_iterations: 10, min_iterations: 1, convergence_ratio: 0.001}
 
 wideband:
   description: "Wideband (16kHz) microphone speech"
@@ -34,7 +36,9 @@ wideband:
   training:
     n_state: 3
     n_senones: 200
-    max_iterations: 10
+    ci: *ci_schedule
+    untied: *untied_schedule
+    tied: *tied_schedule
 
 telephone:
   description: "Telephone (8kHz) narrowband speech"
@@ -50,7 +54,9 @@ telephone:
   training:
     n_state: 3
     n_senones: 200
-    max_iterations: 10
+    ci: *ci_schedule
+    untied: *untied_schedule
+    tied: *tied_schedule
 
 wideband_large:
   description: "Wideband with more senones (larger datasets)"
@@ -65,7 +71,9 @@ wideband_large:
   training:
     n_state: 3
     n_senones: 4000
-    max_iterations: 10
+    ci: *ci_schedule
+    untied: *untied_schedule
+    tied: *tied_schedule
 
 sphinxtrain:
   description: "Matched to SphinxTrain defaults for comparison"
@@ -82,4 +90,6 @@ sphinxtrain:
   training:
     n_state: 3
     n_senones: 200
-    max_iterations: 10
+    ci: *ci_schedule
+    untied: *untied_schedule
+    tied: *tied_schedule

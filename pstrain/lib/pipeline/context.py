@@ -92,16 +92,29 @@ class FeatParams:
 
 
 @dataclass(frozen=True)
+class TrainingSchedule:
+    """Convergence controller for one family of Baum-Welch stages."""
+
+    max_iterations: int = 10
+    min_iterations: int = 1
+    convergence_ratio: float = 0.001
+
+
+@dataclass(frozen=True)
 class TrainParams:
     n_state: int = 3
     n_senones: int = 200
-    max_iterations: int = 10
     a_beam: float = 1e-90
     b_beam: float = 1e-10
-    # Signed absolute change in average log likelihood per frame. Kept at
-    # 0.001: A7 measurement found that SphinxTrain's literal 0.1 worsens WER.
-    convergence_ratio: float = 0.001
-    min_iterations: int = 1
+    # A7c matched the upstream signed absolute likelihood-delta decision,
+    # while measurements retained 0.001 rather than upstream's literal 0.1.
+    # CI and tied stages keep that controller and upstream's ten-pass cap.
+    ci: TrainingSchedule = field(default_factory=TrainingSchedule)
+    tied: TrainingSchedule = field(default_factory=TrainingSchedule)
+    # SphinxTrain scripts/30.cd_hmm_untied/norm_and_launchbw.pl uses the same
+    # converge-with-cap controller. The preserved SLT oracle ended at pass 6;
+    # cap this stage there so a stricter pstrain threshold cannot run to 10.
+    untied: TrainingSchedule = field(default_factory=lambda: TrainingSchedule(max_iterations=6))
     # Warn on every skipped update; fail a stage above five percent.
     max_skip_fraction: float = 0.05
     # Retry forward-final-state pruning failures once at a beam this many
@@ -159,7 +172,9 @@ DEFAULT_CONFIGS: dict[str, dict[str, Any]] = {
         "training": {
             "n_state": 3,
             "n_senones": 200,
-            "max_iterations": 10,
+            "ci": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.001},
+            "untied": {"max_iterations": 6, "min_iterations": 1, "convergence_ratio": 0.001},
+            "tied": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.001},
         },
     },
     "wideband": {
@@ -176,7 +191,9 @@ DEFAULT_CONFIGS: dict[str, dict[str, Any]] = {
         "training": {
             "n_state": 3,
             "n_senones": 200,
-            "max_iterations": 10,
+            "ci": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.001},
+            "untied": {"max_iterations": 6, "min_iterations": 1, "convergence_ratio": 0.001},
+            "tied": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.001},
         },
     },
     "telephone": {
@@ -193,7 +210,9 @@ DEFAULT_CONFIGS: dict[str, dict[str, Any]] = {
         "training": {
             "n_state": 3,
             "n_senones": 200,
-            "max_iterations": 10,
+            "ci": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.001},
+            "untied": {"max_iterations": 6, "min_iterations": 1, "convergence_ratio": 0.001},
+            "tied": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.001},
         },
     },
     "wideband_large": {
@@ -210,7 +229,9 @@ DEFAULT_CONFIGS: dict[str, dict[str, Any]] = {
         "training": {
             "n_state": 3,
             "n_senones": 4000,
-            "max_iterations": 10,
+            "ci": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.001},
+            "untied": {"max_iterations": 6, "min_iterations": 1, "convergence_ratio": 0.001},
+            "tied": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.001},
         },
     },
     "sphinxtrain": {
@@ -229,7 +250,9 @@ DEFAULT_CONFIGS: dict[str, dict[str, Any]] = {
         "training": {
             "n_state": 3,
             "n_senones": 200,
-            "max_iterations": 10,
+            "ci": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.001},
+            "untied": {"max_iterations": 6, "min_iterations": 1, "convergence_ratio": 0.001},
+            "tied": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.001},
         },
     },
 }
@@ -239,7 +262,13 @@ def _validate_params(
     profile: str,
     block: str,
     values: dict[str, Any],
-    params_type: type[FeatParams] | type[TrainParams] | type[SplitParams] | type[RunnerParams],
+    params_type: (
+        type[FeatParams]
+        | type[TrainingSchedule]
+        | type[TrainParams]
+        | type[SplitParams]
+        | type[RunnerParams]
+    ),
 ) -> None:
     """Reject misspelled profile parameters with configuration context."""
     known = {item.name for item in fields(params_type)}
@@ -258,7 +287,14 @@ def _coerce_dataclass_values(values: dict[str, Any], params_type: type[Any]) -> 
             continue
         default = getattr(defaults, item.name)
         value = coerced[item.name]
-        if isinstance(default, tuple):
+        if isinstance(default, TrainingSchedule):
+            if not isinstance(value, dict):
+                raise ValueError(f"{item.name} schedule must be a mapping")
+            _validate_params("training", item.name, value, TrainingSchedule)
+            coerced[item.name] = TrainingSchedule(
+                **_coerce_dataclass_values(value, TrainingSchedule)
+            )
+        elif isinstance(default, tuple):
             coerced[item.name] = tuple(value)
         elif isinstance(default, float):
             coerced[item.name] = float(value)

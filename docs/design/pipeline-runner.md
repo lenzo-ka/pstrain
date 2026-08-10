@@ -129,6 +129,30 @@ legacy linear path (bit-identical to pstrain's pre-multipron behavior).
 See [`multi-pron-training.md`](multi-pron-training.md) for the full
 design and the as-built layout.
 
+## Stage-specific Baum-Welch control
+
+Training schedules are configured independently because the upstream recipes
+do not apply one variance history and endpoint to every stage:
+
+```yaml
+training:
+  ci: {max_iterations: 10, min_iterations: 1, convergence_ratio: 0.001}
+  untied: {max_iterations: 6, min_iterations: 1, convergence_ratio: 0.001}
+  tied: {max_iterations: 10, min_iterations: 1, convergence_ratio: 0.001}
+```
+
+All three use the SphinxTrain signed likelihood-delta decision and may stop
+before their cap after `min_iterations`. The six-pass untied cap records the
+effective endpoint of the preserved CMU Arctic SLT run; upstream stage 30 is a
+converge-with-cap loop, not a fixed-count loop. CI and tied stages retain the
+A7c-matched 0.001 decision threshold and upstream ten-pass cap.
+
+Variance accumulation is deliberately code-defined by stage. CI and each newly
+split tied stage use one-pass variance on their first iteration and centered
+two-pass variance thereafter. CD-untied uses centered two-pass variance from
+its first iteration, matching the unconditional `-2passvar yes` in
+`scripts/30.cd_hmm_untied/baum_welch.pl`.
+
 ## Adding a new pipeline node
 
 1. In `pstrain/lib/pipeline/tasks.py`, write a builder that closes over
