@@ -449,7 +449,7 @@ def test_jobs_one_runs_inline_without_constructing_pool(
     assert output.exists()
 
 
-def test_pool_submit_startup_failure_falls_back_inline(
+def test_pool_probe_failure_falls_back_entire_batch_inline(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -457,20 +457,22 @@ def test_pool_submit_startup_failure_falls_back_inline(
     outputs = [tmp_path / f"out-{i}" for i in range(2)]
     sentinel = tmp_path / "sentinel"
 
-    class SubmitDeniedPool:
+    submitted: list[object] = []
+    shutdown_calls: list[tuple[bool, bool]] = []
+
+    class ProbeDeniedPool:
         def __init__(self, *args: object, **kwargs: object) -> None:
             pass
 
-        def __enter__(self) -> SubmitDeniedPool:
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            pass
-
-        def submit(self, *args: object, **kwargs: object) -> None:
+        def submit(self, fn: object, *args: object, **kwargs: object) -> None:
+            # ProcessPoolExecutor registers work before worker startup can fail.
+            submitted.append(fn)
             raise PermissionError("semaphores denied")
 
-    monkeypatch.setattr(runner, "ProcessPoolExecutor", SubmitDeniedPool)
+        def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
+            shutdown_calls.append((wait, cancel_futures))
+
+    monkeypatch.setattr(runner, "ProcessPoolExecutor", ProbeDeniedPool)
     pl = Pipeline()
     for i, output in enumerate(outputs):
         pl.add(
@@ -488,8 +490,74 @@ def test_pool_submit_startup_failure_falls_back_inline(
         assert pl.run("all", jobs=2) == 0
     assert all(output.exists() for output in outputs)
     assert sentinel.exists()
+    assert submitted == [runner._pool_startup_probe]
+    assert shutdown_calls == [(True, True)]
     assert "Cannot start process pool for group" in caplog.text
     assert "running sequentially" in caplog.text
+
+
+def test_real_submit_failure_after_probe_fails_without_inline_rerun(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    outputs = [tmp_path / f"out-{i}" for i in range(2)]
+    submitted: list[object] = []
+    shutdown_calls: list[tuple[bool, bool]] = []
+
+    class TrackingFuture(Future[None]):
+        result_calls = 0
+
+        def result(self, timeout: float | None = None) -> None:
+            self.result_calls += 1
+            return super().result(timeout)
+
+    first_real_future = TrackingFuture()
+    first_real_future.set_result(None)
+
+    class RegisterThenFailPool:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def submit(self, fn: object, *args: object, **kwargs: object) -> Future[None]:
+            submitted.append(fn)
+            future: Future[None] = Future()
+            if fn is runner._pool_startup_probe:
+                future.set_result(None)
+                return future
+            if len(submitted) == 2:
+                args[0].fn()
+                return first_real_future
+            # Mirror executor ordering: register the work, then fail startup.
+            raise PermissionError("worker spawn denied")
+
+        def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
+            shutdown_calls.append((wait, cancel_futures))
+
+    def unexpected_fallback(batch: list[runner._PlanEntry]) -> int:
+        pytest.fail("real tasks must not be rerun inline after a successful probe")
+
+    monkeypatch.setattr(runner, "_run_inline_batch", unexpected_fallback)
+    monkeypatch.setattr(runner, "ProcessPoolExecutor", RegisterThenFailPool)
+    batch = [
+        runner._PlanEntry(
+            Task(
+                f"group:{i}",
+                functools.partial(_touch, output, str(i)),
+                outputs=(output,),
+                parallel_group="group",
+            ),
+            stale=True,
+            reason="test",
+        )
+        for i, output in enumerate(outputs)
+    ]
+
+    assert runner._run_parallel_batch(batch, jobs=2) != 0
+    assert submitted == [runner._pool_startup_probe, runner._worker, runner._worker]
+    assert first_real_future.result_calls == 1
+    assert outputs[0].exists()
+    assert not outputs[1].exists()
+    assert shutdown_calls == [(True, True)]
+    assert "group:1: worker spawn denied" in capsys.readouterr().out
 
 
 def test_parallel_worker_failure_does_not_fall_back_inline(
@@ -504,16 +572,17 @@ def test_parallel_worker_failure_does_not_fall_back_inline(
         def __init__(self, *args: object, **kwargs: object) -> None:
             pass
 
-        def __enter__(self) -> AcceptedFailingPool:
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            pass
-
-        def submit(self, *args: object, **kwargs: object) -> Future[None]:
+        def submit(self, fn: object, *args: object, **kwargs: object) -> Future[None]:
             future: Future[None] = Future()
-            future.set_exception(RuntimeError("worker task failed"))
+            if fn is runner._pool_startup_probe:
+                future.set_result(None)
+            else:
+                future.set_exception(RuntimeError("worker task failed"))
             return future
+
+        def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
+            assert wait
+            assert cancel_futures
 
     monkeypatch.setattr(runner, "_run_inline_batch", unexpected_fallback)
     monkeypatch.setattr(runner, "ProcessPoolExecutor", AcceptedFailingPool)
@@ -533,42 +602,51 @@ def test_parallel_worker_failure_does_not_fall_back_inline(
     assert not output.exists()
 
 
-def test_parallel_group_missing_output_after_run_fails(
+def test_parallel_mixed_batch_reports_task_with_missing_output(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    output = tmp_path / "output"
+    outputs = [tmp_path / f"output-{i}" for i in range(3)]
 
     class AcceptedSuccessfulPool:
         def __init__(self, *args: object, **kwargs: object) -> None:
             pass
 
-        def __enter__(self) -> AcceptedSuccessfulPool:
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            pass
-
-        def submit(self, *args: object, **kwargs: object) -> Future[None]:
+        def submit(self, fn: object, *args: object, **kwargs: object) -> Future[None]:
             future: Future[None] = Future()
+            if fn is runner._worker:
+                args[0].fn()
             future.set_result(None)
             return future
 
-    monkeypatch.setattr(runner, "ProcessPoolExecutor", AcceptedSuccessfulPool)
-    pl = Pipeline()
-    pl.add(
-        Task(
-            "grouped",
-            _produce_nothing,
-            outputs=(output,),
-            parallel_group="group",
-        )
-    )
-    pl.register_target("grouped", output)
+        def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
+            assert wait
+            assert cancel_futures
 
-    assert pl.run("grouped", jobs=2) != 0
-    assert f"grouped: did not produce: [{output!r}]" in capsys.readouterr().out
+    monkeypatch.setattr(runner, "ProcessPoolExecutor", AcceptedSuccessfulPool)
+    batch = [
+        runner._PlanEntry(
+            Task(
+                f"group:{i}",
+                _produce_nothing if i == 1 else functools.partial(_touch, output, str(i)),
+                outputs=(output,),
+                parallel_group="group",
+            ),
+            stale=True,
+            reason="test",
+        )
+        for i, output in enumerate(outputs)
+    ]
+
+    assert runner._run_parallel_batch(batch, jobs=2) != 0
+    output = capsys.readouterr().out
+    assert f"group:1: did not produce: [{outputs[1]!r}]" in output
+    assert "group:0: did not produce" not in output
+    assert "group:2: did not produce" not in output
+    assert outputs[0].exists()
+    assert not outputs[1].exists()
+    assert outputs[2].exists()
 
 
 def test_staleness_propagates_to_downstream(tmp_path: Path) -> None:

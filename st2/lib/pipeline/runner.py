@@ -46,6 +46,10 @@ _PROGRESS_REPORT_BUCKETS = 10
 # print the first few and a "... and N more" summary.
 _MAX_FAILURES_TO_REPORT = 5
 
+# A worker should start and return this module-level no-op quickly. Allow ample
+# time for slow or heavily loaded hosts before treating startup as unavailable.
+_POOL_STARTUP_TIMEOUT_SECONDS = 30.0
+
 
 class UnknownTargetError(KeyError):
     """Raised when a build target is not registered with the pipeline."""
@@ -330,9 +334,10 @@ def _run_one(task: Task) -> int:
 def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> int:
     """Run a batch of independent tasks in a process pool.
 
-    Inline fallback is safe only before the pool has accepted any work. Once
-    one future has been accepted, an infrastructure error may mean a worker
-    crashed after starting a task, so the batch fails instead of being rerun.
+    A no-op probe starts a worker before any real work is submitted. Inline
+    fallback is safe only when construction or that probe fails. Once the probe
+    succeeds, an infrastructure error may mean a real task started, so the
+    batch fails instead of being rerun.
     """
     group_name = batch[0].task.parallel_group
     n = len(batch)
@@ -346,16 +351,21 @@ def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> int:
     except (OSError, BrokenProcessPool) as exc:
         return _fallback_inline(batch, group_name=group_name, exc=exc)
 
-    with pool:
+    try:
+        probe = pool.submit(_pool_startup_probe)
+        probe.result(timeout=_POOL_STARTUP_TIMEOUT_SECONDS)
+    except (OSError, BrokenProcessPool, TimeoutError) as exc:
+        pool.shutdown(wait=True, cancel_futures=True)
+        return _fallback_inline(batch, group_name=group_name, exc=exc)
+
+    try:
         future_to_task: dict[Future[None], Task] = {}
         for entry in batch:
             try:
                 future = pool.submit(_worker, entry.task)
-            except (OSError, BrokenProcessPool) as exc:
-                if not future_to_task:
-                    return _fallback_inline(batch, group_name=group_name, exc=exc)
-                failures.append(("process pool", exc))
-                logger.exception("Process pool failed after accepting work for %s", group_name)
+            except Exception as exc:
+                failures.append((entry.task.name, exc))
+                logger.exception("Process pool failed while submitting %s", entry.task.name)
                 break
             future_to_task[future] = entry.task
 
@@ -371,6 +381,8 @@ def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> int:
             except BaseException as exc:
                 failures.append((task.name, exc))
                 logger.exception("Parallel task %s failed", task.name)
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
     elapsed = time.monotonic() - start
     if failures:
         print(f"!! fan-out [{group_name}]: {len(failures)} failure(s)")
@@ -407,6 +419,10 @@ def _verify_outputs(task: Task) -> None:
     missing = [path for path in task.outputs if not Path(path).exists()]
     if missing:
         raise TaskFailure(f"did not produce: {missing}")
+
+
+def _pool_startup_probe() -> None:
+    """Importable no-op used to prove that a process-pool worker can start."""
 
 
 def _worker(task: Task) -> None:
