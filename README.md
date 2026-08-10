@@ -56,8 +56,17 @@ pstrain build cd-8g --project-dir myproject     # full CD pipeline, 8 Gaussians
 ```
 
 Useful flags: `--dry-run` prints the resolved task plan, `-j N` parallelizes
-the feature-extraction fan-out, `--config <name>` selects a named profile from
+the feature-extraction fan-out (the default leaves two CPUs free; pass an
+explicit full CPU count to opt into the whole machine), `--config <name>` selects a named profile from
 `etc/configs.yaml` (`default`, `wideband`, `telephone`, …).
+
+Named profiles may set `runner.jobs` and `runner.nice` (default 5; 0 disables
+the POSIX niceness increment). Ctrl-C, SIGTERM, or `Pipeline.cancel()` aborts
+an active fan-out: pending work is cancelled and worker process groups,
+including native helpers, receive SIGTERM followed by SIGKILL after a one-second
+grace period. Completed tasks retain their completion markers, so a rerun starts
+at the first unfinished task. Cancellation is checked between inline tasks;
+an inline task already running with `jobs=1` finishes before cancellation.
 
 When `--phoneset` is omitted, setup extracts one covering both the dictionary
 and filler dictionary (notably `SIL`) so that every model state is trainable.

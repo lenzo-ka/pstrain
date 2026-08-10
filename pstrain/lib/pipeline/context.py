@@ -136,6 +136,14 @@ class SplitParams:
     seed: int = 42
 
 
+@dataclass(frozen=True)
+class RunnerParams:
+    """Local process-allocation policy for pipeline fan-outs."""
+
+    jobs: int | None = None
+    nice: int = 5
+
+
 DEFAULT_CONFIGS: dict[str, dict[str, Any]] = {
     "default": {
         "description": "Default wideband configuration",
@@ -231,7 +239,7 @@ def _validate_params(
     profile: str,
     block: str,
     values: dict[str, Any],
-    params_type: type[FeatParams] | type[TrainParams] | type[SplitParams],
+    params_type: type[FeatParams] | type[TrainParams] | type[SplitParams] | type[RunnerParams],
 ) -> None:
     """Reject misspelled profile parameters with configuration context."""
     known = {item.name for item in fields(params_type)}
@@ -282,6 +290,7 @@ class PipelineContext:
     feat: FeatParams = field(default_factory=FeatParams)
     train: TrainParams = field(default_factory=TrainParams)
     split: SplitParams = field(default_factory=SplitParams)
+    runner: RunnerParams = field(default_factory=RunnerParams)
     description: str = ""
 
     @classmethod
@@ -302,9 +311,19 @@ class PipelineContext:
         feature_values = cfg.get("features", {})
         training_values = cfg.get("training", {})
         split_values = cfg.get("split", {})
+        runner_values = cfg.get("runner", {})
         _validate_params(config_name, "features", feature_values, FeatParams)
         _validate_params(config_name, "training", training_values, TrainParams)
         _validate_params(config_name, "split", split_values, SplitParams)
+        _validate_params(config_name, "runner", runner_values, RunnerParams)
+        nice = runner_values.get("nice", 5)
+        if not isinstance(nice, int) or nice < 0:
+            raise ValueError(f"config {config_name!r} runner.nice must be a non-negative integer")
+        configured_jobs = runner_values.get("jobs")
+        if configured_jobs is not None and (
+            not isinstance(configured_jobs, int) or configured_jobs < 1
+        ):
+            raise ValueError(f"config {config_name!r} runner.jobs must be a positive integer")
         return cls(
             project_dir=project_dir,
             experiment=experiment,
@@ -313,6 +332,7 @@ class PipelineContext:
             feat=FeatParams(**_coerce_dataclass_values(feature_values, FeatParams)),
             train=TrainParams(**_coerce_dataclass_values(training_values, TrainParams)),
             split=SplitParams(**_coerce_dataclass_values(split_values, SplitParams)),
+            runner=RunnerParams(**runner_values),
         )
 
     @property
