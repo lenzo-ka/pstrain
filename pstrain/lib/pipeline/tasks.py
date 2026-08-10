@@ -803,7 +803,7 @@ def build_pipeline(ctx: PipelineContext) -> Pipeline:
     recursively under the audio directory. An empty or missing audio
     directory fails immediately during pipeline construction.
     """
-    pl = Pipeline()
+    pl = Pipeline(ctx.project_dir)
 
     for stage in ("features", "split", "training"):
         pl.add(_make_provenance_task(ctx, stage))

@@ -10,7 +10,10 @@ actual pstrain training code.
 from __future__ import annotations
 
 import functools
+import json
 import os
+import subprocess
+import sys
 import time
 from concurrent.futures import Future
 from pathlib import Path
@@ -18,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from pstrain.lib.pipeline import Pipeline, Task, UnknownTargetError, runner
+from pstrain.lib.pipeline import timings as pipeline_timings
 
 
 def _touch(path: Path, contents: str = "") -> None:
@@ -33,6 +37,11 @@ def _raise_worker_error() -> None:
 
 def _produce_nothing() -> None:
     """Picklable callable that deliberately omits its declared output."""
+
+
+def _burn_cpu_in_child(output: Path) -> None:
+    subprocess.run([sys.executable, "-c", "sum(i * i for i in range(2_000_000))"], check=True)
+    output.touch()
 
 
 def _make_touch_task(name: str, out: Path, *, inputs: tuple[Path, ...] = ()) -> Task:
@@ -786,3 +795,113 @@ def test_force_from_path_target_works(tmp_path: Path) -> None:
     rc = pl.run(out)
     assert rc == 0
     assert out.read_text() == "ok"
+
+
+def test_inline_and_pool_task_timings_are_persisted_and_rolled_up(tmp_path: Path) -> None:
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    final = tmp_path / "final"
+    pipeline = Pipeline(tmp_path)
+    pipeline.add(
+        Task(
+            "features:first",
+            functools.partial(_touch, first),
+            outputs=(first,),
+            parallel_group="features",
+        )
+    )
+    pipeline.add(
+        Task(
+            "features:second",
+            functools.partial(_touch, second),
+            outputs=(second,),
+            parallel_group="features",
+        )
+    )
+    pipeline.add(_make_touch_task("finish", final, inputs=(first, second)))
+    pipeline.register_target("all", final)
+
+    assert pipeline.run("all", jobs=2) == 0
+    artifacts = list((tmp_path / ".pstrain" / "timings").glob("*.json"))
+    assert len(artifacts) == 1
+    document = json.loads(artifacts[0].read_text())
+    assert set(document) == {
+        "schema_version",
+        "run_id",
+        "target",
+        "start",
+        "end",
+        "tasks",
+        "stages",
+    }
+    assert document["schema_version"] == 1
+    assert {item["task"] for item in document["tasks"]} == {
+        "features:first",
+        "features:second",
+        "finish",
+    }
+    features = next(item for item in document["stages"] if item["stage"] == "features")
+    feature_tasks = [item for item in document["tasks"] if item["stage"] == "features"]
+    assert features["wall"] == pytest.approx(sum(item["wall"] for item in feature_tasks))
+    assert features["cpu"] == pytest.approx(
+        sum(
+            item["cpu_user"]
+            + item["cpu_sys"]
+            + item["cpu_children_user"]
+            + item["cpu_children_sys"]
+            for item in feature_tasks
+        )
+    )
+
+
+def test_cpu_timing_includes_reaped_child(tmp_path: Path) -> None:
+    output = tmp_path / "child-output"
+    timing = runner._worker(
+        Task("child-cpu", functools.partial(_burn_cpu_in_child, output), outputs=(output,))
+    )
+    assert timing.cpu_children_user + timing.cpu_children_sys > 0
+
+
+def test_timing_write_failure_does_not_fail_pipeline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    output = tmp_path / "output"
+    pipeline = Pipeline(tmp_path)
+    pipeline.add(
+        Task("work", functools.partial(Path.write_text, output, "done"), outputs=(output,))
+    )
+    pipeline.register_target("work", output)
+
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("blocked")
+    monkeypatch.setattr(pipeline_timings, "timings_dir", lambda project: blocker / "timings")
+    assert pipeline.run("work", jobs=1) == 0
+    assert output.exists()
+    assert "Could not write pipeline timings" in caplog.text
+
+
+def test_rollup_schema_and_summary_are_value_tolerant() -> None:
+    record = pipeline_timings.TaskTiming(
+        task="features:a",
+        stage="features",
+        group="features",
+        wall=2.0,
+        cpu_user=0.5,
+        cpu_sys=0.25,
+        cpu_children_user=0.5,
+        cpu_children_sys=0.25,
+        start="2026-08-10T00:00:00+00:00",
+        end="2026-08-10T00:00:02+00:00",
+    )
+    document = pipeline_timings.build_document(
+        [record],
+        run_id="named",
+        target="features",
+        started=record.start,
+        ended=record.end,
+    )
+    assert document["stages"] == [
+        {"stage": "features", "wall": 2.0, "cpu": 1.5, "cpu_wall_ratio": 0.75}
+    ]
+    assert "features" in pipeline_timings.format_summary(document)
+    assert "0.75x" in pipeline_timings.format_summary(document)

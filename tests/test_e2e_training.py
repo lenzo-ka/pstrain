@@ -16,6 +16,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from tests.clib import requires_c_library
 
@@ -102,7 +103,9 @@ def test_build_ci_1g_produces_finite_model(tmp_path: Path) -> None:
 
 
 @requires_c_library
-def test_features_extracted_for_every_utterance(tmp_path: Path) -> None:
+def test_features_extracted_for_every_utterance(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Feature extraction fans out to one .mfc per fixture utterance."""
     from pstrain.lib.pipeline import PipelineContext
     from pstrain.lib.pipeline.tasks import build_pipeline
@@ -119,12 +122,14 @@ def test_features_extracted_for_every_utterance(tmp_path: Path) -> None:
     )
 
     ctx = PipelineContext.from_config(project_dir)
-    rc = build_pipeline(ctx).run("features", jobs=2)
+    rc = build_pipeline(ctx).run("features", jobs=2, verbose=True)
     assert rc == 0
 
     n_wav = len(list((FIXTURE / "wav").glob("*.wav")))
     mfcs = list(ctx.features_dir.glob("*.mfc"))
     assert len(mfcs) == n_wav, f"expected {n_wav} .mfc files, got {len(mfcs)}"
+    assert list((project_dir / ".pstrain" / "timings").glob("*.json"))
+    assert "Pipeline timings" in capsys.readouterr().out
 
 
 @requires_c_library
