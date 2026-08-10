@@ -454,7 +454,11 @@ def test_jobs_none_uses_cpu_count_bounded_by_batch(
 
     def record_batch(batch: list[runner._PlanEntry], *, jobs: int) -> int:
         observed.append((jobs, min(jobs, len(batch))))
-        return runner._run_inline_batch(batch)
+        for entry in batch:
+            rc = runner._run_one(entry.task)
+            if rc != 0:
+                return rc
+        return 0
 
     monkeypatch.setattr(runner.os, "cpu_count", lambda: 8)
     monkeypatch.setattr(runner, "_run_parallel_batch", record_batch)
@@ -499,7 +503,7 @@ def test_jobs_one_runs_inline_without_constructing_pool(
     assert output.exists()
 
 
-def test_pool_probe_failure_falls_back_entire_batch_inline(
+def test_pool_probe_failure_aborts_batch_without_inline_execution(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -536,17 +540,16 @@ def test_pool_probe_failure_falls_back_entire_batch_inline(
     pl.add(_make_touch_task("sentinel", sentinel, inputs=tuple(outputs)))
     pl.register_target("all", sentinel)
 
-    with caplog.at_level("WARNING"):
-        assert pl.run("all", jobs=2) == 0
-    assert all(output.exists() for output in outputs)
-    assert sentinel.exists()
+    with caplog.at_level("ERROR"):
+        assert pl.run("all", jobs=2) == 1
+    assert all(not output.exists() for output in outputs)
+    assert not sentinel.exists()
     assert submitted == [runner._pool_startup_probe]
     assert shutdown_calls == [(True, True)]
-    assert "Cannot start process pool for group" in caplog.text
-    assert "running sequentially" in caplog.text
+    assert "cannot start process pool for group" in caplog.text
 
 
-def test_pool_probe_timeout_abandons_worker_and_falls_back_inline(
+def test_pool_probe_timeout_abandons_worker_and_aborts_batch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     outputs = [tmp_path / f"out-{i}" for i in range(2)]
@@ -584,10 +587,10 @@ def test_pool_probe_timeout_abandons_worker_and_falls_back_inline(
         for i, output in enumerate(outputs)
     ]
 
-    assert runner._run_parallel_batch(batch, jobs=2) == 0
+    assert runner._run_parallel_batch(batch, jobs=2) == 1
     assert submitted == [runner._pool_startup_probe]
     assert shutdown_calls == [(False, True)]
-    assert [output.read_text() for output in outputs] == ["0", "1"]
+    assert all(not output.exists() for output in outputs)
 
 
 def test_real_submit_failure_after_probe_fails_without_inline_rerun(
@@ -626,10 +629,10 @@ def test_real_submit_failure_after_probe_fails_without_inline_rerun(
         def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
             shutdown_calls.append((wait, cancel_futures))
 
-    def unexpected_fallback(batch: list[runner._PlanEntry]) -> int:
+    def unexpected_inline_run(task: Task) -> int:
         pytest.fail("real tasks must not be rerun inline after a successful probe")
 
-    monkeypatch.setattr(runner, "_run_inline_batch", unexpected_fallback)
+    monkeypatch.setattr(runner, "_run_one", unexpected_inline_run)
     monkeypatch.setattr(runner, "ProcessPoolExecutor", RegisterThenFailPool)
     batch = [
         runner._PlanEntry(
@@ -659,7 +662,7 @@ def test_parallel_worker_failure_does_not_fall_back_inline(
 ) -> None:
     output = tmp_path / "output"
 
-    def unexpected_fallback(batch: list[runner._PlanEntry]) -> int:
+    def unexpected_inline_run(task: Task) -> int:
         pytest.fail("worker failures must not be rerun inline")
 
     class AcceptedFailingPool:
@@ -678,7 +681,7 @@ def test_parallel_worker_failure_does_not_fall_back_inline(
             assert wait
             assert cancel_futures
 
-    monkeypatch.setattr(runner, "_run_inline_batch", unexpected_fallback)
+    monkeypatch.setattr(runner, "_run_one", unexpected_inline_run)
     monkeypatch.setattr(runner, "ProcessPoolExecutor", AcceptedFailingPool)
     pl = Pipeline()
     pl.add(
