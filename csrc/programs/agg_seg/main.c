@@ -496,7 +496,7 @@ int agg_seg_run(void)
     return 0;
 }
 
-#ifndef ST2_LIBRARY_BUILD
+#ifndef PSTRAIN_LIBRARY_BUILD
 int main(int argc, char *argv[])
 {
     parse_cmd_ln(argc, argv);

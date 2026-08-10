@@ -1,12 +1,12 @@
 /**
- * @file st2_mdef_gen.h
+ * @file pstrain_mdef_gen.h
  * @brief Simplified API for generating mdef files.
  *
  * Wraps mk_mdef_gen functionality for CFFI binding.
  */
 
-#ifndef ST2_MDEF_GEN_H
-#define ST2_MDEF_GEN_H
+#ifndef PSTRAIN_MDEF_GEN_H
+#define PSTRAIN_MDEF_GEN_H
 
 #include <sphinxbase/prim_type.h>
 
@@ -18,7 +18,7 @@
  * @param n_state Number of emitting states per phone (typically 3)
  * @return 0 on success, -1 on error
  */
-int st2_mdef_gen_ci(const char *phone_list_path,
+int pstrain_mdef_gen_ci(const char *phone_list_path,
                     const char *output_path,
                     uint32 n_state);
 
@@ -35,7 +35,7 @@ int st2_mdef_gen_ci(const char *phone_list_path,
  * @param ignore_wpos If true, ignore word position in triphones
  * @return 0 on success, -1 on error
  */
-int st2_mdef_gen_alltriphones(const char *phone_list_path,
+int pstrain_mdef_gen_alltriphones(const char *phone_list_path,
                               const char *dict_path,
                               const char *filler_dict_path,
                               const char *output_path,
@@ -57,7 +57,7 @@ int st2_mdef_gen_alltriphones(const char *phone_list_path,
  * @param ignore_wpos If true, ignore word position
  * @return 0 on success, -1 on error
  */
-int st2_mdef_gen_untied(const char *phone_list_path,
+int pstrain_mdef_gen_untied(const char *phone_list_path,
                         const char *dict_path,
                         const char *filler_dict_path,
                         const char *transcript_path,
@@ -76,11 +76,11 @@ int st2_mdef_gen_untied(const char *phone_list_path,
  * @param ignore_wpos If true, ignore word position
  * @return 0 on success, -1 on error
  */
-int st2_mdef_count_triphones(const char *phone_list_path,
+int pstrain_mdef_count_triphones(const char *phone_list_path,
                              const char *dict_path,
                              const char *filler_dict_path,
                              const char *transcript_path,
                              const char *output_path,
                              int32 ignore_wpos);
 
-#endif /* ST2_MDEF_GEN_H */
+#endif /* PSTRAIN_MDEF_GEN_H */

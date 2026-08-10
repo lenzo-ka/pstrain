@@ -1,10 +1,10 @@
 /**
- * @file st2_bw.h
+ * @file pstrain_bw.h
  * @brief Simplified Baum-Welch training API for CFFI
  */
 
-#ifndef ST2_BW_H
-#define ST2_BW_H
+#ifndef PSTRAIN_BW_H
+#define PSTRAIN_BW_H
 
 #include <sphinxbase/prim_type.h>
 
@@ -15,7 +15,7 @@ extern "C" {
 /**
  * Training configuration
  */
-typedef struct st2_bw_config_s {
+typedef struct pstrain_bw_config_s {
     float64 a_beam;      /**< Forward beam (default: 1e-90) */
     float64 b_beam;      /**< Backward beam (default: 1e-90) */
     float32 spthresh;    /**< State pruning threshold (default: 0) */
@@ -24,12 +24,12 @@ typedef struct st2_bw_config_s {
     int32 mean_reest;    /**< Re-estimate means (default: 1) */
     int32 var_reest;     /**< Re-estimate variances (default: 1) */
     int32 pass2var;      /**< Use 2-pass variance estimation (default: 1) */
-} st2_bw_config_t;
+} pstrain_bw_config_t;
 
 /**
  * Opaque training context
  */
-typedef struct st2_bw_context_s st2_bw_context_t;
+typedef struct pstrain_bw_context_s pstrain_bw_context_t;
 
 /**
  * Initialize BW training context
@@ -42,24 +42,24 @@ typedef struct st2_bw_context_s st2_bw_context_t;
  * @param config Training configuration (NULL for defaults)
  * @return Training context, or NULL on error
  */
-st2_bw_context_t *
-st2_bw_init(const char *mdef_path,
+pstrain_bw_context_t *
+pstrain_bw_init(const char *mdef_path,
             const char *means_path,
             const char *vars_path,
             const char *mixw_path,
             const char *tmat_path,
-            const st2_bw_config_t *config);
+            const pstrain_bw_config_t *config);
 
 /**
  * Free training context
  */
 void
-st2_bw_free(st2_bw_context_t *ctx);
+pstrain_bw_free(pstrain_bw_context_t *ctx);
 
 /**
  * Load dictionary (lexicon) for transcript processing
  *
- * Must be called before st2_bw_process_utt_text.
+ * Must be called before pstrain_bw_process_utt_text.
  * Dictionary handles multiple pronunciations automatically.
  *
  * @param ctx Training context
@@ -68,7 +68,7 @@ st2_bw_free(st2_bw_context_t *ctx);
  * @return 0 on success, -1 on error
  */
 int
-st2_bw_set_dict(st2_bw_context_t *ctx,
+pstrain_bw_set_dict(pstrain_bw_context_t *ctx,
                 const char *dict_path,
                 const char *filler_dict_path);
 
@@ -80,19 +80,19 @@ st2_bw_set_dict(st2_bw_context_t *ctx,
  * backward sums posteriors across variants. When disabled, the trainer
  * falls back to the historical linear path where the first listed
  * variant is always selected (matches SphinxTrain's default behavior
- * and is bit-identical to st2's pre-multipron output).
+ * and is bit-identical to pstrain's pre-multipron output).
  *
  * @param ctx Training context
  * @param enable Nonzero to enable multipron training, zero to disable
  * @return 0 on success, -1 on error
  */
 int
-st2_bw_set_multipron(st2_bw_context_t *ctx, int enable);
+pstrain_bw_set_multipron(pstrain_bw_context_t *ctx, int enable);
 
 /**
  * Process utterance with transcript text
  *
- * Dictionary must be loaded first via st2_bw_set_dict.
+ * Dictionary must be loaded first via pstrain_bw_set_dict.
  * Handles word lookup, multiple pronunciations, and state sequence.
  *
  * @param ctx Training context
@@ -102,7 +102,7 @@ st2_bw_set_multipron(st2_bw_context_t *ctx, int enable);
  * @return 0 on success, -1 on error
  */
 int
-st2_bw_process_utt_text(st2_bw_context_t *ctx,
+pstrain_bw_process_utt_text(pstrain_bw_context_t *ctx,
                         const float *features,
                         uint32 n_frames,
                         const char *transcript);
@@ -111,7 +111,7 @@ st2_bw_process_utt_text(st2_bw_context_t *ctx,
  * Process utterance from raw MFCC features (13-dim)
  *
  * Uses C feat module to apply CMN and compute deltas, exactly like SphinxTrain.
- * Dictionary must be loaded first via st2_bw_set_dict.
+ * Dictionary must be loaded first via pstrain_bw_set_dict.
  *
  * @param ctx Training context
  * @param mfcc Raw MFCC features (n_frames * 13, row-major)
@@ -120,7 +120,7 @@ st2_bw_process_utt_text(st2_bw_context_t *ctx,
  * @return 0 on success, -1 on error
  */
 int
-st2_bw_process_utt_mfcc(st2_bw_context_t *ctx,
+pstrain_bw_process_utt_mfcc(pstrain_bw_context_t *ctx,
                         const float *mfcc,
                         uint32 n_mfcc_frames,
                         const char *transcript);
@@ -136,7 +136,7 @@ st2_bw_process_utt_mfcc(st2_bw_context_t *ctx,
  * @return 0 on success, -1 on error
  */
 int
-st2_bw_process_utt(st2_bw_context_t *ctx,
+pstrain_bw_process_utt(pstrain_bw_context_t *ctx,
                    const float *features,
                    uint32 n_frames,
                    const uint32 *phone_ids,
@@ -151,7 +151,7 @@ st2_bw_process_utt(st2_bw_context_t *ctx,
  * @return 0 on success, -1 on error
  */
 int
-st2_bw_normalize(st2_bw_context_t *ctx);
+pstrain_bw_normalize(pstrain_bw_context_t *ctx);
 
 /**
  * Save trained model
@@ -164,7 +164,7 @@ st2_bw_normalize(st2_bw_context_t *ctx);
  * @return 0 on success, -1 on error
  */
 int
-st2_bw_save(st2_bw_context_t *ctx,
+pstrain_bw_save(pstrain_bw_context_t *ctx,
             const char *means_path,
             const char *vars_path,
             const char *mixw_path,
@@ -179,7 +179,7 @@ st2_bw_save(st2_bw_context_t *ctx,
  * @param total_utts Output: total utterances processed (may be NULL)
  */
 void
-st2_bw_get_stats(st2_bw_context_t *ctx,
+pstrain_bw_get_stats(pstrain_bw_context_t *ctx,
                  float64 *total_log_lik,
                  uint32 *total_frames,
                  uint32 *total_utts);
@@ -192,10 +192,10 @@ st2_bw_get_stats(st2_bw_context_t *ctx,
  * @return 0 on success, -1 on error
  */
 int
-st2_bw_save_counts(st2_bw_context_t *ctx, const char *counts_path);
+pstrain_bw_save_counts(pstrain_bw_context_t *ctx, const char *counts_path);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* ST2_BW_H */
+#endif /* PSTRAIN_BW_H */

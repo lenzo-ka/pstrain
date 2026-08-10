@@ -1,9 +1,9 @@
 /**
- * @file st2_inc_comp.c
+ * @file pstrain_inc_comp.c
  * @brief Gaussian splitting (increase components) API for CFFI
  */
 
-#include "st2_inc_comp.h"
+#include "pstrain_inc_comp.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -134,7 +134,7 @@ inc_densities_core(float32 ***new_mixw,
 }
 
 int
-st2_inc_comp(const char *in_mean_path,
+pstrain_inc_comp(const char *in_mean_path,
              const char *in_var_path,
              const char *in_mixw_path,
              const char *dcount_path,

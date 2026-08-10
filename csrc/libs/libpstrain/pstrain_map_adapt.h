@@ -1,5 +1,5 @@
-#ifndef ST2_MAP_ADAPT_H
-#define ST2_MAP_ADAPT_H
+#ifndef PSTRAIN_MAP_ADAPT_H
+#define PSTRAIN_MAP_ADAPT_H
 
 #include <sphinxbase/prim_type.h>
 
@@ -32,7 +32,7 @@ extern "C" {
  * @param tpfloor Transition probability floor (default 1e-4)
  * @return 0 on success, non-zero on error
  */
-int st2_map_adapt(const char *meanfn,
+int pstrain_map_adapt(const char *meanfn,
                   const char *varfn,
                   const char *mixwfn,
                   const char *tmatfn,
@@ -54,4 +54,4 @@ int st2_map_adapt(const char *meanfn,
 }
 #endif
 
-#endif /* ST2_MAP_ADAPT_H */
+#endif /* PSTRAIN_MAP_ADAPT_H */

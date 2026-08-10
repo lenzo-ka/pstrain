@@ -1,5 +1,5 @@
 /**
- * st2_fe.c - Simplified FE initialization for st2
+ * pstrain_fe.c - Simplified FE initialization for pstrain
  *
  * Provides a simple interface to create a front-end without needing
  * to go through the cmd_ln infrastructure.
@@ -28,7 +28,7 @@
  * @return Initialized fe_t*, or NULL on failure
  */
 fe_t *
-st2_fe_create(float samprate, int nfilt, int nfft,
+pstrain_fe_create(float samprate, int nfilt, int nfft,
               float lowerf, float upperf, int ncep,
               float alpha, int lifter)
 {
@@ -87,9 +87,9 @@ st2_fe_create(float samprate, int nfilt, int nfft,
  * @return Initialized fe_t*, or NULL on failure
  */
 fe_t *
-st2_fe_create_default(void)
+pstrain_fe_create_default(void)
 {
-    return st2_fe_create(
+    return pstrain_fe_create(
         16000.0f,  /* samprate */
         40,        /* nfilt */
         512,       /* nfft */

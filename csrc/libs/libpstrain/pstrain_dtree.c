@@ -1,9 +1,9 @@
 /**
- * @file st2_dtree.c
+ * @file pstrain_dtree.c
  * @brief CFFI-friendly wrappers for decision tree operations.
  */
 
-#include "st2_dtree.h"
+#include "pstrain_dtree.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,7 +30,7 @@
 
 
 pset_t *
-st2_read_pset(const char *filename,
+pstrain_read_pset(const char *filename,
               const char *mdef_path,
               uint32 *out_n_pset)
 {
@@ -64,7 +64,7 @@ st2_read_pset(const char *filename,
 
 
 void
-st2_free_pset(pset_t *pset, uint32 n_pset)
+pstrain_free_pset(pset_t *pset, uint32 n_pset)
 {
     uint32 i;
     if (pset) {
@@ -122,7 +122,7 @@ find_triphones(model_def_t *mdef, const char *phn, uint32 *p_s, uint32 *p_e)
 
 
 int
-st2_build_tree(const char *mdef_path,
+pstrain_build_tree(const char *mdef_path,
                const char *mixw_path,
                const char *mean_path,
                const char *var_path,
@@ -196,7 +196,7 @@ st2_build_tree(const char *mdef_path,
         const char *type_str = continuous ? ".cont." : ".semi.";
         int argc = 0;
         const char *argv[8];
-        argv[argc++] = "st2_build_tree";
+        argv[argc++] = "pstrain_build_tree";
         argv[argc++] = "-ts2cbfn";
         argv[argc++] = type_str;
         argv[argc++] = "-varfloor";
@@ -481,7 +481,7 @@ st2_build_tree(const char *mdef_path,
 extern int tiestate_run(void);
 
 int
-st2_tie_states(const char *input_mdef_path,
+pstrain_tie_states(const char *input_mdef_path,
                const char *output_mdef_path,
                const char *tree_dir,
                const char *pset_path,
@@ -507,7 +507,7 @@ st2_tie_states(const char *input_mdef_path,
 
     int argc = 0;
     const char *argv[16];
-    argv[argc++] = "st2_tie_states";
+    argv[argc++] = "pstrain_tie_states";
     argv[argc++] = "-imoddeffn";
     argv[argc++] = input_mdef_path;
     argv[argc++] = "-omoddeffn";
@@ -541,7 +541,7 @@ extern int make_quests_run(void);
 extern int prunetree_run(void);
 
 int
-st2_make_quests(const char *mdef_path,
+pstrain_make_quests(const char *mdef_path,
                 const char *mixw_path,
                 const char *mean_path,
                 const char *var_path,
@@ -592,7 +592,7 @@ st2_make_quests(const char *mdef_path,
 
     int argc = 0;
     const char *argv[32];
-    argv[argc++] = "st2_make_quests";
+    argv[argc++] = "pstrain_make_quests";
     argv[argc++] = "-moddeffn";
     argv[argc++] = mdef_path;
     argv[argc++] = "-mixwfn";
@@ -632,7 +632,7 @@ st2_make_quests(const char *mdef_path,
 
 
 int
-st2_prune_tree(const char *mdef_path,
+pstrain_prune_tree(const char *mdef_path,
                const char *pset_path,
                const char *input_tree_dir,
                const char *output_tree_dir,
@@ -667,7 +667,7 @@ st2_prune_tree(const char *mdef_path,
 
     int argc = 0;
     const char *argv[20];
-    argv[argc++] = "st2_prune_tree";
+    argv[argc++] = "pstrain_prune_tree";
     argv[argc++] = "-moddeffn";
     argv[argc++] = mdef_path;
     argv[argc++] = "-psetfn";
@@ -700,7 +700,7 @@ st2_prune_tree(const char *mdef_path,
 
 
 /* ============================================================================
- * st2_init_mixw - Initialize CD model parameters from CI model
+ * pstrain_init_mixw - Initialize CD model parameters from CI model
  * ============================================================================ */
 
 /* Static variables for tracking what's been initialized */
@@ -799,7 +799,7 @@ init_model_params(float32 ***dest_mixw,
 }
 
 int
-st2_init_mixw(const char *src_mdef_path,
+pstrain_init_mixw(const char *src_mdef_path,
               const char *src_mixw_path,
               const char *src_mean_path,
               const char *src_var_path,

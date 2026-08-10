@@ -1,11 +1,11 @@
 /**
- * @file st2_flat.c
+ * @file pstrain_flat.c
  * @brief Simplified flat initialization API for CFFI
  *
  * Wraps SphinxTrain's mk_flat and init_gau functionality.
  */
 
-#include "st2_flat.h"
+#include "pstrain_flat.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,11 +32,11 @@
 #include <s3/s3.h>
 
 /* Forward declaration for init_gau core function */
-int st2_init_gau_core(lexicon_t *lex, model_def_t *mdef, feat_t *feat,
+int pstrain_init_gau_core(lexicon_t *lex, model_def_t *mdef, feat_t *feat,
                       const char *accumdir, const char *meanfn);
 
 int
-st2_flat_tmat(const char *mdef_path,
+pstrain_flat_tmat(const char *mdef_path,
               const char *topo_path,
               const char *output_path)
 {
@@ -49,7 +49,7 @@ st2_flat_tmat(const char *mdef_path,
     int ret = 0;
 
     if (!mdef_path || !topo_path || !output_path) {
-        E_ERROR("Invalid arguments to st2_flat_tmat\n");
+        E_ERROR("Invalid arguments to pstrain_flat_tmat\n");
         return -1;
     }
 
@@ -96,7 +96,7 @@ st2_flat_tmat(const char *mdef_path,
 }
 
 int
-st2_flat_mixw(uint32 n_tied_state,
+pstrain_flat_mixw(uint32 n_tied_state,
               uint32 n_stream,
               uint32 n_density,
               const char *output_path)
@@ -106,7 +106,7 @@ st2_flat_mixw(uint32 n_tied_state,
     uint32 i, j, k;
 
     if (n_tied_state == 0 || n_stream == 0 || n_density == 0 || !output_path) {
-        E_ERROR("Invalid arguments to st2_flat_mixw\n");
+        E_ERROR("Invalid arguments to pstrain_flat_mixw\n");
         return -1;
     }
 
@@ -149,7 +149,7 @@ st2_flat_mixw(uint32 n_tied_state,
  * Per-state mode: requires segmentation files
  */
 int
-st2_init_gau(const char *mdef_path,
+pstrain_init_gau(const char *mdef_path,
              const char *dict_path,
              const char *filler_dict_path,
              const char *feat_type,
@@ -169,7 +169,7 @@ st2_init_gau(const char *mdef_path,
     int ret = -1;
 
     if (!ctl_path || !cep_dir || !accum_dir) {
-        E_ERROR("Invalid arguments to st2_init_gau\n");
+        E_ERROR("Invalid arguments to pstrain_init_gau\n");
         return -1;
     }
 
@@ -229,7 +229,7 @@ st2_init_gau(const char *mdef_path,
     }
 
     /* Run init_gau core */
-    ret = st2_init_gau_core(lex, mdef, feat, accum_dir, mean_path);
+    ret = pstrain_init_gau_core(lex, mdef, feat, accum_dir, mean_path);
 
 cleanup:
     if (lex)
@@ -248,7 +248,7 @@ cleanup:
  * This is adapted from SphinxTrain's init_gau.c
  */
 int
-st2_init_gau_core(lexicon_t *lex, model_def_t *mdef, feat_t *feat,
+pstrain_init_gau_core(lexicon_t *lex, model_def_t *mdef, feat_t *feat,
                   const char *accumdir, const char *meanfn)
 {
     char *trans = NULL;
@@ -500,7 +500,7 @@ st2_init_gau_core(lexicon_t *lex, model_def_t *mdef, feat_t *feat,
  * Adapted from SphinxTrain's norm program.
  */
 int
-st2_norm_gau(const char *accum_dir,
+pstrain_norm_gau(const char *accum_dir,
              const char *mean_path,
              const char *var_path)
 {
@@ -515,7 +515,7 @@ st2_norm_gau(const char *accum_dir,
     uint32 *veclen = NULL;
 
     if (!accum_dir) {
-        E_ERROR("Invalid arguments to st2_norm_gau\n");
+        E_ERROR("Invalid arguments to pstrain_norm_gau\n");
         return -1;
     }
 

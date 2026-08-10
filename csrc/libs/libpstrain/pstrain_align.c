@@ -1,5 +1,5 @@
 /**
- * @file st2_align.c
+ * @file pstrain_align.c
  * @brief In-process forced-alignment session wrapper.
  *
  * Drives the sphinx3 aligner vendored under csrc/programs/sphinx3_align/
@@ -8,7 +8,7 @@
  * aligner; see docs/sphinx3-align-cffi-plan.md for context.
  */
 
-#include "st2_align.h"
+#include "pstrain_align.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -36,9 +36,9 @@ extern arg_t *cmd_ln_get_defn_for_align(void);
 /* Maximum cepstrum frames we'll allocate for a single utterance.  Matches
  * the constant baked into main_align.c so we stay aligned with the CLI's
  * limits. */
-#define ST2_ALIGN_MAX_FRAMES 32768
+#define PSTRAIN_ALIGN_MAX_FRAMES 32768
 
-struct st2_align_context_s {
+struct pstrain_align_context_s {
     cmd_ln_t *config;
     int32 ncep;
     int32 want_phones;
@@ -48,7 +48,7 @@ struct st2_align_context_s {
 /* Single-instance enforcement: the underlying aligner holds module-static
  * state (kbc, ascr, etc.) over in main_align.c. Promoting to a per-context
  * model is mechanical but unnecessary today. */
-static st2_align_context_t *g_ctx = NULL;
+static pstrain_align_context_t *g_ctx = NULL;
 static char g_last_error[1024];
 
 static void
@@ -61,7 +61,7 @@ set_error(const char *fmt, ...)
 }
 
 void
-st2_align_config_default(st2_align_config_t *config)
+pstrain_align_config_default(pstrain_align_config_t *config)
 {
     if (config == NULL) return;
     config->beam = 1e-64;
@@ -94,7 +94,7 @@ build_config(const char *mdef_path,
              const char *feat_params_path,
              const char *dict_path,
              const char *fdict_path,
-             const st2_align_config_t *cfg)
+             const pstrain_align_config_t *cfg)
 {
     char beam_str[64];
     char insert_sil_str[16];
@@ -127,8 +127,8 @@ build_config(const char *mdef_path,
     return c;
 }
 
-st2_align_context_t *
-st2_align_init(const char *mdef_path,
+pstrain_align_context_t *
+pstrain_align_init(const char *mdef_path,
                const char *mean_path,
                const char *var_path,
                const char *mixw_path,
@@ -136,27 +136,27 @@ st2_align_init(const char *mdef_path,
                const char *feat_params_path,
                const char *dict_path,
                const char *fdict_path,
-               const st2_align_config_t *config)
+               const pstrain_align_config_t *config)
 {
     if (g_ctx != NULL) {
-        set_error("st2_align: another aligner is already active; free it first");
+        set_error("pstrain_align: another aligner is already active; free it first");
         return NULL;
     }
     if (mdef_path == NULL || mean_path == NULL || var_path == NULL ||
         mixw_path == NULL || tmat_path == NULL || dict_path == NULL) {
-        set_error("st2_align: required path argument missing");
+        set_error("pstrain_align: required path argument missing");
         return NULL;
     }
 
-    st2_align_config_t defaults;
-    st2_align_config_default(&defaults);
-    const st2_align_config_t *cfg = config ? config : &defaults;
+    pstrain_align_config_t defaults;
+    pstrain_align_config_default(&defaults);
+    const pstrain_align_config_t *cfg = config ? config : &defaults;
 
     cmd_ln_t *c = build_config(mdef_path, mean_path, var_path, mixw_path,
                                tmat_path, feat_params_path,
                                dict_path, fdict_path, cfg);
     if (c == NULL) {
-        set_error("st2_align: cmd_ln_init failed");
+        set_error("pstrain_align: cmd_ln_init failed");
         return NULL;
     }
 
@@ -168,12 +168,12 @@ st2_align_init(const char *mdef_path,
     models_init(c);
 
     if (feat == NULL) {
-        feat = feat_array_alloc(kbcore_fcb(kbc), ST2_ALIGN_MAX_FRAMES);
+        feat = feat_array_alloc(kbcore_fcb(kbc), PSTRAIN_ALIGN_MAX_FRAMES);
     }
 
     align_init(kbc->mdef, kbc->tmat, dict, c, kbc->logmath);
 
-    st2_align_context_t *ctx = ckd_calloc(1, sizeof(*ctx));
+    pstrain_align_context_t *ctx = ckd_calloc(1, sizeof(*ctx));
     ctx->config = c;
     ctx->ncep = feat_cepsize(kbcore_fcb(kbc));
     ctx->want_phones = cfg->compute_phones;
@@ -184,7 +184,7 @@ st2_align_init(const char *mdef_path,
 }
 
 void
-st2_align_free(st2_align_context_t *ctx)
+pstrain_align_free(pstrain_align_context_t *ctx)
 {
     if (ctx == NULL) return;
 
@@ -251,7 +251,7 @@ count_wd(const align_wdseg_t *w)
 }
 
 /* Internal arena: a single contiguous string buffer attached to the result
- * struct. Holds all the seg labels; freed in st2_align_result_free. */
+ * struct. Holds all the seg labels; freed in pstrain_align_result_free. */
 struct seg_arena {
     char *buf;
     size_t len;
@@ -278,7 +278,7 @@ arena_strdup(struct seg_arena *a, const char *s)
 /* The arena's buf may move when arena_strdup grows it, so we record byte
  * offsets first and resolve them to pointers at the end. */
 static void
-flatten_wd(const align_wdseg_t *src, st2_align_seg_t *dst, uint32 n,
+flatten_wd(const align_wdseg_t *src, pstrain_align_seg_t *dst, uint32 n,
            size_t *name_offs, struct seg_arena *arena)
 {
     uint32 i = 0;
@@ -293,7 +293,7 @@ flatten_wd(const align_wdseg_t *src, st2_align_seg_t *dst, uint32 n,
 }
 
 static void
-flatten_ph(const align_phseg_t *src, st2_align_seg_t *dst, uint32 n,
+flatten_ph(const align_phseg_t *src, pstrain_align_seg_t *dst, uint32 n,
            size_t *name_offs, struct seg_arena *arena)
 {
     char buf[64];
@@ -309,7 +309,7 @@ flatten_ph(const align_phseg_t *src, st2_align_seg_t *dst, uint32 n,
 }
 
 static void
-flatten_st(const align_stseg_t *src, st2_align_seg_t *dst, uint32 n,
+flatten_st(const align_stseg_t *src, pstrain_align_seg_t *dst, uint32 n,
            size_t *name_offs, struct seg_arena *arena)
 {
     char buf[64];
@@ -328,9 +328,9 @@ static int
 build_result(int want_phones, int want_states,
              align_stseg_t *stseg, align_phseg_t *phseg, align_wdseg_t *wdseg,
              int32 n_frames,
-             st2_align_result_t **out_result)
+             pstrain_align_result_t **out_result)
 {
-    st2_align_result_t *r = ckd_calloc(1, sizeof(*r));
+    pstrain_align_result_t *r = ckd_calloc(1, sizeof(*r));
     struct seg_arena *arena = ckd_calloc(1, sizeof(*arena));
     r->_arena = arena;
 
@@ -343,15 +343,15 @@ build_result(int want_phones, int want_states,
     size_t *st_offs = r->n_states ? ckd_calloc(r->n_states, sizeof(size_t)) : NULL;
 
     if (r->n_words) {
-        r->words = ckd_calloc(r->n_words, sizeof(st2_align_seg_t));
+        r->words = ckd_calloc(r->n_words, sizeof(pstrain_align_seg_t));
         flatten_wd(wdseg, r->words, r->n_words, wd_offs, arena);
     }
     if (r->n_phones) {
-        r->phones = ckd_calloc(r->n_phones, sizeof(st2_align_seg_t));
+        r->phones = ckd_calloc(r->n_phones, sizeof(pstrain_align_seg_t));
         flatten_ph(phseg, r->phones, r->n_phones, ph_offs, arena);
     }
     if (r->n_states) {
-        r->states = ckd_calloc(r->n_states, sizeof(st2_align_seg_t));
+        r->states = ckd_calloc(r->n_states, sizeof(pstrain_align_seg_t));
         flatten_st(stseg, r->states, r->n_states, st_offs, arena);
     }
 
@@ -378,7 +378,7 @@ build_result(int want_phones, int want_states,
 }
 
 void
-st2_align_result_free(st2_align_result_t *result)
+pstrain_align_result_free(pstrain_align_result_t *result)
 {
     if (result == NULL) return;
     if (result->_arena) {
@@ -393,7 +393,7 @@ st2_align_result_free(st2_align_result_t *result)
 }
 
 const char *
-st2_align_last_error(void)
+pstrain_align_last_error(void)
 {
     return g_last_error[0] ? g_last_error : NULL;
 }
@@ -406,13 +406,13 @@ prepare_feat_from_mfcc(const float *mfcc, uint32 n_frames, uint32 ncep,
                        int32 *out_nfr)
 {
     if ((int32)ncep != feat_cepsize(kbcore_fcb(kbc))) {
-        set_error("st2_align: ncep=%u does not match model cepsize=%d",
+        set_error("pstrain_align: ncep=%u does not match model cepsize=%d",
                   ncep, feat_cepsize(kbcore_fcb(kbc)));
         return -1;
     }
-    if (n_frames > ST2_ALIGN_MAX_FRAMES) {
-        set_error("st2_align: n_frames=%u exceeds max=%d",
-                  n_frames, ST2_ALIGN_MAX_FRAMES);
+    if (n_frames > PSTRAIN_ALIGN_MAX_FRAMES) {
+        set_error("pstrain_align: n_frames=%u exceeds max=%d",
+                  n_frames, PSTRAIN_ALIGN_MAX_FRAMES);
         return -1;
     }
     mfcc_t **rows = ckd_calloc(n_frames, sizeof(mfcc_t *));
@@ -424,7 +424,7 @@ prepare_feat_from_mfcc(const float *mfcc, uint32 n_frames, uint32 ncep,
                                           TRUE, TRUE, feat);
     ckd_free(rows);
     if (produced < 0) {
-        set_error("st2_align: feat_s2mfc2feat_live failed");
+        set_error("pstrain_align: feat_s2mfc2feat_live failed");
         return -1;
     }
     *out_nfr = produced;
@@ -432,16 +432,16 @@ prepare_feat_from_mfcc(const float *mfcc, uint32 n_frames, uint32 ncep,
 }
 
 int
-st2_align_mfcc(st2_align_context_t *ctx,
+pstrain_align_mfcc(pstrain_align_context_t *ctx,
                const float *mfcc,
                uint32 n_frames,
                uint32 ncep,
                const char *transcript,
                const char *utt_id,
-               st2_align_result_t **out_result)
+               pstrain_align_result_t **out_result)
 {
     if (ctx == NULL || mfcc == NULL || transcript == NULL || out_result == NULL) {
-        set_error("st2_align_mfcc: NULL argument");
+        set_error("pstrain_align_mfcc: NULL argument");
         return -1;
     }
     *out_result = NULL;
@@ -460,7 +460,7 @@ st2_align_mfcc(st2_align_context_t *ctx,
                                &stseg, &phseg, &wdseg);
     if (rc != 0) {
         ckd_free(sent);
-        set_error("st2_align_mfcc: align_utt_capture failed (rc=%d)", rc);
+        set_error("pstrain_align_mfcc: align_utt_capture failed (rc=%d)", rc);
         return -1;
     }
 
@@ -473,22 +473,22 @@ st2_align_mfcc(st2_align_context_t *ctx,
 }
 
 int
-st2_align_mfc_file(st2_align_context_t *ctx,
+pstrain_align_mfc_file(pstrain_align_context_t *ctx,
                    const char *mfc_path,
                    const char *transcript,
                    const char *utt_id,
-                   st2_align_result_t **out_result)
+                   pstrain_align_result_t **out_result)
 {
     if (ctx == NULL || mfc_path == NULL || transcript == NULL || out_result == NULL) {
-        set_error("st2_align_mfc_file: NULL argument");
+        set_error("pstrain_align_mfc_file: NULL argument");
         return -1;
     }
     *out_result = NULL;
 
     int32 nfr = feat_s2mfc2feat(kbcore_fcb(kbc), mfc_path, NULL, "",
-                                0, -1, feat, ST2_ALIGN_MAX_FRAMES);
+                                0, -1, feat, PSTRAIN_ALIGN_MAX_FRAMES);
     if (nfr <= 0) {
-        set_error("st2_align_mfc_file: failed to read %s", mfc_path);
+        set_error("pstrain_align_mfc_file: failed to read %s", mfc_path);
         return -1;
     }
 
@@ -501,7 +501,7 @@ st2_align_mfc_file(st2_align_context_t *ctx,
                                &stseg, &phseg, &wdseg);
     if (rc != 0) {
         ckd_free(sent);
-        set_error("st2_align_mfc_file: align_utt_capture failed (rc=%d)", rc);
+        set_error("pstrain_align_mfc_file: align_utt_capture failed (rc=%d)", rc);
         return -1;
     }
 

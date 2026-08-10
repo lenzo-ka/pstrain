@@ -1,12 +1,12 @@
 /**
- * @file st2_agg_seg.h
+ * @file pstrain_agg_seg.h
  * @brief CFFI-friendly wrapper for segment aggregation.
  *
  * Aggregates feature observations by state, phone, or all together.
  */
 
-#ifndef ST2_AGG_SEG_H
-#define ST2_AGG_SEG_H
+#ifndef PSTRAIN_AGG_SEG_H
+#define PSTRAIN_AGG_SEG_H
 
 #include <sphinxbase/prim_type.h>
 
@@ -14,10 +14,10 @@
  * Segment aggregation type.
  */
 typedef enum {
-    ST2_SEGTYPE_ALL = 0,  /**< All frames to one file */
-    ST2_SEGTYPE_ST = 1,   /**< Aggregate by tied state */
-    ST2_SEGTYPE_PHN = 2   /**< Aggregate by phone */
-} st2_segtype_t;
+    PSTRAIN_SEGTYPE_ALL = 0,  /**< All frames to one file */
+    PSTRAIN_SEGTYPE_ST = 1,   /**< Aggregate by tied state */
+    PSTRAIN_SEGTYPE_PHN = 2   /**< Aggregate by phone */
+} pstrain_segtype_t;
 
 /**
  * Aggregate feature segments from training corpus.
@@ -44,7 +44,7 @@ typedef enum {
  * @param cachesz Cache size in MB (default 200)
  * @return 0 on success, -1 on error
  */
-int st2_agg_seg(const char *mdef_path,
+int pstrain_agg_seg(const char *mdef_path,
                 const char *dict_path,
                 const char *fdict_path,
                 const char *ctl_path,
@@ -62,4 +62,4 @@ int st2_agg_seg(const char *mdef_path,
                 int32 stride,
                 int32 cachesz);
 
-#endif /* ST2_AGG_SEG_H */
+#endif /* PSTRAIN_AGG_SEG_H */

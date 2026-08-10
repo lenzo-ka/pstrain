@@ -1,4 +1,4 @@
-#include "st2_kdtree.h"
+#include "pstrain_kdtree.h"
 
 #include <s3/common.h>
 #include <s3/s3gau_io.h>
@@ -6,7 +6,7 @@
 
 #include <stdio.h>
 
-int st2_kdtree_build(const char *meanfn,
+int pstrain_kdtree_build(const char *meanfn,
                      const char *varfn,
                      const char *outfn,
                      float32 threshold,

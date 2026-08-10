@@ -1,12 +1,12 @@
 /**
- * @file st2_dtree.h
+ * @file pstrain_dtree.h
  * @brief CFFI-friendly wrappers for decision tree operations.
  *
  * Provides simplified API for building decision trees and generating questions.
  */
 
-#ifndef ST2_DTREE_H
-#define ST2_DTREE_H
+#ifndef PSTRAIN_DTREE_H
+#define PSTRAIN_DTREE_H
 
 #include <sphinxbase/prim_type.h>
 #include <s3/quest.h>
@@ -22,14 +22,14 @@
  * @param out_n_pset Output: number of phone sets read
  * @return pset_t array, or NULL on error
  */
-pset_t *st2_read_pset(const char *filename,
+pset_t *pstrain_read_pset(const char *filename,
                        const char *mdef_path,
                        uint32 *out_n_pset);
 
 /**
  * Free a phone set array.
  */
-void st2_free_pset(pset_t *pset, uint32 n_pset);
+void pstrain_free_pset(pset_t *pset, uint32 n_pset);
 
 /**
  * Build a decision tree for triphones of a given base phone.
@@ -63,7 +63,7 @@ void st2_free_pset(pset_t *pset, uint32 n_pset);
  * @param allphones Build for all phones at once
  * @return 0 on success, -1 on error
  */
-int st2_build_tree(const char *mdef_path,
+int pstrain_build_tree(const char *mdef_path,
                    const char *mixw_path,
                    const char *mean_path,
                    const char *var_path,
@@ -96,7 +96,7 @@ int st2_build_tree(const char *mdef_path,
  * @param allphones Tie all phones
  * @return 0 on success, -1 on error
  */
-int st2_tie_states(const char *input_mdef_path,
+int pstrain_tie_states(const char *input_mdef_path,
                    const char *output_mdef_path,
                    const char *tree_dir,
                    const char *pset_path,
@@ -118,7 +118,7 @@ int st2_tie_states(const char *input_mdef_path,
  * @param niter Number of iterations
  * @return 0 on success, -1 on error
  */
-int st2_make_quests(const char *mdef_path,
+int pstrain_make_quests(const char *mdef_path,
                     const char *mixw_path,
                     const char *mean_path,
                     const char *var_path,
@@ -144,7 +144,7 @@ int st2_make_quests(const char *mdef_path,
  * @param allphones Prune all phones together as single tree
  * @return 0 on success, -1 on error
  */
-int st2_prune_tree(const char *mdef_path,
+int pstrain_prune_tree(const char *mdef_path,
                    const char *pset_path,
                    const char *input_tree_dir,
                    const char *output_tree_dir,
@@ -174,7 +174,7 @@ int st2_prune_tree(const char *mdef_path,
  * @param continuous 1 for continuous, 0 for semi-continuous
  * @return 0 on success, -1 on error
  */
-int st2_init_mixw(const char *src_mdef_path,
+int pstrain_init_mixw(const char *src_mdef_path,
                   const char *src_mixw_path,
                   const char *src_mean_path,
                   const char *src_var_path,
@@ -186,4 +186,4 @@ int st2_init_mixw(const char *src_mdef_path,
                   const char *dest_tmat_path,
                   int32 continuous);
 
-#endif /* ST2_DTREE_H */
+#endif /* PSTRAIN_DTREE_H */

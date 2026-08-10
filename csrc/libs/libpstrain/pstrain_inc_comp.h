@@ -1,13 +1,13 @@
 /**
- * @file st2_inc_comp.h
+ * @file pstrain_inc_comp.h
  * @brief Gaussian splitting (increase components) API for CFFI
  *
  * Wraps SphinxTrain's inc_comp functionality for increasing
  * the number of Gaussian components per mixture.
  */
 
-#ifndef ST2_INC_COMP_H
-#define ST2_INC_COMP_H
+#ifndef PSTRAIN_INC_COMP_H
+#define PSTRAIN_INC_COMP_H
 
 #include <sphinxbase/prim_type.h>
 
@@ -32,7 +32,7 @@ extern "C" {
  * @return 0 on success, -1 on error
  */
 int
-st2_inc_comp(const char *in_mean_path,
+pstrain_inc_comp(const char *in_mean_path,
              const char *in_var_path,
              const char *in_mixw_path,
              const char *dcount_path,
@@ -45,4 +45,4 @@ st2_inc_comp(const char *in_mean_path,
 }
 #endif
 
-#endif /* ST2_INC_COMP_H */
+#endif /* PSTRAIN_INC_COMP_H */

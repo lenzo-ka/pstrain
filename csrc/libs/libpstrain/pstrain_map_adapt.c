@@ -1,4 +1,4 @@
-#include "st2_map_adapt.h"
+#include "pstrain_map_adapt.h"
 
 #include <s3/common.h>
 #include <s3/model_inventory.h>
@@ -51,7 +51,7 @@ extern int map_var_reest(float32 tau, vector_t ***si_mean, vector_t ***si_var,
                          vector_t ***map_mean, vector_t ***map_var, float32 varfloor,
                          uint32 i, uint32 j, uint32 k, const uint32 *veclen);
 
-int st2_map_adapt(const char *meanfn,
+int pstrain_map_adapt(const char *meanfn,
                   const char *varfn,
                   const char *mixwfn,
                   const char *tmatfn,

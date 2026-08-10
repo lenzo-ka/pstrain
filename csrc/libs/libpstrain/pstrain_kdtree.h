@@ -1,5 +1,5 @@
-#ifndef ST2_KDTREE_H
-#define ST2_KDTREE_H
+#ifndef PSTRAIN_KDTREE_H
+#define PSTRAIN_KDTREE_H
 
 #include <sphinxbase/prim_type.h>
 
@@ -18,7 +18,7 @@ extern "C" {
  * @param absolute Use absolute threshold calculation
  * @return 0 on success, non-zero on error
  */
-int st2_kdtree_build(const char *meanfn,
+int pstrain_kdtree_build(const char *meanfn,
                      const char *varfn,
                      const char *outfn,
                      float32 threshold,
@@ -29,4 +29,4 @@ int st2_kdtree_build(const char *meanfn,
 }
 #endif
 
-#endif /* ST2_KDTREE_H */
+#endif /* PSTRAIN_KDTREE_H */

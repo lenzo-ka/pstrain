@@ -1,5 +1,5 @@
-#ifndef ST2_PARAM_CNT_H
-#define ST2_PARAM_CNT_H
+#ifndef PSTRAIN_PARAM_CNT_H
+#define PSTRAIN_PARAM_CNT_H
 
 #include <sphinxbase/prim_type.h>
 
@@ -30,7 +30,7 @@
  * @param n_part Total number of corpus parts (0 for none).
  * @return 0 on success, -1 on error.
  */
-int st2_param_cnt(const char *mdef_path,
+int pstrain_param_cnt(const char *mdef_path,
                   const char *dict_path,
                   const char *fdict_path,
                   const char *ctl_path,
@@ -45,4 +45,4 @@ int st2_param_cnt(const char *mdef_path,
                   uint32 part,
                   uint32 n_part);
 
-#endif /* ST2_PARAM_CNT_H */
+#endif /* PSTRAIN_PARAM_CNT_H */

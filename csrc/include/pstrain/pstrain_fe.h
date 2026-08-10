@@ -1,12 +1,12 @@
 /**
- * st2_fe.h - Simplified FE initialization for st2
+ * pstrain_fe.h - Simplified FE initialization for pstrain
  *
  * Provides a simple interface to create a front-end without needing
  * to go through the cmd_ln infrastructure.
  */
 
-#ifndef ST2_FE_H
-#define ST2_FE_H
+#ifndef PSTRAIN_FE_H
+#define PSTRAIN_FE_H
 
 #include <sphinxbase/fe.h>
 
@@ -26,7 +26,7 @@
  * @param lifter Liftering coefficient (e.g., 22)
  * @return Initialized fe_t*, or NULL on failure
  */
-fe_t *st2_fe_create(float samprate, int nfilt, int nfft,
+fe_t *pstrain_fe_create(float samprate, int nfilt, int nfft,
                     float lowerf, float upperf, int ncep,
                     float alpha, int lifter);
 
@@ -35,6 +35,6 @@ fe_t *st2_fe_create(float samprate, int nfilt, int nfft,
  *
  * @return Initialized fe_t*, or NULL on failure
  */
-fe_t *st2_fe_create_default(void);
+fe_t *pstrain_fe_create_default(void);
 
-#endif /* ST2_FE_H */
+#endif /* PSTRAIN_FE_H */

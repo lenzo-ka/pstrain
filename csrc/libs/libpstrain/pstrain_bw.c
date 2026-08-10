@@ -1,12 +1,12 @@
 /**
- * @file st2_bw.c
+ * @file pstrain_bw.c
  * @brief Simplified Baum-Welch training API for CFFI
  *
  * Provides a simplified interface to SphinxTrain's BW training,
  * hiding the complex struct initialization from Python.
  */
 
-#include "st2_bw.h"
+#include "pstrain_bw.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,7 +31,7 @@
 #include <s3/lexicon.h>
 
 /* The forced-alignment / utterance-HMM builders live alongside the
- * standalone bw binary; we link them through libst2c. */
+ * standalone bw binary; we link them through libpstrainc. */
 #include "next_utt_states.h"
 
 /* Forward declarations from bw code */
@@ -58,7 +58,7 @@ extern int32 baum_welch_update(float64 *log_forw_prob,
 /**
  * Training context - holds all state for a training session
  */
-struct st2_bw_context_s {
+struct pstrain_bw_context_s {
     model_inventory_t *inv;
     model_def_t *mdef;
     feat_t *feat;
@@ -81,15 +81,15 @@ struct st2_bw_context_s {
     uint32 total_utts;
 };
 
-st2_bw_context_t *
-st2_bw_init(const char *mdef_path,
+pstrain_bw_context_t *
+pstrain_bw_init(const char *mdef_path,
             const char *means_path,
             const char *vars_path,
             const char *mixw_path,
             const char *tmat_path,
-            const st2_bw_config_t *config)
+            const pstrain_bw_config_t *config)
 {
-    st2_bw_context_t *ctx;
+    pstrain_bw_context_t *ctx;
     uint32 n_ts, n_cb;
 
     ctx = ckd_calloc(1, sizeof(*ctx));
@@ -104,7 +104,7 @@ st2_bw_init(const char *mdef_path,
     ctx->mean_reest = config ? config->mean_reest : 1;
     ctx->var_reest = config ? config->var_reest : 1;
     ctx->pass2var = config ? config->pass2var : 1;  /* Match SphinxTrain -2passvar yes */
-    ctx->multipron = 1;  /* On by default; disable via st2_bw_set_multipron(ctx, 0). */
+    ctx->multipron = 1;  /* On by default; disable via pstrain_bw_set_multipron(ctx, 0). */
 
     /* Initialize cmd_ln with default values - required for gauden_alloc_acc etc.
      * and baum_welch_update which queries cmd_ln internally. */
@@ -208,12 +208,12 @@ st2_bw_init(const char *mdef_path,
     return ctx;
 
 error:
-    st2_bw_free(ctx);
+    pstrain_bw_free(ctx);
     return NULL;
 }
 
 void
-st2_bw_free(st2_bw_context_t *ctx)
+pstrain_bw_free(pstrain_bw_context_t *ctx)
 {
     if (!ctx) return;
 
@@ -226,12 +226,12 @@ st2_bw_free(st2_bw_context_t *ctx)
 }
 
 int
-st2_bw_set_dict(st2_bw_context_t *ctx,
+pstrain_bw_set_dict(pstrain_bw_context_t *ctx,
                 const char *dict_path,
                 const char *filler_dict_path)
 {
     if (!ctx || !dict_path) {
-        E_ERROR("Invalid arguments to st2_bw_set_dict\n");
+        E_ERROR("Invalid arguments to pstrain_bw_set_dict\n");
         return -1;
     }
 
@@ -264,7 +264,7 @@ st2_bw_set_dict(st2_bw_context_t *ctx,
 }
 
 int
-st2_bw_set_multipron(st2_bw_context_t *ctx, int enable)
+pstrain_bw_set_multipron(pstrain_bw_context_t *ctx, int enable)
 {
     if (!ctx) return -1;
     ctx->multipron = enable ? 1 : 0;
@@ -285,7 +285,7 @@ st2_bw_set_multipron(st2_bw_context_t *ctx, int enable)
  * state_seq_make() and must NOT be freed.
  */
 static state_t *
-build_utt_state_seq(st2_bw_context_t *ctx,
+build_utt_state_seq(pstrain_bw_context_t *ctx,
                     char *trans_copy,
                     uint32 *n_state,
                     int *needs_free)
@@ -308,7 +308,7 @@ build_utt_state_seq(st2_bw_context_t *ctx,
 }
 
 int
-st2_bw_process_utt_text(st2_bw_context_t *ctx,
+pstrain_bw_process_utt_text(pstrain_bw_context_t *ctx,
                         const float *features,
                         uint32 n_frames,
                         const char *transcript)
@@ -324,12 +324,12 @@ st2_bw_process_utt_text(st2_bw_context_t *ctx,
     char *trans_copy;
 
     if (!ctx || !features || n_frames == 0 || !transcript) {
-        E_ERROR("Invalid arguments to st2_bw_process_utt_text\n");
+        E_ERROR("Invalid arguments to pstrain_bw_process_utt_text\n");
         return -1;
     }
 
     if (!ctx->lex) {
-        E_ERROR("Dictionary not loaded - call st2_bw_set_dict first\n");
+        E_ERROR("Dictionary not loaded - call pstrain_bw_set_dict first\n");
         return -1;
     }
 
@@ -406,7 +406,7 @@ st2_bw_process_utt_text(st2_bw_context_t *ctx,
  * Uses C feat module to apply CMN and compute deltas, exactly like SphinxTrain.
  */
 int
-st2_bw_process_utt_mfcc(st2_bw_context_t *ctx,
+pstrain_bw_process_utt_mfcc(pstrain_bw_context_t *ctx,
                         const float *mfcc,
                         uint32 n_mfcc_frames,
                         const char *transcript)
@@ -424,12 +424,12 @@ st2_bw_process_utt_mfcc(st2_bw_context_t *ctx,
     int32 ceplen = 13;
 
     if (!ctx || !mfcc || n_mfcc_frames == 0 || !transcript) {
-        E_ERROR("Invalid arguments to st2_bw_process_utt_mfcc\n");
+        E_ERROR("Invalid arguments to pstrain_bw_process_utt_mfcc\n");
         return -1;
     }
 
     if (!ctx->lex) {
-        E_ERROR("Dictionary not loaded - call st2_bw_set_dict first\n");
+        E_ERROR("Dictionary not loaded - call pstrain_bw_set_dict first\n");
         return -1;
     }
 
@@ -521,7 +521,7 @@ st2_bw_process_utt_mfcc(st2_bw_context_t *ctx,
 }
 
 int
-st2_bw_process_utt(st2_bw_context_t *ctx,
+pstrain_bw_process_utt(pstrain_bw_context_t *ctx,
                    const float *features,
                    uint32 n_frames,
                    const uint32 *phone_ids,
@@ -537,7 +537,7 @@ st2_bw_process_utt(st2_bw_context_t *ctx,
     uint32 f, s;
 
     if (!ctx || !features || n_frames == 0 || !phone_ids || n_phones == 0) {
-        E_ERROR("Invalid arguments to st2_bw_process_utt\n");
+        E_ERROR("Invalid arguments to pstrain_bw_process_utt\n");
         return -1;
     }
 
@@ -606,7 +606,7 @@ st2_bw_process_utt(st2_bw_context_t *ctx,
 }
 
 int
-st2_bw_normalize(st2_bw_context_t *ctx)
+pstrain_bw_normalize(pstrain_bw_context_t *ctx)
 {
     gauden_t *g = ctx->inv->gauden;
     uint32 n_mgau = g->n_mgau;
@@ -723,7 +723,7 @@ st2_bw_normalize(st2_bw_context_t *ctx)
 
     /* Note: gauden_eval_precomp was already called above (line 634).
      * Do NOT call it again here - it would flip variances back to raw form,
-     * but st2_bw_save expects precomputed form (1/(2*sigma^2)). */
+     * but pstrain_bw_save expects precomputed form (1/(2*sigma^2)). */
 
     /* Reset stats for next iteration */
     ctx->total_log_lik = 0;
@@ -735,7 +735,7 @@ st2_bw_normalize(st2_bw_context_t *ctx)
 }
 
 int
-st2_bw_save(st2_bw_context_t *ctx,
+pstrain_bw_save(pstrain_bw_context_t *ctx,
             const char *means_path,
             const char *vars_path,
             const char *mixw_path,
@@ -816,7 +816,7 @@ st2_bw_save(st2_bw_context_t *ctx,
 }
 
 void
-st2_bw_get_stats(st2_bw_context_t *ctx,
+pstrain_bw_get_stats(pstrain_bw_context_t *ctx,
                  float64 *total_log_lik,
                  uint32 *total_frames,
                  uint32 *total_utts)
@@ -827,13 +827,13 @@ st2_bw_get_stats(st2_bw_context_t *ctx,
 }
 
 int
-st2_bw_save_counts(st2_bw_context_t *ctx, const char *counts_path)
+pstrain_bw_save_counts(pstrain_bw_context_t *ctx, const char *counts_path)
 {
     gauden_t *g = ctx->inv->gauden;
 
     E_INFO("Saving density counts to %s\n", counts_path);
     /* Use s3gaudnom_write to write just dnom (density counts).
-     * This matches the format expected by st2_inc_comp (Gaussian splitting). */
+     * This matches the format expected by pstrain_inc_comp (Gaussian splitting). */
     if (s3gaudnom_write(counts_path,
                         g->dnom,
                         g->n_mgau,

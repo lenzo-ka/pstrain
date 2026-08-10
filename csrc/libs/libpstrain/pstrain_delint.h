@@ -1,5 +1,5 @@
-#ifndef ST2_DELINT_H
-#define ST2_DELINT_H
+#ifndef PSTRAIN_DELINT_H
+#define PSTRAIN_DELINT_H
 
 #include <sphinxbase/prim_type.h>
 
@@ -20,7 +20,7 @@ extern "C" {
  * @param maxiter Max iterations for convergence (default 100)
  * @return 0 on success, non-zero on error
  */
-int st2_delint(const char *moddeffn,
+int pstrain_delint(const char *moddeffn,
                const char *mixwfn,
                const char **accumdirs,
                float32 cilambda,
@@ -30,4 +30,4 @@ int st2_delint(const char *moddeffn,
 }
 #endif
 
-#endif /* ST2_DELINT_H */
+#endif /* PSTRAIN_DELINT_H */

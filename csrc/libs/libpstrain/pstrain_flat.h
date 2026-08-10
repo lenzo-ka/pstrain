@@ -1,10 +1,10 @@
 /**
- * @file st2_flat.h
+ * @file pstrain_flat.h
  * @brief Simplified flat initialization API for CFFI
  */
 
-#ifndef ST2_FLAT_H
-#define ST2_FLAT_H
+#ifndef PSTRAIN_FLAT_H
+#define PSTRAIN_FLAT_H
 
 #include <sphinxbase/prim_type.h>
 
@@ -21,7 +21,7 @@ extern "C" {
  * @return 0 on success, -1 on error
  */
 int
-st2_flat_tmat(const char *mdef_path,
+pstrain_flat_tmat(const char *mdef_path,
               const char *topo_path,
               const char *output_path);
 
@@ -35,7 +35,7 @@ st2_flat_tmat(const char *mdef_path,
  * @return 0 on success, -1 on error
  */
 int
-st2_flat_mixw(uint32 n_tied_state,
+pstrain_flat_mixw(uint32 n_tied_state,
               uint32 n_stream,
               uint32 n_density,
               const char *output_path);
@@ -63,7 +63,7 @@ st2_flat_mixw(uint32 n_tied_state,
  * @return 0 on success, -1 on error
  */
 int
-st2_init_gau(const char *mdef_path,
+pstrain_init_gau(const char *mdef_path,
              const char *dict_path,
              const char *filler_dict_path,
              const char *feat_type,
@@ -86,7 +86,7 @@ st2_init_gau(const char *mdef_path,
  * @return 0 on success, -1 on error
  */
 int
-st2_norm_gau(const char *accum_dir,
+pstrain_norm_gau(const char *accum_dir,
              const char *mean_path,
              const char *var_path);
 
@@ -94,4 +94,4 @@ st2_norm_gau(const char *accum_dir,
 }
 #endif
 
-#endif /* ST2_FLAT_H */
+#endif /* PSTRAIN_FLAT_H */

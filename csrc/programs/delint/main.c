@@ -604,7 +604,7 @@ rd_interp_wr()
     return S3_SUCCESS;
 }
 
-#ifndef ST2_LIBRARY_BUILD
+#ifndef PSTRAIN_LIBRARY_BUILD
 int
 main(int argc, char *argv[])
 {
@@ -615,4 +615,4 @@ main(int argc, char *argv[])
 
     return 0;
 }
-#endif /* ST2_LIBRARY_BUILD */
+#endif /* PSTRAIN_LIBRARY_BUILD */

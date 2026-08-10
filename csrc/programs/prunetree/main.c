@@ -422,7 +422,7 @@ prunetree_run(void)
     return 0;
 }
 
-#ifndef ST2_LIBRARY_BUILD
+#ifndef PSTRAIN_LIBRARY_BUILD
 int
 main(int argc, char *argv[])
 {

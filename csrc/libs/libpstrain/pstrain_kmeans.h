@@ -1,12 +1,12 @@
 /**
- * @file st2_kmeans.h
+ * @file pstrain_kmeans.h
  * @brief K-means clustering API for CFFI
  *
  * Wraps SphinxTrain's k-means with a simple array-based interface.
  */
 
-#ifndef ST2_KMEANS_H
-#define ST2_KMEANS_H
+#ifndef PSTRAIN_KMEANS_H
+#define PSTRAIN_KMEANS_H
 
 #include <sphinxbase/prim_type.h>
 
@@ -28,7 +28,7 @@ extern "C" {
  * @return Squared error on success, negative on error
  */
 float64
-st2_kmeans(const float32 *observations,
+pstrain_kmeans(const float32 *observations,
            uint32 n_obs,
            uint32 veclen,
            uint32 n_clusters,
@@ -54,7 +54,7 @@ st2_kmeans(const float32 *observations,
  * @return 0 on success, -1 on error
  */
 int
-st2_kmeans_init(const float32 *features,
+pstrain_kmeans_init(const float32 *features,
                 uint32 n_frames,
                 uint32 veclen,
                 uint32 n_density,
@@ -68,4 +68,4 @@ st2_kmeans_init(const float32 *features,
 }
 #endif
 
-#endif /* ST2_KMEANS_H */
+#endif /* PSTRAIN_KMEANS_H */

@@ -1,9 +1,9 @@
 /**
- * @file st2_mdef_gen.c
+ * @file pstrain_mdef_gen.c
  * @brief CFFI-friendly wrappers for mk_mdef_gen functionality.
  */
 
-#include "st2_mdef_gen.h"
+#include "pstrain_mdef_gen.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -87,7 +87,7 @@ init_cmd_ln(uint32 n_state)
     };
 
     /* Use global cmd_ln since mk_mdef_gen uses it */
-    const char *argv[] = { "st2_mdef_gen", "-n_state_pm", n_state_str };
+    const char *argv[] = { "pstrain_mdef_gen", "-n_state_pm", n_state_str };
     cmd_ln_parse(args, 3, (char **)argv, FALSE);
 
     return NULL;  /* Using global cmd_ln */
@@ -95,7 +95,7 @@ init_cmd_ln(uint32 n_state)
 
 
 int
-st2_mdef_gen_ci(const char *phone_list_path,
+pstrain_mdef_gen_ci(const char *phone_list_path,
                 const char *output_path,
                 uint32 n_state)
 {
@@ -121,7 +121,7 @@ st2_mdef_gen_ci(const char *phone_list_path,
 
     /* Generate CI-only mdef (NULL CDheap, 0 cdheapsize) */
     if (make_mdef_from_list(output_path, CIlist, cilistsize,
-                            NULL, 0, "st2_mdef_gen") != S3_SUCCESS) {
+                            NULL, 0, "pstrain_mdef_gen") != S3_SUCCESS) {
         E_ERROR("Failed to write CI mdef to %s\n", output_path);
         goto cleanup;
     }
@@ -137,7 +137,7 @@ cleanup:
 
 
 int
-st2_mdef_gen_alltriphones(const char *phone_list_path,
+pstrain_mdef_gen_alltriphones(const char *phone_list_path,
                           const char *dict_path,
                           const char *filler_dict_path,
                           const char *output_path,
@@ -194,7 +194,7 @@ st2_mdef_gen_alltriphones(const char *phone_list_path,
 
     /* Generate mdef with all triphones */
     if (make_mdef_from_list(output_path, CIlist, cilistsize,
-                            CDheap, cdheapsize, "st2_mdef_gen") != S3_SUCCESS) {
+                            CDheap, cdheapsize, "pstrain_mdef_gen") != S3_SUCCESS) {
         E_ERROR("Failed to write all-triphones mdef to %s\n", output_path);
         goto cleanup;
     }
@@ -212,7 +212,7 @@ cleanup:
 
 
 int
-st2_mdef_gen_untied(const char *phone_list_path,
+pstrain_mdef_gen_untied(const char *phone_list_path,
                     const char *dict_path,
                     const char *filler_dict_path,
                     const char *transcript_path,
@@ -281,7 +281,7 @@ st2_mdef_gen_untied(const char *phone_list_path,
 
     /* Generate untied mdef */
     if (make_mdef_from_list(output_path, CIlist, cilistsize,
-                            CDheap, cdheapsize, "st2_mdef_gen") != S3_SUCCESS) {
+                            CDheap, cdheapsize, "pstrain_mdef_gen") != S3_SUCCESS) {
         E_ERROR("Failed to write untied mdef to %s\n", output_path);
         goto cleanup;
     }
@@ -299,7 +299,7 @@ cleanup:
 
 
 int
-st2_mdef_count_triphones(const char *phone_list_path,
+pstrain_mdef_count_triphones(const char *phone_list_path,
                          const char *dict_path,
                          const char *filler_dict_path,
                          const char *transcript_path,

@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.14)
 
-project(st2 VERSION 0.1.0
-  DESCRIPTION "ST2 - Acoustic model training toolkit"
-  HOMEPAGE_URL "https://github.com/lenzo-ka/st2"
+project(pstrain VERSION 0.1.0
+  DESCRIPTION "pstrain, the Peace Train - acoustic model training toolkit"
+  HOMEPAGE_URL "https://github.com/lenzo-ka/pstrain"
   LANGUAGES C)
 
 include(CMakePrintHelpers)
@@ -62,23 +62,23 @@ add_definitions(-DHAVE_CONFIG_H)
 # Detect scikit-build-core wheel build
 if(SKBUILD)
   message(STATUS "Building Python wheel via scikit-build-core")
-  # For wheel builds, install to the wheel root (st2/_lib/)
+  # For wheel builds, install to the wheel root (pstrain/_lib/)
   # scikit-build-core sets wheel.install-dir in pyproject.toml
-  set(ST2_INSTALL_LIBDIR "lib")
-  set(ST2_INSTALL_BINDIR "bin")
-  set(ST2_INSTALL_INCLUDEDIR "include")
+  set(PSTRAIN_INSTALL_LIBDIR "lib")
+  set(PSTRAIN_INSTALL_BINDIR "bin")
+  set(PSTRAIN_INSTALL_INCLUDEDIR "include")
   # All programs go to bin/ in wheel
-  set(ST2_INSTALL_PROGRAMS "bin")
+  set(PSTRAIN_INSTALL_PROGRAMS "bin")
 else()
   # Standard system install
-  set(ST2_INSTALL_LIBDIR ${CMAKE_INSTALL_LIBDIR})
-  set(ST2_INSTALL_BINDIR ${CMAKE_INSTALL_BINDIR})
-  set(ST2_INSTALL_INCLUDEDIR ${CMAKE_INSTALL_INCLUDEDIR}/st2)
-  # Internal programs go to libexec/st2c/
-  set(ST2_INSTALL_PROGRAMS ${CMAKE_INSTALL_LIBEXECDIR}/st2c)
+  set(PSTRAIN_INSTALL_LIBDIR ${CMAKE_INSTALL_LIBDIR})
+  set(PSTRAIN_INSTALL_BINDIR ${CMAKE_INSTALL_BINDIR})
+  set(PSTRAIN_INSTALL_INCLUDEDIR ${CMAKE_INSTALL_INCLUDEDIR}/pstrain)
+  # Internal programs go to libexec/pstrainc/
+  set(PSTRAIN_INSTALL_PROGRAMS ${CMAKE_INSTALL_LIBEXECDIR}/pstrainc)
 endif()
 
-cmake_print_variables(SKBUILD ST2_INSTALL_LIBDIR ST2_INSTALL_BINDIR ST2_INSTALL_PROGRAMS)
+cmake_print_variables(SKBUILD PSTRAIN_INSTALL_LIBDIR PSTRAIN_INSTALL_BINDIR PSTRAIN_INSTALL_PROGRAMS)
 
 # Enable CTest at the top level so `ctest --test-dir <build>` recurses into
 # the csrc/tests registered below. Must be called before add_subdirectory.

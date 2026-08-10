@@ -1,9 +1,9 @@
 /**
- * @file st2_agg_seg.c
+ * @file pstrain_agg_seg.c
  * @brief CFFI-friendly wrapper for segment aggregation.
  */
 
-#include "st2_agg_seg.h"
+#include "pstrain_agg_seg.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,7 +17,7 @@
 extern int agg_seg_run(void);
 
 int
-st2_agg_seg(const char *mdef_path,
+pstrain_agg_seg(const char *mdef_path,
             const char *dict_path,
             const char *fdict_path,
             const char *ctl_path,
@@ -46,17 +46,17 @@ st2_agg_seg(const char *mdef_path,
 
     /* Convert segtype enum to string */
     switch (segtype) {
-        case ST2_SEGTYPE_ALL:
+        case PSTRAIN_SEGTYPE_ALL:
             segtype_str = "all";
             break;
-        case ST2_SEGTYPE_ST:
+        case PSTRAIN_SEGTYPE_ST:
             segtype_str = "st";
             if (!mdef_path || !ts2cb_path) {
                 E_ERROR("segtype 'st' requires mdef_path and ts2cb_path\n");
                 return -1;
             }
             break;
-        case ST2_SEGTYPE_PHN:
+        case PSTRAIN_SEGTYPE_PHN:
             segtype_str = "phn";
             if (!mdef_path || !dict_path) {
                 E_ERROR("segtype 'phn' requires mdef_path and dict_path\n");
@@ -116,7 +116,7 @@ st2_agg_seg(const char *mdef_path,
 
     int argc = 0;
     const char *argv[64];
-    argv[argc++] = "st2_agg_seg";
+    argv[argc++] = "pstrain_agg_seg";
 
     if (mdef_path) {
         argv[argc++] = "-moddeffn";

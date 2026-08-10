@@ -1,4 +1,4 @@
-#include "st2_delint.h"
+#include "pstrain_delint.h"
 
 #include <s3/common.h>
 #include <s3/model_def_io.h>
@@ -56,7 +56,7 @@ rd_param(uint32 *idx,
     return S3_SUCCESS;
 }
 
-int st2_delint(const char *moddeffn,
+int pstrain_delint(const char *moddeffn,
                const char *mixwfn,
                const char **accumdirs,
                float32 cilambda,

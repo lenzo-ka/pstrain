@@ -1,4 +1,4 @@
-#include "st2_param_cnt.h"
+#include "pstrain_param_cnt.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,7 +10,7 @@
 /* External function from param_cnt/main.c */
 extern int param_cnt_run(void);
 
-int st2_param_cnt(const char *mdef_path,
+int pstrain_param_cnt(const char *mdef_path,
                   const char *dict_path,
                   const char *fdict_path,
                   const char *ctl_path,
@@ -75,7 +75,7 @@ int st2_param_cnt(const char *mdef_path,
     const char *argv[40];
     int argc = 0;
 
-    argv[argc++] = "st2_param_cnt";
+    argv[argc++] = "pstrain_param_cnt";
     argv[argc++] = "-moddeffn"; argv[argc++] = mdef_path;
     argv[argc++] = "-dictfn"; argv[argc++] = dict_path;
     argv[argc++] = "-ctlfn"; argv[argc++] = ctl_path;

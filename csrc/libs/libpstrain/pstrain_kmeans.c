@@ -1,11 +1,11 @@
 /**
- * @file st2_kmeans.c
+ * @file pstrain_kmeans.c
  * @brief K-means clustering API for CFFI
  *
  * Provides array-based wrappers around SphinxTrain's k-means functions.
  */
 
-#include "st2_kmeans.h"
+#include "pstrain_kmeans.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,13 +27,13 @@ static uint32 g_veclen = 0;
  * Callback for k_means to get observation i.
  */
 static vector_t
-st2_get_obs(uint32 i)
+pstrain_get_obs(uint32 i)
 {
     return (vector_t)(g_observations + i * g_veclen);
 }
 
 float64
-st2_kmeans(const float32 *observations,
+pstrain_kmeans(const float32 *observations,
            uint32 n_obs,
            uint32 veclen,
            uint32 n_clusters,
@@ -48,14 +48,14 @@ st2_kmeans(const float32 *observations,
     uint32 i, j;
 
     if (!observations || !out_centroids || n_obs == 0 || veclen == 0) {
-        E_ERROR("Invalid arguments to st2_kmeans\n");
+        E_ERROR("Invalid arguments to pstrain_kmeans\n");
         return -1.0;
     }
 
     /* Set up global state for callback */
     g_observations = observations;
     g_veclen = veclen;
-    k_means_set_get_obs(&st2_get_obs);
+    k_means_set_get_obs(&pstrain_get_obs);
 
     /* Allocate mean vectors */
     mean = (vector_t *)ckd_calloc_2d(n_clusters, veclen, sizeof(float32));
@@ -106,7 +106,7 @@ st2_kmeans(const float32 *observations,
 }
 
 int
-st2_kmeans_init(const float32 *features,
+pstrain_kmeans_init(const float32 *features,
                 uint32 n_frames,
                 uint32 veclen,
                 uint32 n_density,
@@ -123,7 +123,7 @@ st2_kmeans_init(const float32 *features,
     float64 diff;
 
     if (!features || !out_means || n_frames == 0) {
-        E_ERROR("Invalid arguments to st2_kmeans_init\n");
+        E_ERROR("Invalid arguments to pstrain_kmeans_init\n");
         return -1;
     }
 
@@ -135,7 +135,7 @@ st2_kmeans_init(const float32 *features,
     }
 
     /* Run k-means to get cluster centers */
-    sqerr = st2_kmeans(features, n_frames, veclen, n_density,
+    sqerr = pstrain_kmeans(features, n_frames, veclen, n_density,
                        max_iter, min_ratio, out_means, labels);
 
     if (sqerr < 0) {
