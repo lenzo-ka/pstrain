@@ -143,6 +143,7 @@ def run_bw_training(
     multipron: bool = True,
     max_skip_fraction: float = 0.05,
     retry_beam_factor: float = 1e10,
+    first_pass_2passvar: bool | None = None,
 ) -> TrainingResult:
     """Run Baum-Welch training iterations.
 
@@ -164,6 +165,9 @@ def run_bw_training(
         retry_beam_factor: Widen the forward beam by this factor for one retry
             when pruning prevents the final state from being reached. Set to 1
             to disable retries.
+        first_pass_2passvar: Optional stage policy for the first iteration.
+            ``True`` selects centered two-pass accumulation, ``False`` selects
+            one-pass, and ``None`` honors ``config.pass2var``.
 
     Returns:
         TrainingResult with training statistics
@@ -210,19 +214,20 @@ def run_bw_training(
     for iteration in range(1, n_iter + 1):
         logger.info("Starting iteration %d/%d...", iteration, n_iter)
 
-        # Use 1-pass variance for first iteration, 2-pass thereafter
-        # This matches SphinxTrain behavior which uses -2passvar no for iter 1
+        # SphinxTrain's policy is stage-specific: CI and tied stages begin with
+        # one-pass variance, while stage 30 CD-untied uses -2passvar yes from
+        # its first pass (baum_welch.pl's unconditional $var2pass = "yes").
         from dataclasses import replace
 
-        if config is None:
-            iter_config = BWConfig(pass2var=(iteration > 1), multipron=multipron)
-        else:
-            iter_config = config
-            if iteration == 1 and config.pass2var:
-                iter_config = replace(iter_config, pass2var=False)
-                logger.info("Using 1-pass variance for iteration 1 (SphinxTrain-compatible)")
-            if multipron != iter_config.multipron:
-                iter_config = replace(iter_config, multipron=multipron)
+        iter_config = BWConfig(multipron=multipron) if config is None else config
+        if iteration == 1 and first_pass_2passvar is not None:
+            iter_config = replace(iter_config, pass2var=first_pass_2passvar)
+            logger.info(
+                "Using stage policy: %s-pass variance for iteration 1",
+                2 if first_pass_2passvar else 1,
+            )
+        if config is not None and multipron != iter_config.multipron:
+            iter_config = replace(iter_config, multipron=multipron)
 
         # Create trainer for this iteration
         trainer = BWTrainer(

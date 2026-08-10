@@ -20,7 +20,7 @@ import pytest
 import yaml
 
 from pstrain.lib.pipeline import PipelineContext
-from pstrain.lib.pipeline.context import DEFAULT_CONFIGS, FeatParams, SplitParams, TrainParams
+from pstrain.lib.pipeline.context import DEFAULT_CONFIGS, FeatParams, SplitParams
 from pstrain.lib.pipeline.tasks import TARGETS, build_pipeline
 
 
@@ -229,7 +229,7 @@ def test_irrelevant_config_edit_does_not_rebuild_features(
 
     configs.write_text(
         "# formatting and an unrelated profile changed\n"
-        "unrelated:\n  training:\n    max_iterations: 3\n"
+        "unrelated:\n  training:\n    ci: {max_iterations: 3}\n"
         "custom: {features: {alpha: 0.42}}\n"
     )
     unchanged = build_pipeline(PipelineContext.from_config(empty_project, config_name="custom"))
@@ -289,7 +289,9 @@ def test_model_and_package_copy_build_provenance(
 def test_stage_fingerprints_cover_only_effective_relevant_values(empty_project: Path) -> None:
     base = PipelineContext.from_config(empty_project)
     feature_change = replace(base, feat=FeatParams(alpha=0.5))
-    training_change = replace(base, train=TrainParams(max_iterations=3))
+    training_change = replace(
+        base, train=replace(base.train, ci=replace(base.train.ci, max_iterations=3))
+    )
     split_change = replace(base, split=SplitParams(seed=99))
 
     assert feature_change.provenance_path("features") != base.provenance_path("features")
@@ -599,6 +601,25 @@ def test_bw_transition_floor_mapping_covers_every_training_stage() -> None:
     }
 
 
+def test_slt_profile_resolves_per_stage_schedule(empty_project: Path) -> None:
+    """The standard parity profile exposes the intended effective schedule."""
+    from pstrain.lib.pipeline.tasks import _bw_policy_for_stage
+
+    ctx = PipelineContext.from_config(empty_project, config_name="sphinxtrain")
+    ci, ci_first_2pass = _bw_policy_for_stage(ctx, "ci-1g")
+    untied, untied_first_2pass = _bw_policy_for_stage(ctx, "cd-untied")
+    tied, tied_first_2pass = _bw_policy_for_stage(ctx, "cd-8g")
+
+    assert (ci.max_iterations, ci.min_iterations, ci.convergence_ratio) == (10, 1, 0.001)
+    assert (untied.max_iterations, untied.min_iterations, untied.convergence_ratio) == (
+        6,
+        1,
+        0.001,
+    )
+    assert (tied.max_iterations, tied.min_iterations, tied.convergence_ratio) == (10, 1, 0.001)
+    assert (ci_first_2pass, untied_first_2pass, tied_first_2pass) == (False, True, False)
+
+
 def test_configured_bw_parameters_reach_training_call(
     empty_project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -607,7 +628,7 @@ def test_configured_bw_parameters_reach_training_call(
 
     (empty_project / "etc" / "configs.yaml").write_text(
         "default:\n  training:\n    a_beam: 1e-123\n    b_beam: 1e-9\n"
-        "    convergence_ratio: 0.004\n    min_iterations: 3\n"
+        "    ci: {max_iterations: 7, convergence_ratio: 0.004, min_iterations: 3}\n"
         "    max_skip_fraction: 0.02\n    retry_beam_factor: 1e12\n"
     )
     ctx = PipelineContext.from_config(empty_project)
@@ -678,7 +699,47 @@ def test_configured_bw_parameters_reach_training_call(
     assert c_config.topn == 1
     assert c_config.mixw_floor == 1e-8
     assert c_config.tmat_floor == 1e-4
+    assert c_config.pass2var == 1
     assert captured["convergence_ratio"] == 0.004
     assert captured["min_iterations"] == 3
+    assert captured["n_iter"] == 7
+    assert captured["first_pass_2passvar"] is False
     assert captured["max_skip_fraction"] == 0.02
     assert captured["retry_beam_factor"] == 1e12
+
+
+def test_configured_untied_schedule_and_variance_reach_training_call(
+    empty_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Untied schedule values and first-pass 2passvar cross orchestration."""
+    from pstrain.lib.steps.train import TrainingResult
+
+    (empty_project / "etc" / "configs.yaml").write_text(
+        "default:\n  training:\n"
+        "    untied: {max_iterations: 4, min_iterations: 2, convergence_ratio: 0.02}\n"
+    )
+    ctx = PipelineContext.from_config(empty_project)
+    source = ctx.model_dir("cd-untied-init")
+    source.mkdir(parents=True)
+    for name in ("mdef", "means", "variances", "mixture_weights", "transition_matrices"):
+        (source / name).write_text(name)
+
+    captured: dict[str, object] = {}
+
+    def fake_bw(**kwargs: object) -> TrainingResult:
+        captured.update(kwargs)
+        output = Path(kwargs["output_dir"])  # type: ignore[arg-type]
+        output.mkdir(parents=True)
+        for name in ("means", "variances", "mixture_weights", "transition_matrices"):
+            (output / name).write_text(name)
+        return TrainingResult(1, False, -1.0, 1, 1)
+
+    monkeypatch.setattr("pstrain.lib.steps.train.run_bw_training", fake_bw)
+    tasks = build_pipeline(ctx).tasks()
+    tasks["provenance:training"].fn()
+    tasks["cd-untied"].fn()
+
+    assert captured["n_iter"] == 4
+    assert captured["min_iterations"] == 2
+    assert captured["convergence_ratio"] == 0.02
+    assert captured["first_pass_2passvar"] is True

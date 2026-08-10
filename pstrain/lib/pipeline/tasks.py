@@ -40,7 +40,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from pstrain.lib.pipeline.context import PipelineContext
+from pstrain.lib.pipeline.context import PipelineContext, TrainingSchedule
 from pstrain.lib.pipeline.feat_params import write_feat_params
 from pstrain.lib.pipeline.runner import Pipeline, Task
 
@@ -277,6 +277,20 @@ def _tmat_floor_for_stage(model_name: str) -> float:
     return 1e-5 if model_name.startswith("cd-") and model_name != "cd-untied" else 1e-4
 
 
+def _bw_policy_for_stage(ctx: PipelineContext, model_name: str) -> tuple[TrainingSchedule, bool]:
+    """Resolve the explicit schedule and first-pass variance policy for a stage."""
+    if model_name.startswith("ci-"):
+        # scripts/20.ci_hmm starts with one-pass variance.
+        return ctx.train.ci, False
+    if model_name == "cd-untied":
+        # scripts/30.cd_hmm_untied/baum_welch.pl always passes -2passvar yes.
+        return ctx.train.untied, True
+    if model_name.startswith("cd-"):
+        # scripts/50.cd_hmm_tied starts each newly split density at one-pass.
+        return ctx.train.tied, False
+    raise ValueError(f"no Baum-Welch stage policy for {model_name!r}")
+
+
 def _make_bw_train_task(
     ctx: PipelineContext,
     *,
@@ -319,6 +333,7 @@ def _make_bw_train_task(
         # All non-split tasks consume a 1-density model (including CD-untied,
         # where upstream deliberately selects one density).
         topn = 1
+        schedule, first_pass_2passvar = _bw_policy_for_stage(ctx, out_model)
         result = run_bw_training(
             model_dir=src_dir,
             output_dir=out_dir,
@@ -327,9 +342,9 @@ def _make_bw_train_task(
             transcription=transcription,
             dictionary=dictionary,
             filler_dict=ctx.filler_dict,
-            n_iter=ctx.train.max_iterations,
-            convergence_ratio=ctx.train.convergence_ratio,
-            min_iterations=ctx.train.min_iterations,
+            n_iter=schedule.max_iterations,
+            convergence_ratio=schedule.convergence_ratio,
+            min_iterations=schedule.min_iterations,
             config=BWConfig(
                 a_beam=ctx.train.a_beam,
                 b_beam=ctx.train.b_beam,
@@ -341,6 +356,7 @@ def _make_bw_train_task(
             multipron=ctx.train.multipron_training,
             max_skip_fraction=ctx.train.max_skip_fraction,
             retry_beam_factor=ctx.train.retry_beam_factor,
+            first_pass_2passvar=first_pass_2passvar,
         )
         if copy_mdef_from_src:
             shutil.copy(src_dir / "mdef", out_dir / "mdef")
@@ -386,6 +402,7 @@ def _make_split_and_train_task(
         # scripts/20.ci_hmm/baum_welch.pl uses 1e-8.
         mixw_floor = _mixw_floor_for_stage(out_model)
         tmat_floor = _tmat_floor_for_stage(out_model)
+        schedule, first_pass_2passvar = _bw_policy_for_stage(ctx, out_model)
         result = run_bw_training(
             model_dir=split_dir,
             output_dir=out_dir,
@@ -394,9 +411,9 @@ def _make_split_and_train_task(
             transcription=transcription,
             dictionary=dictionary,
             filler_dict=ctx.filler_dict,
-            n_iter=ctx.train.max_iterations,
-            convergence_ratio=ctx.train.convergence_ratio,
-            min_iterations=ctx.train.min_iterations,
+            n_iter=schedule.max_iterations,
+            convergence_ratio=schedule.convergence_ratio,
+            min_iterations=schedule.min_iterations,
             config=BWConfig(
                 a_beam=ctx.train.a_beam,
                 b_beam=ctx.train.b_beam,
@@ -408,6 +425,7 @@ def _make_split_and_train_task(
             multipron=ctx.train.multipron_training,
             max_skip_fraction=ctx.train.max_skip_fraction,
             retry_beam_factor=ctx.train.retry_beam_factor,
+            first_pass_2passvar=first_pass_2passvar,
         )
         write_feat_params(out_dir / "feat.params", ctx.feat)
         _record_model_provenance(ctx, out_dir)
