@@ -6,6 +6,7 @@ Orchestrates Baum-Welch training using the CFFI-wrapped BWTrainer.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,7 +24,24 @@ from pstrain.lib.validate import validate_files_exist
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["run_bw_training", "TrainingResult"]
+__all__ = ["run_bw_training", "TrainingIteration", "TrainingResult"]
+
+_CHECKPOINT_FILES = (
+    "mdef",
+    "means",
+    "variances",
+    "mixture_weights",
+    "transition_matrices",
+    "gauden_counts",
+)
+
+
+def _checkpoint_iteration(output_dir: Path, iteration: int) -> None:
+    """Retain the complete model produced by one BW pass for validation."""
+    checkpoint = output_dir / "iterations" / f"{iteration:02d}"
+    checkpoint.mkdir(parents=True, exist_ok=True)
+    for filename in _CHECKPOINT_FILES:
+        shutil.copyfile(output_dir / filename, checkpoint / filename)
 
 
 def _convergence_delta(current: float, previous: float) -> float:
@@ -59,6 +77,7 @@ def _process_with_final_state_retry(
     fail instead of allowing another call to observe the temporary beam.
     """
     assert not trainer._retry_transaction_active, "BWTrainer cannot be shared across threads"
+    trainer._last_process_retried = False
     trainer._retry_transaction_active = True
     try:
         success = trainer.process_utterance_mfcc(mfcc, transcript)
@@ -66,6 +85,7 @@ def _process_with_final_state_retry(
             return success
 
         retry_beam = normal_beam / retry_beam_factor
+        trainer._last_process_retried = True
         logger.warning(
             "Final state not reached for %s; retrying once with a_beam=%.3g",
             fileid,
@@ -81,6 +101,21 @@ def _process_with_final_state_retry(
 
 
 @dataclass
+class TrainingIteration:
+    """Numerical and accounting telemetry for one BW pass."""
+
+    iteration: int
+    total_log_lik: float
+    avg_log_prob: float
+    per_frame_delta: float | None
+    frames: int
+    input_utts: int
+    processed_utts: int
+    retried_utts: int
+    skipped_utts: int
+
+
+@dataclass
 class TrainingResult:
     """Result from BW training."""
 
@@ -90,6 +125,7 @@ class TrainingResult:
     final_frames: int
     final_utts: int
     total_skipped: int = 0
+    trajectory: tuple[TrainingIteration, ...] = ()
 
 
 def run_bw_training(
@@ -157,6 +193,10 @@ def run_bw_training(
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    checkpoints_enabled = os.environ.get("PSTRAIN_BW_CHECKPOINTS") == "1"
+    if checkpoints_enabled:
+        shutil.rmtree(output_dir / "iterations", ignore_errors=True)
+
     # Copy mdef (unchanged during training)
     shutil.copy(model_dir / "mdef", output_dir / "mdef")
 
@@ -165,6 +205,7 @@ def run_bw_training(
     last_frames = 0
     last_utts = 0
     total_skipped = 0
+    trajectory: list[TrainingIteration] = []
 
     for iteration in range(1, n_iter + 1):
         logger.info("Starting iteration %d/%d...", iteration, n_iter)
@@ -199,6 +240,7 @@ def run_bw_training(
         # Process all utterances
         processed = 0
         skipped = 0
+        retried = 0
         for fileid in fileids:
             # Load features
             mfc_path = features_dir / f"{fileid}.mfc"
@@ -235,9 +277,11 @@ def run_bw_training(
                     retry_beam_factor,
                     fileid,
                 )
-
                 if success:
-                    processed += 1
+                    if trainer._last_process_retried:
+                        retried += 1
+                    else:
+                        processed += 1
                 else:
                     logger.warning("Failed to process: %s", fileid)
                     skipped += 1
@@ -256,7 +300,9 @@ def run_bw_training(
             )
         else:
             logger.info(
-                "Iteration %d processed %d utterances with zero skips", iteration, processed
+                "Iteration %d processed %d utterances with zero skips",
+                iteration,
+                processed + retried,
             )
 
         skip_fraction = skipped / len(fileids) if fileids else 1.0
@@ -266,7 +312,7 @@ def run_bw_training(
                 f"({skip_fraction:.2%}), above configured limit {max_skip_fraction:.2%}"
             )
 
-        if processed == 0:
+        if processed + retried == 0:
             raise RuntimeError("No utterances processed successfully")
 
         # Get statistics BEFORE normalization (normalize resets stats)
@@ -280,6 +326,23 @@ def run_bw_training(
             stats.total_frames,
             stats.total_utts,
             stats.avg_log_prob,
+        )
+        trajectory.append(
+            TrainingIteration(
+                iteration=iteration,
+                total_log_lik=stats.total_log_lik,
+                avg_log_prob=stats.avg_log_prob,
+                per_frame_delta=(
+                    None
+                    if iteration == 1
+                    else _convergence_delta(stats.avg_log_prob, prev_likelihood)
+                ),
+                frames=stats.total_frames,
+                input_utts=len(fileids),
+                processed_utts=processed,
+                retried_utts=retried,
+                skipped_utts=skipped,
+            )
         )
 
         # Check for degenerate training (no successful utterances)
@@ -302,6 +365,8 @@ def run_bw_training(
             mixw_path=output_dir / "mixture_weights",
             tmat_path=output_dir / "transition_matrices",
         )
+        if checkpoints_enabled:
+            _checkpoint_iteration(output_dir, iteration)
 
         # Check convergence
         if iteration > 1:
@@ -334,6 +399,7 @@ def run_bw_training(
                     final_frames=stats.total_frames,
                     final_utts=stats.total_utts,
                     total_skipped=total_skipped,
+                    trajectory=tuple(trajectory),
                 )
 
         prev_likelihood = stats.avg_log_prob
@@ -356,4 +422,5 @@ def run_bw_training(
         final_frames=last_frames,
         final_utts=last_utts,
         total_skipped=total_skipped,
+        trajectory=tuple(trajectory),
     )

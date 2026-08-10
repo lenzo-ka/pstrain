@@ -30,7 +30,7 @@ from pstrain.lib.steps.ci_hmm import CIHMMStep, ci_hmm_step
 from pstrain.lib.steps.features import FeaturesStep, features_step
 from pstrain.lib.steps.package import create_noisedict, package_model
 from pstrain.lib.steps.split import run_split
-from pstrain.lib.steps.train import TrainingResult, run_bw_training
+from pstrain.lib.steps.train import TrainingIteration, TrainingResult, run_bw_training
 
 __all__ = [
     # Base classes
@@ -49,6 +49,7 @@ __all__ = [
     "run_bw_training",
     "run_split",
     "TrainingResult",
+    "TrainingIteration",
     # CD pipeline functions
     "run_untied_mdef",
     "run_init_cd_untied",
