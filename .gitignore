@@ -83,3 +83,4 @@ data/
 # minimal fix so the mini_arctic e2e corpus is tracked.)
 !tests/fixtures/**
 !tests/fixtures/mini_arctic/wav/*.wav
+.claude
