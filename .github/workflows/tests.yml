@@ -42,9 +42,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Test every Python we ship wheels + classifiers for (3.10-3.13).
-        python: ["3.10", "3.11", "3.12", "3.13"]
-        os: [ubuntu-latest, macos-latest]
+        # PRs test boundary Python versions on Ubuntu; other events run the full matrix.
+        python: ${{ github.event_name == 'pull_request' && fromJSON('["3.10","3.13"]') || fromJSON('["3.10","3.11","3.12","3.13"]') }}
+        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest","macos-latest"]') }}
     steps:
       - uses: actions/checkout@v4
 
