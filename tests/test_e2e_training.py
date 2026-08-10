@@ -40,6 +40,23 @@ def _mdef_counts(path: Path) -> dict[str, int]:
     return counts
 
 
+def _mdef_senone_assignments(path: Path) -> tuple[list[int], list[int]]:
+    """Read CI and CD emitting-state senone IDs from a text mdef."""
+    ci_senones: list[int] = []
+    cd_senones: list[int] = []
+    with path.open() as handle:
+        for line in handle:
+            fields = line.split()
+            if len(fields) < 8 or fields[0].startswith("#"):
+                continue
+            assignments = [int(field) for field in fields[6:] if field != "N"]
+            if fields[1:3] == ["-", "-"]:
+                ci_senones.extend(assignments)
+            else:
+                cd_senones.extend(assignments)
+    return ci_senones, cd_senones
+
+
 @requires_c_library
 def test_build_ci_1g_produces_finite_model(tmp_path: Path) -> None:
     """features → flat → ci-1g yields a finite, converged CI model."""
@@ -158,7 +175,8 @@ def test_build_cd_1g_produces_genuine_tied_model(tmp_path: Path) -> None:
 
     ci_counts = _mdef_counts(ctx.model_dir("ci-1g") / "mdef")
     alltri_counts = _mdef_counts(alltriphones)
-    tied_counts = _mdef_counts(ctx.model_dir("cd-1g") / "mdef")
+    tied_mdef = ctx.model_dir("cd-1g") / "mdef"
+    tied_counts = _mdef_counts(tied_mdef)
     ci_senones = ci_counts["n_tied_state"]
     tied_senones = tied_counts["n_tied_state"]
     assert ci_senones < tied_senones <= ctx.train.n_senones + ci_senones
@@ -166,6 +184,15 @@ def test_build_cd_1g_produces_genuine_tied_model(tmp_path: Path) -> None:
     # Fixed seed + fixture + pruning target make this exact count deterministic:
     # 108 CI senones are retained and the trees contribute the requested 200.
     assert tied_senones == 308
+
+    ci_assignments, cd_assignments = _mdef_senone_assignments(tied_mdef)
+    # Exact CI identity coverage catches remapped, duplicated, or missing CI states.
+    assert ci_assignments == list(range(ci_senones)), "CI senone assignments are not identities"
+    expected_cd_senones = set(range(ci_senones, tied_senones))
+    actual_cd_senones = set(cd_assignments)
+    # Exact CD range coverage rejects both a constant mapping and the modulo
+    # placeholder, which leaks assignments into the CI block.
+    assert actual_cd_senones == expected_cd_senones, "CD senones do not cover the tied-state range"
 
     model_dir = ctx.model_dir("cd-1g")
     means, n_mgau, n_feat, n_density, veclen = _st2c.read_gau(str(model_dir / "means"))
