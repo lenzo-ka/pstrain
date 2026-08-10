@@ -91,16 +91,25 @@ class SetupCommand(Command):
         filler_dict_path = Path(ctx.args.filler_dict).resolve() if ctx.args.filler_dict else None
         config_path = Path(ctx.args.config).resolve() if ctx.args.config else None
 
-        if config_path is not None and not config_path.is_file():
-            return CommandResult.fail(f"Config file does not exist: {config_path}")
+        named_sources = [
+            ("Transcription", transcription_path),
+            ("Audio", audio_path),
+            ("Dictionary", dictionary_path),
+            ("Phoneset", phoneset_path),
+            ("Filler dictionary", filler_dict_path),
+            ("Config file", config_path),
+        ]
+        for label, source in named_sources:
+            if source is not None and not source.exists():
+                return CommandResult.fail(f"{label} does not exist: {source}")
         if ctx.args.link and audio_path is not None:
-            try:
-                audio_path.relative_to(project_dir)
-            except ValueError:
-                pass
-            else:
+            source_in_project = audio_path == project_dir or audio_path.is_relative_to(
+                project_dir
+            )
+            source_contains_project = project_dir.is_relative_to(audio_path)
+            if source_in_project or source_contains_project:
                 return CommandResult.fail(
-                    "Cannot link project audio from inside the project directory: "
+                    "Cannot link project audio from or around the project directory: "
                     f"{audio_path}"
                 )
 

@@ -174,6 +174,21 @@ def test_setup_missing_config_errors(tmp_path: Path, monkeypatch: MonkeyPatch) -
     assert not project.exists()
 
 
+def test_setup_dry_run_missing_dictionary_errors_without_creating_project(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    missing = tmp_path / "missing.dict"
+    project = tmp_path / "project"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["st2", "setup", str(project), "--dictionary", str(missing), "--dry-run"],
+    )
+
+    assert main() == 1
+    assert not project.exists()
+
+
 def test_setup_clobber_link_rejects_source_inside_project(tmp_path: Path) -> None:
     project = tmp_path / "project"
     source = project / "audio"
@@ -181,9 +196,97 @@ def test_setup_clobber_link_rejects_source_inside_project(tmp_path: Path) -> Non
     wav = source / "keep.wav"
     wav.write_bytes(b"keep")
 
-    with pytest.raises(ValueError, match="inside the project directory"):
+    with pytest.raises(ValueError, match="around the project directory"):
         setup_project(project, audio_path=source, link_audio=True, clobber=True)
 
     assert source.is_dir()
     assert not source.is_symlink()
     assert wav.read_bytes() == b"keep"
+
+
+def test_setup_link_rejects_source_containing_project(tmp_path: Path) -> None:
+    source = tmp_path / "corpus"
+    project = source / "project"
+    project.mkdir(parents=True)
+
+    with pytest.raises(ValueError, match="around the project directory"):
+        setup_project(project, audio_path=source, link_audio=True)
+
+    assert not (project / "audio").exists()
+
+
+def test_setup_copy_without_clobber_rejects_linked_project_audio(tmp_path: Path) -> None:
+    external = tmp_path / "external"
+    external.mkdir()
+    external_wav = external / "sample.wav"
+    external_wav.write_bytes(b"external")
+    incoming = tmp_path / "incoming"
+    incoming.mkdir()
+    (incoming / "sample.wav").write_bytes(b"incoming")
+    project = tmp_path / "project"
+    setup_project(project, audio_path=external, link_audio=True)
+
+    with pytest.raises(FileExistsError, match="Project audio is a link"):
+        setup_project(project, audio_path=incoming)
+
+    assert (project / "audio").is_symlink()
+    assert external_wav.read_bytes() == b"external"
+
+
+def test_setup_copy_with_clobber_replaces_link_without_touching_source(
+    tmp_path: Path,
+) -> None:
+    external = tmp_path / "external"
+    external.mkdir()
+    external_wav = external / "sample.wav"
+    external_wav.write_bytes(b"external")
+    incoming = tmp_path / "incoming"
+    incoming.mkdir()
+    (incoming / "sample.wav").write_bytes(b"incoming")
+    project = tmp_path / "project"
+    setup_project(project, audio_path=external, link_audio=True)
+
+    setup_project(project, audio_path=incoming, clobber=True)
+
+    assert (project / "audio").is_dir()
+    assert not (project / "audio").is_symlink()
+    assert (project / "audio" / "sample.wav").read_bytes() == b"incoming"
+    assert external_wav.read_bytes() == b"external"
+
+
+def test_validate_corpusless_project_is_invalid(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    setup_project(project)
+
+    report = validate_project(project)
+
+    assert not report.is_valid
+    assert "no transcription; project has no corpus to train on" in report.errors
+    assert "Split outputs are missing; run st2 split" not in report.warnings
+
+
+def test_validate_partial_split_is_invalid(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    setup_project(project, transcription_path=FIXTURE / "transcription.txt")
+    (project / "experiments" / "default" / "etc" / "train.fileids").write_text("")
+
+    report = validate_project(project)
+
+    assert not report.is_valid
+    assert "Missing split output: test.fileids" in report.errors
+    assert "Missing split output: train.transcription" in report.errors
+    assert "Missing split output: test.transcription" in report.errors
+
+
+def test_validate_reports_unique_dictionary_base_words(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    setup_project(project)
+    (project / "shared" / "dictionary.dict").write_text(
+        "word W ER D\nword(2) W AO R D\n"
+    )
+    (project / "shared" / "phoneset.txt").write_text("W\nER\nD\nAO\nR\n")
+
+    report = validate_project(project)
+
+    assert report.dictionary_entries == 2
+    assert report.dictionary_base_words == 1
