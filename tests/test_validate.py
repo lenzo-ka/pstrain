@@ -19,8 +19,7 @@ def test_nested_audio_reports_transcription_fileid_mismatch(tmp_path: Path) -> N
     assert report.audio_files == 0
     assert report.missing_audio == ["utt1"]
     assert any(
-        "Audio files not referenced by any transcription fileid: 1 "
-        "(e.g., spk1/utt1.wav)" in warning
+        "Audio files not referenced by any transcription fileid: 1 (e.g., spk1/utt1.wav)" in warning
         for warning in report.warnings
     )
 

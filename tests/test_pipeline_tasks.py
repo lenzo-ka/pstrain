@@ -146,9 +146,7 @@ def test_nested_and_flat_audio_fanout_uses_relative_fileids(empty_project: Path)
         "extract:spk1/utt2",
         "extract:spk2/utt1",
     ]
-    assert tasks["extract:spk1/utt1"].outputs == (
-        ctx.features_dir / "spk1" / "utt1.mfc",
-    )
+    assert tasks["extract:spk1/utt1"].outputs == (ctx.features_dir / "spk1" / "utt1.mfc",)
 
 
 def test_audio_fileids_are_recursive_sorted_relative_posix_paths(empty_project: Path) -> None:
