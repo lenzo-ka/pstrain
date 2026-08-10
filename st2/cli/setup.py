@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from st2.api import validate_project
 from st2.cli.base import Command, CommandContext, CommandResult
+from st2.lib.setup import setup_project
 
 
 class SetupCommand(Command):
@@ -72,10 +74,7 @@ class SetupCommand(Command):
         )
 
     def execute(self, ctx: CommandContext) -> CommandResult:
-        """Execute setup command.
-
-        Single code path - ctx methods emit shell in dry-run, execute otherwise.
-        """
+        """Set up a project through the public library API."""
         # Resolve project directory
         if ctx.args.project_dir:
             project_dir = Path(ctx.args.project_dir).resolve()
@@ -91,73 +90,33 @@ class SetupCommand(Command):
         phoneset_path = Path(ctx.args.phoneset).resolve() if ctx.args.phoneset else None
         filler_dict_path = Path(ctx.args.filler_dict).resolve() if ctx.args.filler_dict else None
 
-        # Single code path - these emit shell in dry-run, execute otherwise
         ctx.comment(f"Setup project: {project_dir}")
         ctx.blank()
 
-        # Create directory structure
-        ctx.comment("Create directory structure")
-        ctx.mkdir(project_dir)
-        for subdir in ["etc", "audio", "shared", "shared/features", "experiments"]:
-            ctx.mkdir(project_dir / subdir)
-        ctx.blank()
+        if ctx.dry_run:
+            ctx.comment("Would create the project and install the requested setup files")
+            return CommandResult.ok()
 
-        # Copy transcription
-        if transcription_path:
-            ctx.comment("Copy transcription file")
-            ctx.copy(transcription_path, project_dir / "etc" / "all.transcription")
-            ctx.blank()
-
-        # Handle audio
-        if audio_path:
-            ctx.comment("Set up audio files")
-            if ctx.args.link:
-                ctx.symlink(audio_path, project_dir / "audio")
-            elif audio_path.is_dir():
-                ctx.copy_tree(audio_path, project_dir / "audio")
-            else:
-                ctx.copy(audio_path, project_dir / "audio" / audio_path.name)
-            ctx.blank()
-
-        # Copy dictionary
-        if dictionary_path:
-            ctx.comment("Copy dictionary")
-            ctx.copy(dictionary_path, project_dir / "shared" / "dictionary.dict")
-            ctx.blank()
-
-        # Handle phoneset
-        if phoneset_path:
-            ctx.comment("Copy phoneset")
-            ctx.copy(phoneset_path, project_dir / "shared" / "phoneset.txt")
-            ctx.blank()
-        elif dictionary_path:
-            ctx.comment("Extract phoneset from dictionary")
-            ctx.st2(
-                "phoneset",
-                "--extract",
-                str(dictionary_path),
-                output=str(project_dir / "shared" / "phoneset.txt"),
-            )
-            ctx.blank()
-
-        # Handle filler dictionary
-        if filler_dict_path:
-            ctx.comment("Copy filler dictionary")
-            ctx.copy(filler_dict_path, project_dir / "shared" / "filler.dict")
-        else:
-            ctx.comment("Copy default filler dictionary")
-            ctx.st2("data", "filler.dict", output=str(project_dir / "shared" / "filler.dict"))
-        ctx.blank()
-
-        # Initialize config
-        ctx.comment("Initialize config")
-        ctx.st2("config", "init", project_dir=str(project_dir))
-        ctx.blank()
+        setup_project(
+            project_dir=project_dir,
+            transcription_path=transcription_path,
+            audio_path=audio_path,
+            dictionary_path=dictionary_path,
+            phoneset_path=phoneset_path,
+            filler_dict_path=filler_dict_path,
+            config_path=Path(ctx.args.config).resolve() if ctx.args.config else None,
+            link_audio=ctx.args.link,
+            clobber=ctx.args.clobber,
+        )
 
         # Validation
         if ctx.args.validate:
             ctx.comment("Validate project")
-            ctx.st2("validate-project", str(project_dir))
+            report = validate_project(project_dir)
+            if not report.is_valid:
+                return CommandResult.fail(
+                    f"Validation failed with {len(report.errors)} error(s)"
+                )
             ctx.blank()
 
         ctx.comment("Done. To work in this project:")

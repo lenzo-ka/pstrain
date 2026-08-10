@@ -6,9 +6,12 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from st2.lib.config import ST2Config
 from st2.lib.dictionary import Dictionary
 from st2.lib.phoneset import Phoneset
+from st2.lib.pipeline.context import DEFAULT_CONFIGS
 
 __all__ = ["setup_project"]
 
@@ -61,6 +64,11 @@ def setup_project(
         config = ST2Config(name=project_name)
         config.bind_to_project(project_dir)
         config.to_yaml(config_file)
+
+    configs_file = project_dir / "etc" / "configs.yaml"
+    if clobber or not configs_file.exists():
+        with open(configs_file, "w", encoding="utf-8") as f:
+            yaml.safe_dump(DEFAULT_CONFIGS, f, sort_keys=False)
 
     # Copy transcription file
     if transcription_path:
@@ -116,21 +124,6 @@ def setup_project(
             if clobber or not dest_dict.exists():
                 shutil.copy(dictionary_path, dest_dict)
 
-    # Extract or copy phoneset
-    dest_phoneset = project_dir / "shared" / "phoneset.txt"
-    if phoneset_path:
-        phoneset_path = Path(phoneset_path).resolve()
-        if phoneset_path != dest_phoneset:
-            if clobber or not dest_phoneset.exists():
-                shutil.copy(phoneset_path, dest_phoneset)
-    elif dictionary_path:
-        # Extract phoneset from dictionary
-        dict_file = project_dir / "shared" / "dictionary.dict"
-        if dict_file.exists() and (clobber or not dest_phoneset.exists()):
-            dictionary = Dictionary.from_file(dict_file)
-            phoneset = Phoneset.from_dictionary(dictionary)
-            phoneset.to_file(dest_phoneset)
-
     # Copy filler dictionary
     dest_filler = project_dir / "shared" / "filler.dict"
     if filler_dict_path:
@@ -146,9 +139,26 @@ def setup_project(
             default_filler = get_data_file("filler.dict")
             shutil.copy(default_filler, dest_filler)
 
+    # Extract or copy phoneset after installing the filler dictionary so an
+    # extracted inventory covers every trainable dictionary entry.
+    dest_phoneset = project_dir / "shared" / "phoneset.txt"
+    if phoneset_path:
+        phoneset_path = Path(phoneset_path).resolve()
+        if phoneset_path != dest_phoneset:
+            if clobber or not dest_phoneset.exists():
+                shutil.copy(phoneset_path, dest_phoneset)
+    elif dictionary_path:
+        dict_file = project_dir / "shared" / "dictionary.dict"
+        if dict_file.exists() and (clobber or not dest_phoneset.exists()):
+            phones = Dictionary.from_file(dict_file).phonemes()
+            if dest_filler.exists():
+                phones.update(Dictionary.from_file(dest_filler).phonemes())
+            Phoneset(phones).to_file(dest_phoneset)
+
     return {
         "project_dir": str(project_dir),
         "config_file": str(project_dir / "etc" / "config.yaml"),
+        "configs_file": str(project_dir / "etc" / "configs.yaml"),
         "transcription_file": str(project_dir / "etc" / "all.transcription"),
         "dictionary_file": str(project_dir / "shared" / "dictionary.dict"),
         "phoneset_file": str(project_dir / "shared" / "phoneset.txt"),

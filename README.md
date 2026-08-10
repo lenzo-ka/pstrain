@@ -42,16 +42,14 @@ ruff, mypy), `docs` (Sphinx).
 ## Quickstart
 
 Point `st2 setup` at audio, a `<fileid> <words…>` transcription, a
-pronunciation dictionary, a phoneset, and a filler dictionary, then build a
-target:
+pronunciation dictionary, and optionally a phoneset and filler dictionary,
+then build a target:
 
 ```bash
 st2 setup myproject \
     --audio        wav/ \
     --transcription transcription.txt \
-    --dictionary   cmudict.dict \
-    --phoneset     phoneset.txt \
-    --filler-dict  filler.dict
+    --dictionary   cmudict.dict
 
 st2 build ci-1g --project-dir myproject     # monophone, 1 Gaussian/state
 st2 build cd-8g --project-dir myproject     # full CD pipeline, 8 Gaussians
@@ -61,8 +59,8 @@ Useful flags: `--dry-run` prints the resolved task plan, `-j N` parallelizes
 the feature-extraction fan-out, `--config <name>` selects a named profile from
 `etc/configs.yaml` (`default`, `wideband`, `telephone`, …).
 
-> The phoneset must include every phone used by both the dictionary **and** the
-> filler dictionary (notably `SIL`), so that every model state is trained.
+When `--phoneset` is omitted, setup extracts one covering both the dictionary
+and filler dictionary (notably `SIL`) so that every model state is trainable.
 
 `tests/fixtures/mini_arctic/` is a tiny, self-contained example corpus (used by
 the end-to-end test).
@@ -111,8 +109,6 @@ This is an early alpha; a few rough edges are known and tracked:
 - The train/test split extracts the file id as the first whitespace token, so a
   Sphinx-format transcription (`<s> … </s> (id)`) is mis-parsed even though the
   transcription *reader* accepts that format. Use `<fileid> <words…>`.
-- `st2 setup` without `--phoneset` currently fails (it invokes a subcommand that
-  does not exist); pass `--phoneset` explicitly.
 - Two configuration systems coexist; the pydantic `etc/config.yaml` does not yet
   drive training (the pipeline reads `etc/configs.yaml`).
 - **Platforms:** Linux and macOS are supported (wheels + CI). Windows is not yet
