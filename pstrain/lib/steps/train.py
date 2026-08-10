@@ -234,6 +234,11 @@ def run_bw_training(
             change = abs(stats.avg_log_prob - prev_likelihood) / abs(prev_likelihood)
             logger.info("Relative change: %.6f (threshold: %.6f)", change, convergence_ratio)
             if change < convergence_ratio:
+                if total_skipped:
+                    logger.warning(
+                        "WARNING: BW training skipped %d utterance updates in total",
+                        total_skipped,
+                    )
                 logger.info("Converged after %d iterations", iteration)
                 return TrainingResult(
                     iterations=iteration,
