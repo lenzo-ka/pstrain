@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from st2.api import validate_project
 from st2.cli.base import Command, CommandContext, CommandResult
+from st2.lib.setup import setup_project
 
 
 class SetupCommand(Command):
@@ -72,10 +74,7 @@ class SetupCommand(Command):
         )
 
     def execute(self, ctx: CommandContext) -> CommandResult:
-        """Execute setup command.
-
-        Single code path - ctx methods emit shell in dry-run, execute otherwise.
-        """
+        """Set up a project through the public library API."""
         # Resolve project directory
         if ctx.args.project_dir:
             project_dir = Path(ctx.args.project_dir).resolve()
@@ -90,74 +89,143 @@ class SetupCommand(Command):
         dictionary_path = Path(ctx.args.dictionary).resolve() if ctx.args.dictionary else None
         phoneset_path = Path(ctx.args.phoneset).resolve() if ctx.args.phoneset else None
         filler_dict_path = Path(ctx.args.filler_dict).resolve() if ctx.args.filler_dict else None
+        config_path = Path(ctx.args.config).resolve() if ctx.args.config else None
 
-        # Single code path - these emit shell in dry-run, execute otherwise
+        file_sources = [
+            ("Transcription", transcription_path),
+            ("Dictionary", dictionary_path),
+            ("Phoneset", phoneset_path),
+            ("Filler dictionary", filler_dict_path),
+            ("Config file", config_path),
+        ]
+        for label, source in file_sources:
+            if source is not None and not source.is_file():
+                return CommandResult.fail(f"{label} must be a file: {source}")
+        if audio_path is not None and not (audio_path.is_file() or audio_path.is_dir()):
+            return CommandResult.fail(f"Audio must be a file or directory: {audio_path}")
+        if ctx.args.link and audio_path is not None:
+            source_in_project = audio_path == project_dir or audio_path.is_relative_to(project_dir)
+            source_contains_project = project_dir.is_relative_to(audio_path)
+            if source_in_project or source_contains_project:
+                return CommandResult.fail(
+                    f"Cannot link project audio from or around the project directory: {audio_path}"
+                )
+
         ctx.comment(f"Setup project: {project_dir}")
         ctx.blank()
 
-        # Create directory structure
-        ctx.comment("Create directory structure")
-        ctx.mkdir(project_dir)
-        for subdir in ["etc", "audio", "shared", "shared/features", "experiments"]:
-            ctx.mkdir(project_dir / subdir)
-        ctx.blank()
+        if ctx.dry_run:
+            audio_dir = project_dir / "audio"
 
-        # Copy transcription
-        if transcription_path:
-            ctx.comment("Copy transcription file")
-            ctx.copy(transcription_path, project_dir / "etc" / "all.transcription")
-            ctx.blank()
+            def describe_install(label: str, source: str, destination: Path) -> None:
+                if destination.exists() and not ctx.args.clobber:
+                    ctx.comment(f"Skip existing {label}: {destination}")
+                else:
+                    action = f"Replace {label}" if destination.exists() else label
+                    ctx.comment(f"{action}: {source} -> {destination}")
 
-        # Handle audio
-        if audio_path:
-            ctx.comment("Set up audio files")
-            if ctx.args.link:
-                ctx.symlink(audio_path, project_dir / "audio")
-            elif audio_path.is_dir():
-                ctx.copy_tree(audio_path, project_dir / "audio")
+            directories = [
+                project_dir,
+                project_dir / "etc",
+                project_dir / "shared",
+                project_dir / "shared" / "features",
+                project_dir / "experiments" / "default" / "etc",
+            ]
+            if not (ctx.args.link and audio_path is not None):
+                directories.append(audio_dir)
+            for directory in directories:
+                ctx.comment(f"Create directory: {directory}")
+            if ctx.args.clobber:
+                ctx.comment("Clobber enabled: replace existing destination files")
             else:
-                ctx.copy(audio_path, project_dir / "audio" / audio_path.name)
-            ctx.blank()
-
-        # Copy dictionary
-        if dictionary_path:
-            ctx.comment("Copy dictionary")
-            ctx.copy(dictionary_path, project_dir / "shared" / "dictionary.dict")
-            ctx.blank()
-
-        # Handle phoneset
-        if phoneset_path:
-            ctx.comment("Copy phoneset")
-            ctx.copy(phoneset_path, project_dir / "shared" / "phoneset.txt")
-            ctx.blank()
-        elif dictionary_path:
-            ctx.comment("Extract phoneset from dictionary")
-            ctx.st2(
-                "phoneset",
-                "--extract",
-                str(dictionary_path),
-                output=str(project_dir / "shared" / "phoneset.txt"),
+                ctx.comment("Clobber disabled: keep existing destination files")
+            if transcription_path:
+                describe_install(
+                    "Copy transcription",
+                    str(transcription_path),
+                    project_dir / "etc" / "all.transcription",
+                )
+            if audio_path:
+                if ctx.args.link:
+                    if (audio_dir.exists() or audio_dir.is_symlink()) and ctx.args.clobber:
+                        ctx.comment(f"Remove existing audio destination: {audio_dir}")
+                    describe_install("Link audio", str(audio_path), audio_dir)
+                elif audio_path.is_dir():
+                    for source in sorted(path for path in audio_path.rglob("*") if path.is_file()):
+                        describe_install(
+                            "Copy audio",
+                            str(source),
+                            audio_dir / source.relative_to(audio_path),
+                        )
+                else:
+                    describe_install("Copy audio", str(audio_path), audio_dir / audio_path.name)
+            if dictionary_path:
+                describe_install(
+                    "Copy dictionary",
+                    str(dictionary_path),
+                    project_dir / "shared" / "dictionary.dict",
+                )
+            if filler_dict_path:
+                describe_install(
+                    "Copy filler dictionary",
+                    str(filler_dict_path),
+                    project_dir / "shared" / "filler.dict",
+                )
+            else:
+                describe_install(
+                    "Copy filler dictionary",
+                    "packaged filler.dict",
+                    project_dir / "shared" / "filler.dict",
+                )
+            if phoneset_path:
+                describe_install(
+                    "Copy phoneset",
+                    str(phoneset_path),
+                    project_dir / "shared" / "phoneset.txt",
+                )
+            elif dictionary_path:
+                describe_install(
+                    "Extract phoneset",
+                    "installed dictionaries",
+                    project_dir / "shared" / "phoneset.txt",
+                )
+            if config_path:
+                describe_install(
+                    "Write config.yaml", str(config_path), project_dir / "etc" / "config.yaml"
+                )
+            else:
+                describe_install(
+                    "Write default config.yaml",
+                    "generated defaults",
+                    project_dir / "etc" / "config.yaml",
+                )
+            describe_install(
+                "Write configs.yaml profiles",
+                "built-in profiles",
+                project_dir / "etc" / "configs.yaml",
             )
-            ctx.blank()
+            if ctx.args.validate:
+                ctx.comment(f"Validate project after setup: {project_dir}")
+            return CommandResult.ok()
 
-        # Handle filler dictionary
-        if filler_dict_path:
-            ctx.comment("Copy filler dictionary")
-            ctx.copy(filler_dict_path, project_dir / "shared" / "filler.dict")
-        else:
-            ctx.comment("Copy default filler dictionary")
-            ctx.st2("data", "filler.dict", output=str(project_dir / "shared" / "filler.dict"))
-        ctx.blank()
-
-        # Initialize config
-        ctx.comment("Initialize config")
-        ctx.st2("config", "init", project_dir=str(project_dir))
-        ctx.blank()
+        setup_project(
+            project_dir=project_dir,
+            transcription_path=transcription_path,
+            audio_path=audio_path,
+            dictionary_path=dictionary_path,
+            phoneset_path=phoneset_path,
+            filler_dict_path=filler_dict_path,
+            config_path=config_path,
+            link_audio=ctx.args.link,
+            clobber=ctx.args.clobber,
+        )
 
         # Validation
         if ctx.args.validate:
             ctx.comment("Validate project")
-            ctx.st2("validate-project", str(project_dir))
+            report = validate_project(project_dir)
+            if not report.is_valid:
+                return CommandResult.fail(f"Validation failed with {len(report.errors)} error(s)")
             ctx.blank()
 
         ctx.comment("Done. To work in this project:")

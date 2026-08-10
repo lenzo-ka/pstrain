@@ -212,8 +212,42 @@ def validate_project(project_dir: Path, experiment: str = "default") -> Validati
 
     # Check transcripts and collect vocabulary
     all_vocab: set[str] = set()
-    for split in ["train", "test", "dev"]:
-        trans_file = experiment_dir / "etc" / f"{split}.transcription"
+    split_artifacts = [
+        experiment_dir / "etc" / name
+        for name in [
+            "train.fileids",
+            "test.fileids",
+            "train.transcription",
+            "test.transcription",
+        ]
+    ]
+    present_split_artifacts = [path for path in split_artifacts if path.exists()]
+    if not present_split_artifacts:
+        all_transcription = project_dir / "etc" / "all.transcription"
+        transcription_parse_failed = False
+        try:
+            has_corpus = bool(parse_transcription_file(all_transcription))
+        except FileNotFoundError:
+            has_corpus = False
+        except Exception as e:
+            has_corpus = False
+            transcription_parse_failed = True
+            report.errors.append(f"Error reading all.transcription: {e}")
+
+        if has_corpus:
+            report.warnings.append("Split outputs are missing; run st2 split")
+        elif not transcription_parse_failed:
+            report.errors.append("no transcription; project has no corpus to train on")
+    elif len(present_split_artifacts) != len(split_artifacts):
+        for path in split_artifacts:
+            if not path.exists():
+                report.errors.append(f"Missing split output: {path.name}")
+
+    split_files = {
+        split: experiment_dir / "etc" / f"{split}.transcription"
+        for split in ["train", "test", "dev"]
+    }
+    for split, trans_file in split_files.items():
         if trans_file.exists():
             try:
                 transcripts = parse_transcription_file(trans_file)
@@ -231,8 +265,6 @@ def validate_project(project_dir: Path, experiment: str = "default") -> Validati
                     all_vocab.update(text.split())
             except Exception as e:
                 report.errors.append(f"Error reading {split}.transcription: {e}")
-        elif split == "train":
-            report.errors.append("Missing: train.transcription")
 
     report.total_utterances = (
         report.train_utterances + report.test_utterances + report.dev_utterances
@@ -241,7 +273,8 @@ def validate_project(project_dir: Path, experiment: str = "default") -> Validati
 
     # Check dictionary coverage
     if dictionary and all_vocab:
-        words_missing = [w for w in all_vocab if not dictionary.contains_base(w)]
+        dictionary_words = dictionary.words()
+        words_missing = [w for w in all_vocab if w not in dictionary_words]
         if words_missing:
             report.missing_words = sorted(set(words_missing))
             report.errors.append(

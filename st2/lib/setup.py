@@ -6,9 +6,12 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from st2.lib.config import ST2Config
 from st2.lib.dictionary import Dictionary
 from st2.lib.phoneset import Phoneset
+from st2.lib.pipeline.context import DEFAULT_CONFIGS
 
 __all__ = ["setup_project"]
 
@@ -41,18 +44,42 @@ def setup_project(
         Dict with setup status and paths
     """
     project_dir = project_dir.resolve()
+    audio_dir = project_dir / "audio"
+
+    if config_path is not None:
+        config_path = Path(config_path).resolve()
+        if not config_path.is_file():
+            raise FileNotFoundError(f"Config file does not exist: {config_path}")
+
+    if audio_path is not None:
+        audio_path = Path(audio_path).resolve()
+        if link_audio:
+            source_in_project = audio_path == project_dir or audio_path.is_relative_to(project_dir)
+            source_contains_project = project_dir.is_relative_to(audio_path)
+            if source_in_project or source_contains_project:
+                raise ValueError(
+                    f"Cannot link project audio from or around the project directory: {audio_path}"
+                )
+
+    if audio_path is not None and not link_audio and audio_dir.is_symlink():
+        if not clobber:
+            raise FileExistsError(
+                f"Project audio is a link; use clobber to replace it: {audio_dir}"
+            )
+        audio_dir.unlink()
 
     # Create directory structure
     project_dir.mkdir(parents=True, exist_ok=True)
     (project_dir / "etc").mkdir(exist_ok=True)
-    (project_dir / "audio").mkdir(exist_ok=True)
+    if not (link_audio and audio_path is not None):
+        audio_dir.mkdir(exist_ok=True)
     (project_dir / "shared").mkdir(exist_ok=True)
     (project_dir / "shared" / "features").mkdir(exist_ok=True)
-    (project_dir / "experiments").mkdir(exist_ok=True)
+    (project_dir / "experiments" / "default" / "etc").mkdir(parents=True, exist_ok=True)
 
     # Create or load configuration
     config_file = project_dir / "etc" / "config.yaml"
-    if config_path and config_path.exists():
+    if config_path:
         if clobber or not config_file.exists():
             config = ST2Config.from_yaml(config_path)
             config.to_yaml(config_file)
@@ -61,6 +88,11 @@ def setup_project(
         config = ST2Config(name=project_name)
         config.bind_to_project(project_dir)
         config.to_yaml(config_file)
+
+    configs_file = project_dir / "etc" / "configs.yaml"
+    if clobber or not configs_file.exists():
+        with open(configs_file, "w", encoding="utf-8") as f:
+            yaml.safe_dump(DEFAULT_CONFIGS, f, sort_keys=False)
 
     # Copy transcription file
     if transcription_path:
@@ -71,26 +103,26 @@ def setup_project(
                 shutil.copy(transcription_path, dest_transcription)
 
     # Handle audio files
-    audio_dir = project_dir / "audio"
     if audio_path:
-        audio_path = Path(audio_path).resolve()
-
         if link_audio:
             # Symlink entire audio directory
-            if clobber and audio_dir.exists():
+            if clobber and (audio_dir.exists() or audio_dir.is_symlink()):
                 if audio_dir.is_symlink():
                     audio_dir.unlink()
                 elif audio_dir.is_dir():
                     shutil.rmtree(audio_dir)
-            if not audio_dir.exists():
+            if not audio_dir.exists() and not audio_dir.is_symlink():
                 try:
                     audio_dir.symlink_to(audio_path)
                 except OSError:
                     # Fall back to individual file symlinks if directory symlink fails
                     audio_dir.mkdir(exist_ok=True)
                     if audio_path.is_dir():
-                        for audio_file in audio_path.glob("*.wav"):
-                            link_path = audio_dir / audio_file.name
+                        for audio_file in audio_path.rglob("*"):
+                            if not audio_file.is_file():
+                                continue
+                            link_path = audio_dir / audio_file.relative_to(audio_path)
+                            link_path.parent.mkdir(parents=True, exist_ok=True)
                             if clobber or not link_path.exists():
                                 if link_path.exists():
                                     link_path.unlink()
@@ -98,9 +130,12 @@ def setup_project(
         else:
             # Copy audio files
             if audio_path.is_dir():
-                for audio_file in audio_path.glob("*.wav"):
-                    dest_file = audio_dir / audio_file.name
+                for audio_file in audio_path.rglob("*"):
+                    if not audio_file.is_file():
+                        continue
+                    dest_file = audio_dir / audio_file.relative_to(audio_path)
                     if clobber or not dest_file.exists():
+                        dest_file.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy(audio_file, dest_file)
             else:
                 dest_file = audio_dir / audio_path.name
@@ -115,21 +150,6 @@ def setup_project(
         if dictionary_path != dest_dict:
             if clobber or not dest_dict.exists():
                 shutil.copy(dictionary_path, dest_dict)
-
-    # Extract or copy phoneset
-    dest_phoneset = project_dir / "shared" / "phoneset.txt"
-    if phoneset_path:
-        phoneset_path = Path(phoneset_path).resolve()
-        if phoneset_path != dest_phoneset:
-            if clobber or not dest_phoneset.exists():
-                shutil.copy(phoneset_path, dest_phoneset)
-    elif dictionary_path:
-        # Extract phoneset from dictionary
-        dict_file = project_dir / "shared" / "dictionary.dict"
-        if dict_file.exists() and (clobber or not dest_phoneset.exists()):
-            dictionary = Dictionary.from_file(dict_file)
-            phoneset = Phoneset.from_dictionary(dictionary)
-            phoneset.to_file(dest_phoneset)
 
     # Copy filler dictionary
     dest_filler = project_dir / "shared" / "filler.dict"
@@ -146,9 +166,26 @@ def setup_project(
             default_filler = get_data_file("filler.dict")
             shutil.copy(default_filler, dest_filler)
 
+    # Extract or copy phoneset after installing the filler dictionary so an
+    # extracted inventory covers every trainable dictionary entry.
+    dest_phoneset = project_dir / "shared" / "phoneset.txt"
+    if phoneset_path:
+        phoneset_path = Path(phoneset_path).resolve()
+        if phoneset_path != dest_phoneset:
+            if clobber or not dest_phoneset.exists():
+                shutil.copy(phoneset_path, dest_phoneset)
+    elif dictionary_path:
+        dict_file = project_dir / "shared" / "dictionary.dict"
+        if dict_file.exists() and (clobber or not dest_phoneset.exists()):
+            phones = Dictionary.from_file(dict_file).phonemes()
+            if dest_filler.exists():
+                phones.update(Dictionary.from_file(dest_filler).phonemes())
+            Phoneset(phones).to_file(dest_phoneset)
+
     return {
         "project_dir": str(project_dir),
         "config_file": str(project_dir / "etc" / "config.yaml"),
+        "configs_file": str(project_dir / "etc" / "configs.yaml"),
         "transcription_file": str(project_dir / "etc" / "all.transcription"),
         "dictionary_file": str(project_dir / "shared" / "dictionary.dict"),
         "phoneset_file": str(project_dir / "shared" / "phoneset.txt"),
