@@ -29,7 +29,8 @@ import logging
 import os
 import time
 from collections.abc import Callable, Iterable
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import Future, ProcessPoolExecutor, as_completed
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -317,16 +318,22 @@ def _run_one(task: Task) -> int:
         print(f"!! {task.name} failed: {exc}")
         return 1
     elapsed = time.monotonic() - start
-    missing = [p for p in task.outputs if not Path(p).exists()]
-    if missing:
-        print(f"!! {task.name} did not produce: {missing}")
+    try:
+        _verify_outputs(task)
+    except TaskFailure as exc:
+        print(f"!! {task.name} {exc}")
         return 1
     print(f"   {task.name} done in {elapsed:.1f}s")
     return 0
 
 
 def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> int:
-    """Run a batch of independent tasks in a process pool."""
+    """Run a batch of independent tasks in a process pool.
+
+    Inline fallback is safe only before the pool has accepted any work. Once
+    one future has been accepted, an infrastructure error may mean a worker
+    crashed after starting a task, so the batch fails instead of being rerun.
+    """
     group_name = batch[0].task.parallel_group
     n = len(batch)
     workers = min(jobs, n)
@@ -336,27 +343,34 @@ def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> int:
     completed = 0
     try:
         pool = ProcessPoolExecutor(max_workers=workers)
-    except (OSError, PermissionError) as exc:
-        logger.warning(
-            "Cannot create process pool for %s (%s); running sequentially",
-            group_name,
-            exc,
-        )
-        return _run_inline_batch(batch)
+    except (OSError, BrokenProcessPool) as exc:
+        return _fallback_inline(batch, group_name=group_name, exc=exc)
 
     with pool:
-        future_to_name = {pool.submit(_worker, e.task): e.task.name for e in batch}
-        for fut in as_completed(future_to_name):
-            name = future_to_name[fut]
+        future_to_task: dict[Future[None], Task] = {}
+        for entry in batch:
+            try:
+                future = pool.submit(_worker, entry.task)
+            except (OSError, BrokenProcessPool) as exc:
+                if not future_to_task:
+                    return _fallback_inline(batch, group_name=group_name, exc=exc)
+                failures.append(("process pool", exc))
+                logger.exception("Process pool failed after accepting work for %s", group_name)
+                break
+            future_to_task[future] = entry.task
+
+        for fut in as_completed(future_to_task):
+            task = future_to_task[fut]
             try:
                 fut.result()
+                _verify_outputs(task)
                 completed += 1
                 report_every = max(1, n // _PROGRESS_REPORT_BUCKETS)
                 if completed % report_every == 0 or completed == n:
                     print(f"   [{group_name}] {completed}/{n}")
             except BaseException as exc:
-                failures.append((name, exc))
-                logger.exception("Parallel task %s failed", name)
+                failures.append((task.name, exc))
+                logger.exception("Parallel task %s failed", task.name)
     elapsed = time.monotonic() - start
     if failures:
         print(f"!! fan-out [{group_name}]: {len(failures)} failure(s)")
@@ -376,6 +390,23 @@ def _run_inline_batch(batch: list[_PlanEntry]) -> int:
         if rc != 0:
             return rc
     return 0
+
+
+def _fallback_inline(batch: list[_PlanEntry], *, group_name: str, exc: BaseException) -> int:
+    """Warn once and run a batch inline after pool startup was rejected."""
+    logger.warning(
+        "Cannot start process pool for %s (%s); running sequentially",
+        group_name,
+        exc,
+    )
+    return _run_inline_batch(batch)
+
+
+def _verify_outputs(task: Task) -> None:
+    """Raise when a completed task omitted any declared output."""
+    missing = [path for path in task.outputs if not Path(path).exists()]
+    if missing:
+        raise TaskFailure(f"did not produce: {missing}")
 
 
 def _worker(task: Task) -> None:
