@@ -8,6 +8,7 @@ by some other task or treated as required external files.
 from __future__ import annotations
 
 import shutil
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 
@@ -15,7 +16,7 @@ import pytest
 import yaml
 
 from pstrain.lib.pipeline import PipelineContext
-from pstrain.lib.pipeline.context import DEFAULT_CONFIGS, FeatParams
+from pstrain.lib.pipeline.context import DEFAULT_CONFIGS, FeatParams, SplitParams, TrainParams
 from pstrain.lib.pipeline.tasks import TARGETS, build_pipeline
 
 
@@ -155,6 +156,85 @@ def test_extract_task_forwards_preemphasis_alpha(empty_project: Path) -> None:
 
     assert isinstance(extract_task.fn, partial)
     assert extract_task.fn.args[2]["alpha"] == 0.42
+
+
+def test_meaningful_feature_config_change_rebuilds_features(
+    empty_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs: list[float] = []
+
+    def extract(_audio: Path, output: Path, params: dict[str, object]) -> None:
+        runs.append(float(params["alpha"]))
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text("features")
+
+    monkeypatch.setattr("pstrain.lib.pipeline.tasks._extract_features_worker", extract)
+    configs = empty_project / "etc" / "configs.yaml"
+    configs.write_text("custom:\n  features:\n    alpha: 0.42\n")
+    first = build_pipeline(PipelineContext.from_config(empty_project, config_name="custom"))
+    assert first.run("features", jobs=1) == 0
+    old_feature = empty_project / "shared" / "features" / "custom" / "placeholder.mfc"
+    assert old_feature.read_text() == "features"
+
+    configs.write_text("custom:\n  features:\n    alpha: 0.21\n")
+    changed = build_pipeline(PipelineContext.from_config(empty_project, config_name="custom"))
+    stale = {entry.task.name for entry in changed.plan("features") if entry.stale}
+
+    assert "provenance:features" in stale
+    assert "extract:placeholder" in stale
+    assert changed.run("features", jobs=1) == 0
+    assert runs == [0.42, 0.21]
+
+
+def test_irrelevant_config_edit_does_not_rebuild_features(
+    empty_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs: list[str] = []
+
+    def extract(_audio: Path, output: Path, _params: dict[str, object]) -> None:
+        runs.append("ran")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text("features")
+
+    monkeypatch.setattr("pstrain.lib.pipeline.tasks._extract_features_worker", extract)
+    configs = empty_project / "etc" / "configs.yaml"
+    configs.write_text("custom:\n  features:\n    alpha: 0.42\n")
+    pipeline = build_pipeline(PipelineContext.from_config(empty_project, config_name="custom"))
+    assert pipeline.run("features", jobs=1) == 0
+
+    configs.write_text(
+        "# formatting and an unrelated profile changed\n"
+        "unrelated:\n  training:\n    max_iterations: 3\n"
+        "custom: {features: {alpha: 0.42}}\n"
+    )
+    unchanged = build_pipeline(PipelineContext.from_config(empty_project, config_name="custom"))
+
+    assert not any(entry.stale for entry in unchanged.plan("features"))
+    assert unchanged.run("features", jobs=1) == 0
+    assert runs == ["ran"]
+
+
+def test_model_files_include_build_provenance(empty_project: Path) -> None:
+    ctx = PipelineContext.from_config(empty_project)
+    assert ctx.model_dir("ci-8g") / "provenance.json" in ctx.model_files("ci-8g")
+
+
+def test_stage_fingerprints_cover_only_effective_relevant_values(empty_project: Path) -> None:
+    base = PipelineContext.from_config(empty_project)
+    feature_change = replace(base, feat=FeatParams(alpha=0.5))
+    training_change = replace(base, train=TrainParams(max_iterations=3))
+    split_change = replace(base, split=SplitParams(seed=99))
+
+    assert feature_change.provenance_path("features") != base.provenance_path("features")
+    assert training_change.provenance_path("features") == base.provenance_path("features")
+    assert split_change.provenance_path("features") == base.provenance_path("features")
+    assert split_change.provenance_path("split") != base.provenance_path("split")
+    assert training_change.provenance_path("split") == base.provenance_path("split")
+    for changed in (feature_change, training_change, split_change):
+        assert changed.provenance_path("training") != base.provenance_path("training")
+
+    document = base.provenance_document("training")
+    assert document["fingerprint"] in base.provenance_path("training").name
 
 
 def test_nested_and_flat_audio_fanout_uses_relative_fileids(empty_project: Path) -> None:

@@ -25,11 +25,15 @@ Path conventions (mirroring the prior Snakefile):
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields
+import hashlib
+import json
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any, Self
 
 import yaml
+
+from pstrain import __version__
 
 
 @dataclass(frozen=True)
@@ -287,7 +291,46 @@ class PipelineContext:
             d / "mixture_weights",
             d / "transition_matrices",
             d / "feat.params",
+            d / "provenance.json",
         ]
+
+    def provenance_payload(self, stage: str) -> dict[str, Any]:
+        """Canonical effective configuration governing a pipeline stage."""
+        payload: dict[str, Any] = {"stage": stage, "tool_version": __version__}
+        if stage == "features":
+            payload["features"] = asdict(self.feat)
+        elif stage == "split":
+            payload["split"] = asdict(self.split)
+        elif stage == "training":
+            payload.update(
+                features=asdict(self.feat),
+                training=asdict(self.train),
+                split=asdict(self.split),
+            )
+        else:
+            raise ValueError(f"unknown provenance stage: {stage!r}")
+        return payload
+
+    def provenance_path(self, stage: str) -> Path:
+        """Content-addressed path for a stage's effective configuration."""
+        canonical = json.dumps(
+            self.provenance_payload(stage), sort_keys=True, separators=(",", ":")
+        ).encode()
+        fingerprint = hashlib.sha256(canonical).hexdigest()
+        return (
+            self.project_dir
+            / ".pstrain"
+            / "provenance"
+            / self.experiment
+            / self.config_name
+            / f"{stage}-{fingerprint}.json"
+        )
+
+    def provenance_document(self, stage: str) -> dict[str, Any]:
+        """Serializable provenance, including its effective-config fingerprint."""
+        payload = self.provenance_payload(stage)
+        fingerprint = self.provenance_path(stage).stem.removeprefix(f"{stage}-")
+        return {"fingerprint": fingerprint, **payload}
 
     @property
     def trees_dir(self) -> Path:

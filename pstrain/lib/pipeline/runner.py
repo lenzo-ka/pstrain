@@ -8,10 +8,11 @@ Staleness model
 ---------------
 A task is stale if any of:
   * Any declared output is missing.
-  * The newest input mtime is strictly greater than the oldest output mtime.
+  * Its completion marker is missing.
+  * The newest input mtime is greater than or equal to the oldest output mtime.
 
-This matches Snakemake's default behavior and is intentionally simple. If we
-ever need content-hash staleness, layer it on top.
+Completion markers make interrupted writes stale; mtimes retain the deliberately
+small file-path DAG model for ordinary dependencies.
 
 Execution model
 ---------------
@@ -25,6 +26,7 @@ Dry-run prints the plan with staleness markers and never executes.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import time
@@ -77,6 +79,15 @@ class Task:
     # Use this for fan-outs (one task per fileid). Leave empty for the linear
     # training chain where ordering matters.
     parallel_group: str = ""
+
+    @property
+    def completion_marker(self) -> Path | None:
+        """Private marker written only after all outputs are complete."""
+        if not self.outputs:
+            return None
+        first = Path(self.outputs[0])
+        task_id = hashlib.sha256(self.name.encode()).hexdigest()[:12]
+        return first.parent / f".{first.name}.{task_id}.complete"
 
 
 @dataclass
@@ -241,14 +252,17 @@ class Pipeline:
         missing = [p for p in outputs if not p.exists()]
         if missing:
             return True, f"missing output: {missing[0]}"
+        marker = task.completion_marker
+        if marker is not None and not marker.exists():
+            return True, "missing completion marker"
         out_mtimes = [p.stat().st_mtime for p in outputs]
         oldest_out = min(out_mtimes)
         existing_inputs = [Path(p) for p in task.inputs if Path(p).exists()]
         if not existing_inputs:
             return False, "up to date"
         newest_in = max(p.stat().st_mtime for p in existing_inputs)
-        if newest_in > oldest_out:
-            return True, "inputs newer than outputs"
+        if newest_in >= oldest_out:
+            return True, "inputs not older than outputs"
         return False, "up to date"
 
 
@@ -316,17 +330,12 @@ def _run_one(task: Task) -> int:
     print(f"-> {task.name}")
     start = time.monotonic()
     try:
-        task.fn()
+        _execute_task(task)
     except Exception as exc:
         logger.exception("Task %s failed", task.name)
         print(f"!! {task.name} failed: {exc}")
         return 1
     elapsed = time.monotonic() - start
-    try:
-        _verify_outputs(task)
-    except TaskFailure as exc:
-        print(f"!! {task.name} {exc}")
-        return 1
     print(f"   {task.name} done in {elapsed:.1f}s")
     return 0
 
@@ -426,6 +435,20 @@ def _verify_outputs(task: Task) -> None:
         raise TaskFailure(f"did not produce: {missing}")
 
 
+def _execute_task(task: Task) -> None:
+    """Execute a task and publish its completion marker last."""
+    marker = task.completion_marker
+    if marker is not None:
+        marker.unlink(missing_ok=True)
+    task.fn()
+    _verify_outputs(task)
+    if marker is not None:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        temporary = marker.with_name(f"{marker.name}.tmp-{os.getpid()}")
+        temporary.write_text(f"task={task.name}\n", encoding="utf-8")
+        temporary.replace(marker)
+
+
 def _pool_startup_probe() -> None:
     """Importable no-op used to prove that a process-pool worker can start."""
 
@@ -436,4 +459,4 @@ def _worker(task: Task) -> None:
     Runs the task's callable. Must be importable at module top level so
     pickling works.
     """
-    task.fn()
+    _execute_task(task)

@@ -26,6 +26,8 @@ Targets exposed to `pstrain build`:
 from __future__ import annotations
 
 import functools
+import json
+import os
 import shutil
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -80,6 +82,31 @@ def _build_tree_worker(
 # parameters; the wrapping `Task.fn` takes no args.
 
 
+def _make_provenance_task(ctx: PipelineContext, stage: str) -> Task:
+    """Materialize canonical, content-addressed effective configuration."""
+    output = ctx.provenance_path(stage)
+
+    def run() -> None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        temporary = output.with_name(f"{output.name}.tmp-{os.getpid()}")
+        temporary.write_text(
+            json.dumps(ctx.provenance_document(stage), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(output)
+
+    return Task(
+        name=f"provenance:{stage}",
+        fn=run,
+        outputs=(output,),
+        description=f"Record effective {stage} configuration",
+    )
+
+
+def _record_model_provenance(ctx: PipelineContext, output_dir: Path) -> None:
+    shutil.copyfile(ctx.provenance_path("training"), output_dir / "provenance.json")
+
+
 def _make_feat_params_task(ctx: PipelineContext) -> Task:
     """Write `feat.params` after all feature files exist. By depending on
     every `.mfc`, this task acts as the sentinel for the "features"
@@ -92,7 +119,7 @@ def _make_feat_params_task(ctx: PipelineContext) -> Task:
     return Task(
         name="feat_params",
         fn=run,
-        inputs=_all_feature_files(ctx),
+        inputs=(*_all_feature_files(ctx), ctx.provenance_path("features")),
         outputs=(out,),
         description="Write feature extraction parameters (after all MFCCs exist)",
     )
@@ -129,7 +156,7 @@ def _make_extract_tasks(ctx: PipelineContext) -> list[Task]:
             Task(
                 name=f"extract:{fileid}",
                 fn=functools.partial(_extract_features_worker, audio, mfc, params),
-                inputs=(audio,),
+                inputs=(audio, ctx.provenance_path("features")),
                 outputs=(mfc,),
                 parallel_group="features",
             )
@@ -173,7 +200,7 @@ def _make_split_task(ctx: PipelineContext) -> Task:
     return Task(
         name="split",
         fn=run,
-        inputs=(src,),
+        inputs=(src, ctx.provenance_path("split")),
         outputs=outputs,
         description="Partition all.transcription into train/test fileids + transcripts",
     )
@@ -203,11 +230,12 @@ def _make_flat_task(ctx: PipelineContext) -> Task:
             ceplen=ctx.feat.ncep,
         )
         write_feat_params(out_dir / "feat.params", ctx.feat)
+        _record_model_provenance(ctx, out_dir)
 
     return Task(
         name="flat",
         fn=run,
-        inputs=(phoneset, train_fileids, *feature_files),
+        inputs=(phoneset, train_fileids, *feature_files, ctx.provenance_path("training")),
         outputs=tuple(ctx.model_files("flat")),
         description="Initialize flat (uniform) acoustic model",
     )
@@ -260,6 +288,7 @@ def _make_bw_train_task(
         if copy_mdef_from_src:
             shutil.copy(src_dir / "mdef", out_dir / "mdef")
         write_feat_params(out_dir / "feat.params", ctx.feat)
+        _record_model_provenance(ctx, out_dir)
         print(f"   {name}: {result.iterations} iter(s), converged={result.converged}")
 
     return Task(
@@ -305,6 +334,7 @@ def _make_split_and_train_task(
             multipron=ctx.train.multipron_training,
         )
         write_feat_params(out_dir / "feat.params", ctx.feat)
+        _record_model_provenance(ctx, out_dir)
         print(f"   {name}: split + {result.iterations} iter(s), converged={result.converged}")
 
     return Task(
@@ -349,11 +379,18 @@ def _make_cd_untied_init_task(ctx: PipelineContext) -> Task:
             output_dir=out_dir,
         )
         write_feat_params(out_dir / "feat.params", ctx.feat)
+        _record_model_provenance(ctx, out_dir)
 
     return Task(
         name="cd-untied-init",
         fn=run,
-        inputs=(*ctx.model_files("ci-1g"), phoneset, dictionary, transcription),
+        inputs=(
+            *ctx.model_files("ci-1g"),
+            phoneset,
+            dictionary,
+            transcription,
+            ctx.provenance_path("training"),
+        ),
         outputs=tuple(ctx.model_files("cd-untied-init")),
         description="Initialize CD untied model from CI-1g",
     )
@@ -500,7 +537,7 @@ def _make_alltriphones_mdef_task(ctx: PipelineContext) -> Task:
     return Task(
         name="alltriphones-mdef",
         fn=run,
-        inputs=(phoneset, dictionary),
+        inputs=(phoneset, dictionary, ctx.provenance_path("training")),
         outputs=(out_path,),
         description="Generate alltriphones mdef from dictionary",
     )
@@ -529,6 +566,7 @@ def _make_cd_1g_init_task(ctx: PipelineContext) -> Task:
             output_dir=out_dir,
         )
         write_feat_params(out_dir / "feat.params", ctx.feat)
+        _record_model_provenance(ctx, out_dir)
 
     return Task(
         name="cd-1g-init",
@@ -575,6 +613,7 @@ def _make_package_task(
         pkg_dir / "acoustic" / "transition_matrices",
         pkg_dir / "acoustic" / "noisedict",
         pkg_dir / "README.txt",
+        pkg_dir / "provenance.json",
     )
 
     def run() -> None:
@@ -587,6 +626,7 @@ def _make_package_task(
             dictionary_path=dictionary,
             filler_dict_path=ctx.filler_dict,
         )
+        shutil.copyfile(ctx.provenance_path("training"), pkg_dir / "provenance.json")
 
     return Task(
         name=name,
@@ -704,6 +744,9 @@ def build_pipeline(ctx: PipelineContext) -> Pipeline:
     directory fails immediately during pipeline construction.
     """
     pl = Pipeline()
+
+    for stage in ("features", "split", "training"):
+        pl.add(_make_provenance_task(ctx, stage))
 
     pl.add(_make_split_task(ctx))
     pl.add(_make_feat_params_task(ctx))
