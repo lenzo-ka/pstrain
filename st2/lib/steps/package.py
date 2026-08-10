@@ -10,73 +10,12 @@ import logging
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
-from st2.lib.config import DEFAULT_FEAT_PARAMS
 from st2.lib.model import MODEL_FILES_REQUIRED
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["package_model", "create_feat_params", "create_noisedict"]
-
-# Shorthand for defaults
-_D = DEFAULT_FEAT_PARAMS
-
-
-def create_feat_params(
-    output_path: Path,
-    samprate: int | None = None,
-    nfilt: int | None = None,
-    nfft: int | None = None,
-    lowerf: float | None = None,
-    upperf: float | None = None,
-    ncep: int | None = None,
-    feat_type: str | None = None,
-) -> Path:
-    """Create feat.params file for Sphinx decoders.
-
-    Args:
-        output_path: Output file path
-        samprate: Sampling rate in Hz (default from DEFAULT_FEAT_PARAMS)
-        nfilt: Number of mel filters (default from DEFAULT_FEAT_PARAMS)
-        nfft: FFT size (default from DEFAULT_FEAT_PARAMS)
-        lowerf: Lower frequency bound (default from DEFAULT_FEAT_PARAMS)
-        upperf: Upper frequency bound (default from DEFAULT_FEAT_PARAMS)
-        ncep: Number of cepstral coefficients (default from DEFAULT_FEAT_PARAMS)
-        feat_type: Feature type string (default from DEFAULT_FEAT_PARAMS)
-
-    Returns:
-        Path to created file
-    """
-    # Apply defaults from canonical source
-    samprate = samprate if samprate is not None else _D["samprate"]
-    nfilt = nfilt if nfilt is not None else _D["nfilt"]
-    nfft = nfft if nfft is not None else _D["nfft"]
-    lowerf = lowerf if lowerf is not None else _D["lowerf"]
-    upperf = upperf if upperf is not None else _D["upperf"]
-    ncep = ncep if ncep is not None else _D["ncep"]
-    feat_type = feat_type if feat_type is not None else _D["feat_type"]
-
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with open(output_path, "w") as f:
-        f.write(f"-samprate {samprate}\n")
-        f.write(f"-nfilt {nfilt}\n")
-        f.write(f"-nfft {nfft}\n")
-        f.write(f"-lowerf {lowerf}\n")
-        f.write(f"-upperf {upperf}\n")
-        f.write(f"-ncep {ncep}\n")
-        f.write(f"-feat {feat_type}\n")
-        # Additional params that decoders may need
-        f.write("-transform dct\n")
-        f.write("-lifter 0\n")
-        f.write("-unit_area yes\n")
-        f.write("-round_filters yes\n")
-        f.write("-remove_dc yes\n")
-
-    logger.info("Created feat.params: %s", output_path)
-    return output_path
+__all__ = ["package_model", "create_noisedict"]
 
 
 def create_noisedict(
@@ -117,7 +56,6 @@ def package_model(
     model_name: str | None = None,
     dictionary_path: Path | None = None,
     filler_dict_path: Path | None = None,
-    feat_params: dict[str, Any] | None = None,
     include_dict: bool = True,
 ) -> dict[str, Path]:
     """Package a trained model for distribution.
@@ -131,7 +69,6 @@ def package_model(
         model_name: Name for the model (used in output path)
         dictionary_path: Path to pronunciation dictionary
         filler_dict_path: Path to filler dictionary
-        feat_params: Feature parameters dict (samprate, nfilt, etc.)
         include_dict: Whether to include dictionary in package
 
     Returns:
@@ -155,6 +92,11 @@ def package_model(
     """
     model_dir = Path(model_dir)
     output_dir = Path(output_dir)
+    source_feat_params = model_dir / "feat.params"
+    if not source_feat_params.is_file():
+        raise FileNotFoundError(
+            f"cannot package model: trained model directory lacks feat.params: {source_feat_params}"
+        )
 
     if model_name:
         package_dir = output_dir / model_name
@@ -178,18 +120,8 @@ def package_model(
         else:
             logger.warning("Model file not found: %s", src)
 
-    # Create feat.params (defaults come from DEFAULT_FEAT_PARAMS)
-    feat_params = feat_params or {}
-    feat_path = create_feat_params(
-        acoustic_dir / "feat.params",
-        samprate=feat_params.get("samprate"),
-        nfilt=feat_params.get("nfilt"),
-        nfft=feat_params.get("nfft"),
-        lowerf=feat_params.get("lowerf"),
-        upperf=feat_params.get("upperf"),
-        ncep=feat_params.get("ncep"),
-        feat_type=feat_params.get("feat_type"),
-    )
+    feat_path = acoustic_dir / "feat.params"
+    shutil.copyfile(source_feat_params, feat_path)
     result["feat_params"] = feat_path
 
     # Create noisedict
@@ -218,7 +150,7 @@ def package_model(
 
     # Create README
     readme_path = package_dir / "README.txt"
-    _create_readme(readme_path, model_name, feat_params)
+    _create_readme(readme_path, model_name)
     result["readme"] = readme_path
 
     logger.info("Packaged model to: %s", package_dir)
@@ -228,12 +160,9 @@ def package_model(
 def _create_readme(
     output_path: Path,
     model_name: str | None,
-    feat_params: dict[str, Any] | None,
 ) -> None:
     """Create README file for the model package."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    feat_params = feat_params or {}
-
     content = f"""ST2 Acoustic Model Package
 ==========================
 
@@ -273,12 +202,7 @@ Command line:
 
 Feature Parameters
 ------------------
-Sample rate: {feat_params.get("samprate", 16000)} Hz
-Mel filters: {feat_params.get("nfilt", 40)}
-FFT size: {feat_params.get("nfft", 512)}
-Frequency range: {feat_params.get("lowerf", 130)}-{feat_params.get("upperf", 6800)} Hz
-Cepstral coefficients: {feat_params.get("ncep", 13)}
-Feature type: {feat_params.get("feat_type", "1s_c_d_dd")}
+See acoustic/feat.params (copied verbatim from the trained model).
 
 License
 -------
