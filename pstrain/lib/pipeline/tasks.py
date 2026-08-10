@@ -106,12 +106,14 @@ def _make_provenance_task(ctx: PipelineContext, stage: str) -> Task:
     def run() -> None:
         output.parent.mkdir(parents=True, exist_ok=True)
         temporary = output.with_name(f"{output.name}.tmp-{os.getpid()}")
-        temporary.write_text(
-            json.dumps(ctx.provenance_document(stage), indent=2, sort_keys=True, allow_nan=False)
-            + "\n",
-            encoding="utf-8",
-        )
         with _provenance_lock(output.parent, stage):
+            temporary.write_text(
+                json.dumps(
+                    ctx.provenance_document(stage), indent=2, sort_keys=True, allow_nan=False
+                )
+                + "\n",
+                encoding="utf-8",
+            )
             for sibling in output.parent.glob(f"{stage}-*.json"):
                 if sibling != output:
                     sibling.unlink()
