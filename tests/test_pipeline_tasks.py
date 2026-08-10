@@ -579,13 +579,24 @@ def test_bw_mixture_floor_is_higher_only_for_tied_cd_stages() -> None:
     assert _mixw_floor_for_stage("cd-8g") == 1e-5
 
 
-def test_bw_transition_floor_changes_at_tied_cd_boundary() -> None:
+def test_bw_transition_floor_mapping_covers_every_training_stage() -> None:
     from pstrain.lib.pipeline.tasks import _tmat_floor_for_stage
 
-    assert _tmat_floor_for_stage("ci-8g") == 1e-4
-    assert _tmat_floor_for_stage("cd-untied") == 1e-4
-    assert _tmat_floor_for_stage("cd-1g") == 1e-5
-    assert _tmat_floor_for_stage("cd-8g") == 1e-5
+    bw_stages = [spec.name for spec in TARGETS if spec.kind in {"ci", "cd"} and spec.name != "flat"]
+    actual = {stage: _tmat_floor_for_stage(stage) for stage in bw_stages}
+    assert actual == {
+        "ci-1g": 1e-4,
+        "ci-2g": 1e-4,
+        "ci-4g": 1e-4,
+        "ci-8g": 1e-4,
+        "cd-untied": 1e-4,
+        "cd-1g": 1e-5,
+        "cd-2g": 1e-5,
+        "cd-4g": 1e-5,
+        "cd-8g": 1e-5,
+        "cd-16g": 1e-5,
+        "cd-32g": 1e-5,
+    }
 
 
 def test_configured_bw_parameters_reach_training_call(
