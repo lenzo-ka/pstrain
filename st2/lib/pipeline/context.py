@@ -25,7 +25,7 @@ Path conventions (mirroring the prior Snakefile):
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +49,8 @@ class FeatParams:
     nfft: int = 512
     lowerf: int = 130
     upperf: int = 6800
+    # Pre-emphasis coefficient (`-alpha`). 0.97 is the engine default.
+    alpha: float = 0.97
     feat_type: str = "1s_c_d_dd"
     # Cepstral lifter window (sphinx_fe `-lifter`). 22 = SphinxTrain default.
     lifter: int = 22
@@ -105,7 +107,7 @@ DEFAULT_CONFIGS: dict[str, dict[str, Any]] = {
         },
     },
     "wideband": {
-        "description": "Wideband (16kHz) speech",
+        "description": "Wideband (16kHz) microphone speech",
         "features": {
             "samprate": 16000,
             "ncep": 13,
@@ -122,7 +124,7 @@ DEFAULT_CONFIGS: dict[str, dict[str, Any]] = {
         },
     },
     "telephone": {
-        "description": "Telephone (8kHz) speech",
+        "description": "Telephone (8kHz) narrowband speech",
         "features": {
             "samprate": 8000,
             "ncep": 13,
@@ -138,7 +140,59 @@ DEFAULT_CONFIGS: dict[str, dict[str, Any]] = {
             "max_iterations": 10,
         },
     },
+    "wideband_large": {
+        "description": "Wideband with more senones (larger datasets)",
+        "features": {
+            "samprate": 16000,
+            "ncep": 13,
+            "nfilt": 40,
+            "nfft": 512,
+            "lowerf": 130,
+            "upperf": 6800,
+            "feat_type": "1s_c_d_dd",
+        },
+        "training": {
+            "n_state": 3,
+            "n_senones": 4000,
+            "max_iterations": 10,
+        },
+    },
+    "sphinxtrain": {
+        "description": "Matched to SphinxTrain defaults for comparison",
+        "features": {
+            "samprate": 16000,
+            "ncep": 13,
+            "nfilt": 25,
+            "nfft": 512,
+            "lowerf": 130,
+            "upperf": 6800,
+            "alpha": 0.97,
+            "lifter": 22,
+            "feat_type": "1s_c_d_dd",
+        },
+        "training": {
+            "n_state": 3,
+            "n_senones": 200,
+            "max_iterations": 10,
+        },
+    },
 }
+
+
+def _validate_params(
+    profile: str,
+    block: str,
+    values: dict[str, Any],
+    params_type: type[FeatParams] | type[TrainParams] | type[SplitParams],
+) -> None:
+    """Reject misspelled profile parameters with configuration context."""
+    known = {item.name for item in fields(params_type)}
+    unknown = sorted(set(values) - known)
+    if unknown:
+        parameter = block.removesuffix("s")
+        raise ValueError(
+            f"unknown {parameter} parameter {unknown[0]!r} in profile {profile!r}"
+        )
 
 
 def load_configs(project_dir: Path) -> dict[str, dict[str, Any]]:
@@ -181,14 +235,20 @@ class PipelineContext:
             available = ", ".join(sorted(configs))
             raise ValueError(f"unknown config {config_name!r}; available: {available}")
         cfg = configs[config_name]
+        feature_values = cfg.get("features", {})
+        training_values = cfg.get("training", {})
+        split_values = cfg.get("split", {})
+        _validate_params(config_name, "features", feature_values, FeatParams)
+        _validate_params(config_name, "training", training_values, TrainParams)
+        _validate_params(config_name, "split", split_values, SplitParams)
         return cls(
             project_dir=project_dir,
             experiment=experiment,
             config_name=config_name,
             description=cfg.get("description", ""),
-            feat=FeatParams(**cfg.get("features", {})),
-            train=TrainParams(**cfg.get("training", {})),
-            split=SplitParams(**cfg.get("split", {})),
+            feat=FeatParams(**feature_values),
+            train=TrainParams(**training_values),
+            split=SplitParams(**split_values),
         )
 
     @property
