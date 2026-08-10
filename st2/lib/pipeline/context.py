@@ -190,9 +190,7 @@ def _validate_params(
     unknown = sorted(set(values) - known)
     if unknown:
         parameter = block.removesuffix("s")
-        raise ValueError(
-            f"unknown {parameter} parameter {unknown[0]!r} in profile {profile!r}"
-        )
+        raise ValueError(f"unknown {parameter} parameter {unknown[0]!r} in profile {profile!r}")
 
 
 def load_configs(project_dir: Path) -> dict[str, dict[str, Any]]:

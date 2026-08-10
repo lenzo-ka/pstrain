@@ -148,9 +148,7 @@ def test_extract_task_forwards_lifter(empty_project: Path, monkeypatch: pytest.M
 
 
 def test_extract_task_forwards_preemphasis_alpha(empty_project: Path) -> None:
-    (empty_project / "etc" / "configs.yaml").write_text(
-        "custom:\n  features:\n    alpha: 0.42\n"
-    )
+    (empty_project / "etc" / "configs.yaml").write_text("custom:\n  features:\n    alpha: 0.42\n")
     ctx = PipelineContext.from_config(empty_project, config_name="custom")
 
     extract_task = build_pipeline(ctx).tasks()["extract:placeholder"]
@@ -175,9 +173,7 @@ def test_nested_and_flat_audio_fanout_uses_relative_fileids(empty_project: Path)
         "extract:spk1/utt2",
         "extract:spk2/utt1",
     ]
-    assert tasks["extract:spk1/utt1"].outputs == (
-        ctx.features_dir / "spk1" / "utt1.mfc",
-    )
+    assert tasks["extract:spk1/utt1"].outputs == (ctx.features_dir / "spk1" / "utt1.mfc",)
 
 
 def test_audio_fileids_are_recursive_sorted_relative_posix_paths(empty_project: Path) -> None:
@@ -332,9 +328,7 @@ def test_shipped_profiles_equal_builtin_defaults() -> None:
 def test_unknown_profile_parameter_names_context(
     empty_project: Path, block: str, key: str, expected: str
 ) -> None:
-    (empty_project / "etc" / "configs.yaml").write_text(
-        f"sphinxtrain:\n  {block}:\n    {key}: 1\n"
-    )
+    (empty_project / "etc" / "configs.yaml").write_text(f"sphinxtrain:\n  {block}:\n    {key}: 1\n")
 
     with pytest.raises(
         ValueError,

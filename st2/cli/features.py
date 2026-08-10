@@ -18,9 +18,7 @@ class FeaturesCommand(ProjectCommand):
 
     name = "features"
     help = "Extract acoustic features from audio files"
-    description = (
-        "Extract MFCC features from audio files found recursively under audio/."
-    )
+    description = "Extract MFCC features from audio files found recursively under audio/."
 
     def add_arguments(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument(

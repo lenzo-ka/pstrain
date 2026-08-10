@@ -79,9 +79,7 @@ def test_packaging_copies_trained_feat_params_despite_config_drift(tmp_path: Pat
         ("varnorm", "yes"),
     ],
 )
-def test_feat_params_rejects_values_hardcoded_by_training(
-    field: str, requested: str
-) -> None:
+def test_feat_params_rejects_values_hardcoded_by_training(field: str, requested: str) -> None:
     feat = FeatParams(**{field: requested})
 
     with pytest.raises(
