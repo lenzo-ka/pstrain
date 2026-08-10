@@ -166,6 +166,7 @@ class BWTrainer:
 
         self._dict_set = False
         self._last_process_result = 0
+        self._last_process_retried = False
         self._retry_transaction_active = False
 
     def __del__(self) -> None:
