@@ -574,6 +574,92 @@ def test_programmatic_cancel_aborts_active_fanout_and_records_timing_status(
     assert json.loads(artifact.read_text())["status"] == "aborted"
 
 
+def test_pipeline_rejects_overlapping_runs_and_cancel_targets_active_run(
+    tmp_path: Path,
+) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    output = tmp_path / "output"
+
+    def wait_for_release() -> None:
+        entered.set()
+        release.wait(timeout=10)
+        output.touch()
+
+    pipeline = Pipeline()
+    pipeline.add(Task("wait", wait_for_release, outputs=(output,)))
+    pipeline.register_target("all", output)
+    result: list[int] = []
+    thread = threading.Thread(target=lambda: result.append(pipeline.run("all")))
+    thread.start()
+    assert entered.wait(timeout=5)
+    try:
+        with pytest.raises(RuntimeError, match="already has an active run"):
+            pipeline.run("all")
+        pipeline.cancel()
+    finally:
+        release.set()
+        thread.join(timeout=10)
+
+    assert not thread.is_alive()
+    assert result == [0]
+    # Cancellation was late enough that the sole task genuinely completed.
+    pipeline.cancel()  # Idle cancellation is explicitly a no-op.
+
+
+@pytest.mark.parametrize(
+    ("execution", "expected_status", "expected_rc"),
+    [
+        (runner._ExecutionResult(0, [], "completed"), "completed", 0),
+        (runner._ExecutionResult(1, [], "failed"), "aborted", 1),
+    ],
+)
+def test_late_cancellation_status_depends_on_genuine_completion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    execution: runner._ExecutionResult,
+    expected_status: str,
+    expected_rc: int,
+) -> None:
+    output = tmp_path / "output"
+    pipeline = Pipeline(tmp_path)
+    pipeline.add(Task("work", functools.partial(_touch, output), outputs=(output,)))
+    pipeline.register_target("all", output)
+
+    def cancel_during_execute(*_args: object, **_kwargs: object) -> runner._ExecutionResult:
+        pipeline.cancel()
+        return execution
+
+    monkeypatch.setattr(runner, "_execute", cancel_during_execute)
+    assert pipeline.run("all") == expected_rc
+    artifact = next((tmp_path / ".pstrain" / "timings").glob("*.json"))
+    assert json.loads(artifact.read_text())["status"] == expected_status
+
+
+def test_signal_handler_sets_cancellation_when_announcement_pipe_breaks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cancellation = threading.Event()
+    handler = runner._signal_cancellation(cancellation)
+
+    def broken_print(*_args: object, **_kwargs: object) -> None:
+        raise BrokenPipeError
+
+    monkeypatch.setattr("builtins.print", broken_print)
+    handler._handle(signal.SIGTERM, None)
+    assert cancellation.is_set()
+
+
+def test_config_reference_names_runner_keys_used_by_context() -> None:
+    reference = (Path(__file__).parents[1] / "docs" / "api" / "config-reference.rst").read_text(
+        encoding="utf-8"
+    )
+    assert "``runner.jobs``" in reference
+    assert "``runner.nice``" in reference
+    assert "``parallel.n_jobs``" not in reference
+    assert "``parallel.nice``" not in reference
+
+
 def _wait_for_job_pids(path: Path) -> list[int]:
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
@@ -593,27 +679,50 @@ def _pid_exists(pid: int) -> bool:
     return True
 
 
+def _kill_fixture_tree(process: subprocess.Popen[str], pids: list[int]) -> None:
+    """Best-effort cleanup for every process recorded by the fixture."""
+    for pid in pids[::2]:
+        try:
+            if os.getpgid(pid) == pid:
+                os.killpg(pid, signal.SIGKILL)
+            else:
+                os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    if process.poll() is None:
+        process.kill()
+    try:
+        process.communicate(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.communicate(timeout=10)
+
+
 @pytest.mark.parametrize("signum", [signal.SIGINT, signal.SIGTERM])
 def test_signal_aborts_tree_and_rerun_resumes_from_completed_frontier(
     tmp_path: Path, signum: signal.Signals
 ) -> None:
     command = [sys.executable, "-m", "tests.job_control_fixture", str(tmp_path), "30"]
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    pids = _wait_for_job_pids(tmp_path / "pids")
-    marker = Task("work:0", lambda: None, outputs=(tmp_path / "out-0",)).completion_marker
-    deadline = time.monotonic() + 10
-    while marker is not None and not marker.exists() and time.monotonic() < deadline:
-        time.sleep(0.05)
-    process.send_signal(signum)
-    output, _ = process.communicate(timeout=15)
+    pids: list[int] = []
+    try:
+        pids = _wait_for_job_pids(tmp_path / "pids")
+        marker = Task("work:0", lambda: None, outputs=(tmp_path / "out-0",)).completion_marker
+        deadline = time.monotonic() + 10
+        while marker is not None and not marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        process.send_signal(signum)
+        output, _ = process.communicate(timeout=15)
 
-    assert process.returncode != 0
-    assert "pipeline aborted" in output
-    assert marker is not None and marker.exists()
-    deadline = time.monotonic() + 5
-    while any(_pid_exists(pid) for pid in pids) and time.monotonic() < deadline:
-        time.sleep(0.05)
-    assert not any(_pid_exists(pid) for pid in pids)
+        assert process.returncode != 0
+        assert "pipeline aborted" in output
+        assert marker is not None and marker.exists()
+        deadline = time.monotonic() + 5
+        while any(_pid_exists(pid) for pid in pids) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not any(_pid_exists(pid) for pid in pids)
+    finally:
+        _kill_fixture_tree(process, pids)
 
     (tmp_path / "pids").unlink()
     resumed = subprocess.run(
@@ -633,16 +742,29 @@ def test_second_sigint_hard_exits(tmp_path: Path) -> None:
         stderr=subprocess.STDOUT,
         text=True,
     )
-    pids = _wait_for_job_pids(tmp_path / "pids")
-    process.send_signal(signal.SIGINT)
-    time.sleep(0.005)
-    process.send_signal(signal.SIGINT)
-    process.communicate(timeout=10)
-    assert process.returncode == 128 + signal.SIGINT
-    deadline = time.monotonic() + 5
-    while any(_pid_exists(pid) for pid in pids) and time.monotonic() < deadline:
-        time.sleep(0.05)
-    assert not any(_pid_exists(pid) for pid in pids)
+    pids: list[int] = []
+    try:
+        pids = _wait_for_job_pids(tmp_path / "pids")
+        process.send_signal(signal.SIGINT)
+        assert process.stdout is not None
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            line = process.stdout.readline()
+            if "received SIGINT; stopping pipeline" in line:
+                break
+            if process.poll() is not None:
+                pytest.fail("fixture exited before its first SIGINT handler engaged")
+        else:
+            pytest.fail("first SIGINT handler did not announce engagement")
+        process.send_signal(signal.SIGINT)
+        process.communicate(timeout=15)
+        assert process.returncode == 128 + signal.SIGINT
+        deadline = time.monotonic() + 5
+        while any(_pid_exists(pid) for pid in pids) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not any(_pid_exists(pid) for pid in pids)
+    finally:
+        _kill_fixture_tree(process, pids)
 
 
 def test_native_helper_dies_when_pool_worker_is_killed(tmp_path: Path) -> None:
@@ -652,15 +774,19 @@ def test_native_helper_dies_when_pool_worker_is_killed(tmp_path: Path) -> None:
         stderr=subprocess.STDOUT,
         text=True,
     )
-    pids = _wait_for_job_pids(tmp_path / "pids")
-    worker_pid, helper_pid = pids[:2]
-    os.kill(worker_pid, signal.SIGKILL)
-    process.communicate(timeout=15)
-    assert process.returncode != 0
-    deadline = time.monotonic() + 5
-    while _pid_exists(helper_pid) and time.monotonic() < deadline:
-        time.sleep(0.05)
-    assert not _pid_exists(helper_pid)
+    pids: list[int] = []
+    try:
+        pids = _wait_for_job_pids(tmp_path / "pids")
+        worker_pid, helper_pid = pids[:2]
+        os.kill(worker_pid, signal.SIGKILL)
+        process.communicate(timeout=15)
+        assert process.returncode != 0
+        deadline = time.monotonic() + 5
+        while _pid_exists(helper_pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not _pid_exists(helper_pid)
+    finally:
+        _kill_fixture_tree(process, pids)
 
 
 def test_pool_probe_failure_aborts_batch_without_inline_execution(
@@ -749,7 +875,7 @@ def test_pool_probe_timeout_abandons_worker_and_aborts_batch(
 
     assert runner._run_parallel_batch(batch, jobs=2) == 1
     assert submitted == [runner._pool_startup_probe]
-    assert shutdown_calls == [(False, True)]
+    assert shutdown_calls == [(True, True)]
     assert all(not output.exists() for output in outputs)
 
 

@@ -173,18 +173,21 @@ name
    :Description: Experiment name
 
 
-parallel
---------
+runner
+------
 
-``parallel.n_jobs``
-   :Type: ``int``
-   :Default: ``-1``
-   :Description: Number of parallel jobs: 1=serial, -1=auto (CPU count minus 2), N=specific count
+``runner.jobs``
+   :Type: ``int | None``
+   :Default: ``None``
+   :Description: Number of parallel jobs: unset=auto (CPU count minus 2), 1=serial, N=specific count
 
-``parallel.nice``
+``runner.nice``
    :Type: ``int``
    :Default: ``5``
    :Description: POSIX worker niceness increment; 0 disables
+
+parallel
+--------
 
 ``parallel.show_progress``
    :Type: ``bool``
