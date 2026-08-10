@@ -67,12 +67,12 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Run tests
-        # ST2_REQUIRE_CLIB=1 turns "C library not loadable" from a silent
+        # PSTRAIN_REQUIRE_CLIB=1 turns "C library not loadable" from a silent
         # skip into a hard failure, so this job can't go green while the
         # entire CFFI/parity tier is quietly skipped.
         env:
-          ST2_REQUIRE_CLIB: "1"
-        run: pytest -v --cov=st2 --cov-report=xml
+          PSTRAIN_REQUIRE_CLIB: "1"
+        run: pytest -v --cov=pstrain --cov-report=xml
 
       - name: Upload coverage
         uses: codecov/codecov-action@v7
@@ -99,10 +99,10 @@ jobs:
           pip install ruff mypy
 
       - name: Run ruff
-        run: ruff check st2/ tests/
+        run: ruff check pstrain/ tests/
 
       - name: Run ruff format check
-        run: ruff format --check st2/ tests/
+        run: ruff format --check pstrain/ tests/
 
   # Type checking (strict mypy, blocking).
   typecheck:
@@ -122,4 +122,4 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Run mypy
-        run: mypy st2/ --ignore-missing-imports
+        run: mypy pstrain/ --ignore-missing-imports

@@ -2,13 +2,13 @@
 
 Basic usage examples.
 
-> **Note**: `st2.api` is the recommended public API. `st2.lib` provides the same
+> **Note**: `pstrain.api` is the recommended public API. `pstrain.lib` provides the same
 > functions and can be used interchangeably.
 
 ## Project Setup
 
 ```python
-from st2.api import setup_project
+from pstrain.api import setup_project
 from pathlib import Path
 
 # Set up a new project
@@ -26,7 +26,7 @@ print(f"Project created at: {result['project_dir']}")
 ## Project Validation
 
 ```python
-from st2.api import validate_project
+from pstrain.api import validate_project
 from pathlib import Path
 
 # Validate a project
@@ -43,7 +43,7 @@ else:
 ## Model Creation
 
 ```python
-from st2.api import create_model, CIModel
+from pstrain.api import create_model, CIModel
 
 # Create a CI model instance
 model = create_model("ci", config="baseline")
@@ -65,7 +65,7 @@ print(f"Default max_iterations: {params['max_iterations']}")
 ## Data Structures
 
 ```python
-from st2.api import Dictionary, Phoneset, get_fileids, parse_transcription_file
+from pstrain.api import Dictionary, Phoneset, get_fileids, parse_transcription_file
 from pathlib import Path
 
 # Load dictionary
@@ -87,7 +87,7 @@ print(f"Found {len(fileids)} fileids")
 For advanced users who need direct access to C functions:
 
 ```python
-from st2.lib._st2c import get_lib, get_ffi
+from pstrain.lib._pstrainc import get_lib, get_ffi
 
 lib = get_lib()
 ffi = get_ffi()

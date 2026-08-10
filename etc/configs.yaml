@@ -1,7 +1,7 @@
-# Named configurations for ST2
+# Named configurations for pstrain
 #
 # Each config defines feature extraction and training parameters.
-# Use: st2 build cd-8g --config wideband
+# Use: pstrain build cd-8g --config wideband
 #
 # Paths use config name: shared/features/wideband/, shared/models/cd-8g/wideband/
 # Same config → same outputs → automatic sharing across experiments.

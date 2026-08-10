@@ -107,7 +107,7 @@ git clone https://github.com/cmusphinx/cmudict.git
 ### Step 5: Set Up Project
 
 ```bash
-st2 setup test_arctic \
+pstrain setup test_arctic \
   --transcription /path/to/converted/all.transcription \
   --audio /path/to/cmu_arctic/wav \
   --dictionary /path/to/cmudict.dict \
@@ -222,7 +222,7 @@ The project setup process should:
    - Normalize transcripts (lowercase, remove punctuation)
    - Create `all.transcription` with fileid + normalized words
 
-4. **Set up project** using `st2 setup`
+4. **Set up project** using `pstrain setup`
    - Transcription: converted `all.transcription`
    - Audio: `wav/*.wav` files
    - Dictionary: CMUDict

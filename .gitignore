@@ -12,7 +12,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-# Build artifacts (root level only, not st2/lib/)
+# Build artifacts (root level only, not pstrain/lib/)
 /lib/
 /lib64/
 parts/
@@ -56,9 +56,9 @@ Thumbs.db
 docs/_build/
 
 # Built C library artifacts
-st2/lib/_cffi/*.dylib
-st2/lib/_cffi/*.so
-st2/lib/_cffi/*.dll
+pstrain/lib/_cffi/*.dylib
+pstrain/lib/_cffi/*.so
+pstrain/lib/_cffi/*.dll
 build.log
 
 # Testing data (do not commit)
@@ -66,7 +66,7 @@ build.log
 cmu_arctic/
 cmu_us_*_arctic/
 *.tar.bz2
-/Volumes/hacks/lenzo/st2/projects/
+/Volumes/hacks/lenzo/pstrain/projects/
 .snakemake/
 
 # Generated training data and models

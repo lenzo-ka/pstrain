@@ -1,13 +1,13 @@
 # Design documentation
 
-Design notes for ST2. Most of these are background documents written
+Design notes for pstrain. Most of these are background documents written
 while making decisions; the current source of truth is the code in
-`st2/lib/`.
+`pstrain/lib/`.
 
 ## Current architecture
 
 * [`pipeline-runner.md`](pipeline-runner.md) — the task runner that
-  orchestrates training (`st2.lib.pipeline`). Replaces an earlier
+  orchestrates training (`pstrain.lib.pipeline`). Replaces an earlier
   Snakemake-based design.
 * [`training-pipeline.md`](training-pipeline.md) — the full training
   workflow: features → flat → ci-Ng → cd-untied → trees → cd-Ng.
@@ -34,7 +34,7 @@ while making decisions; the current source of truth is the code in
 
 ## Past decisions
 
-* [`mlflow-evaluation.md`](mlflow-evaluation.md) — why ST2 doesn't use
+* [`mlflow-evaluation.md`](mlflow-evaluation.md) — why pstrain doesn't use
   MLflow; we keep a small build tracker instead.
 
 ## Decisions reversed (kept here for context)

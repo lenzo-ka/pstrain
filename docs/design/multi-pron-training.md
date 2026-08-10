@@ -91,14 +91,14 @@ graph-builder achieves the same effect:
 | File | Change |
 |---|---|
 | `csrc/include/s3/lexicon.h`<br>`csrc/libs/libcommon/lexicon.c` | Add base-word index `base_ht` and `next_variant` linked list on `lex_entry_t`; new `lexicon_lookup_variants()` + accessors. Existing call sites unchanged. |
-| `csrc/libs/libst2/st2_bw.{h,c}` | New `int32 multipron` flag on the BW context; new `st2_bw_set_multipron()`; `build_utt_state_seq()` dispatches to `next_utt_states` or `next_utt_states_graph`. |
+| `csrc/libs/libpstrain/pstrain_bw.{h,c}` | New `int32 multipron` flag on the BW context; new `pstrain_bw_set_multipron()`; `build_utt_state_seq()` dispatches to `next_utt_states` or `next_utt_states_graph`. |
 | `csrc/programs/bw/next_utt_states.{c,h}` | New `next_utt_states_graph()` alongside the existing linear `next_utt_states()`; shared by the standalone `bw` binary and the CFFI BW context. |
 | `csrc/programs/bw/main.c`<br>`csrc/programs/bw/train_cmd_ln.c` | New `-multipron` argv flag (default `no`) on the standalone `bw` binary; matches the same flag in upstream sphinxtrain PR #58. |
-| `st2/lib/_cffi/cdef.py` | Declare `st2_bw_set_multipron`. |
-| `st2/lib/bw.py` | `BWConfig.multipron` (default `True`); `BWTrainer.__init__` calls the setter. |
-| `st2/lib/steps/train.py` | `run_bw_training(..., multipron=True)` flows into the per-iteration `BWConfig`. |
-| `st2/lib/pipeline/context.py` | `TrainParams.multipron_training` (default `True`). |
-| `st2/lib/pipeline/tasks.py` | Both BW-training task builders pass `ctx.train.multipron_training`. |
+| `pstrain/lib/_cffi/cdef.py` | Declare `pstrain_bw_set_multipron`. |
+| `pstrain/lib/bw.py` | `BWConfig.multipron` (default `True`); `BWTrainer.__init__` calls the setter. |
+| `pstrain/lib/steps/train.py` | `run_bw_training(..., multipron=True)` flows into the per-iteration `BWConfig`. |
+| `pstrain/lib/pipeline/context.py` | `TrainParams.multipron_training` (default `True`). |
+| `pstrain/lib/pipeline/tasks.py` | Both BW-training task builders pass `ctx.train.multipron_training`. |
 
 ### Untouched
 
@@ -140,7 +140,7 @@ Multi-pron training is **on** by default. No configuration changes
 needed. The pipeline picks it up automatically:
 
 ```bash
-st2 build cd-8g           # uses multipron training
+pstrain build cd-8g           # uses multipron training
 ```
 
 Every named config in `etc/configs.yaml` inherits the default.
@@ -160,9 +160,9 @@ sphinxtrain:
     multipron_training: false
 ```
 
-Then `st2 build cd-8g --config sphinxtrain` falls through to the
+Then `pstrain build cd-8g --config sphinxtrain` falls through to the
 legacy `mk_phone_list` + `cvt2triphone` + `state_seq_make` path.
-Output is bit-identical to st2's pre-multipron behavior.
+Output is bit-identical to pstrain's pre-multipron behavior.
 
 ### Mixing models across runs
 
@@ -268,10 +268,10 @@ direction with minimal manual translation.
 
 The two **defaults** differ on purpose:
 
-| Layer | ST2 default | Upstream PR #58 default |
+| Layer | pstrain default | Upstream PR #58 default |
 |---|---|---|
 | C-level `-multipron` flag on `bw` argv | `no` (parity with prior behavior) | `no` (parity with prior behavior) |
-| BW session API used by Python pipeline | `st2_bw_set_multipron(ctx, 1)` — **on** by default | n/a (no CFFI layer) |
+| BW session API used by Python pipeline | `pstrain_bw_set_multipron(ctx, 1)` — **on** by default | n/a (no CFFI layer) |
 | Recipe / config knob | `TrainParams.multipron_training: true` in `etc/configs.yaml` (default `true`) | `CFG_MULTIPRON_TRAINING = 'yes'` in `etc/sphinx_train.cfg` (default `yes`) |
 
 So both projects ship multi-pron training **on** at the layer real

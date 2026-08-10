@@ -6,7 +6,7 @@ CMAKE_BUILD_TYPE ?= Release
 .PHONY: all
 all: build-c install-dev
 
-# Build the C library (libst2c)
+# Build the C library (libpstrainc)
 .PHONY: build-c
 build-c:
 	@echo "Building C library..."
@@ -18,7 +18,7 @@ build-c:
 # Verify C library was built
 .PHONY: check-c
 check-c:
-	@if [ ! -f $(BUILD_DIR)/libst2c.dylib ] && [ ! -f $(BUILD_DIR)/libst2c.so ]; then \
+	@if [ ! -f $(BUILD_DIR)/libpstrainc.dylib ] && [ ! -f $(BUILD_DIR)/libpstrainc.so ]; then \
 		echo "Error: C library not built. Run 'make build-c' first."; \
 		exit 1; \
 	fi
@@ -28,7 +28,7 @@ check-c:
 .PHONY: check-cffi
 check-cffi: check-c
 	@echo "Testing CFFI bindings..."
-	python -c "from st2.lib import _st2c; lib = _st2c.get_lib(); print('CFFI OK: loaded', lib)"
+	python -c "from pstrain.lib import _pstrainc; lib = _pstrainc.get_lib(); print('CFFI OK: loaded', lib)"
 
 .PHONY: install
 install: build-c
@@ -44,13 +44,13 @@ test: check-c
 
 .PHONY: lint
 lint:
-	ruff check st2 tests
-	mypy st2
+	ruff check pstrain tests
+	mypy pstrain
 
 .PHONY: format
 format:
-	ruff format st2 tests
-	ruff check --fix st2 tests
+	ruff format pstrain tests
+	ruff check --fix pstrain tests
 
 .PHONY: clean
 clean:
@@ -65,7 +65,7 @@ clean-c:
 
 .PHONY: docs-gen
 docs-gen:
-	python -c "from st2.lib.config import generate_rst_docs; open('docs/api/config-reference.rst', 'w').write(generate_rst_docs())"
+	python -c "from pstrain.lib.config import generate_rst_docs; open('docs/api/config-reference.rst', 'w').write(generate_rst_docs())"
 
 .PHONY: docs
 docs: docs-gen

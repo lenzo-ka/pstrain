@@ -5,8 +5,8 @@
 Install from source (recommended):
 
 ```bash
-git clone https://github.com/lenzo-ka/st2
-cd st2
+git clone https://github.com/lenzo-ka/pstrain
+cd pstrain
 pip install -e .
 ```
 
@@ -16,28 +16,28 @@ pip install -e .
 
 ```bash
 # Set up a new project
-st2 setup my_project \
+pstrain setup my_project \
     --transcription transcripts.txt \
     --dictionary dictionary.dict \
     --audio audio/
 
 # Validate the project
-st2 validate-project my_project
+pstrain validate-project my_project
 
 # Split data into train/test sets
-st2 split --project-dir my_project
+pstrain split --project-dir my_project
 
 # Extract features
-st2 features --project-dir my_project
+pstrain features --project-dir my_project
 
 # Initialize flat model
-st2 flat --project-dir my_project
+pstrain flat --project-dir my_project
 ```
 
 ### Python API
 
 ```python
-from st2.api import setup_project, validate_project, create_model
+from pstrain.api import setup_project, validate_project, create_model
 from pathlib import Path
 
 # Set up a new project

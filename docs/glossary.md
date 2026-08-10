@@ -1,6 +1,6 @@
 # Glossary
 
-Technical terms used in ST2 and acoustic model training.
+Technical terms used in pstrain and acoustic model training.
 
 ## Model Types
 

@@ -1,8 +1,8 @@
-# Code Review: st2/lib/steps and st2/lib/testing
+# Code Review: pstrain/lib/steps and pstrain/lib/testing
 
 **Date:** 2026-01-15
 **Focus:** Correctness, DRY violations
-**Scope:** `st2/lib/steps/`, `st2/lib/testing/`, related modules
+**Scope:** `pstrain/lib/steps/`, `pstrain/lib/testing/`, related modules
 
 ---
 
@@ -10,7 +10,7 @@
 
 ### ✅ 1.1 `train.py:224-225` — `TrainingResult.final_frames` not populated — FIXED
 
-**File:** `st2/lib/steps/train.py`
+**File:** `pstrain/lib/steps/train.py`
 **Lines:** 220-226
 
 ```python
@@ -36,7 +36,7 @@ return TrainingResult(..., final_frames=last_stats.total_frames, ...)
 
 ### ✅ 1.2 `decoder.py:110` — Fragile CI model detection — FIXED
 
-**File:** `st2/lib/testing/decoder.py`
+**File:** `pstrain/lib/testing/decoder.py`
 **Lines:** 109-110
 
 ```python
@@ -60,7 +60,7 @@ is_ci_model = self._detect_model_type() == "ci"  # Check mdef for triphones
 
 ### ✅ 1.3 `cd_hmm_untied.py:91-98` — Inconsistent return codes — FIXED
 
-**File:** `st2/lib/steps/cd_hmm_untied.py`
+**File:** `pstrain/lib/steps/cd_hmm_untied.py`
 **Lines:** 91-98
 
 ```python
@@ -82,7 +82,7 @@ return 1  # Failure in real execution
 
 ### ✅ 1.4 `cd_pipeline.py:93-137` — `_parse_mdef_stats` reads file twice — FIXED
 
-**File:** `st2/lib/steps/cd_pipeline.py`
+**File:** `pstrain/lib/steps/cd_pipeline.py`
 **Lines:** 93-137
 
 ```python
@@ -105,13 +105,13 @@ def _parse_mdef_stats(mdef_path: Path) -> dict[str, int]:
 
 ### ✅ 1.5 `ci_hmm.py:132-146` — Unreachable code — FIXED
 
-**File:** `st2/lib/steps/ci_hmm.py`
+**File:** `pstrain/lib/steps/ci_hmm.py`
 **Lines:** 132-146
 
 ```python
 raise NotImplementedError(
     "Baum-Welch training not yet implemented via CFFI. "
-    "Need to create st2.lib.bw module with CFFI bindings to bw functions."
+    "Need to create pstrain.lib.bw module with CFFI bindings to bw functions."
 )
 
 # TODO: Future implementation structure:  <-- Unreachable
@@ -126,7 +126,7 @@ raise NotImplementedError(
 
 ### ✅ 1.6 `package.py:93` vs `filler.dict` — Inconsistent filler entries — FIXED
 
-**File:** `st2/lib/steps/package.py:89-93`
+**File:** `pstrain/lib/steps/package.py:89-93`
 
 ```python
 # Create minimal noisedict
@@ -136,7 +136,7 @@ with open(output_path, "w") as f:
     f.write("<sil> SIL\n")
 ```
 
-**File:** `st2/data/filler.dict`
+**File:** `pstrain/data/filler.dict`
 ```
 <sil> SIL
 <s> SIL
@@ -153,7 +153,7 @@ with open(output_path, "w") as f:
 
 ### ✅ 2.1 `WERResult` and `TestResult` — Duplicate properties — FIXED
 
-**Files:** `st2/lib/testing/wer.py`, `st2/lib/testing/test.py`
+**Files:** `pstrain/lib/testing/wer.py`, `pstrain/lib/testing/test.py`
 
 Both classes define nearly identical properties:
 - `accuracy` (same implementation)
@@ -174,9 +174,9 @@ Recommendation: Option 3 — `TestResult` should have a `wer_result: WERResult` 
 ### ✅ 2.2 Feature params defaults repeated — FIXED
 
 **Locations:**
-- `st2/lib/steps/features.py:30-39` (default_params dict)
-- `st2/lib/steps/package.py:21-28` (function defaults)
-- `st2/lib/steps/package.py:177-184` (dict.get calls)
+- `pstrain/lib/steps/features.py:30-39` (default_params dict)
+- `pstrain/lib/steps/package.py:21-28` (function defaults)
+- `pstrain/lib/steps/package.py:177-184` (dict.get calls)
 
 ```python
 # features.py
@@ -197,31 +197,31 @@ def create_feat_params(
 )
 ```
 
-**Fix:** Define canonical defaults in one place (e.g., `st2.lib.config.defaults`) and import everywhere:
+**Fix:** Define canonical defaults in one place (e.g., `pstrain.lib.config.defaults`) and import everywhere:
 ```python
-from st2.lib.config import DEFAULT_FEAT_PARAMS
+from pstrain.lib.config import DEFAULT_FEAT_PARAMS
 ```
 
 ---
 
 ### ✅ 2.3 Model file lists repeated — FIXED
 
-Added `MODEL_FILES_REQUIRED`, `MODEL_FILES_OPTIONAL`, `MODEL_FILES_ALL` constants to `st2/lib/model.py`.
+Added `MODEL_FILES_REQUIRED`, `MODEL_FILES_OPTIONAL`, `MODEL_FILES_ALL` constants to `pstrain/lib/model.py`.
 
 **Locations:**
-- `st2/lib/steps/ci_hmm.py:42-47` (get_inputs flat model files)
-- `st2/lib/steps/ci_hmm.py:58-65` (get_outputs hmm model files)
-- `st2/lib/steps/cd_hmm_untied.py:43-53` (inputs)
-- `st2/lib/steps/cd_hmm_untied.py:58-64` (outputs)
-- `st2/lib/steps/split.py:85-91` (required_files)
-- `st2/lib/steps/package.py:156-162` (model_files)
-- `st2/lib/testing/test.py:144-145` (required_files)
+- `pstrain/lib/steps/ci_hmm.py:42-47` (get_inputs flat model files)
+- `pstrain/lib/steps/ci_hmm.py:58-65` (get_outputs hmm model files)
+- `pstrain/lib/steps/cd_hmm_untied.py:43-53` (inputs)
+- `pstrain/lib/steps/cd_hmm_untied.py:58-64` (outputs)
+- `pstrain/lib/steps/split.py:85-91` (required_files)
+- `pstrain/lib/steps/package.py:156-162` (model_files)
+- `pstrain/lib/testing/test.py:144-145` (required_files)
 
 All refer to the same model files: `mdef`, `means`, `variances`, `mixture_weights`, `transition_matrices`.
 
 **Fix:** Define a constant:
 ```python
-# st2/lib/model.py or st2/lib/constants.py
+# pstrain/lib/model.py or pstrain/lib/constants.py
 MODEL_FILES = ["mdef", "means", "variances", "mixture_weights", "transition_matrices"]
 ```
 
@@ -290,7 +290,7 @@ DEFAULT_UNIFORM_COUNT = 1000.0  # Minimum occupancy for Gaussian splitting
 
 ### ✅ 3.2 `StepContext` mutable dataclass field — FIXED
 
-**File:** `st2/lib/steps/base.py:39`
+**File:** `pstrain/lib/steps/base.py:39`
 
 ```python
 @dataclass
