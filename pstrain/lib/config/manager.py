@@ -192,17 +192,6 @@ class ConfigManager:
             },
             "training": {
                 "n_states": defaults.n_states,
-                "ci": {
-                    "n_iterations": defaults.n_iterations,
-                },
-                "cd": {
-                    "untied": {
-                        "n_iterations": defaults.n_iterations,
-                    },
-                    "tied": {
-                        "n_iterations": defaults.n_iterations,
-                    },
-                },
             },
             "split": {
                 "train_ratio": defaults.train_split,
