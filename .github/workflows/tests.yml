@@ -1,10 +1,17 @@
+# Docs-only changes skip Tests entirely; Build is already path-scoped.
 name: Tests
 
 on:
   push:
     branches: [master, main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
   pull_request:
     branches: [master, main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
   workflow_dispatch:
 
 # Cancel superseded branch/PR runs; never auto-cancel default-branch runs so mainline gets a complete verdict.
