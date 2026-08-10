@@ -157,6 +157,7 @@ class BWTrainer:
             raise RuntimeError("Failed to set multipron flag")
 
         self._dict_set = False
+        self._last_process_result = 0
 
     def __del__(self) -> None:
         """Clean up C context."""
@@ -254,8 +255,22 @@ class BWTrainer:
             n_frames,
             transcript.encode(),
         )
-
+        self._last_process_result = ret
         return bool(ret == 0)
+
+    @property
+    def final_state_not_reached(self) -> bool:
+        """Whether forward pruning lost the final state on the last MFCC update."""
+        return self._last_process_result == -2
+
+    def set_a_beam(self, a_beam: float) -> float:
+        """Set the forward beam and return its previous value."""
+        if a_beam <= 0:
+            raise ValueError("a_beam must be positive")
+        previous = float(self._lib.pstrain_bw_set_a_beam(self._ctx, a_beam))
+        if previous <= 0:
+            raise RuntimeError("Failed to set forward beam")
+        return previous
 
     def process_utterance(
         self,

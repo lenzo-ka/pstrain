@@ -323,5 +323,5 @@ error:
 
     E_ERROR("%s ignored\n", corpus_utt_brief_name());
 
-    return S3_ERROR;
+    return ret;
 }

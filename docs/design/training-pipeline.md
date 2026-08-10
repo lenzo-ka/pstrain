@@ -341,6 +341,13 @@ def run_bw_training(
 
 **Enables:** `ci-1g` target, and all subsequent training
 
+Forward pruning can occasionally remove the transcript's final state. The live
+training driver treats that native status as recoverable: it retries the
+utterance exactly once with a forward beam widened by `retry_beam_factor`
+(default `1e10`, so `1e-90` becomes `1e-100`), restores the stage beam, and
+only then includes a second failure in the normal skip count and limit. Other
+Baum-Welch failures are never retried.
+
 ---
 
 ### Step 2: Gaussian Split (`steps/split.py`)

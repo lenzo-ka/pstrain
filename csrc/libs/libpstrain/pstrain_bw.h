@@ -8,6 +8,8 @@
 
 #include <sphinxbase/prim_type.h>
 
+#define PSTRAIN_BW_FINAL_STATE_NOT_REACHED -2
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -89,6 +91,10 @@ pstrain_bw_set_dict(pstrain_bw_context_t *ctx,
  */
 int
 pstrain_bw_set_multipron(pstrain_bw_context_t *ctx, int enable);
+
+/** Set the forward pruning beam for a retry, returning the previous value. */
+float64
+pstrain_bw_set_a_beam(pstrain_bw_context_t *ctx, float64 a_beam);
 
 /**
  * Process utterance with transcript text

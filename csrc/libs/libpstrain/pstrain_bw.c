@@ -312,6 +312,18 @@ pstrain_bw_set_multipron(pstrain_bw_context_t *ctx, int enable)
     return 0;
 }
 
+float64
+pstrain_bw_set_a_beam(pstrain_bw_context_t *ctx, float64 a_beam)
+{
+    float64 previous;
+
+    if (!ctx || a_beam <= 0.0)
+        return 0.0;
+    previous = ctx->a_beam;
+    ctx->a_beam = a_beam;
+    return previous;
+}
+
 /*
  * Build a state sequence for one utterance, dispatching to either the
  * historical linear builder (next_utt_states) or the multi-pronunciation
@@ -551,7 +563,8 @@ pstrain_bw_process_utt_mfcc(pstrain_bw_context_t *ctx,
 
     if (ret != S3_SUCCESS) {
         E_ERROR("baum_welch_update failed\n");
-        return -1;
+        return ret == PSTRAIN_BW_FINAL_STATE_NOT_REACHED
+            ? PSTRAIN_BW_FINAL_STATE_NOT_REACHED : -1;
     }
 
     ctx->total_log_lik += log_forw_prob;

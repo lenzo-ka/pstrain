@@ -323,6 +323,7 @@ def _make_bw_train_task(
             ),
             multipron=ctx.train.multipron_training,
             max_skip_fraction=ctx.train.max_skip_fraction,
+            retry_beam_factor=ctx.train.retry_beam_factor,
         )
         if copy_mdef_from_src:
             shutil.copy(src_dir / "mdef", out_dir / "mdef")
@@ -383,6 +384,7 @@ def _make_split_and_train_task(
             ),
             multipron=ctx.train.multipron_training,
             max_skip_fraction=ctx.train.max_skip_fraction,
+            retry_beam_factor=ctx.train.retry_beam_factor,
         )
         write_feat_params(out_dir / "feat.params", ctx.feat)
         _record_model_provenance(ctx, out_dir)

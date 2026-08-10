@@ -104,6 +104,9 @@ class TrainParams:
     min_iterations: int = 1
     # Warn on every skipped update; fail a stage above five percent.
     max_skip_fraction: float = 0.05
+    # Retry forward-final-state pruning failures once at a beam this many
+    # times wider (1e-90 / 1e10 = 1e-100).
+    retry_beam_factor: float = 1e10
     # Tuned by SphinxTrain scripts/40.buildtrees/buildtree.pl for 3-state HMMs.
     tree_state_weights: tuple[float, ...] = (1.0, 0.05, 0.0)
     tree_ssplitmax: int = 7
