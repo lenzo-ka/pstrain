@@ -13,7 +13,7 @@ feat.params is generated as OUTPUT for decoder compatibility.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -359,7 +359,7 @@ class ST2Config(BaseModel):
 
     model_config = {"arbitrary_types_allowed": True}
 
-    def bind_to_project(self, project_dir: Path, config_file: Path | None = None) -> ST2Config:
+    def bind_to_project(self, project_dir: Path, config_file: Path | None = None) -> Self:
         """Bind config to a project directory, enabling path properties.
 
         Args:
@@ -418,7 +418,7 @@ class ST2Config(BaseModel):
         return self.model_dump(exclude={"_project_dir", "_config_file"})
 
     @classmethod
-    def from_yaml(cls, path: Path) -> ST2Config:
+    def from_yaml(cls, path: Path) -> Self:
         """Load configuration from YAML file."""
         import yaml
 
@@ -435,6 +435,6 @@ class ST2Config(BaseModel):
             yaml.dump(self.to_dict(), f, default_flow_style=False, sort_keys=False)
 
     @classmethod
-    def default(cls) -> ST2Config:
+    def default(cls) -> Self:
         """Get default configuration."""
         return cls()

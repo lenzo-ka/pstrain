@@ -19,7 +19,7 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 import numpy as np
 
@@ -58,7 +58,7 @@ class FEParams:
     remove_dc: bool = True
 
     @classmethod
-    def from_config(cls, audio_config: Any, feature_config: Any) -> FEParams:
+    def from_config(cls, audio_config: Any, feature_config: Any) -> Self:
         """Create FEParams from high-level config objects.
 
         Args:
@@ -141,7 +141,7 @@ class FeatureExtractor:
             self._lib.fe_free(self._fe)
             self._fe = None
 
-    def __enter__(self) -> FeatureExtractor:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *args: Any) -> None:

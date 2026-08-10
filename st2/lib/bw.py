@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 
 import numpy as np
 
@@ -69,7 +69,7 @@ class HMM:
         self.tmat = tmat
 
     @classmethod
-    def load(cls, model_dir: Path) -> HMM:
+    def load(cls, model_dir: Path) -> Self:
         """Load model from directory using CFFI."""
         model_dir = Path(model_dir)
 

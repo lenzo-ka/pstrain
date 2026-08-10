@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Self
 
 from st2.lib.dictionary.dictionary import Dictionary
 
@@ -197,7 +198,7 @@ class CMUDict(Dictionary):
         return None
 
     @classmethod
-    def from_file(cls, path: Path) -> CMUDict:
+    def from_file(cls, path: Path) -> Self:
         """Load CMUDict from file.
 
         Overrides parent to return CMUDict instance.

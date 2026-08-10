@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Self
 
 
 class Dictionary:
@@ -54,7 +55,7 @@ class Dictionary:
         self._variants: dict[str, list[str]] = {}
 
     @classmethod
-    def from_file(cls, path: Path) -> Dictionary:
+    def from_file(cls, path: Path) -> Self:
         """Load dictionary from file.
 
         Args:

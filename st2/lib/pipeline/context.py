@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, fields
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 import yaml
 
@@ -225,7 +225,7 @@ class PipelineContext:
         *,
         experiment: str = "default",
         config_name: str = "default",
-    ) -> PipelineContext:
+    ) -> Self:
         """Build a context by reading `project/etc/configs.yaml`."""
         project_dir = Path(project_dir).resolve()
         configs = load_configs(project_dir)

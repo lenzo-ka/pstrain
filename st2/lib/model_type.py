@@ -6,10 +6,11 @@ Each model type has its own training process, directory structure, and parameter
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
+from typing import Self
 
 
-class ModelType(str, Enum):
+class ModelType(StrEnum):
     """Acoustic model types."""
 
     CI = "ci"  # Context-Independent (monophone)
@@ -57,7 +58,7 @@ class ModelType(str, Enum):
         return f"{self.get_model_dir(experiment_dir, config)}/hmm"
 
     @classmethod
-    def from_string(cls, value: str) -> ModelType:
+    def from_string(cls, value: str) -> Self:
         """Parse model type from string.
 
         Args:
