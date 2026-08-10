@@ -99,10 +99,10 @@ jobs:
           pip install ruff mypy
 
       - name: Run ruff
-        run: ruff check st2/
+        run: ruff check st2/ tests/
 
       - name: Run ruff format check
-        run: ruff format --check st2/
+        run: ruff format --check st2/ tests/
 
   # Type checking (strict mypy, blocking).
   typecheck:
