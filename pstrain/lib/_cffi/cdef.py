@@ -383,10 +383,7 @@ void ckd_free_3d(void *ptr);
 // ERROR HANDLING
 // ============================================================
 
-void E_INFO(const char *fmt, ...);
-void E_WARN(const char *fmt, ...);
-void E_ERROR(const char *fmt, ...);
-void E_FATAL(const char *fmt, ...);
+void pstrain_session_reset(void);
 
 // ============================================================
 // CLUSTERING

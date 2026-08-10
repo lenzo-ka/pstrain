@@ -23,6 +23,13 @@
 static const float32 *g_observations = NULL;
 static uint32 g_veclen = 0;
 
+void
+pstrain_kmeans_session_reset(void)
+{
+    g_observations = NULL;
+    g_veclen = 0;
+}
+
 /**
  * Callback for k_means to get observation i.
  */

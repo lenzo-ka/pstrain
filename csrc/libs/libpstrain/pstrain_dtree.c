@@ -708,6 +708,14 @@ static pair_t **init_mixw_dest_list = NULL;
 static pair_t **init_cb_dest_list = NULL;
 static pair_t **init_tmat_dest_list = NULL;
 
+void
+pstrain_dtree_session_reset(void)
+{
+    init_mixw_dest_list = NULL;
+    init_cb_dest_list = NULL;
+    init_tmat_dest_list = NULL;
+}
+
 static void
 init_uniform_mixw(float32 ***dest_mixw,
                   model_def_entry_t *dest,
