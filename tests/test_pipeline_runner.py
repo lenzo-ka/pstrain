@@ -496,6 +496,50 @@ def test_pool_probe_failure_falls_back_entire_batch_inline(
     assert "running sequentially" in caplog.text
 
 
+def test_pool_probe_timeout_abandons_worker_and_falls_back_inline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    outputs = [tmp_path / f"out-{i}" for i in range(2)]
+    submitted: list[object] = []
+    shutdown_calls: list[tuple[bool, bool]] = []
+
+    class TimedOutProbeFuture(Future[None]):
+        def result(self, timeout: float | None = None) -> None:
+            assert timeout == runner._POOL_STARTUP_TIMEOUT_SECONDS
+            raise TimeoutError
+
+    class WedgedProbePool:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def submit(self, fn: object, *args: object, **kwargs: object) -> Future[None]:
+            submitted.append(fn)
+            return TimedOutProbeFuture()
+
+        def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
+            shutdown_calls.append((wait, cancel_futures))
+
+    monkeypatch.setattr(runner, "ProcessPoolExecutor", WedgedProbePool)
+    batch = [
+        runner._PlanEntry(
+            Task(
+                f"group:{i}",
+                functools.partial(_touch, output, str(i)),
+                outputs=(output,),
+                parallel_group="group",
+            ),
+            stale=True,
+            reason="test",
+        )
+        for i, output in enumerate(outputs)
+    ]
+
+    assert runner._run_parallel_batch(batch, jobs=2) == 0
+    assert submitted == [runner._pool_startup_probe]
+    assert shutdown_calls == [(False, True)]
+    assert [output.read_text() for output in outputs] == ["0", "1"]
+
+
 def test_real_submit_failure_after_probe_fails_without_inline_rerun(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

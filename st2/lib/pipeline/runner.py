@@ -354,7 +354,12 @@ def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> int:
     try:
         probe = pool.submit(_pool_startup_probe)
         probe.result(timeout=_POOL_STARTUP_TIMEOUT_SECONDS)
-    except (OSError, BrokenProcessPool, TimeoutError) as exc:
+    except TimeoutError as exc:
+        # Deliberately abandon a wedged worker process: leaking it is preferable
+        # to hanging the entire run while waiting for shutdown.
+        pool.shutdown(wait=False, cancel_futures=True)
+        return _fallback_inline(batch, group_name=group_name, exc=exc)
+    except (OSError, BrokenProcessPool) as exc:
         pool.shutdown(wait=True, cancel_futures=True)
         return _fallback_inline(batch, group_name=group_name, exc=exc)
 
