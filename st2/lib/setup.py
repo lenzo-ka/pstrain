@@ -54,14 +54,11 @@ def setup_project(
     if audio_path is not None:
         audio_path = Path(audio_path).resolve()
         if link_audio:
-            source_in_project = audio_path == project_dir or audio_path.is_relative_to(
-                project_dir
-            )
+            source_in_project = audio_path == project_dir or audio_path.is_relative_to(project_dir)
             source_contains_project = project_dir.is_relative_to(audio_path)
             if source_in_project or source_contains_project:
                 raise ValueError(
-                    "Cannot link project audio from or around the project directory: "
-                    f"{audio_path}"
+                    f"Cannot link project audio from or around the project directory: {audio_path}"
                 )
 
     if audio_path is not None and not link_audio and audio_dir.is_symlink():

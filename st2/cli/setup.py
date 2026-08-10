@@ -104,14 +104,11 @@ class SetupCommand(Command):
         if audio_path is not None and not (audio_path.is_file() or audio_path.is_dir()):
             return CommandResult.fail(f"Audio must be a file or directory: {audio_path}")
         if ctx.args.link and audio_path is not None:
-            source_in_project = audio_path == project_dir or audio_path.is_relative_to(
-                project_dir
-            )
+            source_in_project = audio_path == project_dir or audio_path.is_relative_to(project_dir)
             source_contains_project = project_dir.is_relative_to(audio_path)
             if source_in_project or source_contains_project:
                 return CommandResult.fail(
-                    "Cannot link project audio from or around the project directory: "
-                    f"{audio_path}"
+                    f"Cannot link project audio from or around the project directory: {audio_path}"
                 )
 
         ctx.comment(f"Setup project: {project_dir}")
@@ -228,9 +225,7 @@ class SetupCommand(Command):
             ctx.comment("Validate project")
             report = validate_project(project_dir)
             if not report.is_valid:
-                return CommandResult.fail(
-                    f"Validation failed with {len(report.errors)} error(s)"
-                )
+                return CommandResult.fail(f"Validation failed with {len(report.errors)} error(s)")
             ctx.blank()
 
         ctx.comment("Done. To work in this project:")

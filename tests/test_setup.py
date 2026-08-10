@@ -167,9 +167,7 @@ def test_setup_missing_config_errors(tmp_path: Path, monkeypatch: MonkeyPatch) -
         setup_project(project, config_path=missing)
     assert not project.exists()
 
-    monkeypatch.setattr(
-        sys, "argv", ["st2", "setup", str(project), "--config", str(missing)]
-    )
+    monkeypatch.setattr(sys, "argv", ["st2", "setup", str(project), "--config", str(missing)])
     assert main() == 1
     assert not project.exists()
 
@@ -209,16 +207,12 @@ def test_setup_cli_rejects_transcription_directory_without_creating_project(
     assert not project.exists()
 
 
-def test_setup_cli_accepts_audio_directory(
-    tmp_path: Path, monkeypatch: MonkeyPatch
-) -> None:
+def test_setup_cli_accepts_audio_directory(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     audio_dir = tmp_path / "audio-source"
     audio_dir.mkdir()
     (audio_dir / "sample.wav").write_bytes(b"audio")
     project = tmp_path / "project"
-    monkeypatch.setattr(
-        sys, "argv", ["st2", "setup", str(project), "--audio", str(audio_dir)]
-    )
+    monkeypatch.setattr(sys, "argv", ["st2", "setup", str(project), "--audio", str(audio_dir)])
 
     assert main() == 0
     assert (project / "audio" / "sample.wav").read_bytes() == b"audio"
@@ -328,9 +322,7 @@ def test_validate_partial_split_is_invalid(tmp_path: Path) -> None:
 def test_validate_reports_unique_dictionary_base_words(tmp_path: Path) -> None:
     project = tmp_path / "project"
     setup_project(project)
-    (project / "shared" / "dictionary.dict").write_text(
-        "word W ER D\nword(2) W AO R D\n"
-    )
+    (project / "shared" / "dictionary.dict").write_text("word W ER D\nword(2) W AO R D\n")
     (project / "shared" / "phoneset.txt").write_text("W\nER\nD\nAO\nR\n")
 
     report = validate_project(project)
