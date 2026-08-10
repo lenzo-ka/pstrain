@@ -223,9 +223,20 @@ def validate_project(project_dir: Path, experiment: str = "default") -> Validati
     ]
     present_split_artifacts = [path for path in split_artifacts if path.exists()]
     if not present_split_artifacts:
-        if (project_dir / "etc" / "all.transcription").exists():
+        all_transcription = project_dir / "etc" / "all.transcription"
+        transcription_parse_failed = False
+        try:
+            has_corpus = bool(parse_transcription_file(all_transcription))
+        except FileNotFoundError:
+            has_corpus = False
+        except Exception as e:
+            has_corpus = False
+            transcription_parse_failed = True
+            report.errors.append(f"Error reading all.transcription: {e}")
+
+        if has_corpus:
             report.warnings.append("Split outputs are missing; run st2 split")
-        else:
+        elif not transcription_parse_failed:
             report.errors.append("no transcription; project has no corpus to train on")
     elif len(present_split_artifacts) != len(split_artifacts):
         for path in split_artifacts:

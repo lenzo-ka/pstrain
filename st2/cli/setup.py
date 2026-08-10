@@ -91,17 +91,18 @@ class SetupCommand(Command):
         filler_dict_path = Path(ctx.args.filler_dict).resolve() if ctx.args.filler_dict else None
         config_path = Path(ctx.args.config).resolve() if ctx.args.config else None
 
-        named_sources = [
+        file_sources = [
             ("Transcription", transcription_path),
-            ("Audio", audio_path),
             ("Dictionary", dictionary_path),
             ("Phoneset", phoneset_path),
             ("Filler dictionary", filler_dict_path),
             ("Config file", config_path),
         ]
-        for label, source in named_sources:
-            if source is not None and not source.exists():
-                return CommandResult.fail(f"{label} does not exist: {source}")
+        for label, source in file_sources:
+            if source is not None and not source.is_file():
+                return CommandResult.fail(f"{label} must be a file: {source}")
+        if audio_path is not None and not (audio_path.is_file() or audio_path.is_dir()):
+            return CommandResult.fail(f"Audio must be a file or directory: {audio_path}")
         if ctx.args.link and audio_path is not None:
             source_in_project = audio_path == project_dir or audio_path.is_relative_to(
                 project_dir

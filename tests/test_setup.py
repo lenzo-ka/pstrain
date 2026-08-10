@@ -189,6 +189,41 @@ def test_setup_dry_run_missing_dictionary_errors_without_creating_project(
     assert not project.exists()
 
 
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_setup_cli_rejects_transcription_directory_without_creating_project(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    dry_run: bool,
+) -> None:
+    transcription_dir = tmp_path / "transcription"
+    transcription_dir.mkdir()
+    project = tmp_path / "project"
+    argv = ["st2", "setup", str(project), "--transcription", str(transcription_dir)]
+    if dry_run:
+        argv.append("--dry-run")
+    monkeypatch.setattr(sys, "argv", argv)
+
+    assert main() == 1
+    assert f"Transcription must be a file: {transcription_dir}" in capsys.readouterr().err
+    assert not project.exists()
+
+
+def test_setup_cli_accepts_audio_directory(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    audio_dir = tmp_path / "audio-source"
+    audio_dir.mkdir()
+    (audio_dir / "sample.wav").write_bytes(b"audio")
+    project = tmp_path / "project"
+    monkeypatch.setattr(
+        sys, "argv", ["st2", "setup", str(project), "--audio", str(audio_dir)]
+    )
+
+    assert main() == 0
+    assert (project / "audio" / "sample.wav").read_bytes() == b"audio"
+
+
 def test_setup_clobber_link_rejects_source_inside_project(tmp_path: Path) -> None:
     project = tmp_path / "project"
     source = project / "audio"
@@ -257,6 +292,18 @@ def test_setup_copy_with_clobber_replaces_link_without_touching_source(
 def test_validate_corpusless_project_is_invalid(tmp_path: Path) -> None:
     project = tmp_path / "project"
     setup_project(project)
+
+    report = validate_project(project)
+
+    assert not report.is_valid
+    assert "no transcription; project has no corpus to train on" in report.errors
+    assert "Split outputs are missing; run st2 split" not in report.warnings
+
+
+def test_validate_empty_transcription_is_invalid(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    setup_project(project)
+    (project / "etc" / "all.transcription").write_text("")
 
     report = validate_project(project)
 
