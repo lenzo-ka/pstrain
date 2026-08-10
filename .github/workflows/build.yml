@@ -1,15 +1,31 @@
 name: Build
 
-# Builds the sdist and platform wheels as a packaging health check. Publishing
-# to PyPI is intentionally not configured yet; add a publish job (with a PyPI
-# trusted publisher) when releases are wanted.
+# Builds the sdist and platform wheels for packaging-relevant changes and on demand.
+# A weekly scheduled build detects packaging drift when those files do not change.
 
 on:
   push:
     branches: [master, main]
+    paths:
+      - csrc/**
+      - CMakeLists.txt
+      - pyproject.toml
+      - .github/workflows/build.yml
   pull_request:
     branches: [master, main]
+    paths:
+      - csrc/**
+      - CMakeLists.txt
+      - pyproject.toml
+      - .github/workflows/build.yml
   workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * 1"
+
+# Cancel superseded branch/PR runs; never auto-cancel default-branch runs so mainline gets a complete verdict.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
 
 jobs:
   # Build source distribution
