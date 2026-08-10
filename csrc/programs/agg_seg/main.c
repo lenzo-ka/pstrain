@@ -310,7 +310,9 @@ cnt_st(model_def_t *mdef, lexicon_t *lex)
 	    fprintf(cnt_fp, "%u\n", cnt[i]);
 	}
 	fclose(cnt_fp);
+#ifndef PSTRAIN_LIBRARY_BUILD
 	exit(0);
+#endif
     }
     else {
 	E_INFO("Reading %s\n",
@@ -360,7 +362,9 @@ cnt_phn(model_def_t *mdef, lexicon_t *lex,
 	    fprintf(cnt_fp, "\n");
 	}
 	fclose(cnt_fp);
+#ifndef PSTRAIN_LIBRARY_BUILD
 	exit(0);
+#endif
     }
     else {
 	E_INFO("Reading %s\n",

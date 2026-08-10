@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pstrain.lib import _pstrainc
+from pstrain.lib import _pstrainc, native_worker
 
 
 def generate_ci_mdef(
@@ -25,17 +25,19 @@ def generate_ci_mdef(
         output: Output mdef file path
         n_state: Number of emitting states per phone (typically 3)
 
+    This operation is routed through the persistent native worker, so a
+    missing or malformed phone list cannot terminate the calling interpreter.
+
     Raises:
-        RuntimeError: If generation fails
+        PstrainNativeError: If generation fails. ``PstrainNativeCrashError``
+            when the native code died on a signal, ``PstrainNativeFatalError``
+            when it reported a diagnosed failure.
     """
-    lib = _pstrainc.get_lib()
-    ret = lib.pstrain_mdef_gen_ci(
-        str(phone_list).encode(),
-        str(output).encode(),
-        n_state,
+    native_worker.call(
+        "mdef_gen_ci",
+        (str(phone_list), str(output), n_state),
+        (phone_list,),
     )
-    if ret != 0:
-        raise RuntimeError(f"Failed to generate CI mdef: {phone_list} -> {output}")
 
 
 def generate_alltriphones_mdef(

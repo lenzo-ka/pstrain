@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from pstrain.lib import dtree
+from pstrain.lib import dtree, mdef, native_worker
 
 # Check if library exists
 # libpstrainc availability comes from the shared helper (real loader-based
@@ -94,14 +94,50 @@ class TestMakeQuests:
                 var_path=None,
             )
 
-    @pytest.mark.skip(reason="C code crashes on invalid input files")
     def test_make_quests_semi_continuous_no_mean_var(
         self, ci_mdef_file: Path, tmp_path: Path
     ) -> None:
-        """Test that semi-continuous mode doesn't require mean and var."""
-        # Note: This test is skipped because the C code crashes on invalid files
-        # In a real test, we'd need valid input files
-        pass
+        """Semi-continuous mode needs no mean/var, and bad input is contained.
+
+        This replaces a skip ("C code crashes on invalid input files"): the
+        native failure now arrives as a typed exception instead of taking the
+        interpreter with it, so the argument contract is testable.
+        """
+        mixw = tmp_path / "mixw"
+        mixw.write_bytes(b"not a mixture weight file")
+        output = tmp_path / "questions.txt"
+
+        with pytest.raises(native_worker.PstrainNativeError) as raised:
+            dtree.make_quests(
+                ci_mdef_file,
+                mixw,
+                output,
+                continuous=False,
+                mean_path=None,
+                var_path=None,
+            )
+        assert raised.value.operation == "make_quests"
+        assert raised.value.input_path == str(ci_mdef_file)
+        assert raised.value.diagnostic
+
+        # The interpreter survived and the next guarded call still works.
+        phones = tmp_path / "phones"
+        phones.write_text("AA\nSIL\n")
+        recovered = tmp_path / "recovered.mdef"
+        mdef.generate_ci_mdef(phones, recovered)
+        assert recovered.exists()
+
+    def test_make_quests_malformed_mdef_is_contained(self, tmp_path: Path) -> None:
+        """A malformed mdef reaches the native reader and is contained."""
+        bad_mdef = tmp_path / "bad.mdef"
+        bad_mdef.write_text("this is not a model definition\n")
+        mixw = tmp_path / "mixw"
+        mixw.write_bytes(b"")
+
+        with pytest.raises(native_worker.PstrainNativeError) as raised:
+            dtree.make_quests(bad_mdef, mixw, tmp_path / "questions.txt", continuous=False)
+        assert raised.value.operation == "make_quests"
+        assert raised.value.diagnostic
 
 
 @pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
@@ -201,3 +237,60 @@ class TestPruneTree:
                 min_occ=10.0,
                 allphones=False,
             )
+
+    @staticmethod
+    def _tree_inputs(tmp_path: Path, tree_body: str | None) -> tuple[Path, Path, Path]:
+        """Build a valid mdef/pset plus a tree dir holding ``tree_body``."""
+        phones = tmp_path / "phones"
+        phones.write_text("AA\nSIL\n")
+        valid_mdef = tmp_path / "valid.mdef"
+        mdef.generate_ci_mdef(phones, valid_mdef)
+        pset = tmp_path / "pset"
+        pset.write_text("")
+        trees = tmp_path / "trees"
+        trees.mkdir()
+        if tree_body is not None:
+            for state in range(3):
+                (trees / f"AA-{state}.dtree").write_text(tree_body)
+        return valid_mdef, pset, trees
+
+    def test_stub_tree_segfault_is_contained_and_recovers(self, tmp_path: Path) -> None:
+        """A truncated .dtree dereferences NULL in the reader without killing pytest.
+
+        ``read_final_tree`` does not check ``lineiter_start_clean``, so a
+        zero-length member file segfaults the native code. Before containment
+        this took the whole interpreter down and the surrounding tests were
+        skipped.
+        """
+        valid_mdef, pset, trees = self._tree_inputs(tmp_path, "")
+
+        with pytest.raises(native_worker.PstrainNativeCrashError) as raised:
+            dtree.prune_tree(valid_mdef, pset, trees, tmp_path / "out", 1)
+        assert raised.value.operation == "prune_tree"
+        assert raised.value.signal != 0
+        assert raised.value.input_path == str(valid_mdef)
+
+        # The interpreter survived; the helper respawns and the next call works.
+        recovered = tmp_path / "recovered.mdef"
+        mdef.generate_ci_mdef(tmp_path / "phones", recovered)
+        assert recovered.exists()
+
+    def test_malformed_tree_header_is_contained_as_fatal(self, tmp_path: Path) -> None:
+        """A one-line stub tree with a bad header hits E_FATAL, not the parent."""
+        valid_mdef, pset, trees = self._tree_inputs(tmp_path, "not_n_node 3\n")
+
+        with pytest.raises(native_worker.PstrainNativeFatalError) as raised:
+            dtree.prune_tree(valid_mdef, pset, trees, tmp_path / "out", 1)
+        assert raised.value.operation == "prune_tree"
+        assert raised.value.returncode is not None
+        assert raised.value.returncode > 0
+        assert "n_node" in raised.value.diagnostic
+
+    def test_missing_member_tree_reports_the_failing_input(self, tmp_path: Path) -> None:
+        """A missing member file surfaces the E_FATAL_SYSTEM text, same route."""
+        valid_mdef, pset, trees = self._tree_inputs(tmp_path, None)
+
+        with pytest.raises(native_worker.PstrainNativeFatalError) as raised:
+            dtree.prune_tree(valid_mdef, pset, trees, tmp_path / "out", 1)
+        assert raised.value.operation == "prune_tree"
+        assert "Unable to open" in raised.value.diagnostic

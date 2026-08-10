@@ -362,18 +362,17 @@ class TestMakeQuestsParity:
     """Test make_quests parity."""
 
     # NOTE: make_quests needs -type (.cont./.semi.), which CommandBuilder now
-    # supplies via kwargs, but it segfaults on the tiny synthetic model in
-    # this file — both the CLI (exit 139) and, worse, the in-process CFFI path,
-    # which would take down the whole pytest run. The old body swallowed that
-    # crash into pytest.skip("shell command failed"), masking a real fragility.
-    # Running this for real needs a realistic triphone model (available once
-    # the e2e integration job lands, plan 1.2) and the C decision-tree code
-    # hardened against degenerate input (plan 4.1). Skip explicitly and safely
-    # until then rather than invoke code that can crash the interpreter.
+    # supplies via kwargs, but it segfaults on the tiny synthetic model in this
+    # file. The CFFI half of this comparison is no longer the problem: that call
+    # is routed through the contained native worker, so the crash arrives as a
+    # PstrainNativeCrashError (see tests/test_native_worker.py). What still
+    # blocks the test is the parity half — the shell-out CLI is not contained
+    # and exits 139 on the same fixture — and the fixture itself. Running it for
+    # real needs a realistic triphone model (plan 1.2, e2e corpus).
     @pytest.mark.skip(
-        reason="Needs a realistic triphone model; make_quests segfaults on the "
-        "synthetic fixture (CFFI crash would abort pytest). Tracked: plan 1.2 (e2e "
-        "corpus) + 4.1 (harden C against bad input)."
+        reason="Needs a realistic triphone model: the shell-out half of this "
+        "parity check exits 139 on the synthetic fixture. The CFFI half is "
+        "contained. Tracked: plan 1.2 (e2e corpus)."
     )
     def test_questions_generation(self, test_data_dir: Path) -> None:
         """CFFI vs shell-out question generation (needs a realistic model)."""

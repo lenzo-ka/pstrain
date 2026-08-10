@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from pstrain.lib import mdef
+from pstrain.lib import mdef, native_worker
 
 # Check if library is available
 # libpstrainc availability comes from the shared helper (real loader-based
@@ -101,12 +101,14 @@ class TestGenerateCIMdef:
                 assert n_tied == 30
                 break
 
-    @pytest.mark.skip(reason="C code uses E_FATAL which exits process")
     def test_invalid_phone_list_fails(self, tmp_path: Path) -> None:
         """Test that invalid phone list path fails."""
         output = tmp_path / "ci.mdef"
-        with pytest.raises(RuntimeError):
+        with pytest.raises(native_worker.PstrainNativeFatalError) as raised:
             mdef.generate_ci_mdef(tmp_path / "nonexistent", output)
+        assert raised.value.operation == "mdef_gen_ci"
+        assert raised.value.input_path == str(tmp_path / "nonexistent")
+        assert raised.value.diagnostic
 
 
 @pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")

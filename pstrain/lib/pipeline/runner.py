@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import multiprocessing
 import os
 import time
 from collections.abc import Callable, Iterable
@@ -35,6 +36,8 @@ from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from pathlib import Path
+
+from pstrain.lib.native_worker import PstrainWorkerError
 
 logger = logging.getLogger(__name__)
 
@@ -343,10 +346,14 @@ def _run_one(task: Task) -> int:
 def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> int:
     """Run a batch of independent tasks in a process pool.
 
-    A no-op probe starts a worker before any real work is submitted. Inline
-    fallback is safe only when construction or that probe fails. Once the probe
-    succeeds, an infrastructure error may mean a real task started, so the
-    batch fails instead of being rerun.
+    A no-op probe proves that the pool can start before any real work is
+    submitted. If construction or the probe fails, the batch is aborted: it is
+    never quietly rerun in this process. Guarded native
+    operations exist precisely so that malformed input cannot end the
+    interpreter, and running them here after isolation failed would hand that
+    guarantee back. Additional workers may start lazily after submission and
+    fail after other tasks complete. The batch then fails; completed tasks keep
+    their valid manifests, while unfinished tasks remain stale for the rerun.
     """
     group_name = batch[0].task.parallel_group
     n = len(batch)
@@ -356,9 +363,11 @@ def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> int:
     failures: list[tuple[str, BaseException]] = []
     completed = 0
     try:
-        pool = ProcessPoolExecutor(max_workers=workers)
+        pool = ProcessPoolExecutor(
+            max_workers=workers, mp_context=multiprocessing.get_context("spawn")
+        )
     except (OSError, BrokenProcessPool) as exc:
-        return _fallback_inline(batch, group_name=group_name, exc=exc)
+        return _abort_unstartable_batch(group_name=group_name, exc=exc)
 
     try:
         probe = pool.submit(_pool_startup_probe)
@@ -367,10 +376,10 @@ def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> int:
         # Deliberately abandon a wedged worker process: leaking it is preferable
         # to hanging the entire run while waiting for shutdown.
         pool.shutdown(wait=False, cancel_futures=True)
-        return _fallback_inline(batch, group_name=group_name, exc=exc)
+        return _abort_unstartable_batch(group_name=group_name, exc=exc)
     except (OSError, BrokenProcessPool) as exc:
         pool.shutdown(wait=True, cancel_futures=True)
-        return _fallback_inline(batch, group_name=group_name, exc=exc)
+        return _abort_unstartable_batch(group_name=group_name, exc=exc)
 
     try:
         future_to_task: dict[Future[None], Task] = {}
@@ -409,23 +418,13 @@ def _run_parallel_batch(batch: list[_PlanEntry], *, jobs: int) -> int:
     return 0
 
 
-def _run_inline_batch(batch: list[_PlanEntry]) -> int:
-    """Run a fan-out batch sequentially in the current process."""
-    for entry in batch:
-        rc = _run_one(entry.task)
-        if rc != 0:
-            return rc
-    return 0
-
-
-def _fallback_inline(batch: list[_PlanEntry], *, group_name: str, exc: BaseException) -> int:
-    """Warn once and run a batch inline after pool startup was rejected."""
-    logger.warning(
-        "Cannot start process pool for %s (%s); running sequentially",
-        group_name,
-        exc,
-    )
-    return _run_inline_batch(batch)
+def _abort_unstartable_batch(*, group_name: str, exc: BaseException) -> int:
+    """Abort a batch whose process isolation cannot be established."""
+    detail = str(exc) or type(exc).__name__
+    error = PstrainWorkerError(f"cannot start process pool for {group_name}: {detail}")
+    logger.error("%s", error)
+    print(f"!! fan-out [{group_name}] aborted: {error}")
+    return 1
 
 
 def _verify_outputs(task: Task) -> None:

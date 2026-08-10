@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from pstrain.lib import _pstrainc
+from pstrain.lib import _pstrainc, native_worker
 
 if TYPE_CHECKING:
     import numpy.typing as npt
@@ -171,30 +171,34 @@ def make_quests(
         varfloor: Variance floor.
         niter: Number of iterations.
 
+    This operation is routed through the persistent native worker, so a
+    malformed input file cannot terminate the calling interpreter.
+
     Raises:
         ValueError: If continuous=True but mean_path or var_path not provided.
-        RuntimeError: If question generation fails.
+        PstrainNativeError: If question generation fails. ``PstrainNativeCrashError``
+            when the native code died on a signal, ``PstrainNativeFatalError``
+            when it reported a diagnosed failure.
     """
     if continuous and (mean_path is None or var_path is None):
         raise ValueError("Continuous mode requires mean_path and var_path")
 
-    lib = _pstrainc.get_lib()
-
-    ret = lib.pstrain_make_quests(
-        str(mdef_path).encode(),
-        str(mixw_path).encode(),
-        _pstrainc.path_or_null(mean_path),
-        _pstrainc.path_or_null(var_path),
-        str(output_path).encode(),
-        1 if continuous else 0,
-        npermute,
-        quests_per_state,
-        varfloor,
-        niter,
+    native_worker.call(
+        "make_quests",
+        (
+            str(mdef_path),
+            str(mixw_path),
+            None if mean_path is None else str(mean_path),
+            None if var_path is None else str(var_path),
+            str(output_path),
+            1 if continuous else 0,
+            npermute,
+            quests_per_state,
+            varfloor,
+            niter,
+        ),
+        tuple(path for path in (mdef_path, mixw_path, mean_path, var_path) if path),
     )
-
-    if ret != 0:
-        raise RuntimeError(f"Failed to generate questions: {output_path}")
 
 
 def prune_tree(
@@ -220,27 +224,32 @@ def prune_tree(
         min_occ: Prune nodes with fewer than this many observations.
         allphones: Prune all phones together as single tree.
 
-    Raises:
-        RuntimeError: If tree pruning fails.
-    """
-    lib = _pstrainc.get_lib()
+    This operation is routed through the persistent native worker, so a
+    malformed or truncated ``.dtree`` file cannot terminate the calling
+    interpreter.
 
+    Raises:
+        PstrainNativeError: If tree pruning fails. ``PstrainNativeCrashError``
+            when the native code died on a signal, ``PstrainNativeFatalError``
+            when it reported a diagnosed failure.
+    """
     # Create output directory if needed
     output_tree_dir = Path(output_tree_dir)
     output_tree_dir.mkdir(parents=True, exist_ok=True)
 
-    ret = lib.pstrain_prune_tree(
-        str(mdef_path).encode(),
-        str(pset_path).encode(),
-        str(input_tree_dir).encode(),
-        str(output_tree_dir).encode(),
-        n_seno_target,
-        min_occ,
-        1 if allphones else 0,
+    native_worker.call(
+        "prune_tree",
+        (
+            str(mdef_path),
+            str(pset_path),
+            str(input_tree_dir),
+            str(output_tree_dir),
+            n_seno_target,
+            min_occ,
+            1 if allphones else 0,
+        ),
+        (mdef_path, pset_path, input_tree_dir),
     )
-
-    if ret != 0:
-        raise RuntimeError(f"Failed to prune trees: {output_tree_dir}")
 
 
 def parse_questions(questions_path: Path) -> dict[str, list[str]]:
