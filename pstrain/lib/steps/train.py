@@ -52,22 +52,32 @@ def _process_with_final_state_retry(
     retry_beam_factor: float,
     fileid: str,
 ) -> bool:
-    """Process an update, retrying only a forward-final-state pruning failure."""
-    success = trainer.process_utterance_mfcc(mfcc, transcript)
-    if success or not trainer.final_state_not_reached or retry_beam_factor <= 1.0:
-        return success
+    """Process an update, retrying only a forward-final-state pruning failure.
 
-    retry_beam = normal_beam / retry_beam_factor
-    logger.warning(
-        "Final state not reached for %s; retrying once with a_beam=%.3g",
-        fileid,
-        retry_beam,
-    )
-    previous_beam = trainer.set_a_beam(retry_beam)
+    ``BWTrainer`` is a mutable native session and must not be shared between
+    threads. The debug assertion makes concurrent entry at this mutation seam
+    fail instead of allowing another call to observe the temporary beam.
+    """
+    assert not trainer._retry_transaction_active, "BWTrainer cannot be shared across threads"
+    trainer._retry_transaction_active = True
     try:
-        return trainer.process_utterance_mfcc(mfcc, transcript)
+        success = trainer.process_utterance_mfcc(mfcc, transcript)
+        if success or not trainer.final_state_not_reached or retry_beam_factor <= 1.0:
+            return success
+
+        retry_beam = normal_beam / retry_beam_factor
+        logger.warning(
+            "Final state not reached for %s; retrying once with a_beam=%.3g",
+            fileid,
+            retry_beam,
+        )
+        previous_beam = trainer.set_a_beam(retry_beam)
+        try:
+            return trainer.process_utterance_mfcc(mfcc, transcript)
+        finally:
+            trainer.set_a_beam(previous_beam)
     finally:
-        trainer.set_a_beam(previous_beam)
+        trainer._retry_transaction_active = False
 
 
 @dataclass
@@ -110,7 +120,8 @@ def run_bw_training(
         dictionary: Pronunciation dictionary path
         filler_dict: Filler dictionary path (optional)
         n_iter: Maximum training iterations
-        convergence_ratio: Convergence threshold in average log-likelihood per frame
+        convergence_ratio: Maximum signed absolute change in average log
+            likelihood per frame for convergence
         min_iterations: Minimum number of completed iterations before convergence
         config: BW training configuration
         max_skip_fraction: Fail when skipped utterances exceed this fraction.

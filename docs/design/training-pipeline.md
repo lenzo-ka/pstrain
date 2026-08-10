@@ -348,6 +348,13 @@ utterance exactly once with a forward beam widened by `retry_beam_factor`
 only then includes a second failure in the normal skip count and limit. Other
 Baum-Welch failures are never retried.
 
+**BASIS / deliberate deviation:** upstream SphinxTrain has no retry and silently
+skips an utterance when forward pruning loses the final state. The wider beam
+changes that utterance's lattice and posteriors for the iteration, but recovers
+training evidence that upstream discards. Pstrain therefore permits exactly one
+bounded retry, and accumulator counts come only from a successful pass; the
+failed pass contributes no counts.
+
 ---
 
 ### Step 2: Gaussian Split (`steps/split.py`)

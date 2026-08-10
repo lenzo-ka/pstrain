@@ -105,7 +105,11 @@ class HMM:
 
 
 class BWTrainer:
-    """Baum-Welch trainer using CFFI."""
+    """Baum-Welch trainer using CFFI.
+
+    A trainer owns one mutable native session and must not be shared across
+    threads. In debug mode, the retry transaction asserts this contract.
+    """
 
     def __init__(
         self,
@@ -162,6 +166,7 @@ class BWTrainer:
 
         self._dict_set = False
         self._last_process_result = 0
+        self._retry_transaction_active = False
 
     def __del__(self) -> None:
         """Clean up C context."""

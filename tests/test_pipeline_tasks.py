@@ -579,6 +579,15 @@ def test_bw_mixture_floor_is_higher_only_for_tied_cd_stages() -> None:
     assert _mixw_floor_for_stage("cd-8g") == 1e-5
 
 
+def test_bw_transition_floor_changes_at_tied_cd_boundary() -> None:
+    from pstrain.lib.pipeline.tasks import _tmat_floor_for_stage
+
+    assert _tmat_floor_for_stage("ci-8g") == 1e-4
+    assert _tmat_floor_for_stage("cd-untied") == 1e-4
+    assert _tmat_floor_for_stage("cd-1g") == 1e-5
+    assert _tmat_floor_for_stage("cd-8g") == 1e-5
+
+
 def test_configured_bw_parameters_reach_training_call(
     empty_project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

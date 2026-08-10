@@ -272,6 +272,11 @@ def _mixw_floor_for_stage(model_name: str) -> float:
     return 1e-5 if model_name.startswith("cd-") and model_name != "cd-untied" else 1e-8
 
 
+def _tmat_floor_for_stage(model_name: str) -> float:
+    """Return the SphinxTrain stage-specific transition-probability floor."""
+    return 1e-5 if model_name.startswith("cd-") and model_name != "cd-untied" else 1e-4
+
+
 def _make_bw_train_task(
     ctx: PipelineContext,
     *,
@@ -309,6 +314,7 @@ def _make_bw_train_task(
         # Upstream scripts/50.cd_hmm_tied/baum_welch.pl sets 1e-5 for every
         # tied CD stage; CI and scripts/30.cd_hmm_untied use 1e-8.
         mixw_floor = _mixw_floor_for_stage(out_model)
+        tmat_floor = _tmat_floor_for_stage(out_model)
 
         # All non-split tasks consume a 1-density model (including CD-untied,
         # where upstream deliberately selects one density).
@@ -329,6 +335,7 @@ def _make_bw_train_task(
                 b_beam=ctx.train.b_beam,
                 topn=topn,
                 mixw_floor=mixw_floor,
+                tmat_floor=tmat_floor,
                 multipron=ctx.train.multipron_training,
             ),
             multipron=ctx.train.multipron_training,
@@ -378,6 +385,7 @@ def _make_split_and_train_task(
         # Provenance: scripts/50.cd_hmm_tied/baum_welch.pl uses -mwfloor 1e-5;
         # scripts/20.ci_hmm/baum_welch.pl uses 1e-8.
         mixw_floor = _mixw_floor_for_stage(out_model)
+        tmat_floor = _tmat_floor_for_stage(out_model)
         result = run_bw_training(
             model_dir=split_dir,
             output_dir=out_dir,
@@ -394,6 +402,7 @@ def _make_split_and_train_task(
                 b_beam=ctx.train.b_beam,
                 topn=topn,
                 mixw_floor=mixw_floor,
+                tmat_floor=tmat_floor,
                 multipron=ctx.train.multipron_training,
             ),
             multipron=ctx.train.multipron_training,
