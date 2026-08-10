@@ -32,7 +32,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from st2.lib.pipeline.context import FeatParams, PipelineContext
+from st2.lib.pipeline.context import PipelineContext
+from st2.lib.pipeline.feat_params import write_feat_params
 from st2.lib.pipeline.runner import Pipeline, Task
 
 # Top-level worker functions for ProcessPoolExecutor (must be picklable).
@@ -75,33 +76,6 @@ def _build_tree_worker(
     )
 
 
-# Helpers that emit `feat.params` files (used by features dir and every
-# model dir for decoder compatibility).
-
-
-def _feat_params_lines(feat: FeatParams) -> list[str]:
-    """Emit a SphinxTrain-format `feat.params` file. Every field below
-    is sourced from `FeatParams` so callers can override any of them
-    via `etc/configs.yaml` without touching this file."""
-    return [
-        f"-lowerf {feat.lowerf}\n",
-        f"-upperf {feat.upperf}\n",
-        f"-nfilt {feat.nfilt}\n",
-        f"-transform {feat.transform}\n",
-        f"-lifter {feat.lifter}\n",
-        f"-feat {feat.feat_type}\n",
-        f"-agc {feat.agc}\n",
-        f"-cmn {feat.cmn}\n",
-        f"-varnorm {feat.varnorm}\n",
-    ]
-
-
-def _write_feat_params(path: Path, feat: FeatParams) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
-        f.writelines(_feat_params_lines(feat))
-
-
 # Linear-chain task callables. Each closes over `ctx` plus its specific
 # parameters; the wrapping `Task.fn` takes no args.
 
@@ -113,7 +87,7 @@ def _make_feat_params_task(ctx: PipelineContext) -> Task:
     out = ctx.features_dir / "feat.params"
 
     def run() -> None:
-        _write_feat_params(out, ctx.feat)
+        write_feat_params(out, ctx.feat)
 
     return Task(
         name="feat_params",
@@ -226,7 +200,7 @@ def _make_flat_task(ctx: PipelineContext) -> Task:
             feat_type=ctx.feat.feat_type,
             ceplen=ctx.feat.ncep,
         )
-        _write_feat_params(out_dir / "feat.params", ctx.feat)
+        write_feat_params(out_dir / "feat.params", ctx.feat)
 
     return Task(
         name="flat",
@@ -283,7 +257,7 @@ def _make_bw_train_task(
         )
         if copy_mdef_from_src:
             shutil.copy(src_dir / "mdef", out_dir / "mdef")
-        _write_feat_params(out_dir / "feat.params", ctx.feat)
+        write_feat_params(out_dir / "feat.params", ctx.feat)
         print(f"   {name}: {result.iterations} iter(s), converged={result.converged}")
 
     return Task(
@@ -328,7 +302,7 @@ def _make_split_and_train_task(
             n_iter=ctx.train.max_iterations,
             multipron=ctx.train.multipron_training,
         )
-        _write_feat_params(out_dir / "feat.params", ctx.feat)
+        write_feat_params(out_dir / "feat.params", ctx.feat)
         print(f"   {name}: split + {result.iterations} iter(s), converged={result.converged}")
 
     return Task(
@@ -372,7 +346,7 @@ def _make_cd_untied_init_task(ctx: PipelineContext) -> Task:
             untied_mdef=untied_mdef,
             output_dir=out_dir,
         )
-        _write_feat_params(out_dir / "feat.params", ctx.feat)
+        write_feat_params(out_dir / "feat.params", ctx.feat)
 
     return Task(
         name="cd-untied-init",
@@ -552,7 +526,7 @@ def _make_cd_1g_init_task(ctx: PipelineContext) -> Task:
             tied_mdef=tied_mdef,
             output_dir=out_dir,
         )
-        _write_feat_params(out_dir / "feat.params", ctx.feat)
+        write_feat_params(out_dir / "feat.params", ctx.feat)
 
     return Task(
         name="cd-1g-init",
@@ -610,15 +584,7 @@ def _make_package_task(
             model_name=pkg_name,
             dictionary_path=dictionary,
             filler_dict_path=ctx.filler_dict,
-            feat_params={
-                "samprate": ctx.feat.samprate,
-                "nfilt": ctx.feat.nfilt,
-                "nfft": ctx.feat.nfft,
-                "lowerf": ctx.feat.lowerf,
-                "upperf": ctx.feat.upperf,
-                "ncep": ctx.feat.ncep,
-                "feat_type": ctx.feat.feat_type,
-            },
+            feat_params=ctx.feat,
         )
 
     return Task(
