@@ -25,6 +25,7 @@ from tests.numeric_harness import (
     golden_payload,
     read_model_arrays,
     sha256,
+    strict_golden_enabled,
     train_golden,
     write_golden_subset,
 )
@@ -58,7 +59,7 @@ def _trainer(ctx: PipelineContext, *, multipron: bool = True) -> BWTrainer:
 
 @requires_c_library
 def test_feature_frames_finiteness_and_golden_checksum(flat_project: PipelineContext) -> None:
-    """Choke point A: the front end is finite and byte-stable on one WAV."""
+    """Choke point A: portable feature shape/envelope, plus optional bytes."""
     expected = json.loads(GOLDEN.read_text())["feature"]
     paths = sorted(flat_project.features_dir.glob("*.mfc"))
     assert len(paths) == 10
@@ -68,8 +69,21 @@ def test_feature_frames_finiteness_and_golden_checksum(flat_project: PipelineCon
         assert features.shape[1] == 13
         assert np.isfinite(features).all()
     anchor = flat_project.features_dir / f"{expected['fileid']}.mfc"
-    assert read_sphinx_mfc(anchor).shape[0] == expected["frames"]
-    assert sha256(anchor) == expected["sha256"]
+    values = read_sphinx_mfc(anchor)
+    assert values.shape[0] == expected["frames"]
+    assert values.size == expected["values"]
+    observed = [values.min(), values.max(), values.mean(), values.std(), np.linalg.norm(values)]
+    reference = [
+        expected["minimum"],
+        expected["maximum"],
+        expected["mean"],
+        expected["stddev"],
+        expected["l2_norm"],
+    ]
+    tolerance = json.loads(GOLDEN.read_text())["feature_tolerance"]
+    np.testing.assert_allclose(observed, reference, **tolerance)
+    if strict_golden_enabled():
+        assert sha256(anchor) == expected["sha256"]
 
 
 @requires_c_library
@@ -78,7 +92,7 @@ def test_bw_golden_trajectory_and_accounting(flat_project: PipelineContext, tmp_
     expected = json.loads(GOLDEN.read_text())
     result = train_golden(flat_project, tmp_path / "trained")
     actual = golden_payload(flat_project, result)
-    tolerance = expected["float_tolerance"]
+    tolerance = expected["strict_tolerance" if strict_golden_enabled() else "portable_tolerance"]
     assert len(actual["trajectory"]) == len(expected["trajectory"]) == 3
     for observed, golden in zip(actual["trajectory"], expected["trajectory"], strict=True):
         for key in (
@@ -136,6 +150,45 @@ def test_per_utterance_aggregation_conserves_totals(flat_project: PipelineContex
     )
 
 
+@requires_c_library
+def test_real_training_retry_is_accounted_once_and_conserves_stats(
+    flat_project: PipelineContext, tmp_path: Path
+) -> None:
+    """A recovered real retry is one input and one accumulated contribution."""
+    fileid = "arctic_a0001"
+    fileids = tmp_path / "retry.fileids"
+    transcription = tmp_path / "retry.transcription"
+    fileids.write_text(f"{fileid}\n")
+    text = "author of the danger trail philip steels etc"
+    transcription.write_text(f"{fileid} {text}\n")
+    result = run_bw_training(
+        flat_project.model_dir("flat"),
+        tmp_path / "retried-model",
+        flat_project.features_dir,
+        fileids,
+        transcription,
+        flat_project.shared_dir / "dictionary.dict",
+        flat_project.filler_dict,
+        n_iter=1,
+        config=BWConfig(a_beam=1e-1),
+        retry_beam_factor=1e199,
+    )
+    row = result.trajectory[0]
+    assert (row.input_utts, row.processed_utts, row.retried_utts, row.skipped_utts) == (1, 0, 1, 0)
+    assert row.processed_utts + row.retried_utts + row.skipped_utts == row.input_utts
+
+    direct = _trainer(flat_project)
+    mfcc = read_sphinx_mfc(flat_project.features_dir / f"{fileid}.mfc")
+    assert direct.process_utterance_mfcc(mfcc, f"<s> {text} </s>")
+    expected = direct.get_stats()
+    assert (row.frames, result.final_frames, result.final_utts) == (
+        expected.total_frames,
+        expected.total_frames,
+        expected.total_utts,
+    )
+    assert row.total_log_lik == pytest.approx(expected.total_log_lik, rel=1e-14, abs=1e-8)
+
+
 def _assert_normalized_model(model_dir: Path) -> None:
     arrays = read_model_arrays(model_dir)
     for name, values in arrays.items():
@@ -152,6 +205,10 @@ def test_updates_and_split_schedule_preserve_invariants(full_project: PipelineCo
     senones: int | None = None
     for density in (1, 2, 4, 8):
         model = full_project.model_dir(f"cd-{density}g")
+        checkpoints = sorted((model / "iterations").iterdir())
+        assert checkpoints, f"no per-pass checkpoints for cd-{density}g"
+        for checkpoint in checkpoints:
+            _assert_normalized_model(checkpoint)
         _assert_normalized_model(model)
         mixw, n_mixw, _, actual_density = _pstrainc.read_mixw(str(model / "mixture_weights"))
         assert actual_density == density
@@ -160,11 +217,17 @@ def test_updates_and_split_schedule_preserve_invariants(full_project: PipelineCo
         assert n_mixw == senones
         counts, n_cb, _, count_density = _pstrainc.read_dnom(str(model / "gauden_counts"))
         assert (n_cb, count_density) == (n_mixw, density)
-        observed = counts.sum(axis=(0, 1)) > 0
+        observed = counts > 0
         # The report is intentionally explicit in assertion output: an added
         # unobserved density is a reviewable numerical event, never hidden.
-        unobserved_report = np.flatnonzero(~observed).tolist()
+        unobserved_report = np.argwhere(~observed).tolist()
         assert observed.all(), f"unobserved densities at {density}g: {unobserved_report}"
+
+    ci_model = full_project.model_dir("ci-1g")
+    ci_checkpoints = sorted((ci_model / "iterations").iterdir())
+    assert ci_checkpoints, "no per-pass checkpoints for ci-1g"
+    for checkpoint in ci_checkpoints:
+        _assert_normalized_model(checkpoint)
 
 
 def _ci_state_ids(mdef: Path, phone: str) -> list[int]:

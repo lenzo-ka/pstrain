@@ -18,11 +18,21 @@ seconds on a development machine and remains in the normal test suite.
 pass contains total log-likelihood, per-frame log probability and pass-to-pass
 per-frame delta, frames, input
 utterances, successful utterances, retried utterances, and skipped utterances.
-The same file anchors one extracted feature file by frame count and SHA-256.
+The same file anchors one extracted feature file by frame/value count and a
+portable numerical envelope (minimum, maximum, mean, standard deviation, and
+L2 norm). It also records a same-machine SHA-256.
 
-The floating values use `rtol=1e-12` and `atol=1e-8`. This is intentionally a
-tight same-machine tolerance, not a cross-platform promise. A toolchain,
-architecture, or engine change may require a reviewed golden update.
+The always-on portable tier uses `rtol=1e-6, atol=1e-4` for trajectory totals
+and `rtol=1e-4, atol=1e-3` for the feature envelope. These bounds allow normal
+floating reassociation across compilers without accepting material engine
+movement. At the first-pass total near -167,937, the allowed error is about
+0.168 log units, so the approximately 100-log-unit E1 regression is roughly
+595 times larger than the catch envelope.
+
+Set `PSTRAIN_GOLDEN_STRICT=1` for the strict developer/regeneration tier. It
+adds the exact feature SHA-256 and uses `rtol=1e-12, atol=1e-8` for trajectory
+values. Strict failures may reflect architecture or toolchain differences;
+portable failures require investigation.
 
 Regenerate from the repository root with:
 
@@ -32,12 +42,15 @@ python scripts/regenerate_numeric_golden.py
 
 The script creates a fresh project, records seed 42, builds the fixed flat
 model, runs exactly three passes, and replaces the JSON. Review the numerical
-diff; do not regenerate merely to make an unexplained failure green.
+diff. Regeneration is legitimate only after an understood, intentional
+fixture/toolchain baseline change, never to paper over an engine change. The
+regenerating commit must state why the baseline changed.
 
 ## Five choke points
 
 1. **Feature extraction.** Every mini fixture produces a non-empty 13-wide,
-   finite MFC array. `arctic_a0001` has an exact frame count and byte checksum.
+   finite MFC array. `arctic_a0001` has portable count/envelope checks; strict
+   mode additionally checks its exact bytes.
    Front-end dithering is disabled in this exercised path, so it has no hidden
    stochastic state.
 2. **Aggregation.** The same three utterances are accumulated separately and
@@ -48,9 +61,10 @@ diff; do not regenerate merely to make an unexplained failure green.
    clean fixture requires zero skips. A retry remains a second attempt for the
    same input, not another accounted utterance.
 4. **Per-pass update.** Means, variances, mixture weights, and transition
-   matrices remain finite. Mixture-weight and populated transition rows sum to
-   one, variances remain at or above the native `1e-4` floor, and every density
-   has positive reported occupancy.
+   matrices remain finite after every retained BW pass, including CI passes.
+   Mixture-weight and populated transition rows sum to one, variances remain at
+   or above the native `1e-4` floor, and every senone/codebook density has
+   positive reported occupancy.
 5. **Splitting and propagation.** The shared full build checks the exact
    1→2→4→8 schedule after training each stage. Senone counts remain fixed,
    density/count dimensions match the scheduled value, occupancies are

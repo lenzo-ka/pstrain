@@ -25,6 +25,23 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["run_bw_training", "TrainingIteration", "TrainingResult"]
 
+_CHECKPOINT_FILES = (
+    "mdef",
+    "means",
+    "variances",
+    "mixture_weights",
+    "transition_matrices",
+    "gauden_counts",
+)
+
+
+def _checkpoint_iteration(output_dir: Path, iteration: int) -> None:
+    """Retain the complete model produced by one BW pass for validation."""
+    checkpoint = output_dir / "iterations" / f"{iteration:02d}"
+    checkpoint.mkdir(parents=True, exist_ok=True)
+    for filename in _CHECKPOINT_FILES:
+        shutil.copyfile(output_dir / filename, checkpoint / filename)
+
 
 def _convergence_delta(current: float, previous: float) -> float:
     """Return SphinxTrain's signed per-frame log-likelihood delta."""
@@ -343,6 +360,7 @@ def run_bw_training(
             mixw_path=output_dir / "mixture_weights",
             tmat_path=output_dir / "transition_matrices",
         )
+        _checkpoint_iteration(output_dir, iteration)
 
         # Check convergence
         if iteration > 1:

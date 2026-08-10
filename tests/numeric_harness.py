@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,9 @@ FIXTURE = Path(__file__).parent / "fixtures" / "mini_arctic"
 GOLDEN = Path(__file__).parent / "golden" / "numeric_bw.json"
 GOLDEN_FILEIDS = ("arctic_a0001", "arctic_a0002", "arctic_a0003")
 SEED = 42
+PORTABLE_TOLERANCE = {"rtol": 1e-6, "atol": 1e-4}
+STRICT_TOLERANCE = {"rtol": 1e-12, "atol": 1e-8}
+FEATURE_TOLERANCE = {"rtol": 1e-4, "atol": 1e-3}
 
 
 def sha256(path: Path) -> str:
@@ -84,17 +88,31 @@ def train_golden(ctx: PipelineContext, output: Path) -> TrainingResult:
 def golden_payload(ctx: PipelineContext, result: TrainingResult) -> dict[str, Any]:
     """Serialize only stable numerical inputs and outputs."""
     feature = ctx.features_dir / f"{GOLDEN_FILEIDS[0]}.mfc"
+    values = read_sphinx_mfc(feature)
     return {
-        "schema": 1,
+        "schema": 2,
         "seed": SEED,
-        "float_tolerance": {"rtol": 1e-12, "atol": 1e-8},
+        "portable_tolerance": PORTABLE_TOLERANCE,
+        "strict_tolerance": STRICT_TOLERANCE,
+        "feature_tolerance": FEATURE_TOLERANCE,
         "feature": {
             "fileid": GOLDEN_FILEIDS[0],
-            "frames": int(read_sphinx_mfc(feature).shape[0]),
+            "frames": int(values.shape[0]),
+            "values": int(values.size),
+            "minimum": float(values.min()),
+            "maximum": float(values.max()),
+            "mean": float(values.mean()),
+            "stddev": float(values.std()),
+            "l2_norm": float(np.linalg.norm(values)),
             "sha256": sha256(feature),
         },
         "trajectory": [asdict(item) for item in result.trajectory],
     }
+
+
+def strict_golden_enabled() -> bool:
+    """Return whether same-machine bitwise golden checks were requested."""
+    return os.environ.get("PSTRAIN_GOLDEN_STRICT") == "1"
 
 
 def read_model_arrays(model_dir: Path) -> dict[str, np.ndarray[Any, Any]]:
