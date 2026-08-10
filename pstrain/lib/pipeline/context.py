@@ -28,12 +28,38 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass, field, fields
+from functools import cache
 from pathlib import Path
 from typing import Any, Self
 
 import yaml
 
 from pstrain import __version__
+from pstrain.lib.paths import get_lib_path
+
+
+@cache
+def _sha256_file(path: Path, size: int, mtime_ns: int) -> str:
+    """Hash each observed native-library version once per Python process."""
+    del size, mtime_ns  # They form the cache key and detect in-place rebuilds.
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _native_library_identity() -> dict[str, str]:
+    """Identify the library selected by the same discovery used by CFFI."""
+    lib_path = get_lib_path()
+    if lib_path is None:
+        return {"state": "absent"}
+    resolved = lib_path.resolve()
+    stat = resolved.stat()
+    return {
+        "path": str(resolved),
+        "sha256": _sha256_file(resolved, stat.st_size, stat.st_mtime_ns),
+    }
 
 
 @dataclass(frozen=True)
@@ -296,7 +322,11 @@ class PipelineContext:
 
     def provenance_payload(self, stage: str) -> dict[str, Any]:
         """Canonical effective configuration governing a pipeline stage."""
-        payload: dict[str, Any] = {"stage": stage, "tool_version": __version__}
+        payload: dict[str, Any] = {
+            "stage": stage,
+            "tool_version": __version__,
+            "native_library": _native_library_identity(),
+        }
         if stage == "features":
             payload["features"] = asdict(self.feat)
         elif stage == "split":
@@ -314,7 +344,10 @@ class PipelineContext:
     def provenance_path(self, stage: str) -> Path:
         """Content-addressed path for a stage's effective configuration."""
         canonical = json.dumps(
-            self.provenance_payload(stage), sort_keys=True, separators=(",", ":")
+            self.provenance_payload(stage),
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
         ).encode()
         fingerprint = hashlib.sha256(canonical).hexdigest()
         return (

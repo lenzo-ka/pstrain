@@ -83,16 +83,20 @@ def _build_tree_worker(
 
 
 def _make_provenance_task(ctx: PipelineContext, stage: str) -> Task:
-    """Materialize canonical, content-addressed effective configuration."""
+    """Materialize the sole active content-addressed stage configuration."""
     output = ctx.provenance_path(stage)
 
     def run() -> None:
         output.parent.mkdir(parents=True, exist_ok=True)
         temporary = output.with_name(f"{output.name}.tmp-{os.getpid()}")
         temporary.write_text(
-            json.dumps(ctx.provenance_document(stage), indent=2, sort_keys=True) + "\n",
+            json.dumps(ctx.provenance_document(stage), indent=2, sort_keys=True, allow_nan=False)
+            + "\n",
             encoding="utf-8",
         )
+        for sibling in output.parent.glob(f"{stage}-*.json"):
+            if sibling != output:
+                sibling.unlink()
         temporary.replace(output)
 
     return Task(
