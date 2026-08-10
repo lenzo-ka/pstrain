@@ -256,7 +256,8 @@ pstrain_mdef_gen_untied(const char *phone_list_path,
                     const char *transcript_path,
                     const char *output_path,
                     uint32 n_state,
-                    int32 ignore_wpos)
+                    int32 ignore_wpos,
+                    int32 multipron)
 {
     char **CIlist = NULL;
     hashelement_t **CDhash = NULL;
@@ -306,15 +307,18 @@ pstrain_mdef_gen_untied(const char *phone_list_path,
         goto cleanup;
     }
 
-    /* The BW pronunciation graph can select every dictionary variant and
+    /* In multipron mode the BW pronunciation graph can select every dictionary variant and
      * constructs cross-word left/right context products.  count_triphones()
      * follows only the primary dictionary entry, so occurrence pruning here
      * omits models that the graph is allowed to request.  Such slots fall
      * back to CI states; after those zero-occupancy states are re-estimated,
      * an otherwise valid utterance path can become numerically dead.  Keep
      * the complete dictionary-producible set already enumerated above so
-     * graph topology and untied-model initialization have the same domain. */
-    if (make_CD_heap(CDhash, -1, &CDheap, &cdheapsize) != S3_SUCCESS) {
+     * graph topology and untied-model initialization have the same domain.
+     * The linear path retains upstream mk_mdef_gen semantics: only triphones
+     * with a positive transcript occurrence are emitted. */
+    if (make_CD_heap(CDhash, multipron ? -1 : find_threshold(CDhash),
+                     &CDheap, &cdheapsize) != S3_SUCCESS) {
         E_ERROR("Failed to build triphone heap\n");
         goto cleanup;
     }

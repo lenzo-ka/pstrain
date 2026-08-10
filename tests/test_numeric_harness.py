@@ -391,13 +391,14 @@ def test_cd_variant_boundaries_expand_both_triphone_contexts(
     )
     trainer.set_dict(full_project.shared_dir / "dictionary.dict", full_project.filler_dict)
 
-    rows = {tuple(row[:4]) for row in _mdef_rows(model / "mdef")}
-    assert {
+    mdef_rows = list(_mdef_rows(model / "mdef"))
+    expected_boundary_models = {
         ("AH", "SIL", "AH", "s"),
         ("AH", "SIL", "AE", "s"),
         ("EY", "SIL", "AH", "s"),
         ("EY", "SIL", "AE", "s"),
-    } <= rows
+    }
+    assert expected_boundary_models <= {tuple(row[:4]) for row in mdef_rows}
 
     # `a` has AH/EY variants and `and` has AH/AE initial phones.  Thus the
     # word boundary requires two right-context copies of each `a` variant and
@@ -410,6 +411,11 @@ def test_cd_variant_boundaries_expand_both_triphone_contexts(
     try:
         phone_starts = [index for index in range(n_state[0]) if states[index].m_state == 0]
         assert len(phone_starts) == 14
+        graph_models = [tuple(mdef_rows[states[index].phn][:4]) for index in phone_starts]
+        assert {model for model in graph_models if model in expected_boundary_models} == (
+            expected_boundary_models
+        )
+        assert all(graph_models.count(model) == 1 for model in expected_boundary_models)
         terminal_exits = [index for index in range(n_state[0]) if states[index].n_next == 0]
         assert terminal_exits == [n_state[0] - 1]
     finally:

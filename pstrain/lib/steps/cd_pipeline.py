@@ -41,12 +41,12 @@ def run_untied_mdef(
     output_mdef: Path,
     filler_dict: Path | None = None,
     n_state: int = 3,
+    multipron: bool = True,
 ) -> dict[str, int]:
     """Generate untied triphone mdef from transcripts.
 
-    Creates a model definition containing every dictionary-producible
-    triphone.  This includes alternate-pronunciation cross-word contexts
-    that the multipron training graph can select.
+    In multipron mode, creates every dictionary-producible triphone. In
+    linear mode, retains upstream-compatible observed-only enumeration.
 
     Args:
         phone_list: Path to phone list file (one phone per line)
@@ -55,6 +55,7 @@ def run_untied_mdef(
         output_mdef: Output mdef file path
         filler_dict: Optional filler dictionary
         n_state: Number of emitting states per phone
+        multipron: Whether the downstream trainer uses pronunciation graphs
 
     Returns:
         Dict with mdef statistics (n_ci, n_tri, n_tied_state)
@@ -77,6 +78,7 @@ def run_untied_mdef(
         output=output_mdef,
         filler_dict=filler_dict,
         n_state=n_state,
+        multipron=multipron,
     )
 
     # Parse mdef to get stats
@@ -370,6 +372,7 @@ def build_tree_one(
     csplitmax: int = 2000,
     csplitthr: float = 0.0,
     mwfloor: float = 1e-8,
+    cntthresh: float = 1e-5,
 ) -> None:
     """Build a single decision tree file for one (phone, state).
 
@@ -396,6 +399,7 @@ def build_tree_one(
             csplitmax=csplitmax,
             csplitthr=csplitthr,
             mwfloor=mwfloor,
+            cntthresh=cntthresh,
         )
     except RuntimeError as exc:
         logger.warning("Failed to build tree for %s state %d: %s", phone, state, exc)

@@ -1,17 +1,14 @@
 /**
  * @file phone_graph_triphone.c
- * @brief Context-split + triphone resolution on a phone_graph_t.
+ * @brief Two-sided context cross-product and triphone resolution.
  *
  * Two operations live here:
  *
  *   phone_graph_split_contexts(in) -> out
- *     Build a new graph where every slot has at most one distinct
- *     CI-phone predecessor. Slots whose predecessors carry multiple
- *     CI phones are duplicated, one copy per distinct predecessor
- *     CI phone, and the predecessor edges are partitioned. All copies
- *     of a slot share the same outgoing-edge set, with each outgoing
- *     edge possibly retargeted via the same split rule applied to the
- *     successor.
+ *     Build a new graph where every non-filler slot has one unambiguous
+ *     (left CI phone, right CI phone) pair. Slots are duplicated over the
+ *     cross-product of distinct predecessor and successor contexts, and
+ *     edges connect only compatible copies. Fillers stay shared.
  *
  *   cvt2triphone_graph(graph, acmod_set) -> int
  *     Walks an already-unambiguous-context graph and replaces each
