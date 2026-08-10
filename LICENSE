@@ -25,11 +25,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 --------------------------------------------------------------------------------
 
-This project incorporates C source derived from CMU SphinxTrain, SphinxBase,
-and Sphinx-3 (the vendored code under csrc/), which has been modified as part of
-pstrain. That code is dual-licensed: the original portions remain under the Carnegie
-Mellon University BSD-style license (reproduced in full in csrc/LICENSE.sphinx,
-with per-file CMU copyright notices retained), and the pstrain modifications are
-licensed under the BSD 2-Clause terms above. Those terms also apply to the pstrain
-Python package and to the new C code under csrc/libs/libpstrain/. See csrc/NOTICE.md
-for a breakdown.
+Licensing structure
+
+New pstrain code is Copyright (c) 2026 Kevin Lenzo and is licensed under the
+BSD 2-Clause terms above. Vendored and derived CMU SphinxTrain, SphinxBase, and
+Sphinx-3 components under csrc/ remain Copyright (c) Carnegie Mellon University
+and are licensed under the CMU BSD-style license in csrc/LICENSE.sphinx. See
+THIRD_PARTY_NOTICES.md for component provenance and all applicable notices.

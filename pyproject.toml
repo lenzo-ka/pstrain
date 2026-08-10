@@ -3,7 +3,8 @@ name = "pstrain"
 version = "0.1.0"
 description = "pstrain, the Peace Train - acoustic model training toolkit"
 readme = "README.md"
-license = {text = "BSD-2-Clause"}
+license = "BSD-2-Clause"
+license-files = ["LICENSE", "csrc/LICENSE.sphinx", "THIRD_PARTY_NOTICES.md"]
 requires-python = ">=3.11"
 authors = [
     { name = "Kevin Lenzo", email = "kevinlenzo@gmail.com" }
