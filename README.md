@@ -125,7 +125,9 @@ see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for its notices and credits
 
 ## License
 
-New pstrain code is licensed under the BSD 2-Clause license; vendored and
-derived CMU code remains under its CMU BSD-style license. See [LICENSE](LICENSE),
+New pstrain code is licensed under the BSD 2-Clause license. CMU-derived code
+carries both layers: CMU's BSD-style license applies to the base, and Kevin
+Lenzo's BSD 2-Clause license applies to the pstrain modifications, with git
+history recording those changes. See [LICENSE](LICENSE),
 [csrc/LICENSE.sphinx](csrc/LICENSE.sphinx), and
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the full structure.

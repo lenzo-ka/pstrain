@@ -53,27 +53,83 @@ The CMU notice, reproduced in full, is:
 
 ## LAPACK `slapack_lite`
 
-Copyright/attribution line in the vendored routine headers: “Univ. of
-Tennessee, Univ. of California Berkeley, NAG Ltd., Courant Institute, Argonne
-National Lab, and Rice University.” The file does not state a separate
-copyright sentence.
+The vendored file does not state a separate copyright sentence. Its applicable
+LAPACK routine attribution, version, and date notices are reproduced here
+verbatim (routine names are supplied as headings for context):
 
-License/notice: historical LAPACK 3.0 routine notices embedded in the generated
-C source. The full notices, including the routine version, dates, attribution,
-and documentation, remain in
-[`csrc/libs/libsphinxbase/util/slapack_lite.c`](csrc/libs/libsphinxbase/util/slapack_lite.c).
+### IEEECK
+
+> -- LAPACK auxiliary routine (version 3.0) --
+> Univ. of Tennessee, Univ. of California Berkeley, NAG Ltd.,
+> Courant Institute, Argonne National Lab, and Rice University
+> June 30, 1998
+
+### ILAENV
+
+> -- LAPACK auxiliary routine (version 3.0) --
+> Univ. of Tennessee, Univ. of California Berkeley, NAG Ltd.,
+> Courant Institute, Argonne National Lab, and Rice University
+> June 30, 1999
+
+### SPOSV
+
+> -- LAPACK driver routine (version 3.0) --
+> Univ. of Tennessee, Univ. of California Berkeley, NAG Ltd.,
+> Courant Institute, Argonne National Lab, and Rice University
+> March 31, 1993
+
+### SPOTF2
+
+> -- LAPACK routine (version 3.0) --
+> Univ. of Tennessee, Univ. of California Berkeley, NAG Ltd.,
+> Courant Institute, Argonne National Lab, and Rice University
+> February 29, 1992
+
+### SPOTRF
+
+> -- LAPACK routine (version 3.0) --
+> Univ. of Tennessee, Univ. of California Berkeley, NAG Ltd.,
+> Courant Institute, Argonne National Lab, and Rice University
+> March 31, 1993
+
+### SPOTRS
+
+> -- LAPACK routine (version 3.0) --
+> Univ. of Tennessee, Univ. of California Berkeley, NAG Ltd.,
+> Courant Institute, Argonne National Lab, and Rice University
+> March 31, 1993
 
 This component is a conditional, f2c-translated LAPACK fallback.
 
 ## `f2c_lite`
 
-Copyright line: none is stated in the vendored file header.
+The vendored
+[`csrc/libs/libsphinxbase/util/f2c_lite.c`](csrc/libs/libsphinxbase/util/f2c_lite.c)
+starts with includes and contains no copyright or license header. It implements
+a subset of the f2c compatibility runtime; the following permissive notice is
+reproduced verbatim from the `Notice` file in the recognized upstream Netlib
+`libf2c.zip` distribution:
 
-License/notice: generated f2c compatibility-runtime source notice. The full
-header notice remains in
-[`csrc/libs/libsphinxbase/util/f2c_lite.c`](csrc/libs/libsphinxbase/util/f2c_lite.c),
-including its statement that it is generated code and the embedded f2c
-subscript-checking notice.
+> Copyright 1990 - 1997 by AT&T, Lucent Technologies and Bellcore.
+>
+> Permission to use, copy, modify, and distribute this software
+> and its documentation for any purpose and without fee is hereby
+> granted, provided that the above copyright notice appear in all
+> copies and that both that the copyright notice and this
+> permission notice and warranty disclaimer appear in supporting
+> documentation, and that the names of AT&T, Bell Laboratories,
+> Lucent or Bellcore or any of their entities not be used in
+> advertising or publicity pertaining to distribution of the
+> software without specific, written prior permission.
+>
+> AT&T, Lucent and Bellcore disclaim all warranties with regard to
+> this software, including all implied warranties of
+> merchantability and fitness.  In no event shall AT&T, Lucent or
+> Bellcore be liable for any special, indirect or consequential
+> damages or any damages whatsoever resulting from loss of use,
+> data or profits, whether in an action of contract, negligence or
+> other tortious action, arising out of or in connection with the
+> use or performance of this software.
 
 This component is the conditional lightweight f2c runtime used by the LAPACK
 fallback.
