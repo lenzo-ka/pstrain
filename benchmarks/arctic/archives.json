@@ -22,7 +22,7 @@
       "voice": "clb",
       "url": "http://festvox.org/cmu_arctic/packed/cmu_us_clb_arctic.tar.bz2",
       "sha256": "3f16dc3f3b97955ea22623efb33b444341013fc660677b2e170efdcc959fa7c6",
-      "expected_wavs": 1131
+      "expected_wavs": 1132
     }
   ]
 }

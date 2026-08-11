@@ -49,6 +49,7 @@ class Archive:
     expected_wavs: int
 
 
+# WAV counts were measured from the archives authenticated by these SHA-256 pins.
 ARCHIVES = (
     Archive(
         "slt",
@@ -72,7 +73,7 @@ ARCHIVES = (
         "clb",
         "http://festvox.org/cmu_arctic/packed/cmu_us_clb_arctic.tar.bz2",
         "3f16dc3f3b97955ea22623efb33b444341013fc660677b2e170efdcc959fa7c6",
-        1131,
+        1132,
     ),
 )
 
