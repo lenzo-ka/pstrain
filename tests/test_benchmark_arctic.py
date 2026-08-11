@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import tarfile
-from dataclasses import asdict, replace
+from dataclasses import asdict, fields, replace
 from pathlib import Path
 
 import pytest
@@ -21,6 +21,8 @@ from pstrain.benchmarks.arctic import (
     extract_archive,
     load_transcripts,
     main,
+    make_record,
+    paired_delta_ci,
     validate_record,
 )
 
@@ -71,22 +73,18 @@ def test_pin_configs_resolve_ratified_conditions() -> None:
     assert {on[stage]["convergence_ratio"] for stage in ("ci", "untied", "tied")} == {0.001}
     assert PIN_CONFIGS["off"]["split"]["test_count"] == 0
     assert PIN_CONFIGS["on"]["split"]["test_count"] == 0
-    frozen = {
-        "a_beam",
-        "b_beam",
-        "max_skip_fraction",
-        "retry_beam_factor",
-        "tree_state_weights",
-        "tree_ssplitmax",
-        "tree_ssplitthr",
-        "tree_csplitmax",
-        "tree_csplitthr",
-        "tree_mwfloor",
-        "question_npermute",
-        "question_quests_per_state",
-        "question_niter",
-    }
-    assert all(frozen <= set(PIN_CONFIGS[mode]["training"]) for mode in ("off", "on"))
+    from pstrain.lib.pipeline.context import FeatParams, TrainParams
+
+    assert all(
+        {field.name for field in fields(TrainParams)} == set(PIN_CONFIGS[mode]["training"])
+        for mode in ("off", "on")
+    )
+    assert all(
+        {field.name for field in fields(FeatParams)} == set(PIN_CONFIGS[mode]["features"])
+        for mode in ("off", "on")
+    )
+    assert PIN_CONFIGS["off"]["training"]["exclusion_schedule"] == {}
+    assert PIN_CONFIGS["on"]["training"]["exclusion_schedule"] == {}
     assert set(DECODER_CONDITIONS) == {
         "beam",
         "wbeam",
@@ -101,17 +99,36 @@ def test_pin_configs_resolve_ratified_conditions() -> None:
     }
 
 
-def test_comparison_arithmetic_and_off_big_floor_clause() -> None:
+def _cell(errors: tuple[int, ...], *, recorded: bool) -> dict[str, object]:
+    rows = [[f"voice/u{index}", 10, error] for index, error in enumerate(errors)]
+    total_errors = sum(errors)
+    cell: dict[str, object] = {
+        "wer": total_errors / (10 * len(errors)) * (100 if recorded else 1),
+        "errors": total_errors,
+        "ref_words": 10 * len(errors),
+        "utterances": len(errors),
+        "decoded": len(errors),
+        "oov_tokens": 0,
+    }
+    if recorded:
+        cell["utterance_rows"] = rows
+    else:
+        cell["matched_pairs"] = {row[0]: {"ref_words": row[1], "errors": row[2]} for row in rows}
+    return cell
+
+
+def _comparison_documents() -> tuple[dict[str, object], dict[str, object]]:
     results = {
-        mode: {
-            dataset: {"wer": value / 100} for dataset, value in {"slt55": 20.2, "big": 30.8}.items()
-        }
+        mode: {dataset: _cell((1, 1, 1, 1), recorded=False) for dataset in ("slt55", "big")}
         for mode in ("off", "on")
     }
     actual = {
         "results": results,
         "resources": {"x": "y"},
-        "conditions": {"band": "BM1"},
+        "conditions": {
+            "band": "BM1",
+            "bootstrap": {"resamples": 500, "seed": 11},
+        },
         "engine": {"version": "1"},
     }
     record = {
@@ -120,17 +137,29 @@ def test_comparison_arithmetic_and_off_big_floor_clause() -> None:
         "conditions": actual["conditions"],
         "engine": actual["engine"],
         "results": {
-            mode: {
-                dataset: {"wer": value, "bootstrap_ci_95": [value - 0.25, value + 0.25]}
-                for dataset, value in {"slt55": 20.0, "big": 30.0}.items()
-            }
+            mode: {dataset: _cell((1, 1, 1, 1), recorded=True) for dataset in ("slt55", "big")}
             for mode in ("off", "on")
         },
         "off_big_floor_plus_1": True,
     }
+    return actual, record
+
+
+def test_comparison_uses_true_cross_run_matched_pairs() -> None:
+    actual, record = _comparison_documents()
     rows = compare_results(actual, record)
-    assert [round(row["delta"], 3) for row in rows] == [0.2, 0.8, 0.2, 0.8]
-    assert [row["pass"] for row in rows] == [True, True, True, False]
+    assert [row["delta"] for row in rows] == [0.0] * 4
+    assert [row["paired_delta_ci_95"] for row in rows] == [[0.0, 0.0]] * 4
+    assert all(row["pass"] for row in rows)
+
+    actual["results"]["on"]["big"] = _cell((2, 2, 2, 2), recorded=False)  # type: ignore[index]
+    rows = compare_results(actual, record)
+    assert rows[-1]["paired_delta_ci_95"] == [10.0, 10.0]
+    assert not rows[-1]["pass"]
+
+
+def test_comparison_authenticates_inputs_and_pair_ids() -> None:
+    actual, record = _comparison_documents()
 
     for key in ("resources", "conditions", "engine"):
         drifted = json.loads(json.dumps(actual))
@@ -140,6 +169,10 @@ def test_comparison_arithmetic_and_off_big_floor_clause() -> None:
     assert compare_results(
         {**actual, "engine": {"version": "other"}}, record, allow_engine_drift=True
     )
+    pairs = actual["results"]["off"]["slt55"]["matched_pairs"]  # type: ignore[index]
+    pairs["voice/extra"] = pairs.pop("voice/u0")  # type: ignore[union-attr]
+    with pytest.raises(RuntimeError, match="utterance ID mismatch"):
+        compare_results(actual, record)
 
 
 def test_record_schema_and_bootstrap_smoke() -> None:
@@ -153,6 +186,14 @@ def test_record_schema_and_bootstrap_smoke() -> None:
     }
     low, high = bootstrap_ci(pairs, resamples=200, seed=1)
     assert 0 <= low <= high <= 20
+    delta_low, delta_high = paired_delta_ci(
+        [["a/1", 10, 0], ["a/2", 10, 2], ["b/1", 10, 1]],
+        pairs,
+        speaker_stratified=True,
+        resamples=200,
+        seed=1,
+    )
+    assert delta_low == delta_high == 0
     with pytest.raises(RuntimeError, match="missing required field: engine"):
         validate_record({"schema_version": RECORD_SCHEMA_VERSION})
 
@@ -177,6 +218,24 @@ def test_incomplete_extraction_is_recovered(tmp_path: Path) -> None:
         json.loads((destination / ".pstrain-extraction.json").read_text())["source_archive_sha256"]
         == archive.sha256
     )
+    marker = json.loads((destination / ".pstrain-extraction.json").read_text())
+    assert marker["wav_manifest"] == [
+        {"path": "wav/one.wav", "size": 3, "sha256": marker["wav_manifest"][0]["sha256"]}
+    ]
+
+    (destination / "wav" / "one.wav").write_bytes(b"bad")
+    extract_archive(packed, archive, corpus)
+    assert (destination / "wav" / "one.wav").read_bytes() == b"wav"
+
+
+def test_emitted_record_round_trip_comparison(tmp_path: Path) -> None:
+    actual, _record = _comparison_documents()
+    record = make_record(actual)
+    path = tmp_path / "record.json"
+    path.write_text(json.dumps(record))
+    loaded = json.loads(path.read_text())
+    validate_record(loaded)
+    assert all(row["pass"] for row in compare_results(actual, loaded))
 
 
 def test_gate_failure_blocks_comparison(tmp_path: Path) -> None:

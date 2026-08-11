@@ -19,13 +19,20 @@ performed, use `--no-compare` for an exploratory run or `--emit-record` for the
 pin candidate; there is no placeholder record to compare against. Comparison
 authenticates all corpus archives, transcript files, dictionary and LM, the
 complete training/decode conditions, and engine identity before examining WER.
-Engine drift requires the explicit `--allow-engine-drift` override.
+Each record retains compact per-utterance word/error rows. Comparison aligns
+their IDs with the current run and bootstraps the cross-run paired WER delta
+(100,000 percentile resamples, speaker-stratified for the cross-speaker cell).
+The upper confidence bound must be at or below parity, except for the ratified
+one-point `off/big` floor. Engine identity includes dirty tracked-source state,
+the native library, Python, PocketSphinx, and its dictionary. Engine drift
+requires the explicit `--allow-engine-drift` override.
 
 `PSTRAIN_BENCH_CACHE`
 selects the archive cache; authenticated archives there are reused. The work
 tree defaults to `.pstrain-benchmark/arctic`. Expect approximately 8–16 hours
 on a current laptop and 8 GB of free disk space. `-j N` controls feature and
-tree parallelism.
+tree parallelism. Cache reuse verifies the full WAV name/size inventory and a
+deterministic 32-file hash sample per voice; `--deep-verify` hashes every WAV.
 
 `data/train.transcription` is the normalized 1,132-prompt SLT training corpus
 from the parity workspace's SLT prompt set (SHA-256

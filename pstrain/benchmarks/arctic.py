@@ -13,7 +13,8 @@ import tarfile
 import urllib.error
 import urllib.request
 from contextlib import suppress
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT / "benchmarks" / "arctic" / "data"
-RECORD_SCHEMA_VERSION = 1
+RECORD_SCHEMA_VERSION = 2
 BOOTSTRAP_RESAMPLES = 100_000
 BOOTSTRAP_SEED = 7
 DECODER_CONDITIONS: dict[str, Any] = {
@@ -114,20 +115,7 @@ PIN_CONFIGS: dict[str, dict[str, Any]] = {
             "ci": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.1},
             "untied": {"max_iterations": 6, "min_iterations": 1, "convergence_ratio": 0.1},
             "tied": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.1},
-            "exclusion_schedule": {
-                "ci-1g": {5: ["arctic_a0587"], 6: ["arctic_a0587"]},
-                "cd-untied": {"*": ["arctic_a0587"]},
-                "cd-1g": {
-                    1: ["arctic_a0587"],
-                    2: ["arctic_a0587"],
-                    3: ["arctic_a0587"],
-                    4: ["arctic_a0448", "arctic_a0587"],
-                },
-                "cd-2g": {
-                    1: ["arctic_a0448", "arctic_a0587"],
-                    2: ["arctic_a0448", "arctic_a0587"],
-                },
-            },
+            "exclusion_schedule": {},
         },
         "split": {"test_count": 0, "seed": 42},
     },
@@ -166,6 +154,7 @@ PIN_CONFIGS: dict[str, dict[str, Any]] = {
             "question_niter": 1,
             "multipron_training": True,
             "untied_inventory": "transcript-reachable",
+            "exclusion_schedule": {},
             "ci": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.001},
             "untied": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.001},
             "tied": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.001},
@@ -184,14 +173,53 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def engine_identity() -> dict[str, str]:
-    """Identify the Python engine source used for a benchmark run."""
-    from pstrain import __version__
+def _tracked_modifications_hash() -> str:
+    """Hash paths, states, and contents of tracked worktree modifications."""
+    status = subprocess.run(
+        ["git", "status", "--porcelain=v1", "--untracked-files=no"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    digest = hashlib.sha256()
+    for line in sorted(status):
+        path_text = line[3:]
+        if " -> " in path_text:
+            path_text = path_text.split(" -> ", 1)[1]
+        path = ROOT / path_text
+        digest.update(line[:2].encode())
+        digest.update(path_text.encode())
+        digest.update(b"\0")
+        if path.is_file():
+            digest.update(path.read_bytes())
+        else:
+            digest.update(b"<deleted>")
+    return digest.hexdigest()
 
-    identity = {"version": __version__}
+
+def engine_identity(dictionary: Path | None = None) -> dict[str, str]:
+    """Identify all executable and package inputs used for a benchmark run."""
+    from pstrain import __version__
+    from pstrain.lib.paths import get_lib_path
+
+    identity = {"version": __version__, "python_version": sys.version}
+    if dictionary is None:
+        dictionary = pocketsphinx_dictionary()
+    identity["pocketsphinx_dictionary_sha256"] = sha256(dictionary)
     try:
-        commit = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True, capture_output=True, text=True
+        identity["pocketsphinx_version"] = version("pocketsphinx")
+    except PackageNotFoundError as exc:
+        raise RuntimeError("pocketsphinx package metadata is unavailable") from exc
+    native = get_lib_path()
+    identity["native_library_sha256"] = sha256(native) if native is not None else "absent"
+    try:
+        describe = subprocess.run(
+            ["git", "describe", "--always", "--dirty"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
         ).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
         digest = hashlib.sha256()
@@ -201,12 +229,27 @@ def engine_identity() -> dict[str, str]:
             digest.update(path.read_bytes())
         identity["installed_package_sha256"] = digest.hexdigest()
     else:
-        identity["git_commit"] = commit
+        identity["git_describe"] = describe
+        identity["tracked_modifications_sha256"] = _tracked_modifications_hash()
     return identity
 
 
 def benchmark_conditions() -> dict[str, Any]:
     """Return every pinned benchmark condition that comparison authenticates."""
+    from pstrain.lib.pipeline.context import FeatParams, TrainParams
+
+    # Description and split policy are metadata outside these dataclasses. All
+    # dataclass knobs are frozen; schedules are represented by their nested maps.
+    frozen_fields = {
+        "features": [item.name for item in fields(FeatParams)],
+        "training": [item.name for item in fields(TrainParams)],
+        "exemptions": {},
+    }
+    for mode, config in PIN_CONFIGS.items():
+        for section in ("features", "training"):
+            missing = set(frozen_fields[section]) - set(config[section])
+            if missing:
+                raise RuntimeError(f"PIN config {mode}/{section} leaves knobs unfrozen: {missing}")
     return {
         "band": "BM1",
         "pin_conditions": PIN_CONFIGS,
@@ -218,20 +261,73 @@ def benchmark_conditions() -> dict[str, Any]:
             "big_speaker_stratified": True,
         },
         "cells": {"slt55": "same-speaker resubstitution cell", "big": "cross-speaker"},
+        "frozen_dataclass_fields": frozen_fields,
     }
 
 
-def extract_archive(archive_path: Path, archive: Archive, corpus: Path) -> Path:
+def _wav_manifest(destination: Path) -> list[dict[str, Any]]:
+    wav_root = destination / "wav"
+    return [
+        {
+            "path": path.relative_to(destination).as_posix(),
+            "size": path.stat().st_size,
+            "sha256": sha256(path),
+        }
+        for path in sorted(wav_root.glob("*.wav"))
+    ]
+
+
+def _cached_extraction_valid(
+    destination: Path, archive: Archive, marker_data: Any, *, deep_verify: bool
+) -> bool:
+    if (
+        not isinstance(marker_data, dict)
+        or marker_data.get("source_archive_sha256") != archive.sha256
+    ):
+        return False
+    recorded = marker_data.get("wav_manifest")
+    if not isinstance(recorded, list) or len(recorded) != archive.expected_wavs:
+        return False
+    if any(
+        not isinstance(row, dict)
+        or not isinstance(row.get("path"), str)
+        or not str(row["path"]).startswith("wav/")
+        or not isinstance(row.get("size"), int)
+        or not isinstance(row.get("sha256"), str)
+        or len(row["sha256"]) != 64
+        for row in recorded
+    ):
+        return False
+    wav_root = destination / "wav"
+    current = {
+        path.relative_to(destination).as_posix(): path.stat().st_size
+        for path in wav_root.glob("*.wav")
+    }
+    expected = {row.get("path"): row.get("size") for row in recorded if isinstance(row, dict)}
+    if current != expected:
+        return False
+    check_rows = recorded
+    if not deep_verify:
+        check_rows = sorted(
+            recorded,
+            key=lambda row: hashlib.sha256(str(row["path"]).encode()).digest(),
+        )[: min(32, len(recorded))]
+    return all(sha256(destination / row["path"]) == row.get("sha256") for row in check_rows)
+
+
+def extract_archive(
+    archive_path: Path, archive: Archive, corpus: Path, *, deep_verify: bool = False
+) -> Path:
     """Extract an authenticated archive, recovering incomplete cached extraction."""
     destination = corpus / f"cmu_us_{archive.voice}_arctic"
     marker = destination / ".pstrain-extraction.json"
-    expected_marker = {"source_archive_sha256": archive.sha256}
     valid = False
     if marker.is_file():
         with suppress(OSError, json.JSONDecodeError):
-            valid = json.loads(marker.read_text(encoding="utf-8")) == expected_marker
-    if valid:
-        valid = len(list((destination / "wav").glob("*.wav"))) == archive.expected_wavs
+            marker_data = json.loads(marker.read_text(encoding="utf-8"))
+            valid = _cached_extraction_valid(
+                destination, archive, marker_data, deep_verify=deep_verify
+            )
     if not valid:
         if destination.exists():
             shutil.rmtree(destination)
@@ -244,7 +340,11 @@ def extract_archive(archive_path: Path, archive: Archive, corpus: Path) -> Path:
                 f"WAV inventory mismatch for {archive.voice}: "
                 f"expected {archive.expected_wavs}, got {count}"
             )
-        marker.write_text(json.dumps(expected_marker, sort_keys=True) + "\n", encoding="utf-8")
+        marker_data = {
+            "source_archive_sha256": archive.sha256,
+            "wav_manifest": _wav_manifest(destination),
+        }
+        marker.write_text(json.dumps(marker_data, sort_keys=True) + "\n", encoding="utf-8")
     return destination
 
 
@@ -277,6 +377,53 @@ def bootstrap_ci(
             errors += err[choices].sum(axis=1)
             words += ref[choices].sum(axis=1)
         samples[start : start + size] = 100.0 * errors / words
+    low, high = np.percentile(samples, [2.5, 97.5])
+    return [float(low), float(high)]
+
+
+def paired_delta_ci(
+    recorded_rows: list[list[Any]],
+    actual_pairs: dict[str, dict[str, Any]],
+    *,
+    speaker_stratified: bool,
+    resamples: int = BOOTSTRAP_RESAMPLES,
+    seed: int = BOOTSTRAP_SEED,
+) -> list[float]:
+    """Bootstrap current-minus-recorded WER from aligned utterance rows."""
+    import numpy as np
+
+    recorded = {str(row[0]): (int(row[1]), int(row[2])) for row in recorded_rows}
+    actual = {
+        utterance: (int(value["ref_words"]), int(value["errors"]))
+        for utterance, value in actual_pairs.items()
+    }
+    if set(recorded) != set(actual):
+        missing = sorted(set(recorded) - set(actual))
+        extra = sorted(set(actual) - set(recorded))
+        raise RuntimeError(f"matched-pair utterance ID mismatch: missing={missing}, extra={extra}")
+    for utterance in recorded:
+        if recorded[utterance][0] != actual[utterance][0]:
+            raise RuntimeError(f"matched-pair reference word mismatch for {utterance}")
+    strata: dict[str, list[str]] = {}
+    for utterance in sorted(recorded):
+        speaker = utterance.split("/", 1)[0] if speaker_stratified else "all"
+        strata.setdefault(speaker, []).append(utterance)
+    rng = np.random.default_rng(seed)
+    samples = np.empty(resamples, dtype=np.float64)
+    for start in range(0, resamples, 1000):
+        size = min(1000, resamples - start)
+        old_errors = np.zeros(size, dtype=np.int64)
+        new_errors = np.zeros(size, dtype=np.int64)
+        words = np.zeros(size, dtype=np.int64)
+        for utterances in strata.values():
+            old = np.asarray([recorded[key][1] for key in utterances], dtype=np.int64)
+            new = np.asarray([actual[key][1] for key in utterances], dtype=np.int64)
+            refs = np.asarray([recorded[key][0] for key in utterances], dtype=np.int64)
+            choices = rng.integers(0, len(utterances), size=(size, len(utterances)))
+            old_errors += old[choices].sum(axis=1)
+            new_errors += new[choices].sum(axis=1)
+            words += refs[choices].sum(axis=1)
+        samples[start : start + size] = 100.0 * (new_errors - old_errors) / words
     low, high = np.percentile(samples, [2.5, 97.5])
     return [float(low), float(high)]
 
@@ -467,6 +614,63 @@ def _require_equal(label: str, actual: Any, recorded: Any) -> None:
         raise RuntimeError(f"benchmark {label} mismatch: recorded={recorded!r}, actual={actual!r}")
 
 
+def _validate_cell(cell: Any, label: str, *, recorded: bool) -> None:
+    required = {"wer", "errors", "ref_words", "utterances", "decoded", "oov_tokens"}
+    if recorded:
+        required.add("utterance_rows")
+    if not isinstance(cell, dict) or not required <= set(cell):
+        missing = sorted(required - set(cell) if isinstance(cell, dict) else required)
+        raise RuntimeError(f"benchmark record has invalid result cell {label}: missing {missing}")
+    integer_fields = ("errors", "ref_words", "utterances", "decoded", "oov_tokens")
+    if any(not isinstance(cell[key], int) or cell[key] < 0 for key in integer_fields):
+        raise RuntimeError(f"benchmark record has invalid counts in result cell: {label}")
+    if cell["ref_words"] <= 0 or cell["decoded"] > cell["utterances"]:
+        raise RuntimeError(f"benchmark record has impossible counts in result cell: {label}")
+    expected_wer = cell["errors"] / cell["ref_words"]
+    actual_wer = float(cell["wer"]) / 100 if recorded else float(cell["wer"])
+    if abs(actual_wer - expected_wer) > 1e-12:
+        raise RuntimeError(f"benchmark WER is inconsistent with errors/words: {label}")
+    if recorded:
+        rows = cell["utterance_rows"]
+        if (
+            not isinstance(rows, list)
+            or len(rows) != cell["utterances"]
+            or any(
+                not isinstance(row, list)
+                or len(row) != 3
+                or not isinstance(row[0], str)
+                or not row[0]
+                or not isinstance(row[1], int)
+                or row[1] <= 0
+                or not isinstance(row[2], int)
+                or row[2] < 0
+                for row in rows
+            )
+        ):
+            raise RuntimeError(f"benchmark record has invalid utterance rows: {label}")
+        ids = [row[0] for row in rows]
+        if len(ids) != len(set(ids)):
+            raise RuntimeError(f"benchmark record has duplicate utterance rows: {label}")
+        if (
+            sum(row[1] for row in rows) != cell["ref_words"]
+            or sum(row[2] for row in rows) != cell["errors"]
+        ):
+            raise RuntimeError(f"benchmark record rows disagree with aggregates: {label}")
+    else:
+        pairs = cell.get("matched_pairs")
+        if not isinstance(pairs, dict) or len(pairs) != cell["utterances"]:
+            raise RuntimeError(f"benchmark actual result has invalid matched pairs: {label}")
+        try:
+            pair_words = sum(int(value["ref_words"]) for value in pairs.values())
+            pair_errors = sum(int(value["errors"]) for value in pairs.values())
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError(
+                f"benchmark actual result has invalid matched pairs: {label}"
+            ) from exc
+        if pair_words != cell["ref_words"] or pair_errors != cell["errors"]:
+            raise RuntimeError(f"benchmark actual pairs disagree with aggregates: {label}")
+
+
 def validate_record(record: dict[str, Any]) -> None:
     """Validate the complete, versioned benchmark-record schema."""
     if record.get("schema_version") != RECORD_SCHEMA_VERSION:
@@ -474,17 +678,32 @@ def validate_record(record: dict[str, Any]) -> None:
     for field in ("engine", "conditions", "resources", "results", "off_big_floor_plus_1"):
         if field not in record:
             raise RuntimeError(f"benchmark record missing required field: {field}")
+    for field in ("engine", "conditions", "resources", "results"):
+        if not isinstance(record[field], dict):
+            raise RuntimeError(f"benchmark record field must be an object: {field}")
+    if not isinstance(record["off_big_floor_plus_1"], bool):
+        raise RuntimeError("benchmark record off_big_floor_plus_1 must be boolean")
+    bootstrap = record["conditions"].get("bootstrap")
+    if (
+        not isinstance(bootstrap, dict)
+        or not isinstance(bootstrap.get("resamples"), int)
+        or bootstrap["resamples"] <= 0
+        or not isinstance(bootstrap.get("seed"), int)
+    ):
+        raise RuntimeError("benchmark record has invalid bootstrap conditions")
     for mode in ("off", "on"):
+        if not isinstance(record["results"].get(mode), dict):
+            raise RuntimeError(f"benchmark record missing result mode: {mode}")
         for dataset in ("slt55", "big"):
-            cell = record["results"][mode][dataset]
-            if "wer" not in cell or len(cell.get("bootstrap_ci_95", ())) != 2:
-                raise RuntimeError(f"benchmark record has invalid result cell: {mode}/{dataset}")
+            if dataset not in record["results"][mode]:
+                raise RuntimeError(f"benchmark record missing result cell: {mode}/{dataset}")
+            _validate_cell(record["results"][mode][dataset], f"{mode}/{dataset}", recorded=True)
 
 
 def compare_results(
     actual: dict[str, Any], record: dict[str, Any], *, allow_engine_drift: bool = False
 ) -> list[dict[str, Any]]:
-    """Authenticate run inputs and compare WER cells using record CIs."""
+    """Authenticate inputs and bootstrap aligned current-minus-recorded WER."""
     validate_record(record)
     _require_equal("resources", actual.get("resources"), record.get("resources"))
     _require_equal("conditions", actual.get("conditions"), record.get("conditions"))
@@ -493,15 +712,27 @@ def compare_results(
     rows: list[dict[str, Any]] = []
     for mode in ("off", "on"):
         for dataset in ("slt55", "big"):
-            observed = float(actual["results"][mode][dataset]["wer"]) * 100
-            expected = float(record["results"][mode][dataset]["wer"])
-            ci = record["results"][mode][dataset]["bootstrap_ci_95"]
-            tolerance = max(abs(expected - float(ci[0])), abs(float(ci[1]) - expected))
+            actual_cell = actual["results"][mode][dataset]
+            record_cell = record["results"][mode][dataset]
+            _validate_cell(actual_cell, f"actual {mode}/{dataset}", recorded=False)
+            for field in ("utterances", "decoded", "oov_tokens", "ref_words"):
+                _require_equal(f"{mode}/{dataset} {field}", actual_cell[field], record_cell[field])
+            observed = float(actual_cell["wer"]) * 100
+            expected = float(record_cell["wer"])
             delta = observed - expected
-            floor_clause = (
-                mode == "off" and dataset == "big" and record.get("off_big_floor_plus_1", False)
+            ci = paired_delta_ci(
+                record_cell["utterance_rows"],
+                actual_cell["matched_pairs"],
+                speaker_stratified=dataset == "big",
+                resamples=int(record["conditions"]["bootstrap"]["resamples"]),
+                seed=int(record["conditions"]["bootstrap"]["seed"]),
             )
-            passed = abs(delta) <= tolerance or (floor_clause and delta <= 1.0)
+            bar = (
+                1.0
+                if mode == "off" and dataset == "big" and record.get("off_big_floor_plus_1", False)
+                else 0.0
+            )
+            passed = ci[1] <= bar
             rows.append(
                 {
                     "mode": mode,
@@ -509,11 +740,40 @@ def compare_results(
                     "actual": observed,
                     "recorded": expected,
                     "delta": delta,
-                    "tolerance": tolerance,
+                    "paired_delta_ci_95": ci,
+                    "bar": bar,
                     "pass": passed,
                 }
             )
     return rows
+
+
+def make_record(output: dict[str, Any]) -> dict[str, Any]:
+    """Convert a completed run payload into the stable serialized record schema."""
+    record_results = {
+        mode: {
+            dataset: {
+                **{key: value for key, value in cell.items() if key != "matched_pairs"},
+                "wer": float(cell["wer"]) * 100,
+                "utterance_rows": [
+                    [utterance, value["ref_words"], value["errors"]]
+                    for utterance, value in sorted(cell["matched_pairs"].items())
+                ],
+            }
+            for dataset, cell in cells.items()
+        }
+        for mode, cells in output["results"].items()
+    }
+    record = {
+        "schema_version": RECORD_SCHEMA_VERSION,
+        "engine": output["engine"],
+        "conditions": output["conditions"],
+        "resources": output["resources"],
+        "results": record_results,
+        "off_big_floor_plus_1": True,
+    }
+    validate_record(record)
+    return record
 
 
 def run(
@@ -523,6 +783,7 @@ def run(
     *,
     emit_record: Path | None = None,
     allow_engine_drift: bool = False,
+    deep_verify: bool = False,
 ) -> dict[str, Any]:
     """Run BM1 from downloads through comparison."""
     cache = Path(
@@ -532,7 +793,7 @@ def run(
     corpus = work_dir / "corpora"
     corpus.mkdir(parents=True, exist_ok=True)
     for archive in ARCHIVES:
-        extract_archive(archives[archive.voice], archive, corpus)
+        extract_archive(archives[archive.voice], archive, corpus, deep_verify=deep_verify)
     dictionary = pocketsphinx_dictionary()
     from pstrain.lib.lm import build_lm
 
@@ -589,30 +850,12 @@ def run(
         "schema_version": RECORD_SCHEMA_VERSION,
         "results": actual,
         "resources": manifest,
-        "engine": engine_identity(),
+        "engine": engine_identity(dictionary),
         "conditions": benchmark_conditions(),
         "resource_manifest": str(work_dir / "resource-manifest.json"),
     }
     if emit_record is not None:
-        record_results = {
-            mode: {
-                dataset: {
-                    **{key: value for key, value in cell.items() if key != "matched_pairs"},
-                    "wer": float(cell["wer"]) * 100,
-                }
-                for dataset, cell in cells.items()
-            }
-            for mode, cells in actual.items()
-        }
-        benchmark_record = {
-            "schema_version": RECORD_SCHEMA_VERSION,
-            "engine": output["engine"],
-            "conditions": output["conditions"],
-            "resources": manifest,
-            "results": record_results,
-            "off_big_floor_plus_1": True,
-        }
-        validate_record(benchmark_record)
+        benchmark_record = make_record(output)
         emit_record.parent.mkdir(parents=True, exist_ok=True)
         emit_record.write_text(
             json.dumps(benchmark_record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -637,6 +880,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--record", type=Path, help="committed docs/benchmarks JSON record")
     parser.add_argument("--emit-record", type=Path, help="write a complete PIN benchmark record")
     parser.add_argument("--allow-engine-drift", action="store_true")
+    parser.add_argument("--deep-verify", action="store_true", help="rehash every cached corpus WAV")
     parser.add_argument(
         "--no-compare", action="store_true", help="run before the PIN record exists"
     )
@@ -655,6 +899,7 @@ def main(argv: list[str] | None = None) -> int:
             args.jobs,
             emit_record=args.emit_record,
             allow_engine_drift=args.allow_engine_drift,
+            deep_verify=args.deep_verify,
         )
     except (OSError, RuntimeError, subprocess.CalledProcessError) as exc:
         parser.exit(1, f"BM1 failed: {exc}\n")
