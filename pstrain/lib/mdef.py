@@ -124,6 +124,7 @@ def generate_untied_mdef(
         n_state,
         1 if ignore_wpos else 0,
         policies[inventory_policy],
+        1 if multipron else 0,
     )
     if ret != 0:
         raise RuntimeError(f"Failed to generate untied mdef: {output}")

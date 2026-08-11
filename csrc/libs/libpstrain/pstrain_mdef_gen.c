@@ -138,7 +138,8 @@ count_reachable_triphones(const char *transcript_path,
                           char **CIlist,
                           int32 cilistsize,
                           hashelement_t **triphonehash,
-                          int ignore_wpos)
+                          int ignore_wpos,
+                          int multipron)
 {
     static const char *base_attr[] = { "ci", "base", NULL };
     static const char *filler_attr[] = { "ci", "filler", NULL };
@@ -177,7 +178,7 @@ count_reachable_triphones(const char *transcript_path,
             ckd_free(words);
             continue;
         }
-        graph = mk_phone_graph(words, n_words, lex, 1);
+        graph = mk_phone_graph(words, n_words, lex, multipron);
         ckd_free(words);
         if (!graph) goto cleanup;
         split = phone_graph_split_contexts(graph, acmod_set);
@@ -348,7 +349,8 @@ pstrain_mdef_gen_untied(const char *phone_list_path,
                     const char *output_path,
                     uint32 n_state,
                     int32 ignore_wpos,
-                    int32 inventory_policy)
+                    int32 inventory_policy,
+                    int32 multipron)
 {
     char **CIlist = NULL;
     hashelement_t **CDhash = NULL;
@@ -395,7 +397,7 @@ pstrain_mdef_gen_untied(const char *phone_list_path,
     if (inventory_policy == 2) {
         if (count_reachable_triphones(transcript_path, dict_path, filler_dict_path,
                                       CIlist, cilistsize, CDhash,
-                                      ignore_wpos) != S3_SUCCESS) {
+                                      ignore_wpos, multipron) != S3_SUCCESS) {
             E_ERROR("Failed to enumerate graph-reachable triphones in %s\n", transcript_path);
             goto cleanup;
         }

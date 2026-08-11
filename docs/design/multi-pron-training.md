@@ -170,13 +170,33 @@ training:
   untied_inventory: transcript-reachable
 ```
 
-`transcript-reachable` expands every pronunciation variant for each word in
-the training transcripts and enumerates both sides of variant-boundary
-cross-products with the same graph context logic used by Baum-Welch. The
+`transcript-reachable` uses the selected training mode: it expands every
+pronunciation variant in multipron mode and uses the first pronunciation in
+linear mode. In both cases it enumerates contexts with the same graph type
+the Baum-Welch runtime uses. The
 other policies are `all-triphone` and the upstream-compatible `linear`
 first-pronunciation occurrence policy. Inventory misses always back off to a
 trainable CI state; the inventory choice controls parameter allocation, not
 whether an utterance can train.
+
+### CI fallback survival prior
+
+When a reachable CD context is absent from the inventory, its emitting state
+backs off to the corresponding CI senone. At normalization, every active
+non-filler fallback senone receives one full-distribution pseudo-count of its
+parameters from the previous pass: the old mixture weights contribute total
+mass one, and the matching old mean and variance moments are added with that
+mass. Consequently, accumulator mass is not pure Baum-Welch posterior while
+this fallback prior is active. The fallback still learns from every pass's
+posterior, but a persistently low-occupancy state can remain prior-dominated.
+
+This is deliberate and has no upstream analogue. Upstream's occurrence-based
+linear inventory cannot omit a context that occurs in its own training path,
+whereas graph-reachable inventories can expose a missing context through a
+pronunciation branch. Numeric coverage exercises both repeated posterior
+movement and the low-occupancy, prior-dominated case. With a complete CD
+inventory, non-filler CI accumulators stay zero, the prior is not entered, and
+the established numeric golden remains byte-for-byte unchanged.
 
 Then `pstrain build cd-8g --config sphinxtrain` falls through to the
 legacy `mk_phone_list` + `cvt2triphone` + `state_seq_make` path.
@@ -196,11 +216,6 @@ model picks per word.
 * **OpenFST or K2-style FST machinery.** Overkill; our per-utterance
   graph is small.
 * **Touch the BW math.** The DAG engine already exists.
-* **Transcript-reachable inventory enumeration.** Multipron mode currently
-  initializes every dictionary-producible triphone so every graph path has a
-  model. A future optimization could enumerate only triphones reachable from
-  the actual transcript word boundaries while retaining all pronunciation
-  variants.
 
 ## M4b SLT growth measurement
 

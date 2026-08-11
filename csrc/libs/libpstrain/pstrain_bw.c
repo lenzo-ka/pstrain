@@ -115,12 +115,27 @@ struct pstrain_bw_context_s {
     int32 var_reest;
     int32 pass2var;  /* Use 2-pass variance estimation for numerical stability */
     int32 multipron; /* Multi-pron training: build wide utterance graphs */
+    char *fallback_senone; /* CI senones used as primary models this pass */
 
     /* Stats */
     float64 total_log_lik;
     uint32 total_frames;
     uint32 total_utts;
 };
+
+static void
+mark_fallback_senones(pstrain_bw_context_t *ctx, state_t *state_seq, uint32 n_state)
+{
+    uint32 i;
+    for (i = 0; i < n_state; ++i) {
+        acmod_id_t phn = state_seq[i].phn;
+        if (state_seq[i].mixw == TYING_NO_ID ||
+            phn >= ctx->mdef->acmod_set->n_ci ||
+            acmod_set_has_attrib(ctx->mdef->acmod_set, phn, "filler"))
+            continue;
+        ctx->fallback_senone[state_seq[i].mixw] = 1;
+    }
+}
 
 pstrain_bw_context_t *
 pstrain_bw_init(const char *mdef_path,
@@ -252,6 +267,7 @@ pstrain_bw_init(const char *mdef_path,
     }
 
     E_INFO("BW context initialized: %u tied states, %u codebooks\n", n_ts, n_cb);
+    ctx->fallback_senone = ckd_calloc(n_ts, sizeof(*ctx->fallback_senone));
     return ctx;
 
 error:
@@ -268,6 +284,7 @@ pstrain_bw_free(pstrain_bw_context_t *ctx)
     if (ctx->inv) mod_inv_free(ctx->inv);
     if (ctx->mdef) model_def_free(ctx->mdef);
     if (ctx->feat) feat_free(ctx->feat);
+    ckd_free(ctx->fallback_senone);
 
     ckd_free(ctx);
 }
@@ -375,7 +392,7 @@ pstrain_bw_build_state_seq(pstrain_bw_context_t *ctx,
     char *trans_copy;
     int needs_free;
 
-    if (!ctx || !ctx->lex || !transcript || !n_state || !ctx->multipron)
+    if (!ctx || !ctx->lex || !transcript || !n_state)
         return NULL;
     trans_copy = ckd_salloc(transcript);
     state_seq = build_utt_state_seq(ctx, trans_copy, n_state, &needs_free);
@@ -388,6 +405,16 @@ pstrain_bw_free_state_seq(state_t *state_seq, uint32 n_state)
 {
     if (state_seq)
         state_seq_free(state_seq, n_state);
+}
+
+uint32
+pstrain_bw_count_active_fallback_senones(pstrain_bw_context_t *ctx)
+{
+    uint32 i, count = 0;
+    if (!ctx) return 0;
+    for (i = 0; i < ctx->mdef->n_tied_state; ++i)
+        count += ctx->fallback_senone[i] != 0;
+    return count;
 }
 
 int
@@ -464,6 +491,9 @@ pstrain_bw_process_utt_text(pstrain_bw_context_t *ctx,
                                 ctx->feat);
 
         ckd_free_2d((void **)feat_vecs);
+
+        if (ret == S3_SUCCESS)
+            mark_fallback_senones(ctx, state_seq, n_state);
 
         /* Linear path uses static internal buffers (do NOT free).
          * Graph path allocates fresh per utterance (DO free). */
@@ -563,7 +593,6 @@ pstrain_bw_process_utt_mfcc(pstrain_bw_context_t *ctx,
             feat_array_free(feat_buf);
             return -1;
         }
-
         ret = baum_welch_update(&log_forw_prob,
                                 feat_buf,
                                 n_feat_frames,
@@ -583,6 +612,9 @@ pstrain_bw_process_utt_mfcc(pstrain_bw_context_t *ctx,
                                 NULL,  /* pdumpfh */
                                 NULL,  /* latfh */
                                 ctx->feat);
+
+        if (ret == S3_SUCCESS)
+            mark_fallback_senones(ctx, state_seq, n_state);
 
         feat_array_free(feat_buf);
 
@@ -718,7 +750,8 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
                 uint32 tied_state = ctx->mdef->defn[ci].state[state];
                 uint32 cb = tied_state;
                 int observed = 0;
-                if (cb >= n_mgau || seeded[cb]) continue;
+                if (cb >= n_mgau || seeded[cb] || !ctx->fallback_senone[tied_state])
+                    continue;
                 for (j = 0; j < n_feat && !observed; ++j)
                     for (k = 0; k < n_density; ++k)
                         if (g->dnom[cb][j][k] > 0) { observed = 1; break; }
@@ -823,6 +856,8 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
 
     /* Clear accumulators for next iteration */
     E_INFO("Clearing accumulators...\n");
+    memset(ctx->fallback_senone, 0,
+           ctx->mdef->n_tied_state * sizeof(*ctx->fallback_senone));
     for (i = 0; i < n_mgau; i++) {
         for (j = 0; j < n_feat; j++) {
             for (k = 0; k < n_density; k++) {
