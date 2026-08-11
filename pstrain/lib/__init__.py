@@ -12,8 +12,7 @@ Example::
         setup_project,
         validate_project,
         create_model,
-        PstrainConfig,
-        ConfigManager,
+        Profile,
         Dictionary,
         Phoneset,
     )
@@ -46,13 +45,10 @@ from pstrain.lib.compare import (
     load_senones_from_model,
 )
 from pstrain.lib.config import (
-    AudioConfig,
-    ConfigManager,
     FeatureConfig,
-    PstrainConfig,
+    Profile,
     TrainingConfig,
-    get_feature_dir_name,
-    get_user_config,
+    resolve_config,
 )
 
 # Data structures
@@ -103,13 +99,10 @@ __all__: list[str] = [
     "validate_project",
     "ValidationReport",
     # Configuration
-    "PstrainConfig",
-    "AudioConfig",
+    "Profile",
     "FeatureConfig",
     "TrainingConfig",
-    "ConfigManager",
-    "get_user_config",
-    "get_feature_dir_name",
+    "resolve_config",
     # Data structures
     "Dictionary",
     "Phoneset",

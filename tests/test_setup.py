@@ -73,8 +73,9 @@ def test_generated_config_profiles_all_load(tmp_path: Path) -> None:
 
     with (project / "etc" / "configs.yaml").open(encoding="utf-8") as f:
         generated = yaml.safe_load(f)
-    assert generated == DEFAULT_CONFIGS
-    for config_name in generated:
+    assert generated["config_version"] == 1
+    assert set(generated["profiles"]) == set(DEFAULT_CONFIGS)
+    for config_name in generated["profiles"]:
         context = PipelineContext.from_config(project, config_name=config_name)
         assert context.config_name == config_name
 

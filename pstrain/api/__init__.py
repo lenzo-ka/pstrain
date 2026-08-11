@@ -13,8 +13,7 @@ Example::
         validate_project,
         ValidationReport,
         # Configuration
-        PstrainConfig,
-        ConfigManager,
+        Profile,
         # Data structures
         Dictionary,
         Phoneset,
@@ -38,10 +37,8 @@ from pstrain.api.steps import (
 
 # Re-export lib API
 from pstrain.lib import (
-    AudioConfig,
     CDModel,
     CIModel,
-    ConfigManager,
     # Data structures
     Dictionary,
     FeatureConfig,
@@ -49,14 +46,13 @@ from pstrain.lib import (
     Model,
     Phoneset,
     # Configuration
-    PstrainConfig,
+    Profile,
     TrainingConfig,
     create_model,
-    get_feature_dir_name,
     get_fileids,
     get_model_class,
-    get_user_config,
     parse_transcription_file,
+    resolve_config,
     # Project setup
     setup_project,
     validate_project,
@@ -69,13 +65,10 @@ __all__: list[str] = [
     "validate_project",
     "ValidationReport",
     # Configuration
-    "PstrainConfig",
-    "AudioConfig",
+    "Profile",
     "FeatureConfig",
     "TrainingConfig",
-    "ConfigManager",
-    "get_user_config",
-    "get_feature_dir_name",
+    "resolve_config",
     # Data structures
     "Dictionary",
     "Phoneset",

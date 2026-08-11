@@ -953,9 +953,11 @@ class ProjectCommand(Command):
 
     def get_config(self, ctx: CommandContext) -> Any:
         """Load project configuration."""
-        from pstrain.api import ConfigManager
+        from pstrain.api import resolve_config
 
-        return ConfigManager.load_full_config(ctx.project_dir, ctx.experiment)
+        return resolve_config(
+            ctx.project_dir, profile_name=ctx.config_name, experiment=ctx.experiment
+        ).profile
 
 
 class ModelCommand(ProjectCommand):

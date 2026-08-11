@@ -128,6 +128,9 @@ everything, even if up to date.
                 project_dir,
                 experiment=ctx.args.experiment,
                 config_name=ctx.args.config_name,
+                cli_overrides=(
+                    {"runner": {"jobs": ctx.args.jobs}} if ctx.args.jobs is not None else None
+                ),
             )
         except ValueError as exc:
             print(f"Error: {exc}", file=sys.stderr)

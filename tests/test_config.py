@@ -1,167 +1,248 @@
-"""Tests for configuration system."""
+"""Canonical configuration contract tests."""
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import pytest
+import yaml
 
-from pstrain.lib.config.models import (
-    FeatureConfig,
-    PstrainConfig,
-    TrainingConfig,
+from pstrain.lib.config.models import FeatureConfig, Profile, TrainingConfig
+from pstrain.lib.config.resolver import (
+    CONSUMER_TOUCHES,
+    CONSUMERS,
+    migrate_project,
+    resolve_config,
+    validate_consumer_coverage,
 )
+from pstrain.lib.pipeline.context import DEFAULT_CONFIGS, PipelineContext
 
 
-class TestFeatureConfig:
-    """Tests for FeatureConfig model."""
-
-    def test_default_values(self) -> None:
-        """Test default feature settings."""
-        cfg = FeatureConfig()
-        assert cfg.num_ceps == 13
-        assert cfg.num_filters == 25
-        assert cfg.nfft == 512
-        assert cfg.lower_freq == 130.0
-        assert cfg.upper_freq == 6800.0
-        assert cfg.preemphasis == pytest.approx(0.97)
-        assert cfg.lifter == 22
-        assert cfg.feature_type == "1s_c_d_dd"
-
-    def test_custom_values(self) -> None:
-        """Test custom feature settings."""
-        cfg = FeatureConfig(num_ceps=26, nfft=256)
-        assert cfg.num_ceps == 26
-        assert cfg.nfft == 256
-
-    def test_full_dimension_with_deltas(self) -> None:
-        """Test full dimension calculation with deltas."""
-        cfg = FeatureConfig(num_ceps=13, delta=True, delta_delta=True)
-        # 13 * 3 = 39 for 1s_c_d_dd
-        assert cfg.full_dimension == 39
-
-    def test_sphinx_feat_type(self) -> None:
-        """Test sphinx feature type property."""
-        cfg = FeatureConfig(feature_type="1s_c_d_dd")
-        assert cfg.sphinx_feat_type == "1s_c_d_dd"
-
-    def test_num_streams_continuous(self) -> None:
-        """Test num_streams for continuous features."""
-        cfg = FeatureConfig(feature_type="1s_c_d_dd")
-        assert cfg.num_streams == 1
-
-    def test_num_streams_semicontinuous(self) -> None:
-        """Test num_streams for semi-continuous features."""
-        cfg = FeatureConfig(feature_type="s2_4x")
-        assert cfg.num_streams == 4
+def test_active_names_and_defaults_are_canonical() -> None:
+    profile = Profile()
+    assert profile.features.ncep == 13
+    assert profile.features.samprate == 16000
+    assert profile.training.n_state == 3
+    assert profile.runner.jobs is None
+    with pytest.raises(ValueError):
+        FeatureConfig.model_validate({"num_ceps": 26})
+    with pytest.raises(ValueError):
+        TrainingConfig.model_validate({"n_states": 5})
 
 
-class TestTrainingConfig:
-    """Tests for TrainingConfig model."""
-
-    def test_default_values(self) -> None:
-        """Test default training settings."""
-        cfg = TrainingConfig()
-        assert cfg.n_states == 3
-        assert cfg.ci is not None
-        assert cfg.cd is not None
-
-    def test_nested_ci_config(self) -> None:
-        """Test nested CI training config."""
-        cfg = TrainingConfig()
-        assert cfg.ci.n_gaussians == 1
-        # This legacy schema is not consumed by the pipeline, so it must not
-        # declare engine knobs that would be silently ignored.
-        assert not hasattr(cfg.ci, "n_iterations")
-        assert not hasattr(cfg.ci, "abeam")
-
-    def test_removed_training_knob_fails_with_migration_hint(self, tmp_path: Path) -> None:
-        """Legacy engine knobs must not load and then disappear silently."""
-        config_path = tmp_path / "config.yaml"
-        config_path.write_text("training:\n  ci:\n    abeam: 1e-100\n")
-
-        with pytest.raises(ValueError) as exc_info:
-            PstrainConfig.from_yaml(config_path)
-
-        message = str(exc_info.value)
-        assert "abeam" in message
-        assert "etc/configs.yaml" in message
-
-
-class TestPstrainConfig:
-    """Tests for main PstrainConfig model."""
-
-    def test_default_values(self) -> None:
-        """Test default config values."""
-        cfg = PstrainConfig()
-        assert isinstance(cfg.features, FeatureConfig)
-        assert isinstance(cfg.training, TrainingConfig)
-
-    def test_nested_access(self) -> None:
-        """Test accessing nested settings."""
-        cfg = PstrainConfig()
-        assert cfg.features.num_ceps == 13
-        assert cfg.training.n_states == 3
-
-    def test_to_yaml_and_from_yaml(self) -> None:
-        """Test YAML serialization roundtrip."""
-        original = PstrainConfig(name="my_project")
-        original.features.num_ceps = 26
-        original.training.ci.n_gaussians = 4
-
-        with tempfile.NamedTemporaryFile(suffix=".yaml", delete=False) as f:
-            config_path = Path(f.name)
-
-        try:
-            original.to_yaml(config_path)
-            assert config_path.exists()
-
-            restored = PstrainConfig.from_yaml(config_path)
-            assert restored.name == "my_project"
-            assert restored.features.num_ceps == 26
-            assert restored.training.ci.n_gaussians == 4
-        finally:
-            config_path.unlink(missing_ok=True)
-
-    def test_from_yaml_nonexistent_raises(self) -> None:
-        """Test loading nonexistent file raises FileNotFoundError."""
-        with pytest.raises(FileNotFoundError):
-            PstrainConfig.from_yaml(Path("/nonexistent/config.yaml"))
-
-
-class TestConfigValidation:
-    """Tests for config validation."""
-
-    def test_invalid_num_ceps(self) -> None:
-        """Test that zero num_ceps is rejected."""
-        with pytest.raises(ValueError):
-            FeatureConfig(num_ceps=0)
-
-    def test_invalid_nfft(self) -> None:
-        """Test that too small nfft is rejected."""
-        with pytest.raises(ValueError):
-            FeatureConfig(nfft=32)  # min is 64
-
-    def test_valid_config(self) -> None:
-        """Test that valid config passes validation."""
-        cfg = FeatureConfig(
-            num_ceps=13,
-            num_filters=40,
-            nfft=512,
-            lower_freq=130,
-            upper_freq=6800,
+@pytest.mark.parametrize(
+    ("lower", "higher", "expected_kind"),
+    [
+        ("built-in", "user", "user"),
+        ("user", "project-profile", "project-profile"),
+        ("project-profile", "project", "project"),
+        ("project", "experiment", "experiment"),
+        ("experiment", "cli", "cli"),
+    ],
+)
+def test_each_adjacent_layer_wins_in_isolation(
+    tmp_path: Path, lower: str, higher: str, expected_kind: str
+) -> None:
+    project = tmp_path / "project"
+    (project / "etc").mkdir(parents=True)
+    (project / "experiments" / "trial").mkdir(parents=True)
+    user = tmp_path / "user.yaml"
+    values = {
+        "built-in": 13,
+        "user": 17,
+        "project-profile": 26,
+        "project": 39,
+        "experiment": 52,
+        "cli": 65,
+    }
+    active = {lower, higher}
+    if "user" in active:
+        user.write_text(f"config_version: 1\nfeatures:\n  ncep: {values['user']}\n")
+    if "project-profile" in active:
+        (project / "etc" / "configs.yaml").write_text(
+            "config_version: 1\nprofiles:\n  custom:\n    extends: default\n"
+            f"    features:\n      ncep: {values['project-profile']}\n"
         )
-        assert cfg.num_ceps == 13
+    if "project" in active:
+        (project / "etc" / "config.yaml").write_text(
+            f"config_version: 1\nfeatures:\n  ncep: {values['project']}\n"
+        )
+    if "experiment" in active:
+        (project / "experiments" / "trial" / "config.yaml").write_text(
+            f"config_version: 1\nfeatures:\n  ncep: {values['experiment']}\n"
+        )
+    resolved = resolve_config(
+        project,
+        profile_name="custom" if "project-profile" in active else "default",
+        experiment="trial",
+        cli_overrides={"features": {"ncep": values["cli"]}} if "cli" in active else None,
+        user_config_path=user,
+    )
+    assert resolved.profile.features.ncep == values[higher]
+    assert resolved.fields["features.ncep"].winner.source_kind == expected_kind
 
 
-class TestConfigMerging:
-    """Tests for config merging behavior."""
+def test_fugu_project_profile_beats_user_reproduction(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    (project / "etc").mkdir(parents=True)
+    user = tmp_path / "user.yaml"
+    user.write_text("config_version: 1\nfeatures:\n  ncep: 17\n")
+    (project / "etc" / "configs.yaml").write_text(
+        "config_version: 1\nprofiles:\n  custom:\n    extends: default\n"
+        "    features:\n      ncep: 26\n"
+    )
+    resolved = resolve_config(project, profile_name="custom", user_config_path=user)
+    assert resolved.profile.features.ncep == 26
+    assert resolved.fields["features.ncep"].winner.source_kind == "project-profile"
 
-    def test_partial_update(self) -> None:
-        """Test partial config updates."""
-        cfg = PstrainConfig()
-        cfg.features.num_ceps = 26
-        assert cfg.features.num_ceps == 26
-        # Other values should remain defaults
-        assert cfg.features.num_filters == 25
+
+def test_deep_merge_requires_extends(tmp_path: Path) -> None:
+    project = tmp_path
+    (project / "etc").mkdir()
+    (project / "etc" / "configs.yaml").write_text(
+        "config_version: 1\nprofiles:\n  default:\n    features:\n      ncep: 26\n"
+    )
+    with pytest.raises(ValueError, match="has no extends and is incomplete"):
+        resolve_config(project)
+
+
+def test_legacy_resolution_is_equivalent_and_warns(tmp_path: Path) -> None:
+    (tmp_path / "etc").mkdir()
+    (tmp_path / "etc" / "configs.yaml").write_text(
+        "custom:\n  features:\n    samprate: 8000\n  training:\n    n_senones: 99\n"
+    )
+    with pytest.warns(FutureWarning, match="pstrain config migrate"):
+        resolved = resolve_config(tmp_path, profile_name="custom")
+    assert resolved.profile.features.samprate == 8000
+    assert resolved.profile.features.ncep == 13
+    assert resolved.profile.training.n_senones == 99
+
+
+def test_migration_check_is_read_only_and_write_keeps_backup(tmp_path: Path) -> None:
+    (tmp_path / "etc").mkdir()
+    path = tmp_path / "etc" / "configs.yaml"
+    path.write_text("default:\n  features:\n    ncep: 13\n")
+    _, rendered, backup = migrate_project(tmp_path, check=True)
+    assert backup is None
+    assert "config_version: 1" in rendered
+    assert "config_version" not in path.read_text()
+    _, _, backup = migrate_project(tmp_path, check=False)
+    assert backup is not None and backup.exists()
+    assert yaml.safe_load(path.read_text())["config_version"] == 1
+
+
+def _leaf_paths(value: object, prefix: str = "") -> set[str]:
+    if prefix == "training.exclusion_schedule":
+        return {prefix}
+    if isinstance(value, dict):
+        result: set[str] = set()
+        for key, child in value.items():
+            result |= _leaf_paths(child, f"{prefix}.{key}" if prefix else str(key))
+        return result
+    return {prefix}
+
+
+def test_every_semantic_field_has_registered_consumer() -> None:
+    fields = _leaf_paths(Profile().model_dump(mode="python"))
+    validate_consumer_coverage(fields)
+    assert fields == set(CONSUMERS) == set(CONSUMER_TOUCHES)
+
+
+def test_phantom_schema_field_fails_consumer_coverage() -> None:
+    fields = _leaf_paths(Profile().model_dump(mode="python")) | {"training.phantom"}
+    with pytest.raises(ValueError, match=r"unregistered=.*training\.phantom.*unproven"):
+        validate_consumer_coverage(fields)
+
+
+def test_registered_touch_proofs_reach_runtime_projection(tmp_path: Path) -> None:
+    context = PipelineContext.from_config(tmp_path)
+    expected = context.resolved_config.as_dict()  # type: ignore[union-attr]
+    for field_path, runtime_path in CONSUMER_TOUCHES.items():
+        expected_value: object = expected
+        for part in field_path.split("."):
+            expected_value = expected_value[part]  # type: ignore[index]
+        actual: object = context
+        for part in runtime_path.split("."):
+            actual = getattr(actual, part)
+        if isinstance(expected_value, list) and isinstance(actual, tuple):
+            expected_value = tuple(expected_value)
+        assert actual == expected_value, field_path
+
+
+def test_every_field_nondefault_reaches_runtime_projection(tmp_path: Path) -> None:
+    """Anti-recurrence: canonical leaves project to immutable runtime values."""
+    from dataclasses import asdict
+
+    from pstrain.lib.pipeline.context import PipelineContext
+
+    (tmp_path / "etc").mkdir()
+    (tmp_path / "etc" / "configs.yaml").write_text(
+        "config_version: 1\nprofiles:\n  custom:\n    extends: default\n"
+        "    features:\n      ncep: 14\n    training:\n      n_senones: 201\n"
+        "    split:\n      seed: 43\n    runner:\n      nice: 6\n"
+    )
+    context = PipelineContext.from_config(tmp_path, config_name="custom")
+    assert asdict(context.feat)["ncep"] == 14
+    assert asdict(context.train)["n_senones"] == 201
+    assert asdict(context.split)["seed"] == 43
+    assert asdict(context.runner)["nice"] == 6
+
+
+def test_repo_profiles_resolve_equivalently_before_and_after_refactor(tmp_path: Path) -> None:
+    """Every maintained fixture profile keeps its pre-C2 resolved dictionary."""
+    legacy = tmp_path / "legacy"
+    (legacy / "etc").mkdir(parents=True)
+    (legacy / "etc" / "configs.yaml").write_text(yaml.safe_dump(DEFAULT_CONFIGS))
+    maintained_projects = [
+        Path(__file__).parents[1],
+        Path(__file__).parent / "fixtures/mini_arctic",
+    ]
+    for name, body in DEFAULT_CONFIGS.items():
+        expected = Profile.model_validate(body).model_dump(mode="json")
+        before = resolve_config(
+            legacy, profile_name=name, user_config_path=tmp_path / "absent-user.yaml"
+        ).as_dict()
+        for project in maintained_projects:
+            after = resolve_config(
+                project, profile_name=name, user_config_path=tmp_path / "absent-user.yaml"
+            ).as_dict()
+            assert before == expected == after
+
+
+def test_extends_preserves_builtin_leaf_provenance(tmp_path: Path) -> None:
+    (tmp_path / "etc").mkdir()
+    (tmp_path / "etc" / "configs.yaml").write_text(
+        "config_version: 1\nprofiles:\n  custom:\n    extends: default\n    description: custom\n"
+    )
+    resolved = resolve_config(tmp_path, profile_name="custom")
+    assert resolved.fields["features.ncep"].winner.source_kind == "built-in"
+    assert resolved.fields["description"].winner.source_kind == "project-profile"
+
+
+def test_inactive_legacy_overlay_is_ignored_with_loud_warning(tmp_path: Path) -> None:
+    (tmp_path / "etc").mkdir()
+    path = tmp_path / "etc" / "config.yaml"
+    path.write_text("features:\n  num_ceps: 20\n")
+    with pytest.warns(FutureWarning, match=str(path)):
+        resolved = resolve_config(tmp_path)
+    assert resolved.profile.features.ncep == 13
+    assert resolved.warnings and str(path) in resolved.warnings[0]
+
+
+def test_effective_legacy_overlay_provenance_is_labeled_legacy(tmp_path: Path) -> None:
+    user = tmp_path / "user.yaml"
+    user.write_text("features:\n  num_ceps: 20\n")
+    with pytest.warns(FutureWarning):
+        resolved = resolve_config(tmp_path, user_config_path=user)
+    assert resolved.profile.features.ncep == 20
+    assert resolved.fields["features.ncep"].winner.source_kind == "legacy"
+
+
+def test_legacy_warning_is_deduplicated_once_per_run(tmp_path: Path) -> None:
+    (tmp_path / "etc").mkdir()
+    path = tmp_path / "etc" / "config.yaml"
+    path.write_text("features:\n  num_ceps: 20\n")
+    with pytest.warns(FutureWarning) as caught:
+        resolve_config(tmp_path)
+        resolve_config(tmp_path)
+    assert len(caught) == 1

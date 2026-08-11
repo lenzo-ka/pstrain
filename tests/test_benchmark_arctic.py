@@ -35,7 +35,10 @@ from pstrain.benchmarks.arctic import (
     sha256,
     training_corpus_identity,
     validate_record,
+    write_project,
 )
+from pstrain.lib.config.models import Profile
+from pstrain.lib.config.resolver import resolve_config
 from pstrain.lib.corpus.split import train_test_split
 from pstrain.lib.lm import build_lm
 from pstrain.lib.transcription import parse_transcription_file
@@ -176,8 +179,21 @@ def test_eval_transcript_serializations_are_enforced() -> None:
         )
 
 
-def test_pin_configs_resolve_ratified_conditions() -> None:
+def test_pin_configs_resolve_ratified_conditions(tmp_path: Path) -> None:
     assert benchmark_conditions()["known_skips"] == KNOWN_SKIPS
+    project = tmp_path / "bare-checkout" / "benchmark-project"
+    write_project(project, tmp_path / "corpus", DATA_DIR / "cmu_arctic_slt.dict")
+    resolved = {
+        mode: resolve_config(
+            project, profile_name=mode, user_config_path=tmp_path / "absent-user.yaml"
+        )
+        for mode in ("off", "on")
+    }
+    for mode in ("off", "on"):
+        expected = Profile.model_validate(PIN_CONFIGS[mode]).model_dump(mode="json")
+        assert resolved[mode].as_dict() == expected
+        assert resolved[mode].profile.split.test_count == 0
+
     off = PIN_CONFIGS["off"]["training"]
     on = PIN_CONFIGS["on"]["training"]
     assert off["multipron_training"] is False
@@ -200,6 +216,13 @@ def test_pin_configs_resolve_ratified_conditions() -> None:
     )
     assert PIN_CONFIGS["off"]["training"]["exclusion_schedule"] == {}
     assert PIN_CONFIGS["on"]["training"]["exclusion_schedule"] == {}
+    assert resolved["off"].profile.training.untied_inventory == "linear"
+    assert resolved["on"].profile.training.untied_inventory == "transcript-reachable"
+    assert [
+        getattr(resolved[mode].profile.training, stage).convergence_ratio
+        for mode in ("off", "on")
+        for stage in ("ci", "untied", "tied")
+    ] == [0.1, 0.1, 0.1, 0.001, 0.001, 0.001]
     assert set(DECODER_CONDITIONS) == {
         "beam",
         "wbeam",

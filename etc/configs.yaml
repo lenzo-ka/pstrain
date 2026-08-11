@@ -1,95 +1,68 @@
-# Named configurations for pstrain
-#
-# Each config defines feature extraction and training parameters.
-# Use: pstrain build cd-8g --config wideband
-#
-# Paths use config name: shared/features/wideband/, shared/models/cd-8g/wideband/
-# Same config → same outputs → automatic sharing across experiments.
-
-default:
-  description: "Default wideband configuration"
-  features:
-    samprate: 16000
-    ncep: 13
-    nfilt: 25
-    nfft: 512
-    lowerf: 130
-    upperf: 6800
-    feat_type: "1s_c_d_dd"
-  training:
-    n_state: 3
-    n_senones: 200
-    ci: &ci_schedule {max_iterations: 10, min_iterations: 1, convergence_ratio: 0.001}
-    untied: &untied_schedule {max_iterations: 6, min_iterations: 1, convergence_ratio: 0.001}
-    tied: &tied_schedule {max_iterations: 10, min_iterations: 1, convergence_ratio: 0.001}
-
-wideband:
-  description: "Wideband (16kHz) microphone speech"
-  features:
-    samprate: 16000
-    ncep: 13
-    nfilt: 25
-    nfft: 512
-    lowerf: 130
-    upperf: 6800
-    feat_type: "1s_c_d_dd"
-  training:
-    n_state: 3
-    n_senones: 200
-    ci: *ci_schedule
-    untied: *untied_schedule
-    tied: *tied_schedule
-
-telephone:
-  description: "Telephone (8kHz) narrowband speech"
-  features:
-    samprate: 8000
-    ncep: 13
-    # SphinxTrain's sphinx_train.cfg template narrowband (8 kHz) tuning.
-    nfilt: 15
-    nfft: 256
-    lowerf: 200
-    upperf: 3500
-    feat_type: "1s_c_d_dd"
-  training:
-    n_state: 3
-    n_senones: 200
-    ci: *ci_schedule
-    untied: *untied_schedule
-    tied: *tied_schedule
-
-wideband_large:
-  description: "Wideband with more senones (larger datasets)"
-  features:
-    samprate: 16000
-    ncep: 13
-    nfilt: 25
-    nfft: 512
-    lowerf: 130
-    upperf: 6800
-    feat_type: "1s_c_d_dd"
-  training:
-    n_state: 3
-    n_senones: 4000
-    ci: *ci_schedule
-    untied: *untied_schedule
-    tied: *tied_schedule
-
-sphinxtrain:
-  description: "Matched to SphinxTrain defaults for comparison"
-  features:
-    samprate: 16000
-    ncep: 13
-    nfilt: 25
-    nfft: 512
-    lowerf: 130
-    upperf: 6800
-    alpha: 0.97
-    lifter: 22
-    feat_type: "1s_c_d_dd"
-  training:
-    n_state: 3
-    n_senones: 200
-    ci: *ci_schedule
-    untied: *untied_schedule
-    tied: *tied_schedule
+# Canonical named configurations for pstrain.
+config_version: 1
+profiles:
+  default:
+    description: Default wideband configuration
+    features:
+      samprate: 16000
+      ncep: 13
+      nfilt: 25
+      nfft: 512
+      lowerf: 130
+      upperf: 6800
+      alpha: 0.97
+      feat_type: 1s_c_d_dd
+      lifter: 22
+      transform: dct
+      agc: none
+      cmn: batch
+      varnorm: "no"
+    training:
+      n_state: 3
+      n_senones: 200
+      a_beam: 1.0e-90
+      b_beam: 1.0e-10
+      ci: {max_iterations: 10, min_iterations: 1, convergence_ratio: 0.001}
+      untied: {max_iterations: 6, min_iterations: 1, convergence_ratio: 0.001}
+      tied: {max_iterations: 10, min_iterations: 1, convergence_ratio: 0.001}
+      max_skip_fraction: 0.05
+      retry_beam_factor: 1.0e10
+      tree_state_weights: [1.0, 0.05, 0.0]
+      tree_ssplitmax: 7
+      tree_ssplitthr: 0.0
+      tree_csplitmax: 2000
+      tree_csplitthr: 0.0
+      tree_mwfloor: 1.0e-8
+      question_npermute: 12
+      question_quests_per_state: 20
+      question_niter: 1
+      multipron_training: true
+      untied_inventory: all-triphone
+      exclusion_schedule: {}
+    split:
+      train_ratio: null
+      test_count: null
+      seed: 42
+    runner:
+      jobs: null
+      nice: 5
+  wideband:
+    extends: default
+    description: Wideband (16kHz) microphone speech
+  telephone:
+    extends: default
+    description: Telephone (8kHz) narrowband speech
+    features:
+      samprate: 8000
+      nfilt: 15
+      nfft: 256
+      lowerf: 200
+      upperf: 3500
+  wideband_large:
+    extends: default
+    description: Wideband with more senones (larger datasets)
+    training:
+      n_senones: 4000
+  sphinxtrain:
+    extends: default
+    description: Matched to SphinxTrain defaults for comparison

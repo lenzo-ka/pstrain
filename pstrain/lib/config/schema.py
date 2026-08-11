@@ -14,7 +14,7 @@ from typing import Any
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
-from pstrain.lib.config.models import PstrainConfig
+from pstrain.lib.config.models import Profile
 
 
 @dataclass
@@ -29,12 +29,12 @@ class ParameterInfo:
 
 
 def get_schema() -> dict[str, Any]:
-    """Get full JSON schema for PstrainConfig.
+    """Get the canonical profile JSON schema.
 
     Returns:
         JSON Schema dict (for docs generation, validation, etc.)
     """
-    return PstrainConfig.model_json_schema()
+    return Profile.model_json_schema()
 
 
 def list_parameters(prefix: str = "") -> list[ParameterInfo]:
@@ -47,7 +47,7 @@ def list_parameters(prefix: str = "") -> list[ParameterInfo]:
         List of ParameterInfo objects
     """
     params: list[ParameterInfo] = []
-    _collect_params(PstrainConfig, "", params)
+    _collect_params(Profile, "", params)
 
     if prefix:
         params = [p for p in params if p.key.startswith(prefix)]
@@ -109,10 +109,10 @@ def _format_type(annotation: Any) -> str:
 
 def _format_default(field_info: FieldInfo) -> Any:
     """Format default value for display."""
+    if field_info.default_factory is not None:
+        return field_info.get_default(call_default_factory=True)
     if field_info.default is not None:
         return field_info.default
-    if field_info.default_factory is not None:
-        return "(factory)"
     return None
 
 
@@ -192,7 +192,8 @@ def generate_rst_docs() -> str:
         for p in section_params:
             lines.append(f"``{p.key}``")
             lines.append(f"   :Type: ``{p.type}``")
-            lines.append(f"   :Default: ``{p.default}``")
+            default = repr(p.default) if isinstance(p.default, str) else str(p.default)
+            lines.append(f"   :Default: ``{default}``")
             if p.description:
                 lines.append(f"   :Description: {p.description}")
             lines.append("")

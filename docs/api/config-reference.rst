@@ -4,173 +4,82 @@ Configuration Reference
 All configuration parameters for pstrain.
 
 
-audio
------
-
-``audio.format``
-   :Type: ``Literal``
-   :Default: ``wav``
-   :Description: Audio format
-
-``audio.sample_rate``
-   :Type: ``int``
-   :Default: ``16000``
-   :Description: Audio sample rate in Hz
-
-
-corpus
-------
-
-``corpus.audio_dir``
-   :Type: ``str | None``
-   :Default: ``None``
-   :Description: Audio directory (if None, uses project_dir/audio/)
-
-``corpus.transcript_file``
-   :Type: ``str | None``
-   :Default: ``None``
-   :Description: Transcript file (if None, uses etc/all.transcription)
-
-
 description
 -----------
 
 ``description``
-   :Type: ``str | None``
-   :Default: ``None``
-   :Description: Experiment description
-
-
-dictionary
-----------
-
-``dictionary.case_sensitive``
-   :Type: ``bool``
-   :Default: ``False``
-   :Description: Case-sensitive word lookup
-
-``dictionary.filler_dict``
    :Type: ``str``
-   :Default: ``shared/filler.dict``
-   :Description: Filler dictionary (sentence boundaries)
-
-``dictionary.main_dict``
-   :Type: ``str``
-   :Default: ``shared/dictionary.dict``
-   :Description: Main dictionary file (relative to project)
-
-``dictionary.phoneset``
-   :Type: ``str``
-   :Default: ``shared/phoneset.txt``
-   :Description: Phoneset file
-
-``dictionary.silence_phone``
-   :Type: ``str``
-   :Default: ``SIL``
-   :Description: Silence phone symbol
+   :Default: ``''``
+   :Description: Human-readable profile purpose
 
 
 features
 --------
 
 ``features.agc``
-   :Type: ``Literal``
-   :Default: ``none``
-   :Description: Automatic Gain Control
+   :Type: ``str``
+   :Default: ``'none'``
+   :Description: Automatic gain-control mode
+
+``features.alpha``
+   :Type: ``float``
+   :Default: ``0.97``
+   :Description: Pre-emphasis coefficient
 
 ``features.cmn``
-   :Type: ``Literal``
-   :Default: ``batch``
-   :Description: Cepstral Mean Normalization
+   :Type: ``str``
+   :Default: ``'batch'``
+   :Description: Cepstral mean-normalization mode
 
-``features.delta``
-   :Type: ``bool``
-   :Default: ``True``
-   :Description: Compute delta features
-
-``features.delta_delta``
-   :Type: ``bool``
-   :Default: ``True``
-   :Description: Compute delta-delta features
-
-``features.feature_type``
-   :Type: ``Literal``
-   :Default: ``1s_c_d_dd``
-   :Description: Sphinx feature stream type (1s_c_d_dd=continuous, s2_4x=semi-continuous)
-
-``features.frame_length_ms``
-   :Type: ``float``
-   :Default: ``25.0``
-   :Description: Frame length in milliseconds
-
-``features.frame_shift_ms``
-   :Type: ``float``
-   :Default: ``10.0``
-   :Description: Frame shift in milliseconds
+``features.feat_type``
+   :Type: ``str``
+   :Default: ``'1s_c_d_dd'``
+   :Description: Sphinx feature stream type
 
 ``features.lifter``
    :Type: ``int``
    :Default: ``22``
-   :Description: Liftering parameter (0=no liftering)
+   :Description: Cepstral lifter window
 
-``features.lower_freq``
-   :Type: ``float``
-   :Default: ``130.0``
-   :Description: Lower frequency cutoff (Hz) - 130 wideband, 200 telephone
+``features.lowerf``
+   :Type: ``int``
+   :Default: ``130``
+   :Description: Lower filter-bank frequency in Hz
+
+``features.ncep``
+   :Type: ``int``
+   :Default: ``13``
+   :Description: Number of cepstral coefficients
 
 ``features.nfft``
    :Type: ``int``
    :Default: ``512``
    :Description: FFT size
 
-``features.num_ceps``
-   :Type: ``int``
-   :Default: ``13``
-   :Description: Number of cepstral coefficients
-
-``features.num_filters``
+``features.nfilt``
    :Type: ``int``
    :Default: ``25``
-   :Description: Number of mel filters (25 SphinxTrain wideband; 15 for 8 kHz telephone)
+   :Description: Number of mel filters
 
-``features.preemphasis``
-   :Type: ``float``
-   :Default: ``0.97``
-   :Description: Preemphasis coefficient
+``features.samprate``
+   :Type: ``int``
+   :Default: ``16000``
+   :Description: Audio sample rate in Hz
 
 ``features.transform``
-   :Type: ``Literal``
-   :Default: ``dct``
-   :Description: Transform type
+   :Type: ``str``
+   :Default: ``'dct'``
+   :Description: Filter-bank transform
 
-``features.type``
-   :Type: ``Literal``
-   :Default: ``mfcc``
-   :Description: Feature type
-
-``features.upper_freq``
-   :Type: ``float``
-   :Default: ``6800.0``
-   :Description: Upper frequency cutoff (Hz) - 6800 wideband, 3500 telephone
-
-``features.use_energy``
-   :Type: ``bool``
-   :Default: ``True``
-   :Description: Include energy feature
+``features.upperf``
+   :Type: ``int``
+   :Default: ``6800``
+   :Description: Upper filter-bank frequency in Hz
 
 ``features.varnorm``
-   :Type: ``bool``
-   :Default: ``False``
-   :Description: Variance normalization
-
-
-name
-----
-
-``name``
-   :Type: ``str | None``
-   :Default: ``None``
-   :Description: Experiment name
+   :Type: ``str``
+   :Default: ``'no'``
+   :Description: Cepstral variance-normalization mode
 
 
 runner
@@ -179,220 +88,167 @@ runner
 ``runner.jobs``
    :Type: ``int | None``
    :Default: ``None``
-   :Description: Number of parallel jobs: unset=auto (CPU count minus 2), 1=serial, N=specific count
+   :Description: Parallel workers; null means auto
 
 ``runner.nice``
    :Type: ``int``
    :Default: ``5``
-   :Description: POSIX worker niceness increment; 0 disables
-
-parallel
---------
-
-``parallel.show_progress``
-   :Type: ``bool``
-   :Default: ``True``
-   :Description: Show progress bars during parallel execution
+   :Description: Worker niceness increment
 
 
 split
 -----
 
 ``split.seed``
+   :Type: ``int``
+   :Default: ``42``
+   :Description: Deterministic split seed
+
+``split.test_count``
    :Type: ``int | None``
    :Default: ``None``
-   :Description: Random seed for reproducible splits (None = random)
+   :Description: Fixed test utterance count; zero disables an additional holdout
 
 ``split.train_ratio``
-   :Type: ``float``
-   :Default: ``0.9``
-   :Description: Fraction for training (0.9 = 90% train, 10% test)
+   :Type: ``float | None``
+   :Default: ``None``
+   :Description: Training fraction
 
 
 training
 --------
 
-``training.cd.tied.abeam``
+``training.a_beam``
    :Type: ``float``
    :Default: ``1e-90``
-   :Description: Alpha beam
+   :Description: Forward alignment beam
 
-``training.cd.tied.bbeam``
+``training.b_beam``
    :Type: ``float``
    :Default: ``1e-10``
-   :Description: Beta beam
+   :Description: Backward alignment beam
 
-``training.cd.tied.convergence_threshold``
+``training.ci.convergence_ratio``
    :Type: ``float``
    :Default: ``0.001``
-   :Description: Maximum signed absolute change in average log likelihood per frame
+   :Description: Absolute likelihood-delta convergence threshold
 
-``training.cd.tied.min_iterations``
-   :Type: ``int``
-   :Default: ``1``
-   :Description: Minimum iterations
-
-``training.cd.tied.mixw_floor``
-   :Type: ``float``
-   :Default: ``1e-05``
-   :Description: Mixture weight floor
-
-``training.cd.tied.n_gaussians``
-   :Type: ``int``
-   :Default: ``8``
-   :Description: Number of Gaussians per state
-
-``training.cd.tied.n_iterations``
+``training.ci.max_iterations``
    :Type: ``int``
    :Default: ``10``
-   :Description: Maximum training iterations
-
-``training.cd.tied.n_senones``
-   :Type: ``int``
-   :Default: ``200``
-   :Description: Target number of senones (tied states)
-
-``training.cd.tied.tmat_floor``
-   :Type: ``float``
-   :Default: ``1e-05``
-   :Description: Transition probability floor
-
-``training.cd.tied.topn``
-   :Type: ``int``
-   :Default: ``8``
-   :Description: Number of top Gaussians
-
-``training.cd.tied.varfloor``
-   :Type: ``float``
-   :Default: ``0.0001``
-   :Description: Variance floor
-
-``training.cd.untied.abeam``
-   :Type: ``float``
-   :Default: ``1e-90``
-   :Description: Alpha beam
-
-``training.cd.untied.bbeam``
-   :Type: ``float``
-   :Default: ``1e-10``
-   :Description: Beta beam
-
-``training.cd.untied.convergence_threshold``
-   :Type: ``float``
-   :Default: ``0.001``
-   :Description: Maximum signed absolute change in average log likelihood per frame
-
-``training.cd.untied.min_iterations``
-   :Type: ``int``
-   :Default: ``1``
-   :Description: Minimum iterations
-
-``training.cd.untied.mixw_floor``
-   :Type: ``float``
-   :Default: ``1e-05``
-   :Description: Mixture weight floor
-
-``training.cd.untied.n_gaussians``
-   :Type: ``int``
-   :Default: ``1``
-   :Description: Number of Gaussians for untied models
-
-``training.cd.untied.n_iterations``
-   :Type: ``int``
-   :Default: ``10``
-   :Description: Maximum training iterations
-
-``training.cd.untied.tmat_floor``
-   :Type: ``float``
-   :Default: ``0.0001``
-   :Description: Transition probability floor
-
-``training.cd.untied.topn``
-   :Type: ``int``
-   :Default: ``8``
-   :Description: Number of top Gaussians
-
-``training.cd.untied.varfloor``
-   :Type: ``float``
-   :Default: ``0.0001``
-   :Description: Variance floor
-
-``training.ci.abeam``
-   :Type: ``float``
-   :Default: ``1e-90``
-   :Description: Alpha beam for BW forward pass
-
-``training.ci.bbeam``
-   :Type: ``float``
-   :Default: ``1e-10``
-   :Description: Beta beam for BW backward pass
-
-``training.ci.convergence_threshold``
-   :Type: ``float``
-   :Default: ``0.001``
-   :Description: Maximum signed absolute change in average log likelihood per frame
+   :Description: Maximum training passes
 
 ``training.ci.min_iterations``
    :Type: ``int``
    :Default: ``1``
-   :Description: Minimum iterations before checking convergence
+   :Description: Minimum training passes
 
-``training.ci.mixw_floor``
+``training.exclusion_schedule``
+   :Type: ``dict``
+   :Default: ``{}``
+   :Description: Experimental stage/pass utterance exclusions
+
+``training.max_skip_fraction``
    :Type: ``float``
-   :Default: ``1e-08``
-   :Description: Mixture weight floor
+   :Default: ``0.05``
+   :Description: Maximum skipped-update fraction
 
-``training.ci.n_gaussians``
-   :Type: ``int``
-   :Default: ``1``
-   :Description: Initial number of Gaussians per state
-
-``training.ci.n_iterations``
-   :Type: ``int``
-   :Default: ``10``
-   :Description: Maximum training iterations
-
-``training.ci.topn``
-   :Type: ``int``
-   :Default: ``1``
-   :Description: Number of top Gaussians to use in BW
-
-``training.ci.varfloor``
-   :Type: ``float``
-   :Default: ``0.0001``
-   :Description: Variance floor
-
-``training.gaussian_increment.enabled``
+``training.multipron_training``
    :Type: ``bool``
-   :Default: ``False``
-   :Description: Enable Gaussian splitting
+   :Default: ``True``
+   :Description: Sum posteriors over pronunciation variants
 
-``training.gaussian_increment.n_iterations_after_split``
+``training.n_senones``
    :Type: ``int``
-   :Default: ``10``
-   :Description: Re-training iterations after split
+   :Default: ``200``
+   :Description: Target tied-state count
 
-``training.gaussian_increment.schedule``
-   :Type: ``list``
-   :Default: ``[1, 2, 4, 8]``
-   :Description: Gaussian splitting schedule (powers of 2)
-
-``training.n_states``
+``training.n_state``
    :Type: ``int``
    :Default: ``3``
-   :Description: Number of emitting states per HMM (3 or 5 typical)
+   :Description: Emitting states per HMM
 
-``training.tree.max_depth``
+``training.question_niter``
    :Type: ``int``
-   :Default: ``50``
-   :Description: Maximum tree depth
+   :Default: ``1``
+   :Description: Question generation iterations
 
-``training.tree.min_observations``
+``training.question_npermute``
    :Type: ``int``
-   :Default: ``100``
-   :Description: Minimum observations per leaf node
+   :Default: ``12``
+   :Description: Question permutations
 
-``training.tree.questions_file``
-   :Type: ``pathlib.Path | None``
-   :Default: ``None``
-   :Description: Path to questions file (auto-generate if None)
+``training.question_quests_per_state``
+   :Type: ``int``
+   :Default: ``20``
+   :Description: Questions generated per state
+
+``training.retry_beam_factor``
+   :Type: ``float``
+   :Default: ``10000000000.0``
+   :Description: Beam widening factor for one retry
+
+``training.tied.convergence_ratio``
+   :Type: ``float``
+   :Default: ``0.001``
+   :Description: Absolute likelihood-delta convergence threshold
+
+``training.tied.max_iterations``
+   :Type: ``int``
+   :Default: ``10``
+   :Description: Maximum training passes
+
+``training.tied.min_iterations``
+   :Type: ``int``
+   :Default: ``1``
+   :Description: Minimum training passes
+
+``training.tree_csplitmax``
+   :Type: ``int``
+   :Default: ``2000``
+   :Description: Maximum phone-context splits
+
+``training.tree_csplitthr``
+   :Type: ``float``
+   :Default: ``0.0``
+   :Description: Phone-context split threshold
+
+``training.tree_mwfloor``
+   :Type: ``float``
+   :Default: ``1e-08``
+   :Description: Tree mixture-weight floor
+
+``training.tree_ssplitmax``
+   :Type: ``int``
+   :Default: ``7``
+   :Description: Maximum state splits
+
+``training.tree_ssplitthr``
+   :Type: ``float``
+   :Default: ``0.0``
+   :Description: State split threshold
+
+``training.tree_state_weights``
+   :Type: ``tuple``
+   :Default: ``(1.0, 0.05, 0.0)``
+   :Description: Decision-tree state weights
+
+``training.untied.convergence_ratio``
+   :Type: ``float``
+   :Default: ``0.001``
+   :Description: Absolute likelihood-delta convergence threshold
+
+``training.untied.max_iterations``
+   :Type: ``int``
+   :Default: ``10``
+   :Description: Maximum training passes
+
+``training.untied.min_iterations``
+   :Type: ``int``
+   :Default: ``1``
+   :Description: Minimum training passes
+
+``training.untied_inventory``
+   :Type: ``Literal``
+   :Default: ``'all-triphone'``
+   :Description: Untied-model phone inventory policy

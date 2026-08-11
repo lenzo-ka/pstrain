@@ -544,7 +544,7 @@ def test_every_shipped_profile_loads(tmp_path: Path) -> None:
     (project / "etc").mkdir(parents=True)
     shipped_configs = Path(__file__).parents[1] / "etc" / "configs.yaml"
     shutil.copyfile(shipped_configs, project / "etc" / "configs.yaml")
-    profiles = yaml.safe_load(shipped_configs.read_text())
+    profiles = yaml.safe_load(shipped_configs.read_text())["profiles"]
 
     for profile in profiles:
         context = PipelineContext.from_config(project, config_name=profile)
@@ -553,7 +553,9 @@ def test_every_shipped_profile_loads(tmp_path: Path) -> None:
 
 def test_shipped_profiles_equal_builtin_defaults() -> None:
     shipped_configs = Path(__file__).parents[1] / "etc" / "configs.yaml"
-    assert yaml.safe_load(shipped_configs.read_text()) == DEFAULT_CONFIGS
+    document = yaml.safe_load(shipped_configs.read_text())
+    assert document["config_version"] == 1
+    assert set(document["profiles"]) == set(DEFAULT_CONFIGS)
 
 
 @pytest.mark.parametrize(

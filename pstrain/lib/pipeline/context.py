@@ -27,14 +27,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, field
 from functools import cache
 from pathlib import Path
 from typing import Any, Self
 
-import yaml
-
 from pstrain import __version__
+from pstrain.lib.config.models import Profile, TrainingScheduleConfig
+from pstrain.lib.config.resolver import ResolvedConfig, resolve_config
 from pstrain.lib.paths import get_lib_path
 
 
@@ -70,76 +70,90 @@ class FeatParams:
     training-time front-end at decode/align time.
     """
 
-    samprate: int = 16000
-    ncep: int = 13
-    nfilt: int = 25
-    nfft: int = 512
-    lowerf: int = 130
-    upperf: int = 6800
+    samprate: int = field(default_factory=lambda: Profile().features.samprate)
+    ncep: int = field(default_factory=lambda: Profile().features.ncep)
+    nfilt: int = field(default_factory=lambda: Profile().features.nfilt)
+    nfft: int = field(default_factory=lambda: Profile().features.nfft)
+    lowerf: int = field(default_factory=lambda: Profile().features.lowerf)
+    upperf: int = field(default_factory=lambda: Profile().features.upperf)
     # Pre-emphasis coefficient (`-alpha`). 0.97 is the engine default.
-    alpha: float = 0.97
-    feat_type: str = "1s_c_d_dd"
+    alpha: float = field(default_factory=lambda: Profile().features.alpha)
+    feat_type: str = field(default_factory=lambda: Profile().features.feat_type)
     # Cepstral lifter window (sphinx_fe `-lifter`). 22 = SphinxTrain default.
-    lifter: int = 22
+    lifter: int = field(default_factory=lambda: Profile().features.lifter)
     # Linear-transform applied to filter bank outputs (`-transform`).
-    transform: str = "dct"
+    transform: str = field(default_factory=lambda: Profile().features.transform)
     # Automatic gain control (`-agc`).
-    agc: str = "none"
+    agc: str = field(default_factory=lambda: Profile().features.agc)
     # Cepstral mean normalization (`-cmn`). "batch" matches SphinxTrain.
-    cmn: str = "batch"
+    cmn: str = field(default_factory=lambda: Profile().features.cmn)
     # Cepstral variance normalization (`-varnorm`).
-    varnorm: str = "no"
+    varnorm: str = field(default_factory=lambda: Profile().features.varnorm)
 
 
 @dataclass(frozen=True)
 class TrainingSchedule:
     """Convergence controller for one family of Baum-Welch stages."""
 
-    max_iterations: int = 10
-    min_iterations: int = 1
-    convergence_ratio: float = 0.001
+    max_iterations: int = field(default_factory=lambda: TrainingScheduleConfig().max_iterations)
+    min_iterations: int = field(default_factory=lambda: TrainingScheduleConfig().min_iterations)
+    convergence_ratio: float = field(
+        default_factory=lambda: TrainingScheduleConfig().convergence_ratio
+    )
 
 
 @dataclass(frozen=True)
 class TrainParams:
-    n_state: int = 3
-    n_senones: int = 200
-    a_beam: float = 1e-90
-    b_beam: float = 1e-10
+    n_state: int = field(default_factory=lambda: Profile().training.n_state)
+    n_senones: int = field(default_factory=lambda: Profile().training.n_senones)
+    a_beam: float = field(default_factory=lambda: Profile().training.a_beam)
+    b_beam: float = field(default_factory=lambda: Profile().training.b_beam)
     # A7c matched the upstream signed absolute likelihood-delta decision,
     # while measurements retained 0.001 rather than upstream's literal 0.1.
     # CI and tied stages keep that controller and upstream's ten-pass cap.
-    ci: TrainingSchedule = field(default_factory=TrainingSchedule)
-    tied: TrainingSchedule = field(default_factory=TrainingSchedule)
+    ci: TrainingSchedule = field(
+        default_factory=lambda: TrainingSchedule(**Profile().training.ci.model_dump())
+    )
+    tied: TrainingSchedule = field(
+        default_factory=lambda: TrainingSchedule(**Profile().training.tied.model_dump())
+    )
     # SphinxTrain scripts/30.cd_hmm_untied/norm_and_launchbw.pl uses the same
     # converge-with-cap controller. The preserved SLT oracle ended at pass 6;
     # cap this stage there so a stricter pstrain threshold cannot run to 10.
-    untied: TrainingSchedule = field(default_factory=lambda: TrainingSchedule(max_iterations=6))
+    untied: TrainingSchedule = field(
+        default_factory=lambda: TrainingSchedule(**Profile().training.untied.model_dump())
+    )
     # Warn on every skipped update; fail a stage above five percent.
-    max_skip_fraction: float = 0.05
+    max_skip_fraction: float = field(default_factory=lambda: Profile().training.max_skip_fraction)
     # Retry forward-final-state pruning failures once at a beam this many
     # times wider (1e-90 / 1e10 = 1e-100).
-    retry_beam_factor: float = 1e10
+    retry_beam_factor: float = field(default_factory=lambda: Profile().training.retry_beam_factor)
     # Tuned by SphinxTrain scripts/40.buildtrees/buildtree.pl for 3-state HMMs.
-    tree_state_weights: tuple[float, ...] = (1.0, 0.05, 0.0)
-    tree_ssplitmax: int = 7
-    tree_ssplitthr: float = 0.0
-    tree_csplitmax: int = 2000
-    tree_csplitthr: float = 0.0
-    tree_mwfloor: float = 1e-8
-    question_npermute: int = 12
-    question_quests_per_state: int = 20
-    question_niter: int = 1
+    tree_state_weights: tuple[float, ...] = field(
+        default_factory=lambda: Profile().training.tree_state_weights
+    )
+    tree_ssplitmax: int = field(default_factory=lambda: Profile().training.tree_ssplitmax)
+    tree_ssplitthr: float = field(default_factory=lambda: Profile().training.tree_ssplitthr)
+    tree_csplitmax: int = field(default_factory=lambda: Profile().training.tree_csplitmax)
+    tree_csplitthr: float = field(default_factory=lambda: Profile().training.tree_csplitthr)
+    tree_mwfloor: float = field(default_factory=lambda: Profile().training.tree_mwfloor)
+    question_npermute: int = field(default_factory=lambda: Profile().training.question_npermute)
+    question_quests_per_state: int = field(
+        default_factory=lambda: Profile().training.question_quests_per_state
+    )
+    question_niter: int = field(default_factory=lambda: Profile().training.question_niter)
     # Multi-pronunciation training: build wide utterance graphs that
     # sum Baum-Welch posteriors across pronunciation variants. On by
     # default; set to False to fall back to the legacy linear path that
     # always picks the first listed variant per word.
-    multipron_training: bool = True
+    multipron_training: bool = field(default_factory=lambda: Profile().training.multipron_training)
     # PipelineContext resolves an omitted config value by training mode:
     # all-dictionary for multipron and occurrence-based for linear training.
-    untied_inventory: str = "all-triphone"
+    untied_inventory: str = field(default_factory=lambda: Profile().training.untied_inventory)
     # Experimental parity instrument: stage -> pass (or "*") -> utterance IDs.
-    exclusion_schedule: dict[str, dict[int | str, list[str]]] = field(default_factory=dict)
+    exclusion_schedule: dict[str, dict[int | str, list[str]]] = field(
+        default_factory=lambda: Profile().training.exclusion_schedule
+    )
 
 
 @dataclass(frozen=True)
@@ -149,17 +163,17 @@ class SplitParams:
     Defaults match the `pstrain split` CLI: 95% train, seed 42.
     """
 
-    train_ratio: float | None = None
-    test_count: int | None = None
-    seed: int = 42
+    train_ratio: float | None = field(default_factory=lambda: Profile().split.train_ratio)
+    test_count: int | None = field(default_factory=lambda: Profile().split.test_count)
+    seed: int = field(default_factory=lambda: Profile().split.seed)
 
 
 @dataclass(frozen=True)
 class RunnerParams:
     """Local process-allocation policy for pipeline fan-outs."""
 
-    jobs: int | None = None
-    nice: int = 5
+    jobs: int | None = field(default_factory=lambda: Profile().runner.jobs)
+    nice: int = field(default_factory=lambda: Profile().runner.nice)
 
 
 DEFAULT_CONFIGS: dict[str, dict[str, Any]] = {
@@ -262,112 +276,26 @@ DEFAULT_CONFIGS: dict[str, dict[str, Any]] = {
     },
 }
 
-_BW_STAGE_NAMES = {
-    "ci-1g",
-    "ci-2g",
-    "ci-4g",
-    "ci-8g",
-    "cd-untied",
-    "cd-1g",
-    "cd-2g",
-    "cd-4g",
-    "cd-8g",
-    "cd-16g",
-    "cd-32g",
-}
-
-
-def _validate_params(
-    profile: str,
-    block: str,
-    values: dict[str, Any],
-    params_type: (
-        type[FeatParams]
-        | type[TrainingSchedule]
-        | type[TrainParams]
-        | type[SplitParams]
-        | type[RunnerParams]
-    ),
-) -> None:
-    """Reject misspelled profile parameters with configuration context."""
-    known = {item.name for item in fields(params_type)}
-    unknown = sorted(set(values) - known)
-    if unknown:
-        parameter = block.removesuffix("s")
-        raise ValueError(f"unknown {parameter} parameter {unknown[0]!r} in profile {profile!r}")
-
-
-def _coerce_dataclass_values(values: dict[str, Any], params_type: type[Any]) -> dict[str, Any]:
-    """Coerce YAML scalars to the runtime types of dataclass defaults."""
-    defaults = params_type()
-    coerced = dict(values)
-    for item in fields(params_type):
-        if item.name not in coerced:
-            continue
-        default = getattr(defaults, item.name)
-        value = coerced[item.name]
-        if isinstance(default, TrainingSchedule):
-            if not isinstance(value, dict):
-                raise ValueError(f"{item.name} schedule must be a mapping")
-            _validate_params("training", item.name, value, TrainingSchedule)
-            coerced[item.name] = TrainingSchedule(
-                **_coerce_dataclass_values(value, TrainingSchedule)
-            )
-        elif isinstance(default, tuple):
-            coerced[item.name] = tuple(value)
-        elif isinstance(default, float):
-            coerced[item.name] = float(value)
-        elif isinstance(default, int) and not isinstance(default, bool):
-            coerced[item.name] = int(value)
-    return coerced
-
-
-def _validate_exclusion_schedule(profile: str, value: Any) -> None:
-    """Validate the deliberately narrow stage/pass/utterance schedule shape."""
-    if not isinstance(value, dict):
-        raise ValueError(f"config {profile!r} training.exclusion_schedule must be a mapping")
-    for stage, passes in value.items():
-        if not isinstance(stage, str) or not stage:
-            raise ValueError("training.exclusion_schedule stage names must be non-empty strings")
-        if stage not in _BW_STAGE_NAMES:
-            raise ValueError(f"training.exclusion_schedule has unknown BW stage {stage!r}")
-        if not isinstance(passes, dict):
-            raise ValueError(
-                f"training.exclusion_schedule stage {stage!r} must map passes to utterance IDs"
-            )
-        for pass_selector, utterances in passes.items():
-            valid_pass = (
-                pass_selector == "*"
-                or isinstance(pass_selector, int)
-                and not isinstance(pass_selector, bool)
-                and pass_selector >= 1
-                or isinstance(pass_selector, str)
-                and pass_selector.isdigit()
-                and int(pass_selector) >= 1
-            )
-            if not valid_pass:
-                raise ValueError(
-                    "training.exclusion_schedule pass selectors must be positive integers or '*'"
-                )
-            if not isinstance(utterances, list) or not all(
-                isinstance(utterance, str) and utterance for utterance in utterances
-            ):
-                raise ValueError(
-                    "training.exclusion_schedule utterance lists must contain non-empty strings"
-                )
-
 
 def load_configs(project_dir: Path) -> dict[str, dict[str, Any]]:
-    """Load named configurations from `project_dir/etc/configs.yaml`,
-    merged on top of the built-in defaults."""
-    configs_file = project_dir / "etc" / "configs.yaml"
-    if not configs_file.exists():
-        return dict(DEFAULT_CONFIGS)
-    with configs_file.open() as f:
-        user_configs = yaml.safe_load(f) or {}
-    merged = dict(DEFAULT_CONFIGS)
-    merged.update(user_configs)
-    return merged
+    """Compatibility view of named profiles through the canonical reader."""
+    from pstrain.lib.config.resolver import _profile_documents
+
+    profiles, _, _, _ = _profile_documents(project_dir.resolve())
+    return profiles
+
+
+def _runtime_values(profile: Profile) -> tuple[FeatParams, TrainParams, SplitParams, RunnerParams]:
+    values = profile.model_dump(mode="python")
+    training = values["training"]
+    for stage in ("ci", "untied", "tied"):
+        training[stage] = TrainingSchedule(**training[stage])
+    return (
+        FeatParams(**values["features"]),
+        TrainParams(**training),
+        SplitParams(**values["split"]),
+        RunnerParams(**values["runner"]),
+    )
 
 
 @dataclass(frozen=True)
@@ -377,11 +305,12 @@ class PipelineContext:
     project_dir: Path
     experiment: str = "default"
     config_name: str = "default"
-    feat: FeatParams = field(default_factory=FeatParams)
-    train: TrainParams = field(default_factory=TrainParams)
-    split: SplitParams = field(default_factory=SplitParams)
-    runner: RunnerParams = field(default_factory=RunnerParams)
+    feat: FeatParams = field(default_factory=lambda: _runtime_values(Profile())[0])
+    train: TrainParams = field(default_factory=lambda: _runtime_values(Profile())[1])
+    split: SplitParams = field(default_factory=lambda: _runtime_values(Profile())[2])
+    runner: RunnerParams = field(default_factory=lambda: _runtime_values(Profile())[3])
     description: str = ""
+    resolved_config: ResolvedConfig | None = field(default=None, repr=False, compare=False)
 
     @classmethod
     def from_config(
@@ -390,57 +319,27 @@ class PipelineContext:
         *,
         experiment: str = "default",
         config_name: str = "default",
+        cli_overrides: dict[str, Any] | None = None,
     ) -> Self:
         """Build a context by reading `project/etc/configs.yaml`."""
         project_dir = Path(project_dir).resolve()
-        configs = load_configs(project_dir)
-        if config_name not in configs:
-            available = ", ".join(sorted(configs))
-            raise ValueError(f"unknown config {config_name!r}; available: {available}")
-        cfg = configs[config_name]
-        feature_values = cfg.get("features", {})
-        training_values = cfg.get("training", {})
-        split_values = cfg.get("split", {})
-        runner_values = cfg.get("runner", {})
-        _validate_params(config_name, "features", feature_values, FeatParams)
-        _validate_params(config_name, "training", training_values, TrainParams)
-        _validate_params(config_name, "split", split_values, SplitParams)
-        _validate_params(config_name, "runner", runner_values, RunnerParams)
-        nice = runner_values.get("nice", 5)
-        if not isinstance(nice, int) or nice < 0:
-            raise ValueError(f"config {config_name!r} runner.nice must be a non-negative integer")
-        configured_jobs = runner_values.get("jobs")
-        if configured_jobs is not None and (
-            not isinstance(configured_jobs, int) or configured_jobs < 1
-        ):
-            raise ValueError(f"config {config_name!r} runner.jobs must be a positive integer")
-        multipron_training = training_values.get("multipron_training", True)
-        untied_inventory = training_values.get(
-            "untied_inventory",
-            "all-triphone" if multipron_training else "linear",
+        resolved = resolve_config(
+            project_dir,
+            profile_name=config_name,
+            experiment=experiment,
+            cli_overrides=cli_overrides,
         )
-        if untied_inventory not in {"all-triphone", "transcript-reachable", "linear"}:
-            raise ValueError(
-                f"config {config_name!r} training.untied_inventory must be "
-                "all-triphone, transcript-reachable, or linear"
-            )
-        _validate_exclusion_schedule(config_name, training_values.get("exclusion_schedule", {}))
-        if untied_inventory == "transcript-reachable" and multipron_training is False:
-            raise ValueError(
-                f"config {config_name!r} training.untied_inventory "
-                "'transcript-reachable' requires training.multipron_training: true; "
-                "linear mode's equivalent is the 'linear' policy"
-            )
-        resolved_training_values = {**training_values, "untied_inventory": untied_inventory}
+        feat, train, split, runner = _runtime_values(resolved.profile)
         return cls(
             project_dir=project_dir,
             experiment=experiment,
             config_name=config_name,
-            description=cfg.get("description", ""),
-            feat=FeatParams(**_coerce_dataclass_values(feature_values, FeatParams)),
-            train=TrainParams(**_coerce_dataclass_values(resolved_training_values, TrainParams)),
-            split=SplitParams(**_coerce_dataclass_values(split_values, SplitParams)),
-            runner=RunnerParams(**runner_values),
+            description=resolved.profile.description,
+            feat=feat,
+            train=train,
+            split=split,
+            runner=runner,
+            resolved_config=resolved,
         )
 
     @property
@@ -490,7 +389,12 @@ class PipelineContext:
             "stage": stage,
             "tool_version": __version__,
             "native_library": _native_library_identity(),
+            "config_version": self.resolved_config.config_version if self.resolved_config else 1,
         }
+        if self.resolved_config:
+            payload["config_sources"] = {
+                path: item.winner.source_kind for path, item in self.resolved_config.fields.items()
+            }
         if stage == "features":
             payload["features"] = asdict(self.feat)
         elif stage == "split":
