@@ -298,17 +298,31 @@ learns about variant phones.
 | Upstream-align | `7e2bc43` | Hoist `build_utt_state_seq` into `next_utt_states_graph()` to mirror upstream PR #58. |
 | Upstream-align | `9fe0e38` | Add `-multipron` argv flag to the standalone `bw` binary. |
 
-## Upstream port
+## Relationship to the upstream graph builders
 
-The C surface here is also the subject of
-[cmusphinx/sphinxtrain PR #58](https://github.com/cmusphinx/sphinxtrain/pull/58)
-("Bake multiple lexical pronunciation into baum-welch"). The two
-branches converge on the same function names, file locations, and
-signatures (`mk_phone_graph`, `phone_graph_split_contexts`,
-`cvt2triphone_graph`, `state_seq_make_graph`, `next_utt_states_graph`,
-the shared private `state_seq_internal.h`, and the `-multipron` argv
-flag on `bw`) so future fixes can be cherry-picked in either
-direction with minimal manual translation.
+The graph builders were vendored from the upstream SphinxTrain
+multipron mechanism, merged on upstream master by
+[cmusphinx/sphinxtrain PR #60](https://github.com/cmusphinx/sphinxtrain/pull/60).
+They have since evolved deliberately in pstrain; the shared ancestry does not
+imply source or semantic parity. Relative to upstream master at `694c100`, the
+material differences are:
+
+- **Two-sided context splitting:** pstrain duplicates non-filler slots over
+  the left/right context cross-product rather than splitting only by
+  predecessor; this makes each slot's triphone identity unambiguous and
+  supports transcript-reachable triphone enumeration.
+- **Shared fillers:** filler slots are not duplicated during context
+  splitting, preserving their CI identity and one shared terminal silence
+  HMM.
+- **Acoustic-model-aware split API:** `phone_graph_split_contexts` takes an
+  `acmod_set_t` so splitting can normalize contexts to base phones and detect
+  filler attributes.
+- **Triphone visitor:** `phone_graph_visit_triphones` exposes the exact
+  contexts represented by the split graph so reachable-inventory generation
+  uses the same context and word-position rules as graph conversion.
+- **Graph allocation and cleanup:** `phone_graph.c` uses pstrain-specific
+  adjacency allocation, temporary-buffer, and ownership cleanup paths to
+  construct and free the expanded variant graph safely.
 
 The two **defaults** differ on purpose:
 
@@ -343,10 +357,3 @@ Adding this is additive:
 The accumulator is cheap (one float per dictionary entry); the
 challenge is plumbing it through the existing C accumulator path
 without breaking parity. Estimated ~1-2 days when motivated.
-
-### Right-context split symmetry
-
-See "What we don't do" above. Mirror of `phone_graph_split_contexts`
-that splits a slot when its successors have different CI phones.
-Bounded ~14% extra work on multi-pron-rich corpora; closes the last
-known approximation in the triphone resolution.
