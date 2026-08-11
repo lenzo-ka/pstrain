@@ -422,6 +422,54 @@ build_utt_state_seq(pstrain_bw_context_t *ctx,
                                  trans_copy);
 }
 
+/* Copy the historical linear builder's static state graph into the same
+ * caller-owned layout returned by state_seq_make_graph(). */
+state_t *
+pstrain_bw_copy_state_seq(const state_t *source, uint32 n_state)
+{
+    state_t *copy;
+    uint32 *next_state = NULL, *prior_state = NULL;
+    float32 *next_tprob = NULL, *prior_tprob = NULL;
+    uint32 total_next = 0, total_prior = 0;
+    uint32 i, next_offset = 0, prior_offset = 0;
+
+    for (i = 0; i < n_state; ++i) {
+        total_next += source[i].n_next;
+        total_prior += source[i].n_prior;
+    }
+    copy = ckd_calloc(n_state, sizeof(*copy));
+    if (total_next) {
+        next_state = ckd_calloc(total_next, sizeof(*next_state));
+        next_tprob = ckd_calloc(total_next, sizeof(*next_tprob));
+    }
+    if (total_prior) {
+        prior_state = ckd_calloc(total_prior, sizeof(*prior_state));
+        prior_tprob = ckd_calloc(total_prior, sizeof(*prior_tprob));
+    }
+    for (i = 0; i < n_state; ++i) {
+        copy[i] = source[i];
+        if (source[i].n_next) {
+            memcpy(next_state + next_offset, source[i].next_state,
+                   source[i].n_next * sizeof(*next_state));
+            memcpy(next_tprob + next_offset, source[i].next_tprob,
+                   source[i].n_next * sizeof(*next_tprob));
+            copy[i].next_state = next_state + next_offset;
+            copy[i].next_tprob = next_tprob + next_offset;
+            next_offset += source[i].n_next;
+        }
+        if (source[i].n_prior) {
+            memcpy(prior_state + prior_offset, source[i].prior_state,
+                   source[i].n_prior * sizeof(*prior_state));
+            memcpy(prior_tprob + prior_offset, source[i].prior_tprob,
+                   source[i].n_prior * sizeof(*prior_tprob));
+            copy[i].prior_state = prior_state + prior_offset;
+            copy[i].prior_tprob = prior_tprob + prior_offset;
+            prior_offset += source[i].n_prior;
+        }
+    }
+    return copy;
+}
+
 state_t *
 pstrain_bw_build_state_seq(pstrain_bw_context_t *ctx,
                            const char *transcript,
@@ -436,6 +484,8 @@ pstrain_bw_build_state_seq(pstrain_bw_context_t *ctx,
     trans_copy = ckd_salloc(transcript);
     state_seq = build_utt_state_seq(ctx, trans_copy, n_state, &needs_free);
     ckd_free(trans_copy);
+    if (state_seq && !needs_free)
+        state_seq = pstrain_bw_copy_state_seq(state_seq, *n_state);
     return state_seq;
 }
 

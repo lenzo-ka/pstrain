@@ -1,10 +1,9 @@
 """Low-level CFFI bindings to libpstrainc.
 
-This module provides direct access to C functions in libpstrainc.  In the
-``contained-3`` phase, only ``prune_tree``, ``make_quests``, and
-``mdef_gen_ci`` are routed through the persistent native worker.  All other
-operations retain their existing in-process path.
-For most use cases, prefer the higher-level Python wrappers in pstrain.lib.
+The supported model-I/O and logmath operations exported here are coarse
+operations routed through the persistent native worker. ``get_lib()`` and
+dynamic raw-symbol access are private implementation/testing escape hatches;
+applications should use the higher-level wrappers in :mod:`pstrain.lib`.
 
 Implementation is organized into submodules:
 - _cffi.cdef: C type definitions

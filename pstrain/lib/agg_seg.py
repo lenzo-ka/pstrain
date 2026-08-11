@@ -10,6 +10,7 @@ from enum import IntEnum
 from pathlib import Path
 
 from pstrain.lib import _pstrainc
+from pstrain.lib.native_worker import contained
 
 
 class SegType(IntEnum):
@@ -20,6 +21,7 @@ class SegType(IntEnum):
     PHN = 2  # Aggregate by phone
 
 
+@contained
 def aggregate_segments(
     ctl_path: Path,
     cep_dir: Path,

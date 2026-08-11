@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from pstrain.lib import _pstrainc, native_worker
+from pstrain.lib.native_worker import contained
 from pstrain.lib.transcription import parse_transcription_file
 
 
@@ -41,6 +42,7 @@ def generate_ci_mdef(
     )
 
 
+@contained
 def generate_alltriphones_mdef(
     phone_list: Path,
     dict_path: Path,
@@ -77,6 +79,7 @@ def generate_alltriphones_mdef(
         raise RuntimeError(f"Failed to generate all-triphones mdef: {output}")
 
 
+@contained
 def generate_untied_mdef(
     phone_list: Path,
     dict_path: Path,
@@ -144,6 +147,7 @@ def generate_untied_mdef(
         raise RuntimeError(f"Failed to generate untied mdef: {output}")
 
 
+@contained
 def count_triphones(
     phone_list: Path,
     dict_path: Path,

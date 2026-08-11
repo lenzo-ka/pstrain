@@ -16,6 +16,7 @@ Example:
 
 from __future__ import annotations
 
+import contextlib
 import struct
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,7 +24,8 @@ from typing import TYPE_CHECKING, Any, Self
 
 import numpy as np
 
-from pstrain.lib import _pstrainc
+from pstrain.lib import _pstrainc, native_worker
+from pstrain.lib.native_worker import contained
 
 if TYPE_CHECKING:
     import numpy.typing as npt
@@ -109,10 +111,14 @@ class FeatureExtractor:
             alpha: Pre-emphasis coefficient (default: 0.97)
             lifter: Liftering coefficient (default: 22)
         """
-        self._ffi, self._lib = _pstrainc._init()
         self._config = FEParams(**config)
+        if not native_worker.in_worker():
+            self._proxy = native_worker.NativeObjectProxy(__name__, "FeatureExtractor", (), config)
+            self._veclen = int(self._proxy.call("get_veclen"))
+            return
+        self._ffi, self._lib = _pstrainc._init()
         self._fe: Any = None
-        self._veclen: int = 0
+        self._veclen = 0
         self._init_fe()
 
     def _init_fe(self) -> None:
@@ -137,6 +143,9 @@ class FeatureExtractor:
 
     def close(self) -> None:
         """Release resources."""
+        if hasattr(self, "_proxy"):
+            self._proxy.close()
+            return
         if self._fe:
             self._lib.fe_free(self._fe)
             self._fe = None
@@ -148,12 +157,17 @@ class FeatureExtractor:
         self.close()
 
     def __del__(self) -> None:
-        self.close()
+        with contextlib.suppress(Exception):
+            self.close()
 
     @property
     def veclen(self) -> int:
         """Output vector length (number of cepstral coefficients)."""
         return self._veclen
+
+    def get_veclen(self) -> int:
+        """Worker-callable accessor for :attr:`veclen`."""
+        return self.veclen
 
     @property
     def config(self) -> FEParams:
@@ -169,6 +183,10 @@ class FeatureExtractor:
         Returns:
             Feature array of shape (n_frames, veclen)
         """
+        if hasattr(self, "_proxy"):
+            result = self._proxy.call("process_audio", audio)
+            assert isinstance(result, np.ndarray)
+            return result
         if self._fe is None:
             raise RuntimeError("FeatureExtractor is closed")
 
@@ -227,6 +245,7 @@ class FeatureExtractor:
         return feat_buf[:total_frames].copy()
 
 
+@contained
 def extract_features(
     audio_path: str | Path,
     output_path: str | Path,

@@ -52,18 +52,12 @@ def _runtime_contexts(
     trainer: BWTrainer, mdef_path: Path, transcript: str
 ) -> set[tuple[str, str, str, str]]:
     rows = list(_mdef_rows(mdef_path))
-    n_state = trainer._ffi.new("uint32 *")
-    states = trainer._lib.pstrain_bw_build_state_seq(trainer._ctx, transcript.encode(), n_state)
-    assert states != trainer._ffi.NULL
-    try:
-        return {
-            tuple(rows[states[index].phn][:4])
-            for index in range(n_state[0])
-            if states[index].m_state == 0 and rows[states[index].phn][1] != "-"
-        }
-    finally:
-        if trainer.config.multipron:
-            trainer._lib.pstrain_bw_free_state_seq(states, n_state[0])
+    states = trainer.inspect_state_seq(transcript)
+    return {
+        tuple(rows[state.phn][:4])
+        for state in states
+        if state.m_state == 0 and rows[state.phn][1] != "-"
+    }
 
 
 @pytest.fixture(scope="module")
@@ -150,7 +144,7 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
             ),
         )
         assert trainer.process_utterance(features, phones)
-        assert trainer._lib.pstrain_bw_count_active_fallback_senones(trainer._ctx) == 0
+        assert trainer.count_active_fallback_senones() == 0
         assert trainer.normalize()
         out = tmp_path / policy
         out.mkdir()
@@ -598,42 +592,36 @@ def test_multipron_variants_share_utterance_final_state(
 
     trainer = _trainer(flat_project)
     trainer.set_dict(engineered, flat_project.filler_dict)
-    n_state = trainer._ffi.new("uint32 *")
-    states = trainer._lib.pstrain_bw_build_state_seq(trainer._ctx, b"<s> author </s>", n_state)
-    assert states != trainer._ffi.NULL
-    try:
-        terminal_exits = [index for index in range(n_state[0]) if states[index].n_next == 0]
-        assert terminal_exits == [n_state[0] - 1]
+    states = trainer.inspect_state_seq("<s> author </s>")
+    terminal_exits = [index for index, state in enumerate(states) if not state.next_state]
+    assert terminal_exits == [len(states) - 1]
 
-        terminal_exit = terminal_exits[0]
-        terminal_phone = states[terminal_exit].phn
-        terminal_starts = [
-            index
-            for index in range(n_state[0])
-            if states[index].phn == terminal_phone and states[index].m_state == 0
-        ]
-        assert len(terminal_starts) == 2  # initial <s> and one terminal </s>
-        terminal_start = terminal_starts[-1]
-        branch_count = 2  # author and author(2)
-        fan_in = [
-            states[terminal_start].prior_state[offset]
-            for offset in range(states[terminal_start].n_prior)
-            if states[states[terminal_start].prior_state[offset]].phn != terminal_phone
-        ]
-        assert len(fan_in) == branch_count
+    terminal_exit = terminal_exits[0]
+    terminal_phone = states[terminal_exit].phn
+    terminal_starts = [
+        index
+        for index, state in enumerate(states)
+        if state.phn == terminal_phone and state.m_state == 0
+    ]
+    assert len(terminal_starts) == 2  # initial <s> and one terminal </s>
+    terminal_start = terminal_starts[-1]
+    branch_count = 2  # author and author(2)
+    fan_in = [
+        predecessor
+        for predecessor in states[terminal_start].prior_state
+        if states[predecessor].phn != terminal_phone
+    ]
+    assert len(fan_in) == branch_count
 
-        reachable = {terminal_exit}
-        pending = [terminal_exit]
-        while pending:
-            state_id = pending.pop()
-            for offset in range(states[state_id].n_prior):
-                predecessor = states[state_id].prior_state[offset]
-                if predecessor not in reachable:
-                    reachable.add(predecessor)
-                    pending.append(predecessor)
-        assert reachable == set(range(n_state[0]))
-    finally:
-        trainer._lib.pstrain_bw_free_state_seq(states, n_state[0])
+    reachable = {terminal_exit}
+    pending = [terminal_exit]
+    while pending:
+        state_id = pending.pop()
+        for predecessor in states[state_id].prior_state:
+            if predecessor not in reachable:
+                reachable.add(predecessor)
+                pending.append(predecessor)
+    assert reachable == set(range(len(states)))
 
     assert trainer.process_utterance_mfcc(mfcc, "<s> author </s>")
     assert not trainer.final_state_not_reached
@@ -675,21 +663,16 @@ def test_cd_variant_boundaries_expand_both_triphone_contexts(
     # two left-context copies of each `and` variant.  There are 14 phone HMMs:
     # two shared SILs, four `a` copies, four first-phone `and` copies, and the
     # four remaining phones in the two `and` variants.
-    n_state = trainer._ffi.new("uint32 *")
-    states = trainer._lib.pstrain_bw_build_state_seq(trainer._ctx, b"<s> a and </s>", n_state)
-    assert states != trainer._ffi.NULL
-    try:
-        phone_starts = [index for index in range(n_state[0]) if states[index].m_state == 0]
-        assert len(phone_starts) == 14
-        graph_models = [tuple(mdef_rows[states[index].phn][:4]) for index in phone_starts]
-        assert {model for model in graph_models if model in expected_boundary_models} == (
-            expected_boundary_models
-        )
-        assert all(graph_models.count(model) == 1 for model in expected_boundary_models)
-        terminal_exits = [index for index in range(n_state[0]) if states[index].n_next == 0]
-        assert terminal_exits == [n_state[0] - 1]
-    finally:
-        trainer._lib.pstrain_bw_free_state_seq(states, n_state[0])
+    states = trainer.inspect_state_seq("<s> a and </s>")
+    phone_starts = [index for index, state in enumerate(states) if state.m_state == 0]
+    assert len(phone_starts) == 14
+    graph_models = [tuple(mdef_rows[states[index].phn][:4]) for index in phone_starts]
+    assert {model for model in graph_models if model in expected_boundary_models} == (
+        expected_boundary_models
+    )
+    assert all(graph_models.count(model) == 1 for model in expected_boundary_models)
+    terminal_exits = [index for index, state in enumerate(states) if not state.next_state]
+    assert terminal_exits == [len(states) - 1]
 
 
 @requires_c_library
@@ -795,7 +778,7 @@ def test_complete_cd_inventory_leaves_ci_fallback_accumulators_zero(
     trainer.set_dict(full_project.shared_dir / "dictionary.dict", full_project.filler_dict)
     mfcc = read_sphinx_mfc(full_project.features_dir / "arctic_a0001.mfc")
     assert trainer.process_utterance_mfcc(mfcc, "<s> a and </s>")
-    assert trainer._lib.pstrain_bw_count_active_fallback_senones(trainer._ctx) == 0
+    assert trainer.count_active_fallback_senones() == 0
     non_filler_ci_senones = [
         int(state)
         for row in _mdef_rows(complete_mdef)
@@ -803,10 +786,7 @@ def test_complete_cd_inventory_leaves_ci_fallback_accumulators_zero(
         for state in row[6:-1]
     ]
     assert non_filler_ci_senones
-    assert all(
-        trainer._lib.pstrain_bw_fallback_senone_active(trainer._ctx, senone) == 0
-        for senone in non_filler_ci_senones
-    )
+    assert all(not trainer.fallback_senone_active(senone) for senone in non_filler_ci_senones)
 
 
 @requires_c_library
@@ -845,23 +825,18 @@ def test_withheld_context_uses_live_ci_fallback_across_passes(
         BWConfig(pass2var=True, unobserved_gaussian_policy="zero", multipron=True),
     )
     probe.set_dict(full_project.shared_dir / "dictionary.dict", full_project.filler_dict)
-    n_state = probe._ffi.new("uint32 *")
-    states = probe._lib.pstrain_bw_build_state_seq(probe._ctx, b"<s> a and </s>", n_state)
-    assert states != probe._ffi.NULL
+    states = probe.inspect_state_seq("<s> a and </s>")
     ci_rows = [row for row in _mdef_rows(linear_mdef) if row[1] == "-"]
     sil_id = next(index for index, row in enumerate(ci_rows) if row[0] == "SIL")
     fallback_senones = np.asarray(
         sorted(
             {
-                states[index].mixw
-                for index in range(n_state[0])
-                if states[index].mixw != 0xFFFFFFFF
-                and states[index].phn < 36
-                and states[index].phn != sil_id
+                state.mixw
+                for state in states
+                if state.mixw != 0xFFFFFFFF and state.phn < 36 and state.phn != sil_id
             }
         )
     )
-    probe._lib.pstrain_bw_free_state_seq(states, n_state[0])
     assert fallback_senones.size
     initial_arrays = read_model_arrays(initial)
     output = tmp_path / "trained"

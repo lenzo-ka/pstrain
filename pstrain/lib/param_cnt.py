@@ -10,6 +10,7 @@ from enum import IntEnum
 from pathlib import Path
 
 from pstrain.lib import _pstrainc
+from pstrain.lib.native_worker import contained
 
 
 class ParamType(IntEnum):
@@ -20,6 +21,7 @@ class ParamType(IntEnum):
     PHONE = 2  # Count phone occurrences
 
 
+@contained
 def count_params(
     mdef_path: Path,
     dict_path: Path,

@@ -88,9 +88,10 @@ class TestFeatureExtractor:
     def test_context_manager(self) -> None:
         """Test that context manager properly cleans up."""
         fe = FeatureExtractor()
-        assert fe._fe is not None
+        assert fe.veclen > 0
         fe.close()
-        assert fe._fe is None
+        with pytest.raises(RuntimeError, match="closed"):
+            fe.process_audio(np.zeros(160, dtype=np.int16))
 
     def test_process_audio_shape(self, sample_audio_path: Path) -> None:
         """Test that process_audio returns correct shape."""

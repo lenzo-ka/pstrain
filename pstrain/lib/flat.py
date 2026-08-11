@@ -12,6 +12,7 @@ from typing import Any
 
 from pstrain.lib import _pstrainc
 from pstrain.lib.mdef import generate_ci_mdef
+from pstrain.lib.native_worker import contained
 
 __all__ = [
     "create_mdef",
@@ -100,6 +101,7 @@ def create_topology_file(
     return content
 
 
+@contained
 def create_transition_matrices(
     mdef_path: Path,
     topo_path: Path,
@@ -122,6 +124,7 @@ def create_transition_matrices(
         raise RuntimeError(f"pstrain_flat_tmat failed with code {ret}")
 
 
+@contained
 def create_mixture_weights(
     n_tied_state: int,
     n_stream: int = 1,
@@ -150,6 +153,7 @@ def create_mixture_weights(
         raise RuntimeError(f"pstrain_flat_mixw failed with code {ret}")
 
 
+@contained
 def normalize_gaussians(
     accum_dir: Path,
     mean_path: Path | None = None,
@@ -172,6 +176,7 @@ def normalize_gaussians(
         raise RuntimeError(f"pstrain_norm_gau failed with code {ret}")
 
 
+@contained
 def init_gaussians(
     ctl_path: Path,
     cep_dir: Path,

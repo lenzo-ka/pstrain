@@ -47,8 +47,23 @@ def test_unrouted_operation_is_rejected_before_any_worker_starts(tmp_path: Path)
     assert native_worker._owned_worker().pid is None
 
 
-def test_guarded_set_is_exactly_the_contained_three() -> None:
-    assert set(native_worker.GUARDED_OPERATIONS) == {"prune_tree", "make_quests", "mdef_gen_ci"}
+def test_guarded_set_includes_the_full_surface_routes() -> None:
+    assert set(native_worker.GUARDED_OPERATIONS) == {
+        "prune_tree",
+        "make_quests",
+        "mdef_gen_ci",
+        "python_call",
+        "object_create",
+        "object_call",
+        "object_close",
+    }
+
+
+@requires_c_library
+def test_session_reset_clears_cmd_ln_state_between_requests() -> None:
+    """A worker request must observe reset state, not the prior probe key."""
+    assert native_worker.call("_session_probe_set", (), ()) == 0
+    assert native_worker.call("_session_probe_is_set", (), ()) == 0
 
 
 def test_startup_pipe_failure_cleans_diagnostic_file(

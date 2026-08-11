@@ -11,11 +11,13 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from pstrain.lib import _pstrainc, native_worker
+from pstrain.lib.native_worker import contained
 
 if TYPE_CHECKING:
     import numpy.typing as npt
 
 
+@contained
 def build_tree(
     mdef_path: Path,
     mixw_path: Path,
@@ -109,6 +111,7 @@ def build_tree(
         raise RuntimeError(f"Failed to build tree: {output_path}")
 
 
+@contained
 def tie_states(
     input_mdef_path: Path,
     output_mdef_path: Path,
@@ -282,6 +285,7 @@ def parse_questions(questions_path: Path) -> dict[str, list[str]]:
     return questions
 
 
+@contained
 def init_mixw(
     src_mdef_path: Path,
     src_mixw_path: Path,

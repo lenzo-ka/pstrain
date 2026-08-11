@@ -23,10 +23,12 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from . import _pstrainc
+from .native_worker import contained
 
 __all__ = ["map_adapt"]
 
 
+@contained
 def map_adapt(
     mean_path: Path | str,
     var_path: Path | str,

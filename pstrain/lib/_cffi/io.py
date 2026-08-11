@@ -11,11 +11,13 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from pstrain.lib._cffi.core import _init
+from pstrain.lib.native_worker import contained
 
 if TYPE_CHECKING:
     import numpy.typing as npt
 
 
+@contained
 def write_mixw(filename: str, mixw: npt.NDArray[np.float32]) -> int:
     """Write mixture weights to S3 format file.
 
@@ -52,6 +54,7 @@ def write_mixw(filename: str, mixw: npt.NDArray[np.float32]) -> int:
     return result
 
 
+@contained
 def write_tmat(filename: str, tmat: npt.NDArray[np.float32]) -> int:
     """Write transition matrices to S3 format file.
 
@@ -87,6 +90,7 @@ def write_tmat(filename: str, tmat: npt.NDArray[np.float32]) -> int:
     return result
 
 
+@contained
 def write_gau(filename: str, gau: npt.NDArray[np.float32]) -> int:
     """Write Gaussian parameters (means or variances) to S3 format file.
 
@@ -130,6 +134,7 @@ def write_gau(filename: str, gau: npt.NDArray[np.float32]) -> int:
     return result
 
 
+@contained
 def read_mixw(filename: str) -> tuple[npt.NDArray[np.float32], int, int, int]:
     """Read mixture weights from S3 format file.
 
@@ -171,6 +176,7 @@ def read_mixw(filename: str) -> tuple[npt.NDArray[np.float32], int, int, int]:
     return mixw, n_mixw, n_feat, n_density
 
 
+@contained
 def read_tmat(filename: str) -> tuple[npt.NDArray[np.float32], int, int]:
     """Read transition matrices from S3 format file.
 
@@ -210,6 +216,7 @@ def read_tmat(filename: str) -> tuple[npt.NDArray[np.float32], int, int]:
     return tmat, n_tmat, n_state
 
 
+@contained
 def read_gau(filename: str) -> tuple[npt.NDArray[np.float32], int, int, int, list[int]]:
     """Read Gaussian parameters from S3 format file.
 
@@ -261,6 +268,7 @@ def read_gau(filename: str) -> tuple[npt.NDArray[np.float32], int, int, int, lis
     return gau, n_mgau, n_feat, n_density, veclen
 
 
+@contained
 def write_dnom(filename: str, dnom: npt.NDArray[np.float32]) -> int:
     """Write Gaussian density counts to S3 format file.
 
@@ -299,6 +307,7 @@ def write_dnom(filename: str, dnom: npt.NDArray[np.float32]) -> int:
     return result
 
 
+@contained
 def read_dnom(filename: str) -> tuple[npt.NDArray[np.float32], int, int, int]:
     """Read Gaussian density counts from S3 format file.
 

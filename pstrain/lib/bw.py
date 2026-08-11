@@ -5,6 +5,7 @@ Thin wrapper around the C BW implementation via CFFI.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,7 +13,7 @@ from typing import TYPE_CHECKING, Literal, Self
 
 import numpy as np
 
-from pstrain.lib import _pstrainc
+from pstrain.lib import _pstrainc, native_worker
 
 if TYPE_CHECKING:
     import numpy.typing as npt
@@ -57,6 +58,17 @@ class BWResult:
     total_frames: int
     total_utts: int
     avg_log_prob: float
+
+
+@dataclass(frozen=True)
+class StateInfo:
+    """Serializable structural view of one utterance-HMM state."""
+
+    mixw: int
+    phn: int
+    m_state: int
+    prior_state: tuple[int, ...]
+    next_state: tuple[int, ...]
 
 
 class HMM:
@@ -134,6 +146,19 @@ class BWTrainer:
             config: Training configuration
         """
         self.config = config
+        if not native_worker.in_worker():
+            self._proxy = native_worker.NativeObjectProxy(
+                __name__,
+                "BWTrainer",
+                (mdef_path, means_path, vars_path, mixw_path, tmat_path, config),
+                {},
+                (mdef_path, means_path, vars_path, mixw_path, tmat_path),
+            )
+            self._dict_set = False
+            self._last_process_result = 0
+            self._last_process_retried = False
+            self._retry_transaction_active = False
+            return
         self._ffi, self._lib = _pstrainc._init()
 
         # Create C config struct
@@ -178,6 +203,10 @@ class BWTrainer:
 
     def __del__(self) -> None:
         """Clean up C context."""
+        if hasattr(self, "_proxy"):
+            with contextlib.suppress(Exception):
+                self._proxy.close()
+            return
         if hasattr(self, "_ctx") and self._ctx != self._ffi.NULL:
             self._lib.pstrain_bw_free(self._ctx)
 
@@ -191,6 +220,10 @@ class BWTrainer:
         Raises:
             RuntimeError: If setting dictionary fails
         """
+        if hasattr(self, "_proxy"):
+            self._proxy.call("set_dict", dict_path, filler_dict_path)
+            self._dict_set = True
+            return
         filler = str(filler_dict_path).encode() if filler_dict_path else self._ffi.NULL
         ret = self._lib.pstrain_bw_set_dict(
             self._ctx,
@@ -220,6 +253,8 @@ class BWTrainer:
         """
         if not self._dict_set:
             raise RuntimeError("Dictionary not set. Call set_dict() first.")
+        if hasattr(self, "_proxy"):
+            return bool(self._proxy.call("process_utterance_text", features, transcript))
 
         n_frames = features.shape[0]
 
@@ -256,6 +291,10 @@ class BWTrainer:
         """
         if not self._dict_set:
             raise RuntimeError("Dictionary not set. Call set_dict() first.")
+        if hasattr(self, "_proxy"):
+            result = bool(self._proxy.call("process_utterance_mfcc", mfcc, transcript))
+            self._last_process_result = 0 if result else -1
+            return result
 
         n_frames = mfcc.shape[0]
 
@@ -278,12 +317,20 @@ class BWTrainer:
     @property
     def final_state_not_reached(self) -> bool:
         """Whether forward pruning lost the final state on the last MFCC update."""
+        if hasattr(self, "_proxy"):
+            return bool(self._proxy.call("get_final_state_not_reached"))
         return self._last_process_result == -2
+
+    def get_final_state_not_reached(self) -> bool:
+        """Worker-callable accessor for :attr:`final_state_not_reached`."""
+        return self.final_state_not_reached
 
     def set_a_beam(self, a_beam: float) -> float:
         """Set the forward beam and return its previous value."""
         if a_beam <= 0:
             raise ValueError("a_beam must be positive")
+        if hasattr(self, "_proxy"):
+            return float(self._proxy.call("set_a_beam", a_beam))
         previous = float(self._lib.pstrain_bw_set_a_beam(self._ctx, a_beam))
         if previous <= 0:
             raise RuntimeError("Failed to set forward beam")
@@ -303,6 +350,8 @@ class BWTrainer:
         Returns:
             True on success
         """
+        if hasattr(self, "_proxy"):
+            return bool(self._proxy.call("process_utterance", features, phone_ids))
         n_frames = features.shape[0]
         n_phones = len(phone_ids)
 
@@ -326,6 +375,8 @@ class BWTrainer:
         Returns:
             True on success
         """
+        if hasattr(self, "_proxy"):
+            return bool(self._proxy.call("normalize"))
         return bool(self._lib.pstrain_bw_normalize(self._ctx) == 0)
 
     def save(
@@ -340,6 +391,8 @@ class BWTrainer:
         Returns:
             True on success
         """
+        if hasattr(self, "_proxy"):
+            return bool(self._proxy.call("save", means_path, vars_path, mixw_path, tmat_path))
         return bool(
             self._lib.pstrain_bw_save(
                 self._ctx,
@@ -353,6 +406,10 @@ class BWTrainer:
 
     def get_stats(self) -> BWResult:
         """Get training statistics."""
+        if hasattr(self, "_proxy"):
+            result = self._proxy.call("get_stats")
+            assert isinstance(result, BWResult)
+            return result
         total_log_lik = self._ffi.new("float64 *")
         total_frames = self._ffi.new("uint32 *")
         total_utts = self._ffi.new("uint32 *")
@@ -378,4 +435,48 @@ class BWTrainer:
         Returns:
             True on success
         """
+        if hasattr(self, "_proxy"):
+            return bool(self._proxy.call("save_density_counts", counts_path))
         return bool(self._lib.pstrain_bw_save_counts(self._ctx, str(counts_path).encode()) == 0)
+
+    def inspect_state_seq(self, transcript: str) -> list[StateInfo]:
+        """Build and return a caller-owned, serializable state-sequence view."""
+        if hasattr(self, "_proxy"):
+            result = self._proxy.call("inspect_state_seq", transcript)
+            assert isinstance(result, list)
+            return result
+        n_state = self._ffi.new("uint32 *")
+        states = self._lib.pstrain_bw_build_state_seq(self._ctx, transcript.encode(), n_state)
+        if states == self._ffi.NULL:
+            raise RuntimeError("Failed to build state sequence")
+        try:
+            return [
+                StateInfo(
+                    mixw=int(states[index].mixw),
+                    phn=int(states[index].phn),
+                    m_state=int(states[index].m_state),
+                    prior_state=tuple(
+                        int(states[index].prior_state[offset])
+                        for offset in range(states[index].n_prior)
+                    ),
+                    next_state=tuple(
+                        int(states[index].next_state[offset])
+                        for offset in range(states[index].n_next)
+                    ),
+                )
+                for index in range(n_state[0])
+            ]
+        finally:
+            self._lib.pstrain_bw_free_state_seq(states, n_state[0])
+
+    def count_active_fallback_senones(self) -> int:
+        """Return the number of active CI fallback senones."""
+        if hasattr(self, "_proxy"):
+            return int(self._proxy.call("count_active_fallback_senones"))
+        return int(self._lib.pstrain_bw_count_active_fallback_senones(self._ctx))
+
+    def fallback_senone_active(self, senone: int) -> bool:
+        """Return whether one CI fallback senone is active."""
+        if hasattr(self, "_proxy"):
+            return bool(self._proxy.call("fallback_senone_active", senone))
+        return bool(self._lib.pstrain_bw_fallback_senone_active(self._ctx, senone))
