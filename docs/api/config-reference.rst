@@ -107,7 +107,7 @@ split
 ``split.test_count``
    :Type: ``int | None``
    :Default: ``None``
-   :Description: Fixed test utterance count
+   :Description: Fixed test utterance count; zero disables an additional holdout
 
 ``split.train_ratio``
    :Type: ``float | None``
