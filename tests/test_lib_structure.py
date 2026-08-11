@@ -21,14 +21,14 @@ def test_version() -> None:
 def test_lib_public_api() -> None:
     """Test that public API functions are available."""
     from pstrain.lib import (
-        ConfigManager,
-        PstrainConfig,
+        Profile,
+        resolve_config,
         setup_project,
         validate_project,
     )
 
-    assert PstrainConfig is not None
-    assert ConfigManager is not None
+    assert Profile is not None
+    assert callable(resolve_config)
     assert callable(setup_project)
     assert callable(validate_project)
 

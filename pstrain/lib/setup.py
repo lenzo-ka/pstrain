@@ -8,7 +8,7 @@ from typing import Any
 
 import yaml
 
-from pstrain.lib.config import PstrainConfig
+from pstrain.lib.config.models import CURRENT_CONFIG_VERSION, OverlayDocument, Profile
 from pstrain.lib.dictionary import Dictionary
 from pstrain.lib.phoneset import Phoneset
 from pstrain.lib.pipeline.context import DEFAULT_CONFIGS
@@ -81,18 +81,29 @@ def setup_project(
     config_file = project_dir / "etc" / "config.yaml"
     if config_path:
         if clobber or not config_file.exists():
-            config = PstrainConfig.from_yaml(config_path)
-            config.to_yaml(config_file)
+            raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+            config = OverlayDocument.model_validate(raw)
+            config_file.write_text(yaml.safe_dump(config.model_dump(mode="json"), sort_keys=False))
     elif clobber or not config_file.exists():
-        project_name = project_dir.name
-        config = PstrainConfig(name=project_name)
-        config.bind_to_project(project_dir)
-        config.to_yaml(config_file)
+        config_file.write_text(
+            yaml.safe_dump({"config_version": CURRENT_CONFIG_VERSION}, sort_keys=False),
+            encoding="utf-8",
+        )
 
     configs_file = project_dir / "etc" / "configs.yaml"
     if clobber or not configs_file.exists():
         with configs_file.open("w", encoding="utf-8") as f:
-            yaml.safe_dump(DEFAULT_CONFIGS, f, sort_keys=False)
+            yaml.safe_dump(
+                {
+                    "config_version": CURRENT_CONFIG_VERSION,
+                    "profiles": {
+                        name: Profile.model_validate(profile).model_dump(mode="json")
+                        for name, profile in DEFAULT_CONFIGS.items()
+                    },
+                },
+                f,
+                sort_keys=False,
+            )
 
     # Copy transcription file
     if transcription_path:

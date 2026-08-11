@@ -81,6 +81,10 @@ jobs:
           PSTRAIN_REQUIRE_CLIB: "1"
         run: pytest -v --cov=pstrain --cov-report=xml
 
+      - name: Verify canonical config consumers and generated reference
+        if: matrix.python == '3.11' && matrix.os == 'ubuntu-latest'
+        run: make config-check
+
       - name: Upload coverage
         uses: codecov/codecov-action@v7
         if: matrix.python == '3.12' && matrix.os == 'ubuntu-latest'

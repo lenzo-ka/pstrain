@@ -65,11 +65,10 @@ class FlatCommand(ModelCommand):
 
     def execute(self, ctx: CommandContext) -> CommandResult:
         """Initialize flat model using pure Python."""
-        from pstrain.api import get_feature_dir_name
         from pstrain.lib.flat import init_flat_model
 
         model = self.get_model(ctx)
-        config = self.get_config(ctx)
+        self.get_config(ctx)  # Validate the selected canonical profile.
 
         # Resolve paths
         project_dir = ctx.project_dir
@@ -84,11 +83,10 @@ class FlatCommand(ModelCommand):
             if ctx.args.phoneset
             else project_dir / "shared" / "phoneset.txt"
         )
-        feature_dir_name = get_feature_dir_name(config.audio, config.features)
         features_dir = (
             Path(ctx.args.features_dir)
             if ctx.args.features_dir
-            else project_dir / "shared" / "features" / feature_dir_name
+            else project_dir / "shared" / "features" / ctx.config_name
         )
         feat_params = (
             Path(ctx.args.feat_params) if ctx.args.feat_params else features_dir / "feat.params"

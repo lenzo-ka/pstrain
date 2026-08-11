@@ -1,427 +1,215 @@
-"""Configuration models for pstrain using Pydantic.
+"""Canonical, versioned configuration schema for pstrain.
 
-Three-tier configuration:
-1. User (~/.pstrain/config.yaml) - Global defaults
-2. Project (project/etc/config.yaml) - Shared across experiments
-3. Experiment (project/experiments/{name}/config.yaml) - Experiment-specific
-
-All feature extraction parameters live in config. No separate feat.params file
-is needed as input - sphinx_fe reads from config via CLI args.
-feat.params is generated as OUTPUT for decoder compatibility.
+This module is the only place semantic configuration fields and their defaults
+are declared.  Runtime dataclasses are projections of :class:`Profile`.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Literal, Self
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+CURRENT_CONFIG_VERSION: Literal[1] = 1
 
-class StrictPipelineConfig(BaseModel):
-    """Reject stale keys in config sections mirrored by the active pipeline."""
 
-    model_config = ConfigDict(extra="forbid")
+class StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class FeatureConfig(StrictModel):
+    """Acoustic front-end parameters."""
+
+    samprate: Annotated[int, Field(gt=0, description="Audio sample rate in Hz")] = 16000
+    ncep: Annotated[int, Field(gt=0, description="Number of cepstral coefficients")] = 13
+    nfilt: Annotated[int, Field(gt=0, description="Number of mel filters")] = 25
+    nfft: Annotated[int, Field(gt=0, description="FFT size")] = 512
+    lowerf: Annotated[int, Field(ge=0, description="Lower filter-bank frequency in Hz")] = 130
+    upperf: Annotated[int, Field(gt=0, description="Upper filter-bank frequency in Hz")] = 6800
+    alpha: Annotated[float, Field(description="Pre-emphasis coefficient")] = 0.97
+    feat_type: Annotated[str, Field(description="Sphinx feature stream type")] = "1s_c_d_dd"
+    lifter: Annotated[int, Field(ge=0, description="Cepstral lifter window")] = 22
+    transform: Annotated[str, Field(description="Filter-bank transform")] = "dct"
+    agc: Annotated[str, Field(description="Automatic gain-control mode")] = "none"
+    cmn: Annotated[str, Field(description="Cepstral mean-normalization mode")] = "batch"
+    varnorm: Annotated[str, Field(description="Cepstral variance-normalization mode")] = "no"
+
+    @model_validator(mode="after")
+    def validate_band(self) -> FeatureConfig:
+        if self.upperf <= self.lowerf:
+            raise ValueError("upperf must be greater than lowerf")
+        return self
+
+
+class TrainingScheduleConfig(StrictModel):
+    """Convergence controller for one Baum-Welch stage family."""
+
+    max_iterations: Annotated[int, Field(ge=1, description="Maximum training passes")] = 10
+    min_iterations: Annotated[int, Field(ge=1, description="Minimum training passes")] = 1
+    convergence_ratio: Annotated[
+        float, Field(gt=0, description="Absolute likelihood-delta convergence threshold")
+    ] = 0.001
+
+    @model_validator(mode="after")
+    def validate_iterations(self) -> TrainingScheduleConfig:
+        if self.min_iterations > self.max_iterations:
+            raise ValueError("min_iterations must not exceed max_iterations")
+        return self
+
+
+class TrainingConfig(StrictModel):
+    """Acoustic-model training parameters."""
+
+    n_state: Annotated[int, Field(ge=1, description="Emitting states per HMM")] = 3
+    n_senones: Annotated[int, Field(ge=1, description="Target tied-state count")] = 200
+    a_beam: Annotated[float, Field(gt=0, description="Forward alignment beam")] = 1e-90
+    b_beam: Annotated[float, Field(gt=0, description="Backward alignment beam")] = 1e-10
+    ci: TrainingScheduleConfig = Field(default_factory=TrainingScheduleConfig)
+    tied: TrainingScheduleConfig = Field(default_factory=TrainingScheduleConfig)
+    untied: TrainingScheduleConfig = Field(
+        default_factory=lambda: TrainingScheduleConfig(max_iterations=6)
+    )
+    max_skip_fraction: Annotated[
+        float, Field(ge=0, le=1, description="Maximum skipped-update fraction")
+    ] = 0.05
+    retry_beam_factor: Annotated[
+        float, Field(gt=0, description="Beam widening factor for one retry")
+    ] = 1e10
+    tree_state_weights: Annotated[
+        tuple[float, ...], Field(min_length=1, description="Decision-tree state weights")
+    ] = (1.0, 0.05, 0.0)
+    tree_ssplitmax: Annotated[int, Field(ge=0, description="Maximum state splits")] = 7
+    tree_ssplitthr: Annotated[float, Field(ge=0, description="State split threshold")] = 0.0
+    tree_csplitmax: Annotated[int, Field(ge=0, description="Maximum phone-context splits")] = 2000
+    tree_csplitthr: Annotated[float, Field(ge=0, description="Phone-context split threshold")] = 0.0
+    tree_mwfloor: Annotated[float, Field(gt=0, description="Tree mixture-weight floor")] = 1e-8
+    question_npermute: Annotated[int, Field(ge=1, description="Question permutations")] = 12
+    question_quests_per_state: Annotated[
+        int, Field(ge=1, description="Questions generated per state")
+    ] = 20
+    question_niter: Annotated[int, Field(ge=1, description="Question generation iterations")] = 1
+    multipron_training: Annotated[
+        bool, Field(description="Sum posteriors over pronunciation variants")
+    ] = True
+    untied_inventory: Annotated[
+        Literal["all-triphone", "transcript-reachable", "linear"],
+        Field(description="Untied-model phone inventory policy"),
+    ] = "all-triphone"
+    exclusion_schedule: Annotated[
+        dict[str, dict[int | str, list[str]]],
+        Field(description="Experimental stage/pass utterance exclusions"),
+    ] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod
-    def reject_unknown_keys(cls, data: Any) -> Any:
-        """Point legacy configuration users at the active profile schema."""
-        if isinstance(data, dict):
-            unknown = sorted(set(data) - set(cls.model_fields))
-            if unknown:
-                keys = ", ".join(repr(key) for key in unknown)
-                raise ValueError(
-                    f"unknown configuration key(s) {keys}; move active feature/training "
-                    "settings to a named profile in etc/configs.yaml and use its current "
-                    "parameter names"
-                )
+    def select_inventory_default(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("multipron_training") is False:
+            data = dict(data)
+            data.setdefault("untied_inventory", "linear")
         return data
 
-
-class ParallelConfig(BaseModel):
-    """Parallel execution configuration."""
-
-    n_jobs: int = Field(
-        -1,
-        description="Number of parallel jobs: 1=serial, -1=auto (CPU count minus 2), N=specific count",
-    )
-    nice: int = Field(5, ge=0, description="POSIX worker niceness increment; 0 disables")
-    show_progress: bool = Field(
-        True,
-        description="Show progress bars during parallel execution",
-    )
-
-    @field_validator("n_jobs")
+    @field_validator("exclusion_schedule")
     @classmethod
-    def validate_n_jobs(cls, v: int) -> int:
-        """Validate n_jobs value."""
-        if v < -1 or v == 0:
-            raise ValueError("n_jobs must be -1 (auto), 1 (serial), or positive")
-        return v
+    def validate_exclusions(
+        cls, value: dict[str, dict[int | str, list[str]]]
+    ) -> dict[str, dict[int | str, list[str]]]:
+        stages = {
+            "ci-1g",
+            "ci-2g",
+            "ci-4g",
+            "ci-8g",
+            "cd-untied",
+            "cd-1g",
+            "cd-2g",
+            "cd-4g",
+            "cd-8g",
+            "cd-16g",
+            "cd-32g",
+        }
+        for stage, passes in value.items():
+            if stage not in stages:
+                raise ValueError(f"unknown BW stage {stage!r}")
+            for selector, utterances in passes.items():
+                if selector != "*" and (isinstance(selector, bool) or int(selector) < 1):
+                    raise ValueError("pass selectors must be positive integers or '*'")
+                if not all(utterances):
+                    raise ValueError("utterance IDs must be non-empty")
+        return value
 
-
-class AudioConfig(BaseModel):
-    """Audio input configuration."""
-
-    sample_rate: int = Field(16000, gt=0, description="Audio sample rate in Hz")
-    format: Literal["wav", "raw", "sphere"] = Field("wav", description="Audio format")
-
-    @field_validator("sample_rate")
-    @classmethod
-    def validate_sample_rate(cls, v: int) -> int:
-        """Warn about unusual sample rates."""
-        common_rates = {8000, 11025, 16000, 22050, 44100, 48000}
-        if v not in common_rates:
-            import warnings
-
-            warnings.warn(f"Unusual sample rate: {v} Hz", stacklevel=2)
-        return v
-
-
-class FeatureConfig(StrictPipelineConfig):
-    """Feature extraction configuration.
-
-    These parameters control sphinx_fe. They are passed via CLI args,
-    and also written to feat.params for decoder compatibility.
-    """
-
-    # Feature type
-    type: Literal["mfcc"] = Field("mfcc", description="Feature type")
-    feature_type: Literal["1s_c_d_dd", "s2_4x"] = Field(
-        "1s_c_d_dd",
-        description="Sphinx feature stream type (1s_c_d_dd=continuous, s2_4x=semi-continuous)",
-    )
-
-    # MFCC parameters
-    num_ceps: int = Field(13, ge=1, le=50, description="Number of cepstral coefficients")
-    num_filters: int = Field(
-        25,
-        ge=1,
-        le=100,
-        description="Number of mel filters (25 SphinxTrain wideband; 15 for 8 kHz telephone)",
-    )
-    nfft: int = Field(512, ge=64, le=4096, description="FFT size")
-
-    # Frame parameters
-    frame_length_ms: float = Field(25.0, gt=0, description="Frame length in milliseconds")
-    frame_shift_ms: float = Field(10.0, gt=0, description="Frame shift in milliseconds")
-
-    # Frequency range
-    lower_freq: float = Field(
-        130.0, ge=0, description="Lower frequency cutoff (Hz) - 130 wideband, 200 telephone"
-    )
-    upper_freq: float = Field(
-        6800.0, ge=0, description="Upper frequency cutoff (Hz) - 6800 wideband, 3500 telephone"
-    )
-
-    # Processing
-    preemphasis: float = Field(0.97, ge=0.0, le=1.0, description="Preemphasis coefficient")
-    lifter: int = Field(22, ge=0, description="Liftering parameter (0=no liftering)")
-    use_energy: bool = Field(True, description="Include energy feature")
-
-    # Deltas
-    delta: bool = Field(True, description="Compute delta features")
-    delta_delta: bool = Field(True, description="Compute delta-delta features")
-
-    # Normalization
-    agc: Literal["none", "max"] = Field("none", description="Automatic Gain Control")
-    cmn: Literal["batch", "current", "none"] = Field(
-        "batch", description="Cepstral Mean Normalization"
-    )
-    varnorm: bool = Field(False, description="Variance normalization")
-    transform: Literal["dct", "legacy"] = Field("dct", description="Transform type")
-
-    @property
-    def sphinx_feat_type(self) -> str:
-        """Get Sphinx feature type string for binaries."""
-        return self.feature_type
-
-    @property
-    def num_streams(self) -> int:
-        """Get number of feature streams."""
-        return 4 if self.feature_type == "s2_4x" else 1
-
-    @property
-    def model_type(self) -> str:
-        """Get corresponding HMM model type (.cont., .semi.)."""
-        return ".semi." if self.feature_type == "s2_4x" else ".cont."
-
-    @property
-    def full_dimension(self) -> int:
-        """Get full feature dimension including deltas."""
-        if self.feature_type == "s2_4x":
-            return self.num_ceps * 4
-        # 1s_c_d_dd: base + delta + delta-delta
-        return self.num_ceps * 3
-
-    def to_sphinx_fe_args(self) -> list[str]:
-        """Convert to sphinx_fe command-line arguments."""
-        return [
-            "-samprate",
-            str(self.num_ceps),  # Will use audio.sample_rate
-            "-nfilt",
-            str(self.num_filters),
-            "-nfft",
-            str(self.nfft),
-            "-lowerf",
-            str(self.lower_freq),
-            "-upperf",
-            str(self.upper_freq),
-            "-ncep",
-            str(self.num_ceps),
-            "-alpha",
-            str(self.preemphasis),
-            "-lifter",
-            str(self.lifter),
-            "-transform",
-            self.transform,
-        ]
-
-
-class CITrainingConfig(StrictPipelineConfig):
-    """CI (context-independent, monophone) training configuration."""
-
-    n_gaussians: int = Field(1, ge=1, description="Initial number of Gaussians per state")
-
-
-class CDUntiedConfig(StrictPipelineConfig):
-    """CD-Untied (untied triphone) training configuration."""
-
-    n_gaussians: int = Field(1, ge=1, description="Number of Gaussians for untied models")
-
-
-class CDTiedConfig(StrictPipelineConfig):
-    """CD-Tied (tied triphone) training configuration."""
-
-    n_gaussians: int = Field(8, ge=1, description="Number of Gaussians per state")
-    n_senones: int = Field(200, ge=10, description="Target number of senones (tied states)")
-
-
-class CDConfig(StrictPipelineConfig):
-    """CD (context-dependent, triphone) training configuration."""
-
-    untied: CDUntiedConfig = Field(
-        default_factory=lambda: CDUntiedConfig(),
-        description="Untied triphone training configuration",
-    )
-    tied: CDTiedConfig = Field(
-        default_factory=lambda: CDTiedConfig(),
-        description="Tied triphone training configuration",
-    )
-
-
-class GaussianIncrementConfig(StrictPipelineConfig):
-    """Gaussian increment (splitting) configuration."""
-
-    enabled: bool = Field(False, description="Enable Gaussian splitting")
-    schedule: list[int] = Field(
-        default=[1, 2, 4, 8],
-        description="Gaussian splitting schedule (powers of 2)",
-    )
-    n_iterations_after_split: int = Field(
-        10, ge=1, description="Re-training iterations after split"
-    )
-
-    @field_validator("schedule")
-    @classmethod
-    def validate_schedule(cls, v: list[int]) -> list[int]:
-        """Ensure schedule is monotonically increasing powers of 2."""
-        if not v:
-            raise ValueError("Schedule cannot be empty")
-        if not all(x > 0 and (x & (x - 1)) == 0 for x in v):
-            raise ValueError("Schedule must contain only powers of 2")
-        if v != sorted(v):
-            raise ValueError("Schedule must be monotonically increasing")
-        return v
-
-
-class DecisionTreeConfig(StrictPipelineConfig):
-    """Decision tree clustering configuration."""
-
-    questions_file: Path | None = Field(
-        None, description="Path to questions file (auto-generate if None)"
-    )
-    min_observations: int = Field(100, ge=1, description="Minimum observations per leaf node")
-    max_depth: int = Field(50, ge=1, description="Maximum tree depth")
-
-
-class TrainingConfig(StrictPipelineConfig):
-    """Complete training configuration."""
-
-    n_states: int = Field(
-        3, ge=1, le=7, description="Number of emitting states per HMM (3 or 5 typical)"
-    )
-
-    ci: CITrainingConfig = Field(
-        default_factory=lambda: CITrainingConfig(),
-        description="Context-independent (monophone) training",
-    )
-    cd: CDConfig = Field(
-        default_factory=lambda: CDConfig(),
-        description="Context-dependent (triphone) training",
-    )
-    tree: DecisionTreeConfig = Field(
-        default_factory=lambda: DecisionTreeConfig(),
-        description="Decision tree configuration",
-    )
-    gaussian_increment: GaussianIncrementConfig = Field(
-        default_factory=lambda: GaussianIncrementConfig(),
-        description="Gaussian splitting configuration",
-    )
-
-
-class DictionaryConfig(BaseModel):
-    """Dictionary handling configuration."""
-
-    main_dict: str = Field(
-        "shared/dictionary.dict",
-        description="Main dictionary file (relative to project)",
-    )
-    filler_dict: str = Field(
-        "shared/filler.dict",
-        description="Filler dictionary (sentence boundaries)",
-    )
-    phoneset: str = Field(
-        "shared/phoneset.txt",
-        description="Phoneset file",
-    )
-    case_sensitive: bool = Field(
-        False,
-        description="Case-sensitive word lookup",
-    )
-    silence_phone: str = Field(
-        "SIL",
-        description="Silence phone symbol",
-    )
-
-
-class CorpusConfig(BaseModel):
-    """Corpus location configuration."""
-
-    audio_dir: str | None = Field(
-        None,
-        description="Audio directory (if None, uses project_dir/audio/)",
-    )
-    transcript_file: str | None = Field(
-        None,
-        description="Transcript file (if None, uses etc/all.transcription)",
-    )
-
-
-class SplitConfig(BaseModel):
-    """Train/test split configuration."""
-
-    train_ratio: float = Field(
-        0.9, ge=0.0, le=1.0, description="Fraction for training (0.9 = 90% train, 10% test)"
-    )
-    seed: int | None = Field(
-        None, description="Random seed for reproducible splits (None = random)"
-    )
-
-
-class PstrainConfig(BaseModel):
-    """Top-level pstrain configuration.
-
-    Combines all configuration sections. Can be bound to a project directory
-    to enable computed path properties.
-    """
-
-    # Experiment metadata
-    name: str | None = Field(None, description="Experiment name")
-    description: str | None = Field(None, description="Experiment description")
-
-    # Core configuration sections
-    parallel: ParallelConfig = Field(default_factory=lambda: ParallelConfig())
-    audio: AudioConfig = Field(default_factory=lambda: AudioConfig())
-    features: FeatureConfig = Field(default_factory=lambda: FeatureConfig())
-    training: TrainingConfig = Field(default_factory=lambda: TrainingConfig())
-    dictionary: DictionaryConfig = Field(default_factory=lambda: DictionaryConfig())
-    corpus: CorpusConfig = Field(default_factory=lambda: CorpusConfig())
-    split: SplitConfig = Field(default_factory=lambda: SplitConfig())
-
-    # Runtime binding (not serialized)
-    _project_dir: Path | None = None
-    _config_file: Path | None = None
-
-    model_config = {"arbitrary_types_allowed": True}
-
-    def bind_to_project(self, project_dir: Path, config_file: Path | None = None) -> Self:
-        """Bind config to a project directory, enabling path properties.
-
-        Args:
-            project_dir: Project root directory
-            config_file: Optional config file path
-
-        Returns:
-            Self (for chaining)
-        """
-        self._project_dir = Path(project_dir).resolve()
-        self._config_file = Path(config_file).resolve() if config_file else None
+    @model_validator(mode="after")
+    def validate_training(self) -> TrainingConfig:
+        if not self.multipron_training and self.untied_inventory == "transcript-reachable":
+            raise ValueError(
+                "training.untied_inventory 'transcript-reachable' requires "
+                "training.multipron_training: true; linear mode's equivalent is the "
+                "'linear' policy"
+            )
         return self
 
-    @property
-    def project_dir(self) -> Path:
-        """Get project directory (requires bind_to_project() first)."""
-        if self._project_dir is None:
-            raise RuntimeError("Config not bound to project. Call bind_to_project() first.")
-        return self._project_dir
 
-    @property
-    def etc_dir(self) -> Path:
-        """Get etc directory."""
-        return self.project_dir / "etc"
+class SplitConfig(StrictModel):
+    """Train/test split parameters."""
 
-    @property
-    def shared_dir(self) -> Path:
-        """Get shared directory."""
-        return self.project_dir / "shared"
+    train_ratio: Annotated[float | None, Field(gt=0, lt=1, description="Training fraction")] = None
+    test_count: Annotated[int | None, Field(ge=1, description="Fixed test utterance count")] = None
+    seed: Annotated[int, Field(description="Deterministic split seed")] = 42
 
-    @property
-    def audio_dir(self) -> Path:
-        """Get audio directory."""
-        if self.corpus.audio_dir:
-            audio_path = Path(self.corpus.audio_dir)
-            return audio_path if audio_path.is_absolute() else self.project_dir / audio_path
-        return self.project_dir / "audio"
+    @model_validator(mode="after")
+    def validate_choice(self) -> SplitConfig:
+        if self.train_ratio is not None and self.test_count is not None:
+            raise ValueError("train_ratio and test_count are mutually exclusive")
+        return self
 
-    @property
-    def dictionary_path(self) -> Path:
-        """Get main dictionary path."""
-        return self.project_dir / self.dictionary.main_dict
 
-    @property
-    def filler_dict_path(self) -> Path:
-        """Get filler dictionary path."""
-        return self.project_dir / self.dictionary.filler_dict
+class RunnerConfig(StrictModel):
+    """Local pipeline execution policy."""
 
-    @property
-    def phoneset_path(self) -> Path:
-        """Get phoneset path."""
-        return self.project_dir / self.dictionary.phoneset
+    jobs: Annotated[int | None, Field(ge=1, description="Parallel workers; null means auto")] = None
+    nice: Annotated[int, Field(ge=0, description="Worker niceness increment")] = 5
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary (for serialization)."""
-        return self.model_dump(exclude={"_project_dir", "_config_file"})
 
-    @classmethod
-    def from_yaml(cls, path: Path) -> Self:
-        """Load configuration from YAML file."""
-        import yaml
+class Profile(StrictModel):
+    """One complete named model-training profile."""
 
-        with path.open(encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-        return cls.model_validate(data)
+    description: Annotated[str, Field(description="Human-readable profile purpose")] = ""
+    features: FeatureConfig = Field(default_factory=FeatureConfig)
+    training: TrainingConfig = Field(default_factory=TrainingConfig)
+    split: SplitConfig = Field(default_factory=SplitConfig)
+    runner: RunnerConfig = Field(default_factory=RunnerConfig)
 
-    def to_yaml(self, path: Path) -> None:
-        """Save configuration to YAML file."""
-        import yaml
 
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("w", encoding="utf-8") as f:
-            yaml.dump(self.to_dict(), f, default_flow_style=False, sort_keys=False)
+class ProfileDefinition(StrictModel):
+    """On-disk profile; inheritance is allowed only through ``extends``."""
 
-    @classmethod
-    def default(cls) -> Self:
-        """Get default configuration."""
-        return cls()
+    extends: str | None = Field(None, description="Profile to deep-merge before validation")
+    description: str | None = None
+    features: dict[str, Any] | None = None
+    training: dict[str, Any] | None = None
+    split: dict[str, Any] | None = None
+    runner: dict[str, Any] | None = None
+
+
+class ProfilesDocument(StrictModel):
+    """Canonical ``etc/configs.yaml`` document."""
+
+    config_version: Literal[1] = CURRENT_CONFIG_VERSION
+    profiles: dict[str, ProfileDefinition]
+
+
+class OverlayDocument(StrictModel):
+    """Canonical user, project, or experiment field overlay."""
+
+    config_version: Literal[1] = CURRENT_CONFIG_VERSION
+    profile: str | None = None
+    features: dict[str, Any] | None = None
+    training: dict[str, Any] | None = None
+    split: dict[str, Any] | None = None
+    runner: dict[str, Any] | None = None
+
+
+SEMANTIC_BLOCKS = ("features", "training", "split", "runner")
+
+
+def default_profile() -> Profile:
+    """Return the schema-default profile."""
+    return Profile()
