@@ -43,12 +43,17 @@ on a current laptop and 8 GB of free disk space. `-j N` controls feature and
 tree parallelism. Cache reuse verifies the full WAV name/size inventory and a
 deterministic 32-file hash sample per voice; `--deep-verify` hashes every WAV.
 
-`data/train.transcription` is the normalized 1,132-prompt SLT training corpus
-from the parity workspace's SLT prompt set (SHA-256
-`cce3d341c02445d3aa91453f1d7f0fa3097f6ab6df76264336277ca2c54f3085`).
-`data/slt55.transcription` is the frozen same-speaker resubstitution cell by
-design: all 55 IDs are in the SLT training set, matched on both engines
-throughout the parity program, as in the upstream Arctic recipes. It is from
+`data/pin-train.transcription` and `data/pin-train.fileids` are the exact
+1,043-utterance upstream training inputs used by the parity program (SHA-256
+`7b6beae122d9da47ad89861a15490c531c194ca9bc2e329b8b133d94ed960ad6` and
+`8ce9a55c5929f6f86579ee1b244c38fd4d0a9d41e436e2057337f74c1bb4d631`).
+`data/full-slt.transcription` retains the normalized 1,132-prompt SLT set for
+corpus-wide feature extraction and provenance (SHA-256
+`cce3d341c02445d3aa91453f1d7f0fa3097f6ab6df76264336277ca2c54f3085`), but
+the harness trains only on the 1,043-utterance pin corpus.
+`data/slt55.transcription` is the frozen same-speaker held-out cell: none of
+its 55 IDs is in the 1,043-utterance training set. It remains matched on both
+engines throughout the parity program and comes from
 `upstream-cmu-arctic-slt/etc/cmu_arctic_slt_test.transcription` (SHA-256
 `1de4e31c934ea6c5cd414307b8cf4f71c0d846adfd68edf04c4ececaafa4c532`).
 `data/big.transcription` is the frozen BDL/RMS/CLB reference from
@@ -62,12 +67,15 @@ Scheme-formatted, unnormalized `etc/txt.done.data`.
 Its CMU license is included at `csrc/LICENSE.sphinx`. `data/training-unigram.lm`
 is the canonical measured-band LM (SHA-256
 `2cf11ab0474a0bdd165cbee59db674b05764fdb00bf6f9824c0dccce571637b5`).
-The current `arpabo` builder remains tested, but building from the committed
-1,132-prompt transcript produces `43ea28991421...`: the canonical LM was made
-from the earlier 1,043-prompt training partition, so the two corpora cannot
-produce byte-identical models. The committed LM therefore remains canonical.
+The current `arpabo` builder remains tested against the 1,043-utterance pin
+training corpus but produces `2c75cacb19b4...`, not the preserved canonical
+LM's bytes; the committed measured-band LM therefore remains canonical.
 
-The two committed serializations are intentional. `train.transcription` uses
-the trainer's leading-ID form (`fileid text`). Decoder references use Sphinx
-form (`<s> text </s> (fileid)`), including a voice prefix for the cross-speaker
-cell. Format tests enforce each file's contract.
+The committed serializations are intentional. The exact pin transcript and
+decoder references use Sphinx form (`<s> text </s> (fileid)`), including a
+voice prefix for the cross-speaker cell; the retained full set uses normalized
+leading-ID form (`fileid text`). Format tests enforce each file's contract.
+
+An empty `exclusion_schedule` is correct for the pin band: it records pstrain's
+honest whole-set-training behavior, while composition emulation was only a
+diagnostic instrument.
