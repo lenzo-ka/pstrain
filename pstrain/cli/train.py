@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import stat
 import tempfile
@@ -27,6 +28,24 @@ from pstrain.lib.pipeline import PipelineContext, UnknownTargetError
 from pstrain.lib.pipeline.context import DEFAULT_CONFIGS
 from pstrain.lib.pipeline.tasks import TARGETS, build_pipeline
 from pstrain.lib.setup import setup_project
+
+_TEMPFILE_TOKEN_PATTERN = r"[a-z0-9_]{8}"
+_REQUIRED_STAGING_DIRECTORIES = (
+    "audio",
+    "etc",
+    "shared",
+    "shared/features",
+    "experiments/default/etc",
+)
+_REQUIRED_STAGING_FILES = (
+    "etc/all.transcription",
+    "etc/config.yaml",
+    "etc/configs.yaml",
+    "etc/prompts.source",
+    "shared/dictionary.dict",
+    "shared/filler.dict",
+    "shared/phoneset.txt",
+)
 
 
 def _swap_state_path(project_dir: Path) -> Path:
@@ -69,11 +88,24 @@ def _recover_project_swap(project_dir: Path) -> None:
         raise ValueError(f"Cannot read swap journal {state_path}: {exc}") from exc
     if state.get("version") != 1 or state.get("project") != project_dir.name:
         raise ValueError(f"Swap journal does not match project {project_dir}: {state_path}")
-    names = (state.get("staging"), state.get("backup"))
-    if any(not isinstance(name, str) or Path(name).name != name for name in names):
+    staging_name = state.get("staging")
+    backup_name = state.get("backup")
+    expected_patterns = (
+        rf"\.{re.escape(project_dir.name)}\.replacement-{_TEMPFILE_TOKEN_PATTERN}",
+        rf"\.{re.escape(project_dir.name)}\.previous-{_TEMPFILE_TOKEN_PATTERN}",
+    )
+    if (
+        not isinstance(staging_name, str)
+        or not isinstance(backup_name, str)
+        or staging_name == backup_name
+        or staging_name == project_dir.name
+        or backup_name == project_dir.name
+        or re.fullmatch(expected_patterns[0], staging_name) is None
+        or re.fullmatch(expected_patterns[1], backup_name) is None
+    ):
         raise ValueError(f"Swap journal contains unsafe paths: {state_path}")
-    staging = project_dir.parent / str(names[0])
-    backup = project_dir.parent / str(names[1])
+    staging = project_dir.parent / staging_name
+    backup = project_dir.parent / backup_name
 
     if project_dir.exists():
         # Either rename 2 completed, or rename 1 never happened. Keep the usable project.
@@ -82,7 +114,7 @@ def _recover_project_swap(project_dir: Path) -> None:
         if staging.exists():
             shutil.rmtree(staging)
     elif backup.is_dir():
-        if (staging / "etc" / "input-identity.json").is_file():
+        if _staging_is_complete(staging):
             staging.rename(project_dir)
             shutil.rmtree(backup)
         else:
@@ -92,6 +124,35 @@ def _recover_project_swap(project_dir: Path) -> None:
     else:
         raise ValueError(f"Cannot recover swap: backup is missing: {backup}")
     state_path.unlink()
+
+
+def _staging_is_complete(staging: Path) -> bool:
+    """Authenticate a staged project before choosing it over the backup."""
+    manifest_path = staging / "etc" / "input-identity.json"
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        return False
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if (
+            not isinstance(manifest, dict)
+            or manifest.get("version") != 2
+            or not isinstance(manifest.get("source"), dict)
+            or any(not (staging / path).is_dir() for path in _REQUIRED_STAGING_DIRECTORIES)
+            or any(not (staging / path).is_file() for path in _REQUIRED_STAGING_FILES)
+        ):
+            return False
+        installed = manifest.get("installed")
+        if not isinstance(installed, dict):
+            return False
+        ownership = installed.get("audio_ownership")
+        if ownership not in {"copy", "link"}:
+            return False
+        actual = installed_corpus_identity(staging, audio_ownership=ownership)
+        if identity_difference(installed, actual) is not None:
+            return False
+        return validate_project(staging).is_valid
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return False
 
 
 def _managed_audio_link(project_dir: Path) -> Path | None:

@@ -273,11 +273,12 @@ def test_interrupted_swap_is_recovered_before_training(
     project = tmp_path / "project"
     _seed_project(project)
     (project / "generation").write_text("old")
-    backup = tmp_path / ".project.previous-test"
+    backup = tmp_path / ".project.previous-abcdefgh"
     project.rename(backup)
-    staging = tmp_path / ".project.replacement-test"
+    staging = tmp_path / ".project.replacement-abcdefgh"
     if complete_staging:
         _seed_project(staging)
+        (staging / "etc" / "prompts.source").write_text("complete")
         (staging / "generation").write_text("new")
     journal = tmp_path / ".project.pstrain-swap.json"
     journal.write_text(
@@ -295,6 +296,77 @@ def test_interrupted_swap_is_recovered_before_training(
     assert (project / "generation").read_text() == ("new" if complete_staging else "old")
     assert not backup.exists()
     assert not staging.exists()
+    assert not journal.exists()
+
+
+@pytest.mark.parametrize(
+    ("staging_name", "backup_name"),
+    [("unrelated-staging", "unrelated-backup"), ("project", "project")],
+)
+def test_crafted_swap_journal_cannot_delete_unrelated_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    staging_name: str,
+    backup_name: str,
+) -> None:
+    project = tmp_path / "project"
+    _seed_project(project)
+    (project / "untouched.marker").write_text("project")
+    unrelated_staging = tmp_path / "unrelated-staging"
+    unrelated_backup = tmp_path / "unrelated-backup"
+    unrelated_staging.mkdir()
+    unrelated_backup.mkdir()
+    (unrelated_staging / "untouched.marker").write_text("staging")
+    (unrelated_backup / "untouched.marker").write_text("backup")
+    journal = tmp_path / ".project.pstrain-swap.json"
+    journal.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "project": "project",
+                "staging": staging_name,
+                "backup": backup_name,
+            }
+        )
+    )
+
+    assert _invoke(monkeypatch, *_base_arguments(project), "--resume", "--dry-run", "--json") == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["code"] == "swap_recovery_failed"
+    assert (project / "untouched.marker").read_text() == "project"
+    assert (unrelated_staging / "untouched.marker").read_text() == "staging"
+    assert (unrelated_backup / "untouched.marker").read_text() == "backup"
+    assert journal.exists()
+
+
+def test_interrupted_swap_restores_backup_when_staging_manifest_is_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    _seed_project(project)
+    (project / "generation").write_text("old")
+    backup = tmp_path / ".project.previous-1234abcd"
+    project.rename(backup)
+    staging = tmp_path / ".project.replacement-1234abcd"
+    (staging / "etc").mkdir(parents=True)
+    (staging / "etc" / "input-identity.json").write_text("{}")
+    journal = tmp_path / ".project.pstrain-swap.json"
+    journal.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "project": "project",
+                "staging": staging.name,
+                "backup": backup.name,
+            }
+        )
+    )
+
+    assert _invoke(monkeypatch, *_base_arguments(project), "--resume", "--dry-run") == 0
+    assert (project / "generation").read_text() == "old"
+    assert not staging.exists()
+    assert not backup.exists()
     assert not journal.exists()
 
 
