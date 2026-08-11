@@ -1,0 +1,24 @@
+{
+  "archives": [
+    {
+      "voice": "slt",
+      "url": "http://festvox.org/cmu_arctic/packed/cmu_us_slt_arctic.tar.bz2",
+      "sha256": "7c173297916acf3cc7fcab2713be4c60b27312316765a90934651d367226b4ea"
+    },
+    {
+      "voice": "bdl",
+      "url": "http://festvox.org/cmu_arctic/packed/cmu_us_bdl_arctic.tar.bz2",
+      "sha256": "26b91aaf48b2799b2956792b4632c2f926cd0542f402b5452d5adecb60942904"
+    },
+    {
+      "voice": "rms",
+      "url": "http://festvox.org/cmu_arctic/packed/cmu_us_rms_arctic.tar.bz2",
+      "sha256": "c6dc11235629c58441c071a7ba8a2d067903dfefbaabc4056d87da35b72ecda4"
+    },
+    {
+      "voice": "clb",
+      "url": "http://festvox.org/cmu_arctic/packed/cmu_us_clb_arctic.tar.bz2",
+      "sha256": "3f16dc3f3b97955ea22623efb33b444341013fc660677b2e170efdcc959fa7c6"
+    }
+  ]
+}
