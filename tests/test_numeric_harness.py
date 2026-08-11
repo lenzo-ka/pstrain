@@ -113,6 +113,7 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
     veclen = veclens[0]
     prior_means = prior_means_raw.reshape(n_cb, n_density, veclen)
     prior_vars = _pstrainc.read_gau(str(model / "variances"))[0].reshape(n_cb, n_density, veclen)
+    prior_tmat = _pstrainc.read_tmat(str(model / "transition_matrices"))[0]
     # Split the one-density flat model into two identical densities so top-N
     # pruning leaves genuine zero-posterior cells in otherwise active senones.
     prior_means = np.repeat(prior_means, 2, axis=1)
@@ -176,6 +177,26 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
     assert np.any(outputs["retain"]["variances"][empty] == np.float32(5e-5))
     assert np.any(outputs["retain"]["variances"][empty] == np.float32(0.0))
 
+    # Upstream norm writes fresh accumulators directly, so unobserved mixture
+    # and transition rows remain zero. Retain preserves their input values.
+    zero_mixw = outputs["zero"]["mixture_weights"]
+    retain_mixw = outputs["retain"]["mixture_weights"]
+    mixw_empty = zero_mixw.sum(axis=-1) == 0
+    assert mixw_empty.any()
+    assert np.count_nonzero(zero_mixw[mixw_empty]) == 0
+    np.testing.assert_array_equal(retain_mixw[mixw_empty], mixw[mixw_empty])
+    mixw_occupied = ~mixw_empty
+    np.testing.assert_array_equal(zero_mixw[mixw_occupied], retain_mixw[mixw_occupied])
+
+    zero_tmat = outputs["zero"]["transition_matrices"]
+    retain_tmat = outputs["retain"]["transition_matrices"]
+    tmat_empty = zero_tmat.sum(axis=-1) == 0
+    assert tmat_empty.any()
+    assert np.count_nonzero(zero_tmat[tmat_empty]) == 0
+    np.testing.assert_array_equal(retain_tmat[tmat_empty], prior_tmat[tmat_empty])
+    tmat_occupied = ~tmat_empty
+    np.testing.assert_array_equal(zero_tmat[tmat_occupied], retain_tmat[tmat_occupied])
+
     # Every occupied cell saw the same value, so direct one-pass V/N-E[x]^2
     # is exactly zero in float32.  The saved artifact must not contain the
     # evaluation-time 1e-4 floor or a reciprocal round-trip perturbation.
@@ -209,6 +230,34 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
         assert evaluator.process_utterance(features, phones)
         scores[policy] = evaluator.get_stats().total_log_lik
     assert scores["zero"] == scores["retain"]
+
+    # The training loader matches upstream senone loading: an all-zero row is
+    # floored cell-wise and normalized, producing a uniform evaluation PDF.
+    reloaded = BWTrainer(
+        model / "mdef",
+        tmp_path / "zero" / "means",
+        tmp_path / "zero" / "variances",
+        tmp_path / "zero" / "mixture_weights",
+        tmp_path / "zero" / "transition_matrices",
+        BWConfig(
+            pass2var=False,
+            unobserved_gaussian_policy="zero",
+            a_beam=1e-200,
+            multipron=False,
+        ),
+    )
+    reloaded_dir = tmp_path / "zero-reloaded"
+    reloaded_dir.mkdir()
+    assert reloaded.save(
+        reloaded_dir / "means",
+        reloaded_dir / "variances",
+        reloaded_dir / "mixture_weights",
+        reloaded_dir / "transition_matrices",
+    )
+    reloaded_mixw = _pstrainc.read_mixw(str(reloaded_dir / "mixture_weights"))[0]
+    np.testing.assert_array_equal(
+        reloaded_mixw[mixw_empty], np.full_like(reloaded_mixw[mixw_empty], 0.5)
+    )
 
 
 @requires_c_library
@@ -410,7 +459,8 @@ def _assert_normalized_model(model_dir: Path) -> None:
     # BW artifacts intentionally contain direct, unfloored normalization
     # output.  The next engine load applies the evaluation floor.
     assert (np.maximum(arrays["variances"], np.float32(1e-4)) >= 1e-4).all()
-    np.testing.assert_allclose(arrays["mixture_weights"].sum(axis=-1), 1.0, rtol=1e-6, atol=1e-6)
+    mixw_sums = arrays["mixture_weights"].sum(axis=-1)
+    np.testing.assert_allclose(mixw_sums[mixw_sums > 0], 1.0, rtol=1e-6, atol=1e-6)
     tmat_sums = arrays["transition_matrices"].sum(axis=-1)
     np.testing.assert_allclose(tmat_sums[tmat_sums > 0], 1.0, rtol=1e-6, atol=1e-6)
 
@@ -852,7 +902,11 @@ def test_withheld_context_uses_live_ci_fallback_across_passes(
                 -1, 2, *(() if name == "mixture_weights" else (39,))
             )[fallback_senones]
             assert np.any(current_values != previous_values), (iteration, name)
-            if name != "mixture_weights":
+            if name == "mixture_weights":
+                zero_current = checkpoint_arrays[name].reshape(-1, 2)[zero_mass_senones]
+                zero_previous = previous[name].reshape(-1, 2)[zero_mass_senones]
+                np.testing.assert_array_equal(zero_current, zero_previous)
+            else:
                 zero_current = checkpoint_arrays[name].reshape(-1, 2, 39)[zero_mass_senones]
                 zero_previous = previous[name].reshape(-1, 2, 39)[zero_mass_senones]
                 np.testing.assert_array_equal(zero_current, zero_previous)

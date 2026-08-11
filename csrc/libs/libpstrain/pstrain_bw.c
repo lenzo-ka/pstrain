@@ -880,7 +880,17 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
                     ctx->inv->mixw[i][j][k] = ctx->inv->mixw_acc[i][j][k] / sum;
                 }
             } else {
-                E_WARN("mixw %u feat %u has no data, keeping old values\n", i, j);
+                int fallback_tracked = i < ctx->mdef->n_tied_state &&
+                    ctx->fallback_senone[i];
+                if (ctx->unobserved_gaussian_policy ==
+                    PSTRAIN_BW_UNOBSERVED_GAUSSIAN_ZERO && !fallback_tracked) {
+                    memset(ctx->inv->mixw[i][j], 0,
+                           ctx->inv->n_density * sizeof(float32));
+                }
+                E_WARN("mixw %u feat %u has no data, %s values\n", i, j,
+                       ctx->unobserved_gaussian_policy ==
+                       PSTRAIN_BW_UNOBSERVED_GAUSSIAN_ZERO && !fallback_tracked
+                       ? "zeroing" : "retaining");
             }
         }
     }
@@ -898,7 +908,15 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
                     ctx->inv->tmat[i][j][k] = ctx->inv->tmat_acc[i][j][k] / sum;
                 }
             } else {
-                E_WARN("tmat %u state %u has no data, keeping old values\n", i, j);
+                if (ctx->unobserved_gaussian_policy ==
+                    PSTRAIN_BW_UNOBSERVED_GAUSSIAN_ZERO) {
+                    memset(ctx->inv->tmat[i][j], 0,
+                           ctx->inv->n_state_pm * sizeof(float32));
+                }
+                E_WARN("tmat %u state %u has no data, %s values\n", i, j,
+                       ctx->unobserved_gaussian_policy ==
+                       PSTRAIN_BW_UNOBSERVED_GAUSSIAN_ZERO
+                       ? "zeroing" : "retaining");
             }
         }
     }

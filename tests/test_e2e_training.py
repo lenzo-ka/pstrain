@@ -285,13 +285,14 @@ def test_build_cd_8g_produces_genuine_tied_model(tmp_path: Path) -> None:
     assert np.isfinite(mixw).all()
 
     cd1_counts = _pstrainc.read_dnom(str(model_dir / "gauden_counts"))[0]
-    zero_var_cells = np.all(variances == 0, axis=-1)
-    assert zero_var_cells.any(), "fixture must exercise the upstream zero-cell policy"
-    assert np.all(cd1_counts[zero_var_cells] == 0)
+    zero_parameter_cells = np.all(means == 0, axis=-1) & np.all(variances == 0, axis=-1)
+    assert zero_parameter_cells.any(), "fixture must exercise the upstream zero-cell policy"
+    assert np.all(cd1_counts[zero_parameter_cells] == 0)
 
     counts, _, _, n_density = _pstrainc.read_dnom(str(ctx.model_dir("cd-8g") / "gauden_counts"))
     assert n_density == 8
     # topn=1 can update only one density for each state.  This assertion
     # proves the tied-stage BW pass accumulates posterior mass in several.
     assert np.any(np.count_nonzero(counts > 0, axis=2) > 1)
-    np.testing.assert_allclose(mixw.sum(axis=-1), 1.0, rtol=1e-5, atol=1e-6)
+    mixw_sums = mixw.sum(axis=-1)
+    np.testing.assert_allclose(mixw_sums[mixw_sums > 0], 1.0, rtol=1e-5, atol=1e-6)
