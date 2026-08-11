@@ -185,7 +185,7 @@ class TestGenerateUntiedMdef:
         filler = tmp_path / "filler.dict"
         filler.write_text("<s> SIL\n</s> SIL\n")
         transcripts = tmp_path / "train.transcription"
-        transcripts.write_text("<s> LEFT RIGHT </s> (utt1)\n")
+        transcripts.write_text("utt1 LEFT RIGHT\n")
         reachable_path = tmp_path / "reachable.mdef"
         all_path = tmp_path / "all.mdef"
         mdef.generate_untied_mdef(
@@ -227,6 +227,7 @@ class TestGenerateUntiedMdef:
         all_rows = rows(all_path)
         assert reachable == expected
         assert reachable < all_rows
+        assert "utt1" not in reachable_path.read_text()
 
     @pytest.mark.parametrize("multipron", [False, True])
     def test_untied_inventory_matches_training_mode(
