@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import shutil
+import stat
 import tempfile
 import time
 from pathlib import Path
@@ -28,13 +29,106 @@ from pstrain.lib.pipeline.tasks import TARGETS, build_pipeline
 from pstrain.lib.setup import setup_project
 
 
-def _refuse_project_symlinks(project_dir: Path) -> None:
+def _swap_state_path(project_dir: Path) -> Path:
+    return project_dir.parent / f".{project_dir.name}.pstrain-swap.json"
+
+
+def _write_swap_state(project_dir: Path, staging: Path, backup: Path) -> Path:
+    state_path = _swap_state_path(project_dir)
+    state = {
+        "version": 1,
+        "project": project_dir.name,
+        "staging": staging.name,
+        "backup": backup.name,
+    }
+    temporary = state_path.with_name(f"{state_path.name}.tmp-{os.getpid()}")
+    with temporary.open("w", encoding="utf-8") as stream:
+        json.dump(state, stream, indent=2)
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    temporary.replace(state_path)
+    directory_fd = os.open(project_dir.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+    return state_path
+
+
+def _recover_project_swap(project_dir: Path) -> None:
+    """Finish or roll back an interrupted replacement recorded beside the project."""
+    state_path = _swap_state_path(project_dir)
+    if not state_path.exists():
+        return
+    if state_path.is_symlink():
+        raise ValueError(f"Refusing symlink swap journal: {state_path}")
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Cannot read swap journal {state_path}: {exc}") from exc
+    if state.get("version") != 1 or state.get("project") != project_dir.name:
+        raise ValueError(f"Swap journal does not match project {project_dir}: {state_path}")
+    names = (state.get("staging"), state.get("backup"))
+    if any(not isinstance(name, str) or Path(name).name != name for name in names):
+        raise ValueError(f"Swap journal contains unsafe paths: {state_path}")
+    staging = project_dir.parent / str(names[0])
+    backup = project_dir.parent / str(names[1])
+
+    if project_dir.exists():
+        # Either rename 2 completed, or rename 1 never happened. Keep the usable project.
+        if backup.exists():
+            shutil.rmtree(backup)
+        if staging.exists():
+            shutil.rmtree(staging)
+    elif backup.is_dir():
+        if (staging / "etc" / "input-identity.json").is_file():
+            staging.rename(project_dir)
+            shutil.rmtree(backup)
+        else:
+            if staging.exists():
+                shutil.rmtree(staging)
+            backup.rename(project_dir)
+    else:
+        raise ValueError(f"Cannot recover swap: backup is missing: {backup}")
+    state_path.unlink()
+
+
+def _managed_audio_link(project_dir: Path) -> Path | None:
+    manifest_path = project_dir / "etc" / "input-identity.json"
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        return None
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    installed = manifest.get("installed")
+    if not isinstance(installed, dict) or installed.get("audio_ownership") != "link":
+        return None
+    audio = project_dir / "audio"
+    recorded_target = installed.get("audio_link_target")
+    try:
+        if audio.is_symlink() and str(audio.resolve(strict=True)) == recorded_target:
+            return audio
+    except OSError:
+        pass
+    return None
+
+
+def _refuse_project_symlinks(project_dir: Path, *, link_audio: bool) -> None:
     """Replacement never adopts or traverses links from the old project."""
+    managed_audio = _managed_audio_link(project_dir)
+    if managed_audio is not None and not link_audio:
+        raise ValueError(
+            f"Project is in link-mode at {managed_audio}; replacement requires --link-audio"
+        )
     for directory, dirnames, filenames in os.walk(project_dir, followlinks=False):
         base = Path(directory)
         for name in [*dirnames, *filenames]:
             path = base / name
             if path.is_symlink():
+                if managed_audio is not None and path == managed_audio:
+                    continue
                 raise ValueError(f"Refusing to replace project containing symlink: {path}")
 
 
@@ -54,11 +148,12 @@ def _install_project_transactionally(
     """Build a complete replacement beside the destination, then rename it into place."""
     project_dir.parent.mkdir(parents=True, exist_ok=True)
     if replacing:
-        _refuse_project_symlinks(project_dir)
+        _refuse_project_symlinks(project_dir, link_audio=link_audio)
     staging = Path(
         tempfile.mkdtemp(prefix=f".{project_dir.name}.replacement-", dir=project_dir.parent)
     )
     backup: Path | None = None
+    state_path: Path | None = None
     installed = False
     try:
         setup_project(
@@ -83,16 +178,22 @@ def _install_project_transactionally(
                 tempfile.mkdtemp(prefix=f".{project_dir.name}.previous-", dir=project_dir.parent)
             )
             backup.rmdir()
+            state_path = _write_swap_state(project_dir, staging, backup)
             project_dir.rename(backup)
         staging.rename(project_dir)
         installed = True
         if backup is not None:
             shutil.rmtree(backup)
             backup = None
+            assert state_path is not None
+            state_path.unlink()
+            state_path = None
     except Exception:
         if backup is not None and backup.exists() and not project_dir.exists():
             backup.rename(project_dir)
             backup = None
+            if state_path is not None:
+                state_path.unlink(missing_ok=True)
         raise
     finally:
         if staging.exists() and not installed:
@@ -137,7 +238,22 @@ class TrainCommand(Command):
 
     def execute(self, ctx: CommandContext) -> CommandResult:
         started = time.monotonic()
-        project_dir = Path(ctx.args.project_dir).resolve()
+        supplied_project = Path(ctx.args.project_dir)
+        try:
+            supplied_mode = supplied_project.lstat().st_mode
+        except FileNotFoundError:
+            supplied_mode = None
+        if supplied_mode is not None and stat.S_ISLNK(supplied_mode):
+            return self._failure(
+                ctx,
+                "project_path_symlink",
+                f"Refusing project path that is a symlink: {supplied_project}",
+            )
+        project_dir = supplied_project.absolute()
+        try:
+            _recover_project_swap(project_dir)
+        except (OSError, ValueError) as exc:
+            return self._failure(ctx, "swap_recovery_failed", f"Swap recovery failed: {exc}")
         audio_dir = Path(ctx.args.audio).resolve()
         prompts_path = Path(ctx.args.prompts).resolve()
         dictionary_path = Path(ctx.args.dictionary).resolve()

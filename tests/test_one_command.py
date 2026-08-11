@@ -119,6 +119,31 @@ def _seed_project(project: Path) -> None:
     (project / "etc" / "input-identity.json").write_text(json.dumps(manifest))
 
 
+def _seed_link_project(project: Path) -> None:
+    from pstrain.lib.setup import setup_project
+
+    setup_project(
+        project,
+        transcription_path=FIXTURE / "transcription.txt",
+        audio_path=FIXTURE / "wav",
+        dictionary_path=FIXTURE / "dictionary.dict",
+        phoneset_path=FIXTURE / "phoneset.txt",
+        filler_dict_path=FIXTURE / "filler.dict",
+        link_audio=True,
+    )
+    source = input_identity(
+        FIXTURE / "wav",
+        FIXTURE / "transcription.txt",
+        FIXTURE / "dictionary.dict",
+        FIXTURE / "filler.dict",
+        FIXTURE / "phoneset.txt",
+        True,
+    )
+    installed = installed_corpus_identity(project, audio_ownership="link")
+    manifest = {"version": 2, "source": source, "installed": installed}
+    (project / "etc" / "input-identity.json").write_text(json.dumps(manifest))
+
+
 def test_oov_blocks_before_setup_and_names_report(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -202,6 +227,75 @@ def test_replace_refuses_installed_symlinks(
     assert "containing symlink" in error
     assert relative in error
     assert external.read_bytes()
+
+
+def test_replace_refuses_project_root_symlink_without_touching_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    external = tmp_path / "external" / "project"
+    _seed_project(external)
+    marker = external / "untouched.marker"
+    marker.write_text("untouched")
+    alias = tmp_path / "project"
+    alias.symlink_to(external, target_is_directory=True)
+
+    assert _invoke(monkeypatch, *_base_arguments(alias), "--replace-inputs") == 1
+    assert "project path that is a symlink" in capsys.readouterr().err
+    assert marker.read_text() == "untouched"
+    assert alias.is_symlink()
+
+
+def test_link_audio_project_can_be_replaced_only_in_link_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import pstrain.cli.train as train_module
+
+    project = tmp_path / "project"
+    _seed_link_project(project)
+    assert _invoke(monkeypatch, *_base_arguments(project), "--replace-inputs") == 1
+    error = capsys.readouterr().err
+    assert "Project is in link-mode" in error
+    assert "--link-audio" in error
+
+    class SuccessfulPipeline:
+        def run(self, *args: object, **kwargs: object) -> int:
+            return 0
+
+    monkeypatch.setattr(train_module, "build_pipeline", lambda context: SuccessfulPipeline())
+    assert _invoke(monkeypatch, *_base_arguments(project), "--replace-inputs", "--link-audio") == 0
+    assert (project / "audio").is_symlink()
+
+
+@pytest.mark.parametrize("complete_staging", [False, True])
+def test_interrupted_swap_is_recovered_before_training(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, complete_staging: bool
+) -> None:
+    project = tmp_path / "project"
+    _seed_project(project)
+    (project / "generation").write_text("old")
+    backup = tmp_path / ".project.previous-test"
+    project.rename(backup)
+    staging = tmp_path / ".project.replacement-test"
+    if complete_staging:
+        _seed_project(staging)
+        (staging / "generation").write_text("new")
+    journal = tmp_path / ".project.pstrain-swap.json"
+    journal.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "project": "project",
+                "staging": staging.name,
+                "backup": backup.name,
+            }
+        )
+    )
+
+    assert _invoke(monkeypatch, *_base_arguments(project), "--resume", "--dry-run") == 0
+    assert (project / "generation").read_text() == ("new" if complete_staging else "old")
+    assert not backup.exists()
+    assert not staging.exists()
+    assert not journal.exists()
 
 
 def test_failed_replacement_leaves_original_project_intact(
