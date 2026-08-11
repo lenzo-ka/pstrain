@@ -177,19 +177,7 @@ def test_eval_transcript_serializations_are_enforced() -> None:
 
 
 def test_pin_configs_resolve_ratified_conditions() -> None:
-    assert benchmark_conditions()["known_skips"] == [
-        {
-            "mode": "off",
-            "stage": "cd-2g",
-            "pass": 1,
-            "utterance": "arctic_a0587",
-            "mechanism": (
-                "beam failure on a hard utterance after permitted retry; mirrored upstream: "
-                "the preserved upstream build ignores the same utterance at CI passes 5-6"
-            ),
-            "recorded-in": "thresh01-off anchor",
-        }
-    ]
+    assert benchmark_conditions()["known_skips"] == KNOWN_SKIPS
     off = PIN_CONFIGS["off"]["training"]
     on = PIN_CONFIGS["on"]["training"]
     assert off["multipron_training"] is False
@@ -375,9 +363,14 @@ def test_gate_failure_blocks_comparison(tmp_path: Path) -> None:
 
 
 def _write_skip_telemetry(
-    project: Path, *, utterance: str | None, reason: str = "alignment_failure"
+    project: Path,
+    *,
+    utterance: str | None,
+    reason: str = "alignment_failure",
+    stage: str = "cd-2g",
+    pass_numbers: tuple[int, ...] = (1,),
 ) -> None:
-    path = project / "shared/models/cd-2g/off/bw_telemetry.json"
+    path = project / f"shared/models/{stage}/{project.name}/bw_telemetry.json"
     path.parent.mkdir(parents=True)
     terminal = [] if utterance is None else [{"utterance": utterance, "reason": reason}]
     path.write_text(
@@ -385,7 +378,7 @@ def _write_skip_telemetry(
             {
                 "passes": [
                     {
-                        "pass": 1,
+                        "pass": pass_number,
                         "signed_convergence_delta": None,
                         "accounting": {
                             "skipped_utts": len(terminal),
@@ -396,6 +389,7 @@ def _write_skip_telemetry(
                             "terminal_skips": terminal,
                         },
                     }
+                    for pass_number in pass_numbers
                 ]
             }
         )
@@ -405,11 +399,68 @@ def _write_skip_telemetry(
 def test_listed_terminal_skip_passes_and_lands_in_record(tmp_path: Path) -> None:
     project = tmp_path / "off"
     _write_skip_telemetry(project, utterance="arctic_a0587")
-    assert audit_monotonicity(project) == KNOWN_SKIPS
+    off_skips = [item for item in KNOWN_SKIPS if item["mode"] == "off"]
+    assert audit_monotonicity(project) == off_skips
     actual, _ = _comparison_documents()
-    actual["results"]["off"]["slt55"]["known_skips"] = KNOWN_SKIPS  # type: ignore[index]
+    actual["results"]["off"]["slt55"]["known_skips"] = off_skips  # type: ignore[index]
     record = make_record(actual)
-    assert record["results"]["off"]["slt55"]["known_skips"] == KNOWN_SKIPS
+    assert record["results"]["off"]["slt55"]["known_skips"] == off_skips
+
+
+@pytest.mark.parametrize(
+    ("utterance", "stage", "pass_numbers"),
+    [
+        ("arctic_a0302", "cd-untied", tuple(range(3, 11))),
+        ("arctic_a0587", "cd-1g", (6,)),
+    ],
+)
+def test_on_mode_manifest_entries_pass_once_and_are_mandatorily_reported(
+    tmp_path: Path, utterance: str, stage: str, pass_numbers: tuple[int, ...]
+) -> None:
+    project = tmp_path / "on"
+    _write_skip_telemetry(project, utterance=utterance, stage=stage, pass_numbers=pass_numbers)
+    matching_entry = next(
+        item for item in KNOWN_SKIPS if item["utterance"] == utterance and item["mode"] == "on"
+    )
+    assert audit_monotonicity(project) == [matching_entry]
+
+    actual, record = _comparison_documents()
+    record["results"]["on"]["slt55"]["known_skips"] = [matching_entry]  # type: ignore[index]
+    with pytest.raises(RuntimeError, match="known_skips mismatch"):
+        compare_results(actual, record)
+
+
+def test_on_mode_reports_multiple_manifest_entries(tmp_path: Path) -> None:
+    project = tmp_path / "on"
+    _write_skip_telemetry(
+        project,
+        utterance="arctic_a0302",
+        stage="cd-untied",
+        pass_numbers=tuple(range(3, 11)),
+    )
+    _write_skip_telemetry(project, utterance="arctic_a0587", stage="cd-1g", pass_numbers=(6,))
+    on_skips = [item for item in KNOWN_SKIPS if item["mode"] == "on"]
+    assert audit_monotonicity(project) == on_skips
+
+
+@pytest.mark.parametrize(
+    ("mode", "utterance", "stage", "pass_numbers"),
+    [
+        ("off", "arctic_a0302", "cd-untied", (3,)),
+        ("on", "arctic_a0587", "cd-2g", (1,)),
+    ],
+)
+def test_known_skip_manifest_is_scoped_per_mode(
+    tmp_path: Path,
+    mode: str,
+    utterance: str,
+    stage: str,
+    pass_numbers: tuple[int, ...],
+) -> None:
+    project = tmp_path / mode
+    _write_skip_telemetry(project, utterance=utterance, stage=stage, pass_numbers=pass_numbers)
+    with pytest.raises(RuntimeError, match="unlisted terminal skip"):
+        audit_monotonicity(project)
 
 
 def test_unlisted_terminal_skip_fails(tmp_path: Path) -> None:

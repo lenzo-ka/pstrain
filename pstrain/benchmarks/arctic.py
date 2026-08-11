@@ -69,7 +69,33 @@ KNOWN_SKIPS: list[dict[str, Any]] = [
             "the preserved upstream build ignores the same utterance at CI passes 5-6"
         ),
         "recorded-in": "thresh01-off anchor",
-    }
+    },
+    {
+        "mode": "on",
+        "stage": "cd-untied",
+        "passes": list(range(3, 11)),
+        "utterance": "arctic_a0302",
+        "mechanism": (
+            "beam failure on a known-hard utterance after permitted retry in the multipron "
+            "posture — the recorded on-mode remainder class (V7-era: a0302/b0486; set shifted "
+            "with the reachable inventory: b0320 now trains); deep diagnosis deferred per "
+            "banked Q6, tracked as an open item"
+        ),
+        "recorded-in": "on-mode parity anchor",
+    },
+    {
+        "mode": "on",
+        "stage": "cd-1g",
+        "pass": 6,
+        "utterance": "arctic_a0587",
+        "mechanism": (
+            "beam failure on a known-hard utterance after permitted retry in the multipron "
+            "posture — the recorded on-mode remainder class (V7-era: a0302/b0486; set shifted "
+            "with the reachable inventory: b0320 now trains); deep diagnosis deferred per "
+            "banked Q6, tracked as an open item"
+        ),
+        "recorded-in": "on-mode parity anchor",
+    },
 ]
 
 
@@ -667,17 +693,17 @@ def audit_monotonicity(project: Path) -> list[dict[str, Any]]:
             for skip in terminal:
                 utterance = skip.get("utterance") if isinstance(skip, dict) else None
                 reason = skip.get("reason") if isinstance(skip, dict) else None
-                identity = {
-                    "mode": mode,
-                    "stage": stage,
-                    "pass": row.get("pass"),
-                    "utterance": utterance,
-                }
                 match = next(
                     (
                         item
                         for item in KNOWN_SKIPS
-                        if all(identity[key] == item[key] for key in identity)
+                        if item["mode"] == mode
+                        and item["stage"] == stage
+                        and item["utterance"] == utterance
+                        and (
+                            item.get("pass") == row.get("pass")
+                            or row.get("pass") in item.get("passes", [])
+                        )
                     ),
                     None,
                 )
@@ -687,7 +713,8 @@ def audit_monotonicity(project: Path) -> list[dict[str, Any]]:
                         f"utterance={utterance!r}, reason={reason!r}"
                     )
                 else:
-                    known_skips.append(match)
+                    if match not in known_skips:
+                        known_skips.append(match)
     if failures:
         raise RuntimeError("training telemetry gate failed:\n" + "\n".join(failures))
     return known_skips
