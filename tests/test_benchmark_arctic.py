@@ -12,9 +12,13 @@ from pstrain.benchmarks.arctic import (
     ARCHIVES,
     DATA_DIR,
     DECODER_CONDITIONS,
+    FILLER_DICTIONARY,
     PIN_CONFIGS,
+    PINNED_RESOURCE_HASHES,
     RECORD_SCHEMA_VERSION,
     audit_monotonicity,
+    authenticate_pin_resources,
+    band_resources,
     benchmark_conditions,
     bootstrap_ci,
     compare_results,
@@ -23,8 +27,11 @@ from pstrain.benchmarks.arctic import (
     main,
     make_record,
     paired_delta_ci,
+    resolve_data_dir,
+    sha256,
     validate_record,
 )
+from pstrain.lib.lm import build_lm
 
 
 def test_archive_manifest_matches_runtime_config() -> None:
@@ -50,6 +57,38 @@ def test_committed_transcripts_are_normalized_and_complete() -> None:
     train = set(load_transcripts(DATA_DIR / "train.transcription"))
     assert set(load_transcripts(DATA_DIR / "slt55.transcription")) <= train
     assert not (set(big) & train)
+
+
+def test_data_resolves_from_wheel_and_repo_layouts(tmp_path: Path) -> None:
+    wheel_root = tmp_path / "wheel"
+    repo_root = tmp_path / "repo"
+    wheel_data = wheel_root / "benchmarks/arctic/data"
+    repo_data = repo_root / "benchmarks/arctic/data"
+    wheel_data.mkdir(parents=True)
+    repo_data.mkdir(parents=True)
+    (wheel_data / "train.transcription").write_text("wheel text\n")
+    (repo_data / "train.transcription").write_text("repo text\n")
+    assert resolve_data_dir(package_root=wheel_root, repo_root=repo_root) == wheel_data
+    (wheel_data / "train.transcription").unlink()
+    assert resolve_data_dir(package_root=wheel_root, repo_root=repo_root) == repo_data
+
+
+def test_pin_band_resources_and_hashes() -> None:
+    dictionary, lm = band_resources("pin")
+    assert dictionary == DATA_DIR / "cmu_arctic_slt.dict"
+    assert lm == DATA_DIR / "training-unigram.lm"
+    assert sha256(dictionary) == PINNED_RESOURCE_HASHES["dictionary_sha256"]
+    assert sha256(lm) == PINNED_RESOURCE_HASHES["lm_sha256"]
+    assert PINNED_RESOURCE_HASHES["filler_dictionary_sha256"].startswith("fb508839")
+    authenticate_pin_resources(dictionary, lm, FILLER_DICTIONARY.encode())
+
+
+def test_unigram_builder_difference_is_known(tmp_path: Path) -> None:
+    """The 1,132-prompt corpus is not the 1,043-prompt canonical LM corpus."""
+    built = tmp_path / "training-unigram.lm"
+    build_lm(load_transcripts(DATA_DIR / "train.transcription"), built, max_order=1)
+    assert sha256(built) == "43ea28991421ff8d1c2cc375ca59822ddf3ad15408ef49a8ae16a6a9c43e3f6c"
+    assert built.read_bytes() != (DATA_DIR / "training-unigram.lm").read_bytes()
 
 
 def test_transcript_serializations_are_enforced() -> None:
