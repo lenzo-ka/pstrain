@@ -37,7 +37,7 @@ def resolve_data_dir(*, package_root: Path | None = None, repo_root: Path | None
 
 
 DATA_DIR = resolve_data_dir()
-RECORD_SCHEMA_VERSION = 2
+RECORD_SCHEMA_VERSION = 3
 BOOTSTRAP_RESAMPLES = 100_000
 BOOTSTRAP_SEED = 7
 DECODER_CONDITIONS: dict[str, Any] = {
@@ -58,6 +58,19 @@ PINNED_RESOURCE_HASHES = {
     "filler_dictionary_sha256": "fb50883998c41a5030c2a602965935c647563321e84a86f2adabb377ec24b49c",
 }
 FILLER_DICTIONARY = "<sil> SIL\n<s> SIL\n</s> SIL\n"
+KNOWN_SKIPS: list[dict[str, Any]] = [
+    {
+        "mode": "off",
+        "stage": "cd-2g",
+        "pass": 1,
+        "utterance": "arctic_a0587",
+        "mechanism": (
+            "beam failure on a hard utterance after permitted retry; mirrored upstream: "
+            "the preserved upstream build ignores the same utterance at CI passes 5-6"
+        ),
+        "recorded-in": "thresh01-off anchor",
+    }
+]
 
 
 @dataclass(frozen=True)
@@ -301,6 +314,7 @@ def benchmark_conditions(band: str = "pin") -> dict[str, Any]:
             "big_speaker_stratified": True,
         },
         "cells": {"slt55": "same-speaker held-out cell", "big": "cross-speaker"},
+        "known_skips": KNOWN_SKIPS,
         "frozen_dataclass_fields": frozen_fields,
     }
 
@@ -610,14 +624,18 @@ def write_project(project: Path, corpus: Path, dictionary: Path) -> None:
         audio.symlink_to(corpus / "cmu_us_slt_arctic" / "wav", target_is_directory=True)
 
 
-def audit_monotonicity(project: Path) -> None:
-    """Fail when any training pass reports a negative likelihood delta."""
+def audit_monotonicity(project: Path) -> list[dict[str, Any]]:
+    """Gate training telemetry and return manifest-listed terminal skips."""
     telemetry = list(project.glob("shared/models/**/bw_telemetry.json"))
     if not telemetry:
         raise RuntimeError(f"no BW telemetry found under {project}")
     failures: list[str] = []
+    known_skips: list[dict[str, Any]] = []
+    mode = project.name
     for path in telemetry:
         document = json.loads(path.read_text(encoding="utf-8"))
+        relative = path.relative_to(project / "shared" / "models")
+        stage = relative.parts[0]
         rows = document["passes"]
         for row in rows:
             delta = row.get("signed_convergence_delta")
@@ -633,13 +651,46 @@ def audit_monotonicity(project: Path) -> None:
             ) != int(accounting["skipped_utts"]):
                 failures.append(f"{path}: pass {row.get('pass')}: invalid skip accounting")
                 continue
-            unexpected = int(accounting["skipped_utts"]) - int(reasons["excluded_by_schedule"])
-            if unexpected:
+            terminal = accounting.get("terminal_skips", [])
+            if not isinstance(terminal, list):
+                failures.append(f"{path}: pass {row.get('pass')}: invalid terminal skip detail")
+                continue
+            expected_terminal = int(accounting["skipped_utts"]) - int(
+                reasons["excluded_by_schedule"]
+            )
+            if len(terminal) != expected_terminal:
                 failures.append(
-                    f"{path}: pass {row.get('pass')}: {unexpected} unexpected skip(s): {reasons}"
+                    f"{path}: pass {row.get('pass')}: terminal skip detail disagrees "
+                    f"with accounting: {reasons}"
                 )
+                continue
+            for skip in terminal:
+                utterance = skip.get("utterance") if isinstance(skip, dict) else None
+                reason = skip.get("reason") if isinstance(skip, dict) else None
+                identity = {
+                    "mode": mode,
+                    "stage": stage,
+                    "pass": row.get("pass"),
+                    "utterance": utterance,
+                }
+                match = next(
+                    (
+                        item
+                        for item in KNOWN_SKIPS
+                        if all(identity[key] == item[key] for key in identity)
+                    ),
+                    None,
+                )
+                if match is None or reason != "alignment_failure":
+                    failures.append(
+                        f"{path}: pass {row.get('pass')}: unlisted terminal skip: "
+                        f"utterance={utterance!r}, reason={reason!r}"
+                    )
+                else:
+                    known_skips.append(match)
     if failures:
         raise RuntimeError("training telemetry gate failed:\n" + "\n".join(failures))
+    return known_skips
 
 
 def score_model(
@@ -710,7 +761,15 @@ def _require_equal(label: str, actual: Any, recorded: Any) -> None:
 
 
 def _validate_cell(cell: Any, label: str, *, recorded: bool) -> None:
-    required = {"wer", "errors", "ref_words", "utterances", "decoded", "oov_tokens"}
+    required = {
+        "wer",
+        "errors",
+        "ref_words",
+        "utterances",
+        "decoded",
+        "oov_tokens",
+        "known_skips",
+    }
     if recorded:
         required.add("utterance_rows")
     if not isinstance(cell, dict) or not required <= set(cell):
@@ -721,6 +780,10 @@ def _validate_cell(cell: Any, label: str, *, recorded: bool) -> None:
         raise RuntimeError(f"benchmark record has invalid counts in result cell: {label}")
     if cell["ref_words"] <= 0 or cell["decoded"] > cell["utterances"]:
         raise RuntimeError(f"benchmark record has impossible counts in result cell: {label}")
+    if not isinstance(cell["known_skips"], list) or any(
+        item not in KNOWN_SKIPS for item in cell["known_skips"]
+    ):
+        raise RuntimeError(f"benchmark record has invalid known skips in result cell: {label}")
     expected_wer = cell["errors"] / cell["ref_words"]
     actual_wer = float(cell["wer"]) / 100 if recorded else float(cell["wer"])
     if abs(actual_wer - expected_wer) > 1e-12:
@@ -812,6 +875,11 @@ def compare_results(
             _validate_cell(actual_cell, f"actual {mode}/{dataset}", recorded=False)
             for field in ("utterances", "decoded", "oov_tokens", "ref_words"):
                 _require_equal(f"{mode}/{dataset} {field}", actual_cell[field], record_cell[field])
+            _require_equal(
+                f"{mode}/{dataset} known_skips",
+                actual_cell["known_skips"],
+                record_cell["known_skips"],
+            )
             observed = float(actual_cell["wer"]) * 100
             expected = float(record_cell["wer"])
             delta = observed - expected
@@ -941,7 +1009,7 @@ def run(
                 stderr=subprocess.STDOUT,
                 env=env,
             )
-        audit_monotonicity(project)
+        known_skips = audit_monotonicity(project)
         model = project / "shared" / "models" / "cd-8g" / mode
         slt = load_transcripts(DATA_DIR / "slt55.transcription")
         big = load_transcripts(DATA_DIR / "big.transcription")
@@ -950,6 +1018,7 @@ def run(
             "big": score_model(model, audio_roots, big, dictionary, lm),
         }
         for cell in actual[mode].values():
+            cell["known_skips"] = known_skips
             cell["bootstrap_ci_95"] = bootstrap_ci(cell["matched_pairs"])
     output: dict[str, Any] = {
         "schema_version": RECORD_SCHEMA_VERSION,
