@@ -40,32 +40,25 @@ The repository includes a small CMU ARCTIC fixture for a complete local run.
 Set up a project and train a one-Gaussian context-independent model:
 
 ```bash
-pstrain setup /tmp/pstrain-demo \
+pstrain train /tmp/pstrain-demo \
   --audio tests/fixtures/mini_arctic/wav \
-  --transcription tests/fixtures/mini_arctic/transcription.txt \
+  --prompts tests/fixtures/mini_arctic/transcription.txt \
   --dictionary tests/fixtures/mini_arctic/dictionary.dict \
   --phoneset tests/fixtures/mini_arctic/phoneset.txt \
   --filler-dict tests/fixtures/mini_arctic/filler.dict \
-  --validate
-
-pstrain build ci-1g --project-dir /tmp/pstrain-demo -j 1
+  -j 1
 ```
 
-Prepare the held-out transcript in the decoder's Sphinx transcript format,
-then decode it without a language model:
+The command stores separate typed training and decoder transcripts. Decode the
+held-out set without a language model directly—no transcript conversion is needed:
 
 ```bash
-awk '{ id=$1; $1=""; sub(/^ /, ""); print "<s> " $0 " </s> (" id ")" }' \
-  /tmp/pstrain-demo/experiments/default/etc/test.transcription \
-  > /tmp/pstrain-demo/experiments/default/etc/test.sphinx.transcription
-mv /tmp/pstrain-demo/experiments/default/etc/test.sphinx.transcription \
-  /tmp/pstrain-demo/experiments/default/etc/test.transcription
-
 pstrain test ci-1g --project-dir /tmp/pstrain-demo --no-lm
 ```
 
-For a project of your own, `pstrain setup --help` describes the accepted audio,
-transcription, dictionary, phoneset, and configuration inputs. The
+For a project of your own, `pstrain train --help` describes the accepted audio,
+prompt, dictionary, phoneset, and configuration inputs. The lower-level
+`setup`, `validate`, and `build` commands remain available for decomposed workflows. The
 [getting-started guide](docs/getting-started.md) continues from project setup.
 
 ## Benchmark pin

@@ -448,7 +448,7 @@ def test_missing_audio_directory_fails_during_pipeline_construction(
 
 
 def test_split_task_produces_fileid_files(empty_project: Path) -> None:
-    """Split should be registered as a task with the four expected outputs
+    """Split should be registered as a task with the typed expected outputs
     and as a target whose sentinel is train.fileids."""
     ctx = PipelineContext.from_config(empty_project)
     pl = build_pipeline(ctx)
@@ -460,6 +460,7 @@ def test_split_task_produces_fileid_files(empty_project: Path) -> None:
         "test.fileids",
         "train.transcription",
         "test.transcription",
+        "test.decoder.transcription",
     }
     assert pl.targets()["split"].name == "train.fileids"
 

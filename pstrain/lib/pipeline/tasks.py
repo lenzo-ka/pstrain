@@ -205,6 +205,7 @@ def _make_split_task(ctx: PipelineContext) -> Task:
         etc / "test.fileids",
         etc / "train.transcription",
         etc / "test.transcription",
+        etc / "test.decoder.transcription",
     )
 
     def run() -> None:

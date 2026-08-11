@@ -136,7 +136,10 @@ class TestCommand(Command):
 
         # Load test transcripts
         exp_dir = project_dir / "experiments" / config_name
-        test_transcript_file = exp_dir / "etc" / "test.transcription"
+        test_transcript_file = exp_dir / "etc" / "test.decoder.transcription"
+        if not test_transcript_file.exists():
+            # Compatibility for projects created before typed split artifacts.
+            test_transcript_file = exp_dir / "etc" / "test.transcription"
 
         if not test_transcript_file.exists():
             return CommandResult.fail(f"Test transcripts not found: {test_transcript_file}")
