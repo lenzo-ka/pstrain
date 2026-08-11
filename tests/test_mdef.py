@@ -176,6 +176,58 @@ class TestGenerateUntiedMdef:
         )
         assert output.exists()
 
+    def test_transcript_reachable_matches_multipron_graph_domain(self, tmp_path: Path) -> None:
+        """Reachable inventory includes both sides of variant boundaries."""
+        phones = tmp_path / "phones.txt"
+        phones.write_text("L\nM\nX\nY\nP\nQ\nN\nO\nZ\nSIL\n")
+        dictionary = tmp_path / "dictionary.dict"
+        dictionary.write_text("LEFT L X\nLEFT(2) M Y\nRIGHT P N\nRIGHT(2) Q O\nUNUSED Z\n")
+        filler = tmp_path / "filler.dict"
+        filler.write_text("<s> SIL\n</s> SIL\n")
+        transcripts = tmp_path / "train.transcription"
+        transcripts.write_text("<s> LEFT RIGHT </s> (utt1)\n")
+        reachable_path = tmp_path / "reachable.mdef"
+        all_path = tmp_path / "all.mdef"
+        mdef.generate_untied_mdef(
+            phones,
+            dictionary,
+            transcripts,
+            reachable_path,
+            filler_dict=filler,
+            inventory_policy="transcript-reachable",
+        )
+        mdef.generate_alltriphones_mdef(phones, dictionary, all_path, filler_dict=filler)
+
+        def rows(path: Path) -> set[tuple[str, str, str, str]]:
+            return {
+                tuple(fields[:4])
+                for line in path.read_text().splitlines()
+                if len(fields := line.split()) >= 4
+                and not fields[0].startswith("#")
+                and fields[1] != "-"
+            }
+
+        # Computed independently from the four pronunciation pairs. Fan-out
+        # gives X/Y both P/Q right contexts; fan-in gives P/Q both X/Y lefts.
+        expected = {
+            ("L", "SIL", "X", "b"),
+            ("M", "SIL", "Y", "b"),
+            ("X", "L", "P", "e"),
+            ("X", "L", "Q", "e"),
+            ("Y", "M", "P", "e"),
+            ("Y", "M", "Q", "e"),
+            ("P", "X", "N", "b"),
+            ("P", "Y", "N", "b"),
+            ("Q", "X", "O", "b"),
+            ("Q", "Y", "O", "b"),
+            ("N", "P", "SIL", "e"),
+            ("O", "Q", "SIL", "e"),
+        }
+        reachable = rows(reachable_path)
+        all_rows = rows(all_path)
+        assert reachable == expected
+        assert reachable < all_rows
+
     @pytest.mark.parametrize("multipron", [False, True])
     def test_untied_inventory_matches_training_mode(
         self,

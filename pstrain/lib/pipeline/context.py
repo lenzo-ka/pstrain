@@ -135,6 +135,9 @@ class TrainParams:
     # default; set to False to fall back to the legacy linear path that
     # always picks the first listed variant per word.
     multipron_training: bool = True
+    # Keep the M4b all-dictionary policy by default; multipron PP3g
+    # experiments can opt into the exact transcript-reachable graph domain.
+    untied_inventory: str = "all-triphone"
 
 
 @dataclass(frozen=True)
@@ -360,6 +363,21 @@ class PipelineContext:
             not isinstance(configured_jobs, int) or configured_jobs < 1
         ):
             raise ValueError(f"config {config_name!r} runner.jobs must be a positive integer")
+        untied_inventory = training_values.get("untied_inventory", "all-triphone")
+        if untied_inventory not in {"all-triphone", "transcript-reachable", "linear"}:
+            raise ValueError(
+                f"config {config_name!r} training.untied_inventory must be "
+                "all-triphone, transcript-reachable, or linear"
+            )
+        if (
+            untied_inventory == "transcript-reachable"
+            and training_values.get("multipron_training", True) is False
+        ):
+            raise ValueError(
+                f"config {config_name!r} training.untied_inventory "
+                "'transcript-reachable' requires training.multipron_training: true; "
+                "linear mode's equivalent is the 'linear' policy"
+            )
         return cls(
             project_dir=project_dir,
             experiment=experiment,

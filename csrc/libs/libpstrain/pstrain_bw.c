@@ -115,12 +115,27 @@ struct pstrain_bw_context_s {
     int32 var_reest;
     int32 pass2var;  /* Use 2-pass variance estimation for numerical stability */
     int32 multipron; /* Multi-pron training: build wide utterance graphs */
+    char *fallback_senone; /* CI senones used as primary models this pass */
 
     /* Stats */
     float64 total_log_lik;
     uint32 total_frames;
     uint32 total_utts;
 };
+
+static void
+mark_fallback_senones(pstrain_bw_context_t *ctx, state_t *state_seq, uint32 n_state)
+{
+    uint32 i;
+    for (i = 0; i < n_state; ++i) {
+        acmod_id_t phn = state_seq[i].phn;
+        if (state_seq[i].mixw == TYING_NO_ID ||
+            phn >= ctx->mdef->acmod_set->n_ci ||
+            acmod_set_has_attrib(ctx->mdef->acmod_set, phn, "filler"))
+            continue;
+        ctx->fallback_senone[state_seq[i].mixw] = 1;
+    }
+}
 
 pstrain_bw_context_t *
 pstrain_bw_init(const char *mdef_path,
@@ -252,6 +267,7 @@ pstrain_bw_init(const char *mdef_path,
     }
 
     E_INFO("BW context initialized: %u tied states, %u codebooks\n", n_ts, n_cb);
+    ctx->fallback_senone = ckd_calloc(n_ts, sizeof(*ctx->fallback_senone));
     return ctx;
 
 error:
@@ -268,6 +284,7 @@ pstrain_bw_free(pstrain_bw_context_t *ctx)
     if (ctx->inv) mod_inv_free(ctx->inv);
     if (ctx->mdef) model_def_free(ctx->mdef);
     if (ctx->feat) feat_free(ctx->feat);
+    ckd_free(ctx->fallback_senone);
 
     ckd_free(ctx);
 }
@@ -375,7 +392,7 @@ pstrain_bw_build_state_seq(pstrain_bw_context_t *ctx,
     char *trans_copy;
     int needs_free;
 
-    if (!ctx || !ctx->lex || !transcript || !n_state || !ctx->multipron)
+    if (!ctx || !ctx->lex || !transcript || !n_state)
         return NULL;
     trans_copy = ckd_salloc(transcript);
     state_seq = build_utt_state_seq(ctx, trans_copy, n_state, &needs_free);
@@ -388,6 +405,24 @@ pstrain_bw_free_state_seq(state_t *state_seq, uint32 n_state)
 {
     if (state_seq)
         state_seq_free(state_seq, n_state);
+}
+
+uint32
+pstrain_bw_count_active_fallback_senones(pstrain_bw_context_t *ctx)
+{
+    uint32 i, count = 0;
+    if (!ctx) return 0;
+    for (i = 0; i < ctx->mdef->n_tied_state; ++i)
+        count += ctx->fallback_senone[i] != 0;
+    return count;
+}
+
+int
+pstrain_bw_fallback_senone_active(pstrain_bw_context_t *ctx, uint32 senone)
+{
+    if (!ctx || senone >= ctx->mdef->n_tied_state)
+        return 0;
+    return ctx->fallback_senone[senone] != 0;
 }
 
 int
@@ -464,6 +499,9 @@ pstrain_bw_process_utt_text(pstrain_bw_context_t *ctx,
                                 ctx->feat);
 
         ckd_free_2d((void **)feat_vecs);
+
+        if (ret == S3_SUCCESS)
+            mark_fallback_senones(ctx, state_seq, n_state);
 
         /* Linear path uses static internal buffers (do NOT free).
          * Graph path allocates fresh per utterance (DO free). */
@@ -563,7 +601,6 @@ pstrain_bw_process_utt_mfcc(pstrain_bw_context_t *ctx,
             feat_array_free(feat_buf);
             return -1;
         }
-
         ret = baum_welch_update(&log_forw_prob,
                                 feat_buf,
                                 n_feat_frames,
@@ -583,6 +620,9 @@ pstrain_bw_process_utt_mfcc(pstrain_bw_context_t *ctx,
                                 NULL,  /* pdumpfh */
                                 NULL,  /* latfh */
                                 ctx->feat);
+
+        if (ret == S3_SUCCESS)
+            mark_fallback_senones(ctx, state_seq, n_state);
 
         feat_array_free(feat_buf);
 
@@ -699,6 +739,51 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
     uint32 *veclen = g->veclen;
     uint32 i, j, k, l;
 
+    /* A missing CD model resolves to its CI senones. Once such a senone has
+     * occupancy, keep one observation of its previous CI distribution in the
+     * re-estimate. This is a proper survival prior: fallback states still
+     * learn from their posteriors, but a sparsely selected graph branch cannot
+     * collapse its Gaussian or mixture support after the first pass. It is
+     * inactive when the inventory has no misses, so established trajectories
+     * remain unchanged. */
+    if (acmod_set_n_multi(ctx->mdef->acmod_set) > 0 &&
+        n_mgau == ctx->mdef->n_tied_state) {
+        char *seeded = ckd_calloc(n_mgau, sizeof(*seeded));
+        acmod_id_t ci;
+        for (ci = 0; ci < ctx->mdef->acmod_set->n_ci; ++ci) {
+            uint32 state;
+            if (acmod_set_has_attrib(ctx->mdef->acmod_set, ci, "filler"))
+                continue;
+            for (state = 0; state + 1 < ctx->mdef->defn[ci].n_state; ++state) {
+                uint32 tied_state = ctx->mdef->defn[ci].state[state];
+                uint32 cb = tied_state;
+                int observed = 0;
+                if (cb >= n_mgau || seeded[cb] || !ctx->fallback_senone[tied_state])
+                    continue;
+                for (j = 0; j < n_feat && !observed; ++j)
+                    for (k = 0; k < n_density; ++k)
+                        if (g->dnom[cb][j][k] > 0) { observed = 1; break; }
+                if (!observed) continue;
+                seeded[cb] = 1;
+                for (j = 0; j < n_feat; ++j) {
+                    for (k = 0; k < n_density; ++k) {
+                        float32 prior = ctx->inv->mixw[tied_state][j][k];
+                        g->dnom[cb][j][k] += prior;
+                        for (l = 0; l < veclen[j]; ++l) {
+                            float32 mean = g->mean[cb][j][k][l];
+                            g->macc[cb][j][k][l] += prior * mean;
+                            g->vacc[cb][j][k][l] += prior *
+                                (ctx->pass2var ? g->var[cb][j][k][l]
+                                               : g->var[cb][j][k][l] + mean * mean);
+                        }
+                        ctx->inv->mixw_acc[tied_state][j][k] += prior;
+                    }
+                }
+            }
+        }
+        ckd_free(seeded);
+    }
+
     /* Normalize Gaussians: mean and variance */
     E_INFO("Normalizing Gaussians...\n");
     for (i = 0; i < n_mgau; i++) {
@@ -772,6 +857,11 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
 
     /* Recompute Gaussian precomputation values */
     E_INFO("Recomputing Gaussian precomputation values...\n");
+    /* The activation set belongs only to the completed accumulation pass.
+     * Clear it before the final operation that can fail so callers may safely
+     * retry or reuse the context after every normalization exit. */
+    memset(ctx->fallback_senone, 0,
+           ctx->mdef->n_tied_state * sizeof(*ctx->fallback_senone));
     if (gauden_eval_precomp(g) != S3_SUCCESS) {
         E_ERROR("Failed to recompute Gaussian values\n");
         return -1;

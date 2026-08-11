@@ -16,6 +16,7 @@ from pstrain.lib.bw import BWConfig, BWTrainer
 from pstrain.lib.features import read_sphinx_mfc
 from pstrain.lib.pipeline import PipelineContext
 from pstrain.lib.pipeline.tasks import TARGETS
+from pstrain.lib.steps.cd_pipeline import run_init_cd_untied
 from pstrain.lib.steps.train import run_bw_training
 from tests.clib import requires_c_library
 from tests.numeric_harness import (
@@ -40,6 +41,28 @@ _CHECKPOINT_MODEL_FILES = {
     "gauden_counts",
 }
 _M4_FIXTURE = Path(__file__).parent / "fixtures" / "multipron_final_state"
+
+
+def _cd_rows(path: Path) -> list[tuple[str, str, str, str]]:
+    return [tuple(row[:4]) for row in _mdef_rows(path) if row[1] != "-"]
+
+
+def _runtime_contexts(
+    trainer: BWTrainer, mdef_path: Path, transcript: str
+) -> set[tuple[str, str, str, str]]:
+    rows = list(_mdef_rows(mdef_path))
+    n_state = trainer._ffi.new("uint32 *")
+    states = trainer._lib.pstrain_bw_build_state_seq(trainer._ctx, transcript.encode(), n_state)
+    assert states != trainer._ffi.NULL
+    try:
+        return {
+            tuple(rows[states[index].phn][:4])
+            for index in range(n_state[0])
+            if states[index].m_state == 0 and rows[states[index].phn][1] != "-"
+        }
+    finally:
+        if trainer.config.multipron:
+            trainer._lib.pstrain_bw_free_state_seq(states, n_state[0])
 
 
 @pytest.fixture(scope="module")
@@ -447,6 +470,228 @@ def test_cd_variant_boundaries_expand_both_triphone_contexts(
         assert terminal_exits == [n_state[0] - 1]
     finally:
         trainer._lib.pstrain_bw_free_state_seq(states, n_state[0])
+
+
+@requires_c_library
+@pytest.mark.parametrize(
+    "words",
+    [
+        "ONE",
+        "LEFT RIGHT",
+        "LEFT <sil> RIGHT",
+        "LEFT <sil>",
+        "DUP RIGHT",
+    ],
+    ids=[
+        "one-word-single-phone",
+        "variant-boundary",
+        "filler-between-lexical",
+        "variant-adjacent-filler",
+        "duplicate-variants",
+    ],
+)
+@pytest.mark.parametrize("multipron", [False, True], ids=["linear", "multipron"])
+def test_inventory_policy_equals_runtime_contexts_by_mode(
+    full_project: PipelineContext,
+    tmp_path: Path,
+    words: str,
+    multipron: bool,
+) -> None:
+    """Each supported inventory policy matches its BW runtime domain."""
+    from pstrain.lib.mdef import generate_alltriphones_mdef, generate_untied_mdef
+
+    phones = tmp_path / "phones.txt"
+    phones.write_text((full_project.shared_dir / "phoneset.txt").read_text())
+    dictionary = tmp_path / "dictionary.dict"
+    dictionary.write_text(
+        "ONE G\nLEFT L K\nLEFT(2) M IY\nRIGHT P N\nRIGHT(2) D OW\nDUP B AE\nDUP(2) B AE\n"
+    )
+    filler = tmp_path / "filler.dict"
+    filler.write_text("<s> SIL\n</s> SIL\n<sil> SIL\n")
+    transcript_text = f"<s> {words} </s>"
+    transcript = tmp_path / "train.transcription"
+    transcript.write_text(f"{transcript_text} (utt1)\n")
+    inventory_mdef = tmp_path / "inventory.mdef"
+    runtime_mdef = tmp_path / "runtime.mdef"
+    generate_untied_mdef(
+        phones,
+        dictionary,
+        transcript,
+        inventory_mdef,
+        filler_dict=filler,
+        inventory_policy="transcript-reachable" if multipron else "linear",
+        multipron=multipron,
+    )
+    generate_alltriphones_mdef(phones, dictionary, runtime_mdef, filler_dict=filler)
+    runtime_model = tmp_path / "runtime-model"
+    run_init_cd_untied(full_project.model_dir("ci-1g"), runtime_mdef, runtime_model)
+    trainer = BWTrainer(
+        runtime_model / "mdef",
+        runtime_model / "means",
+        runtime_model / "variances",
+        runtime_model / "mixture_weights",
+        runtime_model / "transition_matrices",
+        BWConfig(pass2var=True, multipron=multipron),
+    )
+    trainer.set_dict(dictionary, filler)
+
+    inventory = set(_cd_rows(inventory_mdef))
+    runtime = _runtime_contexts(trainer, runtime_mdef, transcript_text)
+    assert inventory == runtime
+    if words == "LEFT RIGHT":
+        second_variant = {row for row in runtime if row[0] in {"M", "IY", "D", "OW"}}
+        assert bool(second_variant) is multipron
+
+
+@requires_c_library
+def test_complete_cd_inventory_leaves_ci_fallback_accumulators_zero(
+    full_project: PipelineContext, tmp_path: Path
+) -> None:
+    """A complete CD runtime never enters the CI fallback prior path."""
+    from pstrain.lib.mdef import generate_alltriphones_mdef
+
+    model = tmp_path / "complete-model"
+    complete_mdef = tmp_path / "complete.mdef"
+    generate_alltriphones_mdef(
+        full_project.shared_dir / "phoneset.txt",
+        full_project.shared_dir / "dictionary.dict",
+        complete_mdef,
+        filler_dict=full_project.filler_dict,
+    )
+    run_init_cd_untied(full_project.model_dir("ci-2g"), complete_mdef, model)
+    trainer = BWTrainer(
+        model / "mdef",
+        model / "means",
+        model / "variances",
+        model / "mixture_weights",
+        model / "transition_matrices",
+        BWConfig(pass2var=True, a_beam=1e-200, multipron=True),
+    )
+    trainer.set_dict(full_project.shared_dir / "dictionary.dict", full_project.filler_dict)
+    mfcc = read_sphinx_mfc(full_project.features_dir / "arctic_a0001.mfc")
+    assert trainer.process_utterance_mfcc(mfcc, "<s> a and </s>")
+    assert trainer._lib.pstrain_bw_count_active_fallback_senones(trainer._ctx) == 0
+    non_filler_ci_senones = [
+        int(state)
+        for row in _mdef_rows(complete_mdef)
+        if row[1] == "-" and row[4] != "filler"
+        for state in row[6:-1]
+    ]
+    assert non_filler_ci_senones
+    assert all(
+        trainer._lib.pstrain_bw_fallback_senone_active(trainer._ctx, senone) == 0
+        for senone in non_filler_ci_senones
+    )
+
+
+@requires_c_library
+def test_withheld_context_uses_live_ci_fallback_across_passes(
+    full_project: PipelineContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An inventory miss trains through CI fallback for every re-estimation pass."""
+    from pstrain.lib.mdef import generate_untied_mdef
+    from pstrain.lib.steps.cd_pipeline import run_init_cd_untied
+
+    transcript = tmp_path / "fallback.transcription"
+    transcript.write_text("<s> a and </s> (arctic_a0001)\n")
+    fileids = tmp_path / "fallback.fileids"
+    fileids.write_text("arctic_a0001\n")
+    linear_mdef = tmp_path / "linear.mdef"
+    generate_untied_mdef(
+        full_project.shared_dir / "phoneset.txt",
+        full_project.shared_dir / "dictionary.dict",
+        transcript,
+        linear_mdef,
+        filler_dict=full_project.filler_dict,
+        inventory_policy="linear",
+    )
+    rows = {tuple(row[:4]) for row in _mdef_rows(linear_mdef)}
+    withheld = ("EY", "SIL", "AE", "s")
+    assert withheld not in rows
+
+    initial = tmp_path / "initial"
+    run_init_cd_untied(full_project.model_dir("ci-2g"), linear_mdef, initial)
+    probe = BWTrainer(
+        initial / "mdef",
+        initial / "means",
+        initial / "variances",
+        initial / "mixture_weights",
+        initial / "transition_matrices",
+        BWConfig(pass2var=True, multipron=True),
+    )
+    probe.set_dict(full_project.shared_dir / "dictionary.dict", full_project.filler_dict)
+    n_state = probe._ffi.new("uint32 *")
+    states = probe._lib.pstrain_bw_build_state_seq(probe._ctx, b"<s> a and </s>", n_state)
+    assert states != probe._ffi.NULL
+    ci_rows = [row for row in _mdef_rows(linear_mdef) if row[1] == "-"]
+    sil_id = next(index for index, row in enumerate(ci_rows) if row[0] == "SIL")
+    fallback_senones = np.asarray(
+        sorted(
+            {
+                states[index].mixw
+                for index in range(n_state[0])
+                if states[index].mixw != 0xFFFFFFFF
+                and states[index].phn < 36
+                and states[index].phn != sil_id
+            }
+        )
+    )
+    probe._lib.pstrain_bw_free_state_seq(states, n_state[0])
+    assert fallback_senones.size
+    initial_arrays = read_model_arrays(initial)
+    output = tmp_path / "trained"
+    monkeypatch.setenv("PSTRAIN_BW_CHECKPOINTS", "1")
+    result = run_bw_training(
+        initial,
+        output,
+        full_project.features_dir,
+        fileids,
+        transcript,
+        full_project.shared_dir / "dictionary.dict",
+        filler_dict=full_project.filler_dict,
+        n_iter=3,
+        min_iterations=3,
+        convergence_ratio=-1e30,
+        first_pass_2passvar=False,
+        config=BWConfig(pass2var=True, a_beam=1e-200, b_beam=1e-200, multipron=True),
+    )
+    assert result.iterations == 3
+    assert result.total_skipped == 0
+    assert all(row.skipped_utts == 0 for row in result.trajectory)
+
+    previous = initial_arrays
+    for iteration in range(1, 4):
+        checkpoint = output / "iterations" / f"{iteration:02d}"
+        checkpoint_arrays = read_model_arrays(checkpoint)
+        posterior_counts = _pstrainc.read_dnom(str(checkpoint / "gauden_counts"))[0]
+        fallback_counts = posterior_counts.reshape(-1, 2)[fallback_senones]
+        positive_mass = fallback_counts.sum(axis=1)
+        positive_mass = positive_mass[positive_mass > 0]
+        assert positive_mass.min() < 1.1  # comparable to the unit-mass prior
+        for name in ("means", "variances", "mixture_weights"):
+            current_values = checkpoint_arrays[name].reshape(
+                -1, 2, *(() if name == "mixture_weights" else (39,))
+            )[fallback_senones]
+            previous_values = previous[name].reshape(
+                -1, 2, *(() if name == "mixture_weights" else (39,))
+            )[fallback_senones]
+            assert np.any(current_values != previous_values), (iteration, name)
+        previous = checkpoint_arrays
+
+    mfcc = read_sphinx_mfc(full_project.features_dir / "arctic_a0001.mfc")
+    for iteration in range(1, 4):
+        checkpoint = output / "iterations" / f"{iteration:02d}"
+        trainer = BWTrainer(
+            checkpoint / "mdef",
+            checkpoint / "means",
+            checkpoint / "variances",
+            checkpoint / "mixture_weights",
+            checkpoint / "transition_matrices",
+            BWConfig(pass2var=True, a_beam=1e-200, multipron=True),
+        )
+        trainer.set_dict(full_project.shared_dir / "dictionary.dict", full_project.filler_dict)
+        assert trainer.process_utterance_mfcc(mfcc, "<s> a and </s>")
+        assert not trainer.final_state_not_reached
 
 
 @requires_c_library

@@ -469,6 +469,7 @@ def _make_cd_untied_init_task(ctx: PipelineContext) -> Task:
             filler_dict=ctx.filler_dict,
             n_state=ctx.train.n_state,
             multipron=ctx.train.multipron_training,
+            inventory_policy=ctx.train.untied_inventory,
         )
         run_init_cd_untied(
             ci_model_dir=ci_src,

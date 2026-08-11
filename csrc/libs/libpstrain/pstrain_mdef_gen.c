@@ -55,15 +55,14 @@
 #include <s3/s3.h>
 #include <s3/model_def_io.h>
 #include <s3/acmod_set.h>
+#include <s3/lexicon.h>
+#include <s3/phone_graph.h>
 
 /* We need to include the mk_mdef_gen helper headers */
 /* These are in programs/mk_mdef_gen but we'll link against them */
 
-/* Forward declarations for mk_mdef_gen functions */
-typedef struct heapelement_s heapelement_t;
-typedef struct hashelement_s hashelement_t;
-typedef struct phnhashelement_s phnhashelement_t;
-typedef struct dicthashelement_s dicthashelement_t;
+#include "../../programs/mk_mdef_gen/heap.h"
+#include "../../programs/mk_mdef_gen/hash.h"
 
 /* External functions from mk_mdef_gen.c */
 extern int32 make_ci_list_cd_hash_frm_phnlist(const char *phnlist,
@@ -107,6 +106,99 @@ extern int32 print_counts(const char *countfn, phnhashelement_t **CIhash,
                           hashelement_t **CDhash);
 
 extern void freehash(hashelement_t **hash);
+
+typedef struct reachable_visitor_s {
+    acmod_set_t *acmod_set;
+    hashelement_t **triphonehash;
+    int ignore_wpos;
+} reachable_visitor_t;
+
+static int
+mark_reachable(acmod_id_t base, acmod_id_t left, acmod_id_t right,
+               word_posn_t posn, void *user_data)
+{
+    reachable_visitor_t *data = user_data;
+    const char posn_name[2] = { data->ignore_wpos ? '-' : WORD_POSN_CHAR_MAP[posn], '\0' };
+    hashelement_t *entry = lookup(acmod_set_id2name(data->acmod_set, base),
+                                  acmod_set_id2name(data->acmod_set, left),
+                                  acmod_set_id2name(data->acmod_set, right),
+                                  posn_name, data->triphonehash);
+    if (!entry) {
+        E_ERROR("Training graph produced a context outside the dictionary domain\n");
+        return S3_ERROR;
+    }
+    ++entry->count;
+    return S3_SUCCESS;
+}
+
+static int
+count_reachable_triphones(const char *transcript_path,
+                          const char *dict_path,
+                          const char *filler_dict_path,
+                          char **CIlist,
+                          int32 cilistsize,
+                          hashelement_t **triphonehash,
+                          int ignore_wpos,
+                          int multipron)
+{
+    static const char *base_attr[] = { "ci", "base", NULL };
+    static const char *filler_attr[] = { "ci", "filler", NULL };
+    acmod_set_t *acmod_set = acmod_set_new();
+    lexicon_t *lex;
+    lineiter_t *line = NULL;
+    FILE *fp;
+    int32 i;
+    int ret = S3_ERROR;
+    reachable_visitor_t visitor = { acmod_set, triphonehash, ignore_wpos };
+
+    acmod_set_set_n_ci_hint(acmod_set, cilistsize);
+    for (i = 0; i < cilistsize; ++i) {
+        const char **attr = (CIlist[i][0] == '+' || strcmp(CIlist[i], "SIL") == 0)
+            ? filler_attr : base_attr;
+        acmod_set_add_ci(acmod_set, CIlist[i], attr);
+    }
+    lex = lexicon_read(NULL, dict_path, acmod_set);
+    if (!lex) return S3_ERROR;
+    if (filler_dict_path && !lexicon_read(lex, filler_dict_path, acmod_set))
+        return S3_ERROR;
+    fp = fopen(transcript_path, "r");
+    if (!fp) return S3_ERROR;
+
+    for (line = lineiter_start_clean(fp); line; line = lineiter_next(line)) {
+        char **words;
+        int32 n_words = str2words(line->buf, NULL, 0);
+        phone_graph_t *graph;
+        phone_graph_t *split;
+        if (n_words == 0) continue;
+        words = ckd_calloc(n_words, sizeof(*words));
+        str2words(line->buf, words, n_words);
+        if (n_words > 0 && words[n_words - 1][0] == '(')
+            --n_words;
+        if (n_words == 0) {
+            ckd_free(words);
+            continue;
+        }
+        graph = mk_phone_graph(words, n_words, lex, multipron);
+        ckd_free(words);
+        if (!graph) goto cleanup;
+        split = phone_graph_split_contexts(graph, acmod_set);
+        phone_graph_free(graph);
+        if (!split) goto cleanup;
+        if (phone_graph_visit_triphones(split, acmod_set,
+                                        mark_reachable, &visitor) != S3_SUCCESS) {
+            phone_graph_free(split);
+            goto cleanup;
+        }
+        phone_graph_free(split);
+    }
+    ret = S3_SUCCESS;
+
+cleanup:
+    fclose(fp);
+    lineiter_free(line);
+    lexicon_free(lex);
+    return ret;
+}
 
 
 /* Helper to initialize cmd_ln with required args */
@@ -257,6 +349,7 @@ pstrain_mdef_gen_untied(const char *phone_list_path,
                     const char *output_path,
                     uint32 n_state,
                     int32 ignore_wpos,
+                    int32 inventory_policy,
                     int32 multipron)
 {
     char **CIlist = NULL;
@@ -301,23 +394,21 @@ pstrain_mdef_gen_untied(const char *phone_list_path,
         goto cleanup;
     }
 
-    /* Count triphones in transcripts */
-    if (count_triphones(transcript_path, dicthash, CDhash, &CIhash, ignore_wpos) != S3_SUCCESS) {
+    if (inventory_policy == 2) {
+        if (count_reachable_triphones(transcript_path, dict_path, filler_dict_path,
+                                      CIlist, cilistsize, CDhash,
+                                      ignore_wpos, multipron) != S3_SUCCESS) {
+            E_ERROR("Failed to enumerate graph-reachable triphones in %s\n", transcript_path);
+            goto cleanup;
+        }
+    } else if (inventory_policy == 0 &&
+               count_triphones(transcript_path, dicthash, CDhash,
+                                &CIhash, ignore_wpos) != S3_SUCCESS) {
         E_ERROR("Failed to count triphones in %s\n", transcript_path);
         goto cleanup;
     }
 
-    /* In multipron mode the BW pronunciation graph can select every dictionary variant and
-     * constructs cross-word left/right context products.  count_triphones()
-     * follows only the primary dictionary entry, so occurrence pruning here
-     * omits models that the graph is allowed to request.  Such slots fall
-     * back to CI states; after those zero-occupancy states are re-estimated,
-     * an otherwise valid utterance path can become numerically dead.  Keep
-     * the complete dictionary-producible set already enumerated above so
-     * graph topology and untied-model initialization have the same domain.
-     * The linear path retains upstream mk_mdef_gen semantics: only triphones
-     * with a positive transcript occurrence are emitted. */
-    if (make_CD_heap(CDhash, multipron ? -1 : find_threshold(CDhash),
+    if (make_CD_heap(CDhash, inventory_policy == 1 ? -1 : find_threshold(CDhash),
                      &CDheap, &cdheapsize) != S3_SUCCESS) {
         E_ERROR("Failed to build triphone heap\n");
         goto cleanup;

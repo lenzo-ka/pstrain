@@ -301,6 +301,8 @@ state_t *pstrain_bw_build_state_seq(pstrain_bw_context_t *ctx,
                                 const char *transcript,
                                 uint32 *n_state);
 void pstrain_bw_free_state_seq(state_t *state_seq, uint32 n_state);
+uint32 pstrain_bw_count_active_fallback_senones(pstrain_bw_context_t *ctx);
+int pstrain_bw_fallback_senone_active(pstrain_bw_context_t *ctx, uint32 senone);
 int pstrain_bw_process_utt_text(pstrain_bw_context_t *ctx,
                             const float *features,
                             uint32 n_frames,
@@ -466,6 +468,7 @@ int pstrain_mdef_gen_untied(const char *phone_list_path,
                         const char *output_path,
                         uint32 n_state,
                         int32 ignore_wpos,
+                        int32 inventory_policy,
                         int32 multipron);
 
 // Count triphones in transcripts
