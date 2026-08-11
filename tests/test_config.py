@@ -8,8 +8,14 @@ import pytest
 import yaml
 
 from pstrain.lib.config.models import FeatureConfig, Profile, TrainingConfig
-from pstrain.lib.config.resolver import CONSUMERS, migrate_project, resolve_config
-from pstrain.lib.pipeline.context import DEFAULT_CONFIGS
+from pstrain.lib.config.resolver import (
+    CONSUMER_TOUCHES,
+    CONSUMERS,
+    migrate_project,
+    resolve_config,
+    validate_consumer_coverage,
+)
+from pstrain.lib.pipeline.context import DEFAULT_CONFIGS, PipelineContext
 
 
 def test_active_names_and_defaults_are_canonical() -> None:
@@ -24,36 +30,70 @@ def test_active_names_and_defaults_are_canonical() -> None:
         TrainingConfig.model_validate({"n_states": 5})
 
 
-def test_layer_precedence_and_sources(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("lower", "higher", "expected_kind"),
+    [
+        ("built-in", "user", "user"),
+        ("user", "project-profile", "project-profile"),
+        ("project-profile", "project", "project"),
+        ("project", "experiment", "experiment"),
+        ("experiment", "cli", "cli"),
+    ],
+)
+def test_each_adjacent_layer_wins_in_isolation(
+    tmp_path: Path, lower: str, higher: str, expected_kind: str
+) -> None:
     project = tmp_path / "project"
     (project / "etc").mkdir(parents=True)
     (project / "experiments" / "trial").mkdir(parents=True)
     user = tmp_path / "user.yaml"
-    user.write_text("config_version: 1\nfeatures:\n  ncep: 14\n")
-    (project / "etc" / "configs.yaml").write_text(
-        "config_version: 1\nprofiles:\n  custom:\n    extends: default\n"
-        "    features:\n      ncep: 15\n"
-    )
-    (project / "etc" / "config.yaml").write_text("config_version: 1\nfeatures:\n  ncep: 16\n")
-    (project / "experiments" / "trial" / "config.yaml").write_text(
-        "config_version: 1\nfeatures:\n  ncep: 17\n"
-    )
+    values = {
+        "built-in": 13,
+        "user": 17,
+        "project-profile": 26,
+        "project": 39,
+        "experiment": 52,
+        "cli": 65,
+    }
+    active = {lower, higher}
+    if "user" in active:
+        user.write_text(f"config_version: 1\nfeatures:\n  ncep: {values['user']}\n")
+    if "project-profile" in active:
+        (project / "etc" / "configs.yaml").write_text(
+            "config_version: 1\nprofiles:\n  custom:\n    extends: default\n"
+            f"    features:\n      ncep: {values['project-profile']}\n"
+        )
+    if "project" in active:
+        (project / "etc" / "config.yaml").write_text(
+            f"config_version: 1\nfeatures:\n  ncep: {values['project']}\n"
+        )
+    if "experiment" in active:
+        (project / "experiments" / "trial" / "config.yaml").write_text(
+            f"config_version: 1\nfeatures:\n  ncep: {values['experiment']}\n"
+        )
     resolved = resolve_config(
         project,
-        profile_name="custom",
+        profile_name="custom" if "project-profile" in active else "default",
         experiment="trial",
-        cli_overrides={"features": {"ncep": 18}},
+        cli_overrides={"features": {"ncep": values["cli"]}} if "cli" in active else None,
         user_config_path=user,
     )
-    assert resolved.profile.features.ncep == 18
-    assert [item.source_kind for item in resolved.fields["features.ncep"].overridden] == [
-        "schema-default",
-        "project-profile",
-        "user",
-        "project",
-        "experiment",
-    ]
-    assert resolved.fields["features.ncep"].winner.source_kind == "cli"
+    assert resolved.profile.features.ncep == values[higher]
+    assert resolved.fields["features.ncep"].winner.source_kind == expected_kind
+
+
+def test_fugu_project_profile_beats_user_reproduction(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    (project / "etc").mkdir(parents=True)
+    user = tmp_path / "user.yaml"
+    user.write_text("config_version: 1\nfeatures:\n  ncep: 17\n")
+    (project / "etc" / "configs.yaml").write_text(
+        "config_version: 1\nprofiles:\n  custom:\n    extends: default\n"
+        "    features:\n      ncep: 26\n"
+    )
+    resolved = resolve_config(project, profile_name="custom", user_config_path=user)
+    assert resolved.profile.features.ncep == 26
+    assert resolved.fields["features.ncep"].winner.source_kind == "project-profile"
 
 
 def test_deep_merge_requires_extends(tmp_path: Path) -> None:
@@ -103,7 +143,30 @@ def _leaf_paths(value: object, prefix: str = "") -> set[str]:
 
 
 def test_every_semantic_field_has_registered_consumer() -> None:
-    assert _leaf_paths(Profile().model_dump(mode="python")) == set(CONSUMERS)
+    fields = _leaf_paths(Profile().model_dump(mode="python"))
+    validate_consumer_coverage(fields)
+    assert fields == set(CONSUMERS) == set(CONSUMER_TOUCHES)
+
+
+def test_phantom_schema_field_fails_consumer_coverage() -> None:
+    fields = _leaf_paths(Profile().model_dump(mode="python")) | {"training.phantom"}
+    with pytest.raises(ValueError, match=r"unregistered=.*training\.phantom.*unproven"):
+        validate_consumer_coverage(fields)
+
+
+def test_registered_touch_proofs_reach_runtime_projection(tmp_path: Path) -> None:
+    context = PipelineContext.from_config(tmp_path)
+    expected = context.resolved_config.as_dict()  # type: ignore[union-attr]
+    for field_path, runtime_path in CONSUMER_TOUCHES.items():
+        expected_value: object = expected
+        for part in field_path.split("."):
+            expected_value = expected_value[part]  # type: ignore[index]
+        actual: object = context
+        for part in runtime_path.split("."):
+            actual = getattr(actual, part)
+        if isinstance(expected_value, list) and isinstance(actual, tuple):
+            expected_value = tuple(expected_value)
+        assert actual == expected_value, field_path
 
 
 def test_every_field_nondefault_reaches_runtime_projection(tmp_path: Path) -> None:
@@ -130,18 +193,56 @@ def test_repo_profiles_resolve_equivalently_before_and_after_refactor(tmp_path: 
     legacy = tmp_path / "legacy"
     (legacy / "etc").mkdir(parents=True)
     (legacy / "etc" / "configs.yaml").write_text(yaml.safe_dump(DEFAULT_CONFIGS))
-    canonical = Path(__file__).parents[1]
+    maintained_projects = [
+        Path(__file__).parents[1],
+        Path(__file__).parent / "fixtures/mini_arctic",
+    ]
     for name, body in DEFAULT_CONFIGS.items():
         expected = Profile.model_validate(body).model_dump(mode="json")
-        with pytest.warns(FutureWarning):
-            before = resolve_config(
-                legacy,
-                profile_name=name,
-                user_config_path=tmp_path / "absent-user.yaml",
-            ).as_dict()
-        after = resolve_config(
-            canonical,
-            profile_name=name,
-            user_config_path=tmp_path / "absent-user.yaml",
+        before = resolve_config(
+            legacy, profile_name=name, user_config_path=tmp_path / "absent-user.yaml"
         ).as_dict()
-        assert before == expected == after
+        for project in maintained_projects:
+            after = resolve_config(
+                project, profile_name=name, user_config_path=tmp_path / "absent-user.yaml"
+            ).as_dict()
+            assert before == expected == after
+
+
+def test_extends_preserves_builtin_leaf_provenance(tmp_path: Path) -> None:
+    (tmp_path / "etc").mkdir()
+    (tmp_path / "etc" / "configs.yaml").write_text(
+        "config_version: 1\nprofiles:\n  custom:\n    extends: default\n    description: custom\n"
+    )
+    resolved = resolve_config(tmp_path, profile_name="custom")
+    assert resolved.fields["features.ncep"].winner.source_kind == "built-in"
+    assert resolved.fields["description"].winner.source_kind == "project-profile"
+
+
+def test_inactive_legacy_overlay_is_ignored_with_loud_warning(tmp_path: Path) -> None:
+    (tmp_path / "etc").mkdir()
+    path = tmp_path / "etc" / "config.yaml"
+    path.write_text("features:\n  num_ceps: 20\n")
+    with pytest.warns(FutureWarning, match=str(path)):
+        resolved = resolve_config(tmp_path)
+    assert resolved.profile.features.ncep == 13
+    assert resolved.warnings and str(path) in resolved.warnings[0]
+
+
+def test_effective_legacy_overlay_provenance_is_labeled_legacy(tmp_path: Path) -> None:
+    user = tmp_path / "user.yaml"
+    user.write_text("features:\n  num_ceps: 20\n")
+    with pytest.warns(FutureWarning):
+        resolved = resolve_config(tmp_path, user_config_path=user)
+    assert resolved.profile.features.ncep == 20
+    assert resolved.fields["features.ncep"].winner.source_kind == "legacy"
+
+
+def test_legacy_warning_is_deduplicated_once_per_run(tmp_path: Path) -> None:
+    (tmp_path / "etc").mkdir()
+    path = tmp_path / "etc" / "config.yaml"
+    path.write_text("features:\n  num_ceps: 20\n")
+    with pytest.warns(FutureWarning) as caught:
+        resolve_config(tmp_path)
+        resolve_config(tmp_path)
+    assert len(caught) == 1

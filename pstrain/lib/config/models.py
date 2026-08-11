@@ -151,7 +151,10 @@ class SplitConfig(StrictModel):
     """Train/test split parameters."""
 
     train_ratio: Annotated[float | None, Field(gt=0, lt=1, description="Training fraction")] = None
-    test_count: Annotated[int | None, Field(ge=1, description="Fixed test utterance count")] = None
+    test_count: Annotated[
+        int | None,
+        Field(ge=0, description="Fixed test utterance count; zero disables an additional holdout"),
+    ] = None
     seed: Annotated[int, Field(description="Deterministic split seed")] = 42
 
     @model_validator(mode="after")

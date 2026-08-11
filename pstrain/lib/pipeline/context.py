@@ -281,7 +281,7 @@ def load_configs(project_dir: Path) -> dict[str, dict[str, Any]]:
     """Compatibility view of named profiles through the canonical reader."""
     from pstrain.lib.config.resolver import _profile_documents
 
-    profiles, _, _ = _profile_documents(project_dir.resolve())
+    profiles, _, _, _ = _profile_documents(project_dir.resolve())
     return profiles
 
 

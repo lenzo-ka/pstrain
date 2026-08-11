@@ -17,14 +17,9 @@ from pydantic import ValidationError
 
 from pstrain.lib.config.models import (
     CURRENT_CONFIG_VERSION,
-    FeatureConfig,
     OverlayDocument,
     Profile,
     ProfilesDocument,
-    RunnerConfig,
-    SplitConfig,
-    TrainingConfig,
-    TrainingScheduleConfig,
 )
 
 LEGACY_WARNING = (
@@ -67,26 +62,130 @@ class ResolvedConfig:
         return self.profile.model_dump(mode="json")
 
 
-# Registration is intentionally data, not convention. Coverage tests compare
-# this set with every leaf in Profile.model_json_schema().
+# Registration is intentionally explicit data, not schema-derived convention.
+# CONSUMER_TOUCHES names the concrete PipelineContext attribute touched by each
+# field; coverage tests compare both ledgers with every semantic schema leaf.
 CONSUMERS: dict[str, tuple[str, str]] = {
     "description": ("pipeline.metadata", "run"),
-    **{
-        f"features.{name}": ("pipeline.features", "features") for name in FeatureConfig.model_fields
-    },
-    **{
-        f"training.{name}": ("pipeline.training", "training")
-        for name in TrainingConfig.model_fields
-        if name not in {"ci", "untied", "tied"}
-    },
-    **{
-        f"training.{stage}.{name}": ("pipeline.baum_welch", "training")
-        for stage in ("ci", "untied", "tied")
-        for name in TrainingScheduleConfig.model_fields
-    },
-    **{f"split.{name}": ("pipeline.split", "split") for name in SplitConfig.model_fields},
-    **{f"runner.{name}": ("pipeline.runner", "runner") for name in RunnerConfig.model_fields},
+    "features.samprate": ("pipeline.features", "features"),
+    "features.ncep": ("pipeline.features", "features"),
+    "features.nfilt": ("pipeline.features", "features"),
+    "features.nfft": ("pipeline.features", "features"),
+    "features.lowerf": ("pipeline.features", "features"),
+    "features.upperf": ("pipeline.features", "features"),
+    "features.alpha": ("pipeline.features", "features"),
+    "features.lifter": ("pipeline.features", "features"),
+    "features.transform": ("pipeline.features", "features"),
+    "features.agc": ("pipeline.features", "features"),
+    "features.cmn": ("pipeline.features", "features"),
+    "features.varnorm": ("pipeline.features", "features"),
+    "features.feat_type": ("pipeline.features", "features"),
+    "training.n_state": ("pipeline.training", "training"),
+    "training.n_senones": ("pipeline.training", "training"),
+    "training.a_beam": ("pipeline.training", "training"),
+    "training.b_beam": ("pipeline.training", "training"),
+    "training.max_skip_fraction": ("pipeline.training", "training"),
+    "training.retry_beam_factor": ("pipeline.training", "training"),
+    "training.tree_state_weights": ("pipeline.training", "training"),
+    "training.tree_ssplitmax": ("pipeline.training", "training"),
+    "training.tree_ssplitthr": ("pipeline.training", "training"),
+    "training.tree_csplitmax": ("pipeline.training", "training"),
+    "training.tree_csplitthr": ("pipeline.training", "training"),
+    "training.tree_mwfloor": ("pipeline.training", "training"),
+    "training.question_npermute": ("pipeline.training", "training"),
+    "training.question_quests_per_state": ("pipeline.training", "training"),
+    "training.question_niter": ("pipeline.training", "training"),
+    "training.multipron_training": ("pipeline.training", "training"),
+    "training.untied_inventory": ("pipeline.training", "training"),
+    "training.exclusion_schedule": ("pipeline.training", "training"),
+    "training.ci.max_iterations": ("pipeline.baum_welch", "training"),
+    "training.ci.min_iterations": ("pipeline.baum_welch", "training"),
+    "training.ci.convergence_ratio": ("pipeline.baum_welch", "training"),
+    "training.untied.max_iterations": ("pipeline.baum_welch", "training"),
+    "training.untied.min_iterations": ("pipeline.baum_welch", "training"),
+    "training.untied.convergence_ratio": ("pipeline.baum_welch", "training"),
+    "training.tied.max_iterations": ("pipeline.baum_welch", "training"),
+    "training.tied.min_iterations": ("pipeline.baum_welch", "training"),
+    "training.tied.convergence_ratio": ("pipeline.baum_welch", "training"),
+    "split.train_ratio": ("pipeline.split", "split"),
+    "split.test_count": ("pipeline.split", "split"),
+    "split.seed": ("pipeline.split", "split"),
+    "runner.jobs": ("pipeline.runner", "runner"),
+    "runner.nice": ("pipeline.runner", "runner"),
 }
+
+CONSUMER_TOUCHES: dict[str, str] = {
+    "description": "description",
+    **{
+        path: f"feat.{path.removeprefix('features.')}"
+        for path in (
+            "features.samprate",
+            "features.ncep",
+            "features.nfilt",
+            "features.nfft",
+            "features.lowerf",
+            "features.upperf",
+            "features.alpha",
+            "features.lifter",
+            "features.transform",
+            "features.agc",
+            "features.cmn",
+            "features.varnorm",
+            "features.feat_type",
+        )
+    },
+    **{
+        path: f"train.{path.removeprefix('training.')}"
+        for path in (
+            "training.n_state",
+            "training.n_senones",
+            "training.a_beam",
+            "training.b_beam",
+            "training.max_skip_fraction",
+            "training.retry_beam_factor",
+            "training.tree_state_weights",
+            "training.tree_ssplitmax",
+            "training.tree_ssplitthr",
+            "training.tree_csplitmax",
+            "training.tree_csplitthr",
+            "training.tree_mwfloor",
+            "training.question_npermute",
+            "training.question_quests_per_state",
+            "training.question_niter",
+            "training.multipron_training",
+            "training.untied_inventory",
+            "training.exclusion_schedule",
+            "training.ci.max_iterations",
+            "training.ci.min_iterations",
+            "training.ci.convergence_ratio",
+            "training.untied.max_iterations",
+            "training.untied.min_iterations",
+            "training.untied.convergence_ratio",
+            "training.tied.max_iterations",
+            "training.tied.min_iterations",
+            "training.tied.convergence_ratio",
+        )
+    },
+    "split.train_ratio": "split.train_ratio",
+    "split.test_count": "split.test_count",
+    "split.seed": "split.seed",
+    "runner.jobs": "runner.jobs",
+    "runner.nice": "runner.nice",
+}
+
+
+def validate_consumer_coverage(field_paths: Iterable[str]) -> None:
+    """Fail unless every schema field is explicitly registered and touch-proven."""
+    fields = set(field_paths)
+    registered = set(CONSUMERS)
+    proven = set(CONSUMER_TOUCHES)
+    if fields != registered or fields != proven:
+        raise ValueError(
+            "configuration consumer coverage mismatch: "
+            f"unregistered={sorted(fields - registered)}, "
+            f"unproven={sorted(fields - proven)}, "
+            f"stale={sorted((registered | proven) - fields)}"
+        )
 
 
 def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
@@ -147,8 +246,14 @@ def _field_constraints(field_path: str) -> dict[str, Any]:
 
 def _warn_legacy(path: Path, project_dir: Path) -> str:
     message = LEGACY_WARNING.format(path=path, project=project_dir)
-    warnings.warn(message, FutureWarning, stacklevel=3)
+    key = str(path.resolve())
+    if key not in _LEGACY_WARNED_PATHS:
+        _LEGACY_WARNED_PATHS.add(key)
+        warnings.warn(message, FutureWarning, stacklevel=3)
     return message
+
+
+_LEGACY_WARNED_PATHS: set[str] = set()
 
 
 def _builtin_profiles() -> dict[str, dict[str, Any]]:
@@ -160,13 +265,22 @@ def _builtin_profiles() -> dict[str, dict[str, Any]]:
 
 def _profile_documents(
     project_dir: Path,
-) -> tuple[dict[str, dict[str, Any]], dict[str, str], list[str]]:
+) -> tuple[
+    dict[str, dict[str, Any]],
+    dict[str, str],
+    dict[str, dict[str, tuple[str, str]]],
+    list[str],
+]:
     profiles = _builtin_profiles()
     origins = dict.fromkeys(profiles, "built-in")
+    provenance = {
+        name: {path: ("built-in", "built-in") for path, _ in _leaves(body)}
+        for name, body in profiles.items()
+    }
     messages: list[str] = []
     path = project_dir / "etc" / "configs.yaml"
     if not path.exists():
-        return profiles, origins, messages
+        return profiles, origins, provenance, messages
     raw = _load_yaml(path)
     if "config_version" not in raw:
         messages.append(_warn_legacy(path, project_dir))
@@ -177,7 +291,8 @@ def _profile_documents(
                 raise ValueError(f"legacy profile {name!r} in {path} must be a mapping")
             profiles[str(name)] = body
             origins[str(name)] = str(path)
-        return profiles, origins, messages
+            provenance[str(name)] = {leaf: ("legacy", str(path)) for leaf, _ in _leaves(body)}
+        return profiles, origins, provenance, messages
 
     try:
         document = ProfilesDocument.model_validate(raw)
@@ -186,7 +301,7 @@ def _profile_documents(
     definitions = document.profiles
     resolving: set[str] = set()
 
-    def materialize(name: str) -> dict[str, Any]:
+    def materialize(name: str) -> tuple[dict[str, Any], dict[str, tuple[str, str]]]:
         definition = definitions[name]
         body = definition.model_dump(exclude_none=True, exclude={"extends"})
         if definition.extends is None:
@@ -199,21 +314,26 @@ def _profile_documents(
                     f"profile {name!r} in {path} has no extends and is incomplete; "
                     f"missing {missing[0]!r}"
                 )
-            return body
+            return body, {leaf: ("project-profile", str(path)) for leaf, _ in _leaves(body)}
         if name in resolving:
             raise ValueError(f"profile inheritance cycle involving {name!r} in {path}")
         parent = definition.extends
         if parent not in definitions and parent not in profiles:
             raise ValueError(f"profile {name!r} extends unknown profile {parent!r}")
         resolving.add(name)
-        base = materialize(parent) if parent in definitions else profiles[parent]
+        if parent in definitions:
+            base, sources = materialize(parent)
+        else:
+            base, sources = profiles[parent], provenance[parent]
         resolving.remove(name)
-        return _deep_merge(base, body)
+        sources = dict(sources)
+        sources.update({leaf: ("project-profile", str(path)) for leaf, _ in _leaves(body)})
+        return _deep_merge(base, body), sources
 
     for name in definitions:
-        profiles[name] = materialize(name)
+        profiles[name], provenance[name] = materialize(name)
         origins[name] = str(path)
-    return profiles, origins, messages
+    return profiles, origins, provenance, messages
 
 
 def _legacy_inactive_overlay(raw: dict[str, Any], path: Path) -> dict[str, Any]:
@@ -242,30 +362,24 @@ def _legacy_inactive_overlay(raw: dict[str, Any], path: Path) -> dict[str, Any]:
     return mapped
 
 
-def _reject_legacy_collision(
-    effective: dict[str, Any], overlay: dict[str, Any], source: Path
-) -> None:
-    current = dict(_leaves(effective))
-    for path, value in _leaves(overlay):
-        if path in current and current[path] != value:
-            raise ValueError(
-                f"ambiguous legacy configuration in {source}: {path!r} is {value!r}, "
-                f"but the active profile declares {current[path]!r}; run 'pstrain config "
-                "migrate --check' and choose one value"
-            )
-
-
-def _overlay(path: Path, project_dir: Path, kind: str) -> tuple[dict[str, Any], list[str]]:
+def _overlay(
+    path: Path, project_dir: Path, kind: str, *, legacy_effective: bool = True
+) -> tuple[dict[str, Any], list[str], str]:
     if not path.exists():
-        return {}, []
+        return {}, [], kind
     raw = _load_yaml(path)
     if "config_version" not in raw:
-        return _legacy_inactive_overlay(raw, path), [_warn_legacy(path, project_dir)]
+        warning = [_warn_legacy(path, project_dir)]
+        if not legacy_effective:
+            # etc/config.yaml was not consumed before C2. Preserve that
+            # behavior: announce it, but do not alter or abort a build.
+            return {}, warning, "legacy"
+        return _legacy_inactive_overlay(raw, path), warning, "legacy"
     try:
         doc = OverlayDocument.model_validate(raw)
     except ValidationError as exc:
         raise ValueError(f"invalid configuration layer {path}: {exc}") from exc
-    return doc.model_dump(exclude_none=True, exclude={"config_version", "profile"}), []
+    return doc.model_dump(exclude_none=True, exclude={"config_version", "profile"}), [], kind
 
 
 def resolve_config(
@@ -278,7 +392,7 @@ def resolve_config(
 ) -> ResolvedConfig:
     """Resolve built-in < user < project < experiment < CLI."""
     project = Path(project_dir).resolve()
-    profiles, origins, messages = _profile_documents(project)
+    profiles, origins, profile_provenance, messages = _profile_documents(project)
     if profile_name not in profiles:
         raise ValueError(
             f"unknown config {profile_name!r}; available: {', '.join(sorted(profiles))}"
@@ -289,40 +403,42 @@ def resolve_config(
     for path, value in _leaves(default):
         candidates.setdefault(path, []).append(Candidate("schema-default", "Profile", path, value))
 
-    layers: list[tuple[str, str, dict[str, Any]]] = [
-        (
-            "built-in" if origins[profile_name] == "built-in" else "project-profile",
-            origins[profile_name],
-            profiles[profile_name],
-        )
-    ]
+    selected = profiles[profile_name]
+    selected_sources = profile_provenance[profile_name]
+    builtin_layer: dict[str, Any] = {}
+    project_profile_layer: dict[str, Any] = {}
+    for field_path, value in _leaves(selected):
+        kind, _source = selected_sources[field_path]
+        target = builtin_layer if kind == "built-in" else project_profile_layer
+        cursor = target
+        parts = field_path.split(".")
+        for part in parts[:-1]:
+            cursor = cursor.setdefault(part, {})
+        cursor[parts[-1]] = copy.deepcopy(value)
+    layers: list[tuple[str, str, dict[str, Any]]] = []
+    if builtin_layer:
+        layers.append(("built-in", "built-in", builtin_layer))
     user_path = user_config_path or Path(
         os.environ.get("PSTRAIN_USER_CONFIG", Path.home() / ".pstrain" / "config.yaml")
     )
-    user, warns = _overlay(user_path, project, "user")
-    if warns:
-        _reject_legacy_collision(_deep_merge(default, profiles[profile_name]), user, user_path)
+    user, warns, user_kind = _overlay(user_path, project, "user")
     messages.extend(warns)
-    layers.append(("user", str(user_path), user))
+    layers.append((user_kind, str(user_path), user))
+    if project_profile_layer:
+        profile_kind = next(
+            kind for kind, _source in selected_sources.values() if kind != "built-in"
+        )
+        layers.append((profile_kind, origins[profile_name], project_profile_layer))
     project_path = project / "etc" / "config.yaml"
-    project_overlay, warns = _overlay(project_path, project, "project")
-    if warns:
-        _reject_legacy_collision(
-            _deep_merge(_deep_merge(default, profiles[profile_name]), user),
-            project_overlay,
-            project_path,
-        )
+    project_overlay, warns, project_kind = _overlay(
+        project_path, project, "project", legacy_effective=False
+    )
     messages.extend(warns)
-    layers.append(("project", str(project_path), project_overlay))
+    layers.append((project_kind, str(project_path), project_overlay))
     experiment_path = project / "experiments" / experiment / "config.yaml"
-    experiment_overlay, warns = _overlay(experiment_path, project, "experiment")
-    if warns:
-        effective = _deep_merge(_deep_merge(default, profiles[profile_name]), user)
-        _reject_legacy_collision(
-            _deep_merge(effective, project_overlay), experiment_overlay, experiment_path
-        )
+    experiment_overlay, warns, experiment_kind = _overlay(experiment_path, project, "experiment")
     messages.extend(warns)
-    layers.append(("experiment", str(experiment_path), experiment_overlay))
+    layers.append((experiment_kind, str(experiment_path), experiment_overlay))
     if cli_overrides:
         layers.append(
             (
@@ -450,7 +566,7 @@ def _atomic_write(path: Path, content: str) -> None:
 
 
 def list_profiles(project_dir: Path) -> list[dict[str, Any]]:
-    profiles, origins, _ = _profile_documents(project_dir.resolve())
+    profiles, origins, _, _ = _profile_documents(project_dir.resolve())
     builtins = _builtin_profiles()
     return [
         {
