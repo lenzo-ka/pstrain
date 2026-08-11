@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Literal, Self
 
 import numpy as np
 
@@ -29,6 +29,7 @@ class BWConfig:
     # Variance accumulation is an explicit policy choice.  Callers must not
     # inherit a default that can disagree with their training stage.
     pass2var: bool
+    unobserved_gaussian_policy: Literal["zero", "retain"]
     # Beam probabilities closer to zero are wider (less pruning); larger values
     # impose a higher pruning threshold and are tighter in this engine.
     # SphinxTrain defaults: abeam=1e-90, bbeam=1e-10
@@ -148,6 +149,10 @@ class BWTrainer:
         c_config.mixw_reest = 1 if self.config.mixw_reest else 0
         c_config.tmat_reest = 1 if self.config.tmat_reest else 0
         c_config.pass2var = 1 if self.config.pass2var else 0
+        c_config.unobserved_gaussian_policy = {
+            "zero": 1,
+            "retain": 2,
+        }[self.config.unobserved_gaussian_policy]
 
         # Initialize C context
         self._ctx = self._lib.pstrain_bw_init(

@@ -347,6 +347,7 @@ def _make_bw_train_task(
             min_iterations=schedule.min_iterations,
             config=BWConfig(
                 pass2var=True,
+                unobserved_gaussian_policy="zero",
                 a_beam=ctx.train.a_beam,
                 b_beam=ctx.train.b_beam,
                 topn=topn,
@@ -418,6 +419,7 @@ def _make_split_and_train_task(
             min_iterations=schedule.min_iterations,
             config=BWConfig(
                 pass2var=True,
+                unobserved_gaussian_policy="zero",
                 a_beam=ctx.train.a_beam,
                 b_beam=ctx.train.b_beam,
                 topn=topn,

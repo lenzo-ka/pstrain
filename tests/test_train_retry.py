@@ -111,7 +111,7 @@ def test_native_failed_pass_then_retry_matches_clean_wide_beam_model(
             first_pass_2passvar=True,
             filler_dict=context.filler_dict,
             n_iter=1,
-            config=BWConfig(pass2var=True, a_beam=beam),
+            config=BWConfig(pass2var=True, unobserved_gaussian_policy="zero", a_beam=beam),
             retry_beam_factor=retry_factor,
         )
         assert result.final_utts == 1

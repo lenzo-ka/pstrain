@@ -6,7 +6,7 @@ import json
 import re
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pytest
@@ -89,10 +89,105 @@ def _trainer(ctx: PipelineContext, *, multipron: bool = True) -> BWTrainer:
         model / "variances",
         model / "mixture_weights",
         model / "transition_matrices",
-        BWConfig(pass2var=True, a_beam=1e-200, multipron=multipron),
+        BWConfig(
+            pass2var=True,
+            unobserved_gaussian_policy="zero",
+            a_beam=1e-200,
+            multipron=multipron,
+        ),
     )
     trainer.set_dict(ctx.shared_dir / "dictionary.dict", ctx.filler_dict)
     return trainer
+
+
+@requires_c_library
+def test_bw_unobserved_policy_and_raw_variance_artifact(
+    flat_project: PipelineContext, tmp_path: Path
+) -> None:
+    """Zero/retain differ only on empty cells; occupied raw variance is lossless."""
+    model = flat_project.model_dir("flat")
+    prior_means_raw, n_cb, n_feat, n_density, veclens = _pstrainc.read_gau(str(model / "means"))
+    assert n_feat == 1
+    veclen = veclens[0]
+    prior_means = prior_means_raw.reshape(n_cb, n_density, veclen)
+    prior_vars = _pstrainc.read_gau(str(model / "variances"))[0].reshape(n_cb, n_density, veclen)
+    features = np.full((60, 39), 0.25, dtype=np.float32)
+    phones = np.array([0], dtype=np.uint32)
+    outputs: dict[str, dict[str, np.ndarray[Any, Any]]] = {}
+
+    policies: tuple[Literal["zero", "retain"], ...] = ("zero", "retain")
+    for policy in policies:
+        trainer = BWTrainer(
+            model / "mdef",
+            model / "means",
+            model / "variances",
+            model / "mixture_weights",
+            model / "transition_matrices",
+            BWConfig(
+                pass2var=False,
+                unobserved_gaussian_policy=policy,
+                a_beam=1e-200,
+                multipron=False,
+            ),
+        )
+        assert trainer.process_utterance(features, phones)
+        assert trainer.normalize()
+        out = tmp_path / policy
+        out.mkdir()
+        assert trainer.save(
+            out / "means",
+            out / "variances",
+            out / "mixture_weights",
+            out / "transition_matrices",
+        )
+        outputs[policy] = read_model_arrays(out)
+        outputs[policy]["means"] = outputs[policy]["means"].reshape(n_cb, n_density, veclen)
+        outputs[policy]["variances"] = outputs[policy]["variances"].reshape(n_cb, n_density, veclen)
+
+    occupied = np.any(outputs["zero"]["means"] != 0.0, axis=-1)
+    assert occupied.any()
+    empty = ~occupied
+    assert empty.any(), "fixture must contain a genuinely unobserved codebook"
+
+    # Upstream norm's fresh output allocation leaves empty Gaussian cells zero.
+    assert np.count_nonzero(outputs["zero"]["means"][empty]) == 0
+    assert np.count_nonzero(outputs["zero"]["variances"][empty]) == 0
+    np.testing.assert_array_equal(outputs["retain"]["means"][empty], prior_means[empty])
+    np.testing.assert_array_equal(outputs["retain"]["variances"][empty], prior_vars[empty])
+
+    # Every occupied cell saw the same value, so direct one-pass V/N-E[x]^2
+    # is exactly zero in float32.  The saved artifact must not contain the
+    # evaluation-time 1e-4 floor or a reciprocal round-trip perturbation.
+    direct = np.float32(0.25 * 0.25) - np.float32(0.25) * np.float32(0.25)
+    np.testing.assert_array_equal(outputs["zero"]["variances"][occupied], direct)
+    np.testing.assert_array_equal(
+        outputs["zero"]["variances"][occupied], outputs["retain"]["variances"][occupied]
+    )
+    np.testing.assert_array_equal(
+        outputs["zero"]["means"][occupied], outputs["retain"]["means"][occupied]
+    )
+
+    # Reloading applies the evaluation floor.  The phone used above reaches
+    # only occupied states, so both policies must produce the same score.
+    scores = {}
+    for policy in policies:
+        out = tmp_path / policy
+        evaluator = BWTrainer(
+            model / "mdef",
+            out / "means",
+            out / "variances",
+            out / "mixture_weights",
+            out / "transition_matrices",
+            BWConfig(
+                pass2var=False,
+                unobserved_gaussian_policy=policy,
+                a_beam=1e-200,
+                multipron=False,
+            ),
+        )
+        assert evaluator.process_utterance(features, phones)
+        scores[policy] = evaluator.get_stats().total_log_lik
+    assert scores["zero"] == scores["retain"]
 
 
 @requires_c_library
@@ -201,7 +296,7 @@ def test_bw_exclusion_schedule_targets_named_passes_and_wildcard(
         "first_pass_2passvar": False,
         "n_iter": 1,
         "max_skip_fraction": 1.0,
-        "config": BWConfig(pass2var=True, a_beam=1e-200),
+        "config": BWConfig(pass2var=True, unobserved_gaussian_policy="zero", a_beam=1e-200),
     }
     cases = (
         ("named", {1: ["arctic_a0001"], 2: ["arctic_a0002"]}),
@@ -268,7 +363,7 @@ def test_real_training_retry_is_accounted_once_and_conserves_stats(
         first_pass_2passvar=True,
         filler_dict=flat_project.filler_dict,
         n_iter=1,
-        config=BWConfig(pass2var=True, a_beam=1e-1),
+        config=BWConfig(pass2var=True, unobserved_gaussian_policy="zero", a_beam=1e-1),
         retry_beam_factor=1e199,
     )
     row = result.trajectory[0]
@@ -291,7 +386,9 @@ def _assert_normalized_model(model_dir: Path) -> None:
     arrays = read_model_arrays(model_dir)
     for name, values in arrays.items():
         assert np.isfinite(values).all(), name
-    assert (arrays["variances"] >= 1e-4).all()
+    # BW artifacts intentionally contain direct, unfloored normalization
+    # output.  The next engine load applies the evaluation floor.
+    assert (np.maximum(arrays["variances"], np.float32(1e-4)) >= 1e-4).all()
     np.testing.assert_allclose(arrays["mixture_weights"].sum(axis=-1), 1.0, rtol=1e-6, atol=1e-6)
     tmat_sums = arrays["transition_matrices"].sum(axis=-1)
     np.testing.assert_allclose(tmat_sums[tmat_sums > 0], 1.0, rtol=1e-6, atol=1e-6)
@@ -311,7 +408,7 @@ def test_iteration_checkpoints_are_opt_in_and_replace_stale_passes(
         "dictionary": flat_project.shared_dir / "dictionary.dict",
         "filler_dict": flat_project.filler_dict,
         "min_iterations": 4,
-        "config": BWConfig(pass2var=True, a_beam=1e-200),
+        "config": BWConfig(pass2var=True, unobserved_gaussian_policy="zero", a_beam=1e-200),
         "first_pass_2passvar": False,
     }
 
@@ -362,10 +459,15 @@ def test_updates_and_split_schedule_preserve_invariants(full_project: PipelineCo
         counts, n_cb, _, count_density = _pstrainc.read_dnom(str(model / "gauden_counts"))
         assert (n_cb, count_density) == (n_mixw, density)
         observed = counts > 0
-        # The report is intentionally explicit in assertion output: an added
-        # unobserved density is a reviewable numerical event, never hidden.
-        unobserved_report = np.argwhere(~observed).tolist()
-        assert observed.all(), f"unobserved densities at {density}g: {unobserved_report}"
+        means, n_gau, _, gau_density, veclens = _pstrainc.read_gau(str(model / "means"))
+        variances = _pstrainc.read_gau(str(model / "variances"))[0]
+        assert (n_gau, gau_density) == (n_cb, density)
+        means = means.reshape(n_cb, 1, density, veclens[0])
+        variances = variances.reshape(n_cb, 1, density, veclens[0])
+        # Empty densities are expected in this sparse fixture. Under the
+        # parity-stage ZERO policy their artifact cells must be exact zeros.
+        assert np.count_nonzero(means[~observed]) == 0
+        assert np.count_nonzero(variances[~observed]) == 0
 
 
 def _ci_state_ids(mdef: Path, phone: str) -> list[int]:
@@ -471,7 +573,13 @@ def test_cd_variant_boundaries_expand_both_triphone_contexts(
         model / "variances",
         model / "mixture_weights",
         model / "transition_matrices",
-        BWConfig(pass2var=True, a_beam=1e-200, topn=1, multipron=True),
+        BWConfig(
+            pass2var=True,
+            unobserved_gaussian_policy="zero",
+            a_beam=1e-200,
+            topn=1,
+            multipron=True,
+        ),
     )
     trainer.set_dict(full_project.shared_dir / "dictionary.dict", full_project.filler_dict)
 
@@ -565,7 +673,7 @@ def test_inventory_policy_equals_runtime_contexts_by_mode(
         runtime_model / "variances",
         runtime_model / "mixture_weights",
         runtime_model / "transition_matrices",
-        BWConfig(pass2var=True, multipron=multipron),
+        BWConfig(pass2var=True, unobserved_gaussian_policy="zero", multipron=multipron),
     )
     trainer.set_dict(dictionary, filler)
 
@@ -599,7 +707,12 @@ def test_complete_cd_inventory_leaves_ci_fallback_accumulators_zero(
         model / "variances",
         model / "mixture_weights",
         model / "transition_matrices",
-        BWConfig(pass2var=True, a_beam=1e-200, multipron=True),
+        BWConfig(
+            pass2var=True,
+            unobserved_gaussian_policy="zero",
+            a_beam=1e-200,
+            multipron=True,
+        ),
     )
     trainer.set_dict(full_project.shared_dir / "dictionary.dict", full_project.filler_dict)
     mfcc = read_sphinx_mfc(full_project.features_dir / "arctic_a0001.mfc")
@@ -651,7 +764,7 @@ def test_withheld_context_uses_live_ci_fallback_across_passes(
         initial / "variances",
         initial / "mixture_weights",
         initial / "transition_matrices",
-        BWConfig(pass2var=True, multipron=True),
+        BWConfig(pass2var=True, unobserved_gaussian_policy="zero", multipron=True),
     )
     probe.set_dict(full_project.shared_dir / "dictionary.dict", full_project.filler_dict)
     n_state = probe._ffi.new("uint32 *")
@@ -687,7 +800,13 @@ def test_withheld_context_uses_live_ci_fallback_across_passes(
         min_iterations=3,
         convergence_ratio=-1e30,
         first_pass_2passvar=False,
-        config=BWConfig(pass2var=True, a_beam=1e-200, b_beam=1e-200, multipron=True),
+        config=BWConfig(
+            pass2var=True,
+            unobserved_gaussian_policy="zero",
+            a_beam=1e-200,
+            b_beam=1e-200,
+            multipron=True,
+        ),
     )
     assert result.iterations == 3
     assert result.total_skipped == 0
@@ -721,7 +840,12 @@ def test_withheld_context_uses_live_ci_fallback_across_passes(
             checkpoint / "variances",
             checkpoint / "mixture_weights",
             checkpoint / "transition_matrices",
-            BWConfig(pass2var=True, a_beam=1e-200, multipron=True),
+            BWConfig(
+                pass2var=True,
+                unobserved_gaussian_policy="zero",
+                a_beam=1e-200,
+                multipron=True,
+            ),
         )
         trainer.set_dict(full_project.shared_dir / "dictionary.dict", full_project.filler_dict)
         assert trainer.process_utterance_mfcc(mfcc, "<s> a and </s>")
@@ -746,7 +870,12 @@ def test_m4_real_utterances_reach_shared_final_state(
         model / "variances",
         model / "mixture_weights",
         model / "transition_matrices",
-        BWConfig(pass2var=True, a_beam=1e-90, multipron=True),
+        BWConfig(
+            pass2var=True,
+            unobserved_gaussian_policy="zero",
+            a_beam=1e-90,
+            multipron=True,
+        ),
     )
     trainer.set_dict(_M4_FIXTURE / "dictionary.dict", _M4_FIXTURE / "filler.dict")
     mfcc = read_sphinx_mfc(_M4_FIXTURE / f"{fileid}.mfc")
@@ -865,7 +994,7 @@ def test_seeded_bw_reruns_are_bit_identical(flat_project: PipelineContext, tmp_p
             first_pass_2passvar=False,
             filler_dict=flat_project.filler_dict,
             n_iter=1,
-            config=BWConfig(pass2var=True, a_beam=1e-200),
+            config=BWConfig(pass2var=True, unobserved_gaussian_policy="zero", a_beam=1e-200),
         )
     for filename in (
         "means",
