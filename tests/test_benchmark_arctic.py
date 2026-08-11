@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tarfile
 from dataclasses import asdict, fields, replace
 from pathlib import Path
@@ -34,7 +35,9 @@ from pstrain.benchmarks.arctic import (
     training_corpus_identity,
     validate_record,
 )
+from pstrain.lib.corpus.split import train_test_split
 from pstrain.lib.lm import build_lm
+from pstrain.lib.transcription import parse_transcription_file
 
 
 def test_archive_manifest_matches_runtime_config() -> None:
@@ -100,7 +103,7 @@ def test_committed_transcripts_are_normalized_and_complete() -> None:
         "utterances": 1043,
         "transcription": {
             "name": "pin-train.transcription",
-            "sha256": "7b6beae122d9da47ad89861a15490c531c194ca9bc2e329b8b133d94ed960ad6",
+            "sha256": "28788cd1ce2269d344b50420d74007fa8c443778680724f6334e2712ea110959",
         },
         "fileids": {
             "name": "pin-train.fileids",
@@ -140,10 +143,32 @@ def test_unigram_builder_difference_from_canonical_is_known(tmp_path: Path) -> N
     assert built.read_bytes() != (DATA_DIR / "training-unigram.lm").read_bytes()
 
 
-def test_transcript_serializations_are_enforced() -> None:
+def test_pin_training_transcript_is_consumable_by_split_flat_and_bw(tmp_path: Path) -> None:
+    source = DATA_DIR / "pin-train.transcription"
+    expected_ids = (DATA_DIR / "pin-train.fileids").read_text().splitlines()
+
+    # Baum-Welch uses this reader, while split emits the control list consumed
+    # by flat initialization. Exercise both sides without starting training.
+    source_transcripts = parse_transcription_file(source)
+    source_ids = list(source_transcripts)
+    assert len(source_ids) == len(set(source_ids)) == 1043
+    assert source_ids == expected_ids
+    assert "<s>" not in source_ids
+    assert all(re.fullmatch(r"arctic_[ab]\d{4}", fileid) for fileid in source_ids)
+
+    split = train_test_split(source, tmp_path, test_count=0)
+    split_ids = split.train_fileids.read_text().splitlines()
+    split_transcripts = parse_transcription_file(split.train_transcription)
+    assert split.n_train == 1043
+    assert split.n_test == 0
+    assert split_ids == list(split_transcripts) == expected_ids
+    assert split_transcripts == source_transcripts
+
+
+def test_eval_transcript_serializations_are_enforced() -> None:
     full_lines = (DATA_DIR / "full-slt.transcription").read_text().splitlines()
     assert all(line.startswith("arctic_") and "<s>" not in line for line in full_lines)
-    for name in ("pin-train.transcription", "slt55.transcription", "big.transcription"):
+    for name in ("slt55.transcription", "big.transcription"):
         lines = (DATA_DIR / name).read_text().splitlines()
         assert all(
             line.startswith("<s> ") and " </s> (" in line and line.endswith(")") for line in lines
