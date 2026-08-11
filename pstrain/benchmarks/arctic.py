@@ -21,7 +21,22 @@ from typing import Any
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-DATA_DIR = ROOT / "benchmarks" / "arctic" / "data"
+
+
+def resolve_data_dir(*, package_root: Path | None = None, repo_root: Path | None = None) -> Path:
+    """Resolve Arctic data from an installed wheel or a source checkout."""
+    installed = (package_root or ROOT) / "benchmarks" / "arctic" / "data"
+    checkout = (repo_root or Path.cwd()) / "benchmarks" / "arctic" / "data"
+    for candidate in (installed, checkout):
+        if (candidate / "train.transcription").is_file():
+            return candidate
+    raise RuntimeError(
+        "CMU Arctic benchmark data is unavailable; checked "
+        f"{installed} and repository-relative {checkout}"
+    )
+
+
+DATA_DIR = resolve_data_dir()
 RECORD_SCHEMA_VERSION = 2
 BOOTSTRAP_RESAMPLES = 100_000
 BOOTSTRAP_SEED = 7
@@ -37,6 +52,12 @@ DECODER_CONDITIONS: dict[str, Any] = {
     "fwdflatbeam": 1e-80,
     "fwdflatwbeam": 1e-40,
 }
+PINNED_RESOURCE_HASHES = {
+    "lm_sha256": "2cf11ab0474a0bdd165cbee59db674b05764fdb00bf6f9824c0dccce571637b5",
+    "dictionary_sha256": "24ff2852a707b63f499fd968294d5e4c02d44e0eb1ec511e40be1f380d785846",
+    "filler_dictionary_sha256": "fb50883998c41a5030c2a602965935c647563321e84a86f2adabb377ec24b49c",
+}
+FILLER_DICTIONARY = "<sil> SIL\n<s> SIL\n</s> SIL\n"
 
 
 @dataclass(frozen=True)
@@ -207,7 +228,7 @@ def engine_identity(dictionary: Path | None = None) -> dict[str, str]:
     identity = {"version": __version__, "python_version": sys.version}
     if dictionary is None:
         dictionary = pocketsphinx_dictionary()
-    identity["pocketsphinx_dictionary_sha256"] = sha256(dictionary)
+    identity["decode_dictionary_sha256"] = sha256(dictionary)
     try:
         identity["pocketsphinx_version"] = version("pocketsphinx")
     except PackageNotFoundError as exc:
@@ -235,7 +256,7 @@ def engine_identity(dictionary: Path | None = None) -> dict[str, str]:
     return identity
 
 
-def benchmark_conditions() -> dict[str, Any]:
+def benchmark_conditions(band: str = "pin") -> dict[str, Any]:
     """Return every pinned benchmark condition that comparison authenticates."""
     from pstrain.lib.pipeline.context import FeatParams, TrainParams
 
@@ -252,7 +273,7 @@ def benchmark_conditions() -> dict[str, Any]:
             if missing:
                 raise RuntimeError(f"PIN config {mode}/{section} leaves knobs unfrozen: {missing}")
     return {
-        "band": "BM1",
+        "band": "BM1" if band == "pin" else "BM1-pip-en-us-alternative",
         "pin_conditions": PIN_CONFIGS,
         "decoder": DECODER_CONDITIONS,
         "bootstrap": {
@@ -490,6 +511,31 @@ def pocketsphinx_dictionary() -> Path:
     return path
 
 
+def band_resources(band: str) -> tuple[Path, Path]:
+    """Return the decode dictionary and canonical LM for a named band."""
+    if band == "pin":
+        dictionary = DATA_DIR / "cmu_arctic_slt.dict"
+    elif band == "pip-en-us":
+        dictionary = pocketsphinx_dictionary()
+    else:
+        raise ValueError(f"unknown benchmark band: {band}")
+    lm = DATA_DIR / "training-unigram.lm"
+    return dictionary, lm
+
+
+def authenticate_pin_resources(dictionary: Path, lm: Path, filler: bytes) -> None:
+    """Fail before training if any canonical PP3c resource has drifted."""
+    actual = {
+        "lm_sha256": sha256(lm),
+        "dictionary_sha256": sha256(dictionary),
+        "filler_dictionary_sha256": hashlib.sha256(filler).hexdigest(),
+    }
+    if actual != PINNED_RESOURCE_HASHES:
+        raise RuntimeError(
+            f"PIN resource SHA-256 mismatch: expected={PINNED_RESOURCE_HASHES}, actual={actual}"
+        )
+
+
 def write_project(project: Path, corpus: Path, dictionary: Path) -> None:
     """Materialize shared benchmark inputs and explicit pin configs."""
     (project / "etc").mkdir(parents=True, exist_ok=True)
@@ -505,9 +551,7 @@ def write_project(project: Path, corpus: Path, dictionary: Path) -> None:
     (project / "shared" / "phoneset.txt").write_text(
         "\n".join(sorted(phones | {"SIL"})) + "\n", encoding="utf-8"
     )
-    (project / "shared" / "filler.dict").write_text(
-        "<sil> SIL\n<s> SIL\n</s> SIL\n", encoding="utf-8"
-    )
+    (project / "shared" / "filler.dict").write_text(FILLER_DICTIONARY, encoding="utf-8")
     (project / "etc" / "configs.yaml").write_text(
         yaml.safe_dump(PIN_CONFIGS, sort_keys=False), encoding="utf-8"
     )
@@ -785,6 +829,7 @@ def run(
     emit_record: Path | None = None,
     allow_engine_drift: bool = False,
     deep_verify: bool = False,
+    band: str = "pin",
 ) -> dict[str, Any]:
     """Run BM1 from downloads through comparison."""
     cache = Path(
@@ -795,12 +840,9 @@ def run(
     corpus.mkdir(parents=True, exist_ok=True)
     for archive in ARCHIVES:
         extract_archive(archives[archive.voice], archive, corpus, deep_verify=deep_verify)
-    dictionary = pocketsphinx_dictionary()
-    from pstrain.lib.lm import build_lm
-
-    train = load_transcripts(DATA_DIR / "train.transcription")
-    lm = work_dir / "training-unigram.lm"
-    build_lm(train, lm, max_order=1)
+    dictionary, lm = band_resources(band)
+    if band == "pin":
+        authenticate_pin_resources(dictionary, lm, FILLER_DICTIONARY.encode())
     manifest: dict[str, Any] = {
         "archives": {
             item.voice: {**asdict(item), "actual_sha256": sha256(archives[item.voice])}
@@ -809,6 +851,8 @@ def run(
         "transcripts": {path.name: sha256(path) for path in DATA_DIR.glob("*.transcription")},
         "dictionary_sha256": sha256(dictionary),
         "lm_sha256": sha256(lm),
+        "filler_dictionary_sha256": hashlib.sha256(FILLER_DICTIONARY.encode()).hexdigest(),
+        "band": band,
     }
     (work_dir / "resource-manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -852,7 +896,7 @@ def run(
         "results": actual,
         "resources": manifest,
         "engine": engine_identity(dictionary),
-        "conditions": benchmark_conditions(),
+        "conditions": benchmark_conditions(band),
         "resource_manifest": str(work_dir / "resource-manifest.json"),
     }
     if emit_record is not None:
@@ -883,6 +927,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--allow-engine-drift", action="store_true")
     parser.add_argument("--deep-verify", action="store_true", help="rehash every cached corpus WAV")
     parser.add_argument(
+        "--band",
+        choices=("pin", "pip-en-us"),
+        default="pin",
+        help="decode resource band (default: ratified PP3c pin)",
+    )
+    parser.add_argument(
         "--no-compare", action="store_true", help="run before the PIN record exists"
     )
     parser.add_argument("-j", "--jobs", type=int)
@@ -901,6 +951,7 @@ def main(argv: list[str] | None = None) -> int:
             emit_record=args.emit_record,
             allow_engine_drift=args.allow_engine_drift,
             deep_verify=args.deep_verify,
+            band=args.band,
         )
     except (OSError, RuntimeError, subprocess.CalledProcessError) as exc:
         parser.exit(1, f"BM1 failed: {exc}\n")
