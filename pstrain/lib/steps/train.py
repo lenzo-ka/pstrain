@@ -5,9 +5,12 @@ Orchestrates Baum-Welch training using the CFFI-wrapped BWTrainer.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
+import uuid
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -34,6 +37,30 @@ _CHECKPOINT_FILES = (
     "transition_matrices",
     "gauden_counts",
 )
+_TELEMETRY_SCHEMA_VERSION = 1
+_TELEMETRY_FILENAME = "bw_telemetry.json"
+
+
+def _write_telemetry(output_dir: Path, rows: list[dict[str, object]]) -> None:
+    """Atomically retain the completed BW passes without affecting training."""
+    destination = output_dir / _TELEMETRY_FILENAME
+    temporary = destination.with_name(f".{destination.name}.tmp-{os.getpid()}-{uuid.uuid4().hex}")
+    try:
+        temporary.write_text(
+            json.dumps(
+                {"schema_version": _TELEMETRY_SCHEMA_VERSION, "passes": rows},
+                indent=2,
+                sort_keys=True,
+                allow_nan=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(destination)
+    except Exception as exc:
+        logger.warning("Could not write BW telemetry to %s: %s", destination, exc)
+        with suppress(OSError):
+            temporary.unlink(missing_ok=True)
 
 
 def _checkpoint_iteration(output_dir: Path, iteration: int) -> None:
@@ -175,8 +202,10 @@ def run_bw_training(
         dictionary: Pronunciation dictionary path
         filler_dict: Filler dictionary path (optional)
         n_iter: Maximum training iterations
-        convergence_ratio: Maximum signed absolute change in average log
-            likelihood per frame for convergence
+        convergence_ratio: Signed per-frame likelihood delta threshold, using
+            each pass's own frame count. A delta strictly greater than this
+            threshold continues training; otherwise training converges once
+            ``min_iterations`` is satisfied.
         min_iterations: Minimum number of completed iterations before convergence
         config: BW training configuration, including the explicit variance
             policy retained after the stage-specific first iteration.
@@ -229,6 +258,7 @@ def run_bw_training(
     last_utts = 0
     total_skipped = 0
     trajectory: list[TrainingIteration] = []
+    telemetry_rows: list[dict[str, object]] = []
 
     for iteration in range(1, n_iter + 1):
         logger.info("Starting iteration %d/%d...", iteration, n_iter)
@@ -350,16 +380,29 @@ def run_bw_training(
             stats.total_utts,
             stats.avg_log_prob,
         )
+        per_frame_delta = (
+            None if iteration == 1 else _convergence_delta(stats.avg_log_prob, prev_likelihood)
+        )
+        stop_decision = (
+            "converged"
+            if iteration > 1
+            and _has_converged(
+                stats.avg_log_prob,
+                prev_likelihood,
+                iteration,
+                convergence_ratio,
+                min_iterations,
+            )
+            else "cap"
+            if iteration == n_iter
+            else "continued"
+        )
         trajectory.append(
             TrainingIteration(
                 iteration=iteration,
                 total_log_lik=stats.total_log_lik,
                 avg_log_prob=stats.avg_log_prob,
-                per_frame_delta=(
-                    None
-                    if iteration == 1
-                    else _convergence_delta(stats.avg_log_prob, prev_likelihood)
-                ),
+                per_frame_delta=per_frame_delta,
                 frames=stats.total_frames,
                 input_utts=len(fileids),
                 processed_utts=processed,
@@ -367,6 +410,27 @@ def run_bw_training(
                 skipped_utts=skipped,
             )
         )
+        telemetry_rows.append(
+            {
+                "pass": iteration,
+                "total_log_likelihood": stats.total_log_lik,
+                "total_frames": stats.total_frames,
+                "per_frame_log_likelihood": stats.avg_log_prob,
+                "signed_convergence_delta": per_frame_delta,
+                "stop_decision": stop_decision,
+            }
+        )
+        logger.info(
+            "BW telemetry: pass=%d total_log_likelihood=%.6f total_frames=%d "
+            "per_frame_log_likelihood=%.6f signed_convergence_delta=%s stop=%s",
+            iteration,
+            stats.total_log_lik,
+            stats.total_frames,
+            stats.avg_log_prob,
+            "null" if per_frame_delta is None else f"{per_frame_delta:.6f}",
+            stop_decision,
+        )
+        _write_telemetry(output_dir, telemetry_rows)
 
         # Check for degenerate training (no successful utterances)
         if stats.total_frames == 0:

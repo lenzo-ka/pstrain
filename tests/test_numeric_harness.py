@@ -102,10 +102,14 @@ def test_feature_frames_finiteness_and_golden_checksum(flat_project: PipelineCon
 
 
 @requires_c_library
-def test_bw_golden_trajectory_and_accounting(flat_project: PipelineContext, tmp_path: Path) -> None:
+def test_bw_golden_trajectory_and_accounting(
+    flat_project: PipelineContext, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     """Choke points B/C: BW numerics and utterance conservation cannot drift."""
     expected = json.loads(GOLDEN.read_text())
-    result = train_golden(flat_project, tmp_path / "trained")
+    output_dir = tmp_path / "trained"
+    caplog.set_level("INFO", logger="pstrain.lib.steps.train")
+    result = train_golden(flat_project, output_dir)
     actual = golden_payload(flat_project, result)
     tolerance = expected["strict_tolerance" if strict_golden_enabled() else "portable_tolerance"]
     assert len(actual["trajectory"]) == len(expected["trajectory"]) == 3
@@ -135,6 +139,27 @@ def test_bw_golden_trajectory_and_accounting(flat_project: PipelineContext, tmp_
             assert observed["per_frame_delta"] == pytest.approx(
                 golden["per_frame_delta"], rel=tolerance["rtol"], abs=tolerance["atol"]
             )
+
+    artifact = json.loads((output_dir / "bw_telemetry.json").read_text(encoding="utf-8"))
+    assert json.loads(json.dumps(artifact, allow_nan=False)) == artifact
+    assert artifact["schema_version"] == 1
+    rows = artifact["passes"]
+    assert len(rows) == 3
+    assert [row["pass"] for row in rows] == [1, 2, 3]
+    assert [row["stop_decision"] for row in rows] == ["continued", "continued", "cap"]
+    assert rows[0]["signed_convergence_delta"] is None
+    for row, observed in zip(rows, actual["trajectory"], strict=True):
+        assert row["total_frames"] == observed["frames"]
+        assert row["total_log_likelihood"] == observed["total_log_lik"]
+        assert row["per_frame_log_likelihood"] == observed["avg_log_prob"]
+        assert row["signed_convergence_delta"] == observed["per_frame_delta"]
+
+    log_rows = [
+        record.message for record in caplog.records if record.message.startswith("BW telemetry:")
+    ]
+    assert len(log_rows) == 3
+    assert all("total_log_likelihood=" in row and "stop=" in row for row in log_rows)
+    assert log_rows[-1].endswith("stop=cap")
 
 
 @requires_c_library
