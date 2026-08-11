@@ -138,6 +138,8 @@ class TrainParams:
     # Keep the M4b all-dictionary policy by default; multipron PP3g
     # experiments can opt into the exact transcript-reachable graph domain.
     untied_inventory: str = "all-triphone"
+    # Experimental parity instrument: stage -> pass (or "*") -> utterance IDs.
+    exclusion_schedule: dict[str, dict[int | str, list[str]]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -260,6 +262,20 @@ DEFAULT_CONFIGS: dict[str, dict[str, Any]] = {
     },
 }
 
+_BW_STAGE_NAMES = {
+    "ci-1g",
+    "ci-2g",
+    "ci-4g",
+    "ci-8g",
+    "cd-untied",
+    "cd-1g",
+    "cd-2g",
+    "cd-4g",
+    "cd-8g",
+    "cd-16g",
+    "cd-32g",
+}
+
 
 def _validate_params(
     profile: str,
@@ -304,6 +320,41 @@ def _coerce_dataclass_values(values: dict[str, Any], params_type: type[Any]) -> 
         elif isinstance(default, int) and not isinstance(default, bool):
             coerced[item.name] = int(value)
     return coerced
+
+
+def _validate_exclusion_schedule(profile: str, value: Any) -> None:
+    """Validate the deliberately narrow stage/pass/utterance schedule shape."""
+    if not isinstance(value, dict):
+        raise ValueError(f"config {profile!r} training.exclusion_schedule must be a mapping")
+    for stage, passes in value.items():
+        if not isinstance(stage, str) or not stage:
+            raise ValueError("training.exclusion_schedule stage names must be non-empty strings")
+        if stage not in _BW_STAGE_NAMES:
+            raise ValueError(f"training.exclusion_schedule has unknown BW stage {stage!r}")
+        if not isinstance(passes, dict):
+            raise ValueError(
+                f"training.exclusion_schedule stage {stage!r} must map passes to utterance IDs"
+            )
+        for pass_selector, utterances in passes.items():
+            valid_pass = (
+                pass_selector == "*"
+                or isinstance(pass_selector, int)
+                and not isinstance(pass_selector, bool)
+                and pass_selector >= 1
+                or isinstance(pass_selector, str)
+                and pass_selector.isdigit()
+                and int(pass_selector) >= 1
+            )
+            if not valid_pass:
+                raise ValueError(
+                    "training.exclusion_schedule pass selectors must be positive integers or '*'"
+                )
+            if not isinstance(utterances, list) or not all(
+                isinstance(utterance, str) and utterance for utterance in utterances
+            ):
+                raise ValueError(
+                    "training.exclusion_schedule utterance lists must contain non-empty strings"
+                )
 
 
 def load_configs(project_dir: Path) -> dict[str, dict[str, Any]]:
@@ -369,6 +420,7 @@ class PipelineContext:
                 f"config {config_name!r} training.untied_inventory must be "
                 "all-triphone, transcript-reachable, or linear"
             )
+        _validate_exclusion_schedule(config_name, training_values.get("exclusion_schedule", {}))
         if (
             untied_inventory == "transcript-reachable"
             and training_values.get("multipron_training", True) is False

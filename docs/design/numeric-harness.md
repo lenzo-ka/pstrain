@@ -85,6 +85,28 @@ the committed question syntax and pruned trees, reproduces preorder leaf
 labels, independently walks a sample of at least 60 triphone states, and
 compares the result with the tied mdef assignment.
 
+## Per-pass utterance exclusions
+
+`training.exclusion_schedule` is an experiment/parity instrument, not a
+production corpus-filtering feature. It maps pipeline stage names to one-based
+BW pass numbers (or `"*"`) and then to utterance IDs. For example:
+
+```yaml
+training:
+  exclusion_schedule:
+    ci-1g:
+      5: [arctic_a0587]
+      6: [arctic_a0587]
+    cd-untied:
+      "*": [arctic_a0587]
+```
+
+Matching utterances are removed only at the BW accumulation boundary and are
+reported as `excluded_by_schedule`; decode evaluation continues to use the
+normal test split. The active mapping is retained in training provenance so a
+parity run can be reproduced exactly. Leave the knob absent for ordinary
+training.
+
 ## Reproducibility
 
 The exercised corpus split records seed 42. Feature dithering is off and

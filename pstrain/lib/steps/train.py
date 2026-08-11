@@ -37,18 +37,19 @@ _CHECKPOINT_FILES = (
     "transition_matrices",
     "gauden_counts",
 )
-_TELEMETRY_SCHEMA_VERSION = 1
 _TELEMETRY_FILENAME = "bw_telemetry.json"
 
 
-def _write_telemetry(output_dir: Path, rows: list[dict[str, object]]) -> None:
+def _write_telemetry(
+    output_dir: Path, rows: list[dict[str, object]], *, schema_version: int = 1
+) -> None:
     """Atomically retain the completed BW passes without affecting training."""
     destination = output_dir / _TELEMETRY_FILENAME
     temporary = destination.with_name(f".{destination.name}.tmp-{os.getpid()}-{uuid.uuid4().hex}")
     try:
         temporary.write_text(
             json.dumps(
-                {"schema_version": _TELEMETRY_SCHEMA_VERSION, "passes": rows},
+                {"schema_version": schema_version, "passes": rows},
                 indent=2,
                 sort_keys=True,
                 allow_nan=False,
@@ -140,6 +141,7 @@ class TrainingIteration:
     processed_utts: int
     retried_utts: int
     skipped_utts: int
+    excluded_by_schedule: int = 0
 
 
 @dataclass
@@ -189,6 +191,7 @@ def run_bw_training(
     multipron: bool = True,
     max_skip_fraction: float = 0.05,
     retry_beam_factor: float = 1e10,
+    exclusion_schedule: dict[int | str, list[str]] | None = None,
 ) -> TrainingResult:
     """Run Baum-Welch training iterations.
 
@@ -216,6 +219,8 @@ def run_bw_training(
         first_pass_2passvar: Required stage policy for the first iteration.
             ``True`` selects centered two-pass accumulation and ``False``
             selects one-pass variance accumulation.
+        exclusion_schedule: Experimental mapping of one-based pass numbers or
+            ``"*"`` to utterance IDs that must not reach BW accumulation.
 
     Returns:
         TrainingResult with training statistics
@@ -259,6 +264,7 @@ def run_bw_training(
     total_skipped = 0
     trajectory: list[TrainingIteration] = []
     telemetry_rows: list[dict[str, object]] = []
+    exclusion_schedule = exclusion_schedule or {}
 
     for iteration in range(1, n_iter + 1):
         logger.info("Starting iteration %d/%d...", iteration, n_iter)
@@ -294,7 +300,16 @@ def run_bw_training(
         processed = 0
         skipped = 0
         retried = 0
+        excluded = 0
+        excluded_fileids = set(exclusion_schedule.get("*", ()))
+        excluded_fileids.update(exclusion_schedule.get(iteration, ()))
+        excluded_fileids.update(exclusion_schedule.get(str(iteration), ()))
         for fileid in fileids:
+            if fileid in excluded_fileids:
+                logger.info("Skipping %s on iteration %d: excluded_by_schedule", fileid, iteration)
+                skipped += 1
+                excluded += 1
+                continue
             # Load features
             mfc_path = features_dir / f"{fileid}.mfc"
             if not mfc_path.exists():
@@ -408,18 +423,26 @@ def run_bw_training(
                 processed_utts=processed,
                 retried_utts=retried,
                 skipped_utts=skipped,
+                excluded_by_schedule=excluded,
             )
         )
-        telemetry_rows.append(
-            {
-                "pass": iteration,
-                "total_log_likelihood": stats.total_log_lik,
-                "total_frames": stats.total_frames,
-                "per_frame_log_likelihood": stats.avg_log_prob,
-                "signed_convergence_delta": per_frame_delta,
-                "stop_decision": stop_decision,
+        telemetry_row: dict[str, object] = {
+            "pass": iteration,
+            "total_log_likelihood": stats.total_log_lik,
+            "total_frames": stats.total_frames,
+            "per_frame_log_likelihood": stats.avg_log_prob,
+            "signed_convergence_delta": per_frame_delta,
+            "stop_decision": stop_decision,
+        }
+        if exclusion_schedule:
+            telemetry_row["accounting"] = {
+                "input_utts": len(fileids),
+                "processed_utts": processed,
+                "retried_utts": retried,
+                "skipped_utts": skipped,
+                "skip_reasons": {"excluded_by_schedule": excluded},
             }
-        )
+        telemetry_rows.append(telemetry_row)
         logger.info(
             "BW telemetry: pass=%d total_log_likelihood=%.6f total_frames=%d "
             "per_frame_log_likelihood=%.6f signed_convergence_delta=%s stop=%s",
@@ -430,7 +453,11 @@ def run_bw_training(
             "null" if per_frame_delta is None else f"{per_frame_delta:.6f}",
             stop_decision,
         )
-        _write_telemetry(output_dir, telemetry_rows)
+        _write_telemetry(
+            output_dir,
+            telemetry_rows,
+            schema_version=2 if exclusion_schedule else 1,
+        )
 
         # Check for degenerate training (no successful utterances)
         if stats.total_frames == 0:
