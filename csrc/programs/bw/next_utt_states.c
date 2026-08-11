@@ -86,6 +86,7 @@ state_t *next_utt_states(uint32 *n_state,
     if (phone == NULL) {
 	E_WARN("Unable to produce phonetic transcription for the utterance '%s'\n", trans);
 	ckd_free(word);
+	ckd_free(utterance);
 	return NULL;
     }
 
