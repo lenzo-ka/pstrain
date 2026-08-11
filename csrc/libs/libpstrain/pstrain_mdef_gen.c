@@ -132,7 +132,8 @@ mark_reachable(acmod_id_t base, acmod_id_t left, acmod_id_t right,
 }
 
 static int
-count_reachable_triphones(const char *transcript_path,
+count_reachable_triphones(const char **utterances,
+                          uint32 n_utterances,
                           const char *dict_path,
                           const char *filler_dict_path,
                           char **CIlist,
@@ -145,8 +146,6 @@ count_reachable_triphones(const char *transcript_path,
     static const char *filler_attr[] = { "ci", "filler", NULL };
     acmod_set_t *acmod_set = acmod_set_new();
     lexicon_t *lex;
-    lineiter_t *line = NULL;
-    FILE *fp;
     int32 i;
     int ret = S3_ERROR;
     reachable_visitor_t visitor = { acmod_set, triphonehash, ignore_wpos };
@@ -161,25 +160,21 @@ count_reachable_triphones(const char *transcript_path,
     if (!lex) return S3_ERROR;
     if (filler_dict_path && !lexicon_read(lex, filler_dict_path, acmod_set))
         return S3_ERROR;
-    fp = fopen(transcript_path, "r");
-    if (!fp) return S3_ERROR;
-
-    for (line = lineiter_start_clean(fp); line; line = lineiter_next(line)) {
+    for (i = 0; i < (int32)n_utterances; ++i) {
         char **words;
-        int32 n_words = str2words(line->buf, NULL, 0);
+        char *utterance = ckd_salloc(utterances[i]);
+        int32 n_words = str2words(utterance, NULL, 0);
         phone_graph_t *graph;
         phone_graph_t *split;
-        if (n_words == 0) continue;
-        words = ckd_calloc(n_words, sizeof(*words));
-        str2words(line->buf, words, n_words);
-        if (n_words > 0 && words[n_words - 1][0] == '(')
-            --n_words;
         if (n_words == 0) {
-            ckd_free(words);
+            ckd_free(utterance);
             continue;
         }
+        words = ckd_calloc(n_words, sizeof(*words));
+        str2words(utterance, words, n_words);
         graph = mk_phone_graph(words, n_words, lex, multipron);
         ckd_free(words);
+        ckd_free(utterance);
         if (!graph) goto cleanup;
         split = phone_graph_split_contexts(graph, acmod_set);
         phone_graph_free(graph);
@@ -194,8 +189,6 @@ count_reachable_triphones(const char *transcript_path,
     ret = S3_SUCCESS;
 
 cleanup:
-    fclose(fp);
-    lineiter_free(line);
     lexicon_free(lex);
     return ret;
 }
@@ -350,7 +343,9 @@ pstrain_mdef_gen_untied(const char *phone_list_path,
                     uint32 n_state,
                     int32 ignore_wpos,
                     int32 inventory_policy,
-                    int32 multipron)
+                    int32 multipron,
+                    const char **utterances,
+                    uint32 n_utterances)
 {
     char **CIlist = NULL;
     hashelement_t **CDhash = NULL;
@@ -362,7 +357,8 @@ pstrain_mdef_gen_untied(const char *phone_list_path,
     int32 cdheapsize = 0;
     int ret = -1;
 
-    if (!phone_list_path || !dict_path || !transcript_path || !output_path) {
+    if (!phone_list_path || !dict_path || !transcript_path || !output_path ||
+        (inventory_policy == 2 && !utterances && n_utterances != 0)) {
         E_ERROR("NULL path argument\n");
         return -1;
     }
@@ -395,7 +391,8 @@ pstrain_mdef_gen_untied(const char *phone_list_path,
     }
 
     if (inventory_policy == 2) {
-        if (count_reachable_triphones(transcript_path, dict_path, filler_dict_path,
+        if (count_reachable_triphones(utterances, n_utterances,
+                                      dict_path, filler_dict_path,
                                       CIlist, cilistsize, CDhash,
                                       ignore_wpos, multipron) != S3_SUCCESS) {
             E_ERROR("Failed to enumerate graph-reachable triphones in %s\n", transcript_path);

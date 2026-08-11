@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from pstrain.lib import _pstrainc, native_worker
+from pstrain.lib.transcription import parse_transcription_file
 
 
 def generate_ci_mdef(
@@ -115,6 +116,17 @@ def generate_untied_mdef(
         raise ValueError(f"unknown untied inventory policy {inventory_policy!r}; choose {choices}")
 
     lib = _pstrainc.get_lib()
+    ffi = _pstrainc.get_ffi()
+    parsed_utterances: list[object] = []
+    utterances_c = ffi.NULL
+    n_utterances = 0
+    if inventory_policy == "transcript-reachable":
+        parsed_utterances = [
+            ffi.new("char[]", text.encode())
+            for text in parse_transcription_file(transcript).values()
+        ]
+        utterances_c = ffi.new("char*[]", parsed_utterances)
+        n_utterances = len(parsed_utterances)
     ret = lib.pstrain_mdef_gen_untied(
         str(phone_list).encode(),
         str(dict_path).encode(),
@@ -125,6 +137,8 @@ def generate_untied_mdef(
         1 if ignore_wpos else 0,
         policies[inventory_policy],
         1 if multipron else 0,
+        utterances_c,
+        n_utterances,
     )
     if ret != 0:
         raise RuntimeError(f"Failed to generate untied mdef: {output}")

@@ -58,6 +58,8 @@ int pstrain_mdef_gen_alltriphones(const char *phone_list_path,
  * @param inventory_policy 0 for linear occurrence pruning, 1 for every
  * dictionary-producible triphone, 2 for transcript-reachable graph contexts
  * @param multipron If true, reachable enumeration uses pronunciation graphs;
+ * @param utterances Parsed transcript texts for reachable enumeration
+ * @param n_utterances Number of parsed transcript texts
  * otherwise it uses the linear runtime graph
  * @return 0 on success, -1 on error
  */
@@ -69,7 +71,9 @@ int pstrain_mdef_gen_untied(const char *phone_list_path,
                         uint32 n_state,
                         int32 ignore_wpos,
                         int32 inventory_policy,
-                        int32 multipron);
+                        int32 multipron,
+                        const char **utterances,
+                        uint32 n_utterances);
 
 /**
  * Count triphones in transcripts.
