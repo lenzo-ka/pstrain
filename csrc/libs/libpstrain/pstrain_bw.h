@@ -114,6 +114,9 @@ pstrain_bw_free_state_seq(state_t *state_seq, uint32 n_state);
 /** Number of CI senones used as primary fallback models in this pass. */
 uint32 pstrain_bw_count_active_fallback_senones(pstrain_bw_context_t *ctx);
 
+/** Whether a senone was activated as a primary CI fallback this pass. */
+int pstrain_bw_fallback_senone_active(pstrain_bw_context_t *ctx, uint32 senone);
+
 /**
  * Process utterance with transcript text
  *

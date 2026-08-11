@@ -491,13 +491,13 @@ def test_cd_variant_boundaries_expand_both_triphone_contexts(
     ],
 )
 @pytest.mark.parametrize("multipron", [False, True], ids=["linear", "multipron"])
-def test_reachable_inventory_equals_runtime_contexts_by_mode(
+def test_inventory_policy_equals_runtime_contexts_by_mode(
     full_project: PipelineContext,
     tmp_path: Path,
     words: str,
     multipron: bool,
 ) -> None:
-    """Reachable enumeration uses the exact graph mode used by BW."""
+    """Each supported inventory policy matches its BW runtime domain."""
     from pstrain.lib.mdef import generate_alltriphones_mdef, generate_untied_mdef
 
     phones = tmp_path / "phones.txt"
@@ -511,15 +511,15 @@ def test_reachable_inventory_equals_runtime_contexts_by_mode(
     transcript_text = f"<s> {words} </s>"
     transcript = tmp_path / "train.transcription"
     transcript.write_text(f"{transcript_text} (utt1)\n")
-    reachable = tmp_path / "reachable.mdef"
+    inventory_mdef = tmp_path / "inventory.mdef"
     runtime_mdef = tmp_path / "runtime.mdef"
     generate_untied_mdef(
         phones,
         dictionary,
         transcript,
-        reachable,
+        inventory_mdef,
         filler_dict=filler,
-        inventory_policy="transcript-reachable",
+        inventory_policy="transcript-reachable" if multipron else "linear",
         multipron=multipron,
     )
     generate_alltriphones_mdef(phones, dictionary, runtime_mdef, filler_dict=filler)
@@ -535,7 +535,7 @@ def test_reachable_inventory_equals_runtime_contexts_by_mode(
     )
     trainer.set_dict(dictionary, filler)
 
-    inventory = set(_cd_rows(reachable))
+    inventory = set(_cd_rows(inventory_mdef))
     runtime = _runtime_contexts(trainer, runtime_mdef, transcript_text)
     assert inventory == runtime
     if words == "LEFT RIGHT":
@@ -571,6 +571,17 @@ def test_complete_cd_inventory_leaves_ci_fallback_accumulators_zero(
     mfcc = read_sphinx_mfc(full_project.features_dir / "arctic_a0001.mfc")
     assert trainer.process_utterance_mfcc(mfcc, "<s> a and </s>")
     assert trainer._lib.pstrain_bw_count_active_fallback_senones(trainer._ctx) == 0
+    non_filler_ci_senones = [
+        int(state)
+        for row in _mdef_rows(complete_mdef)
+        if row[1] == "-" and row[4] != "filler"
+        for state in row[6:-1]
+    ]
+    assert non_filler_ci_senones
+    assert all(
+        trainer._lib.pstrain_bw_fallback_senone_active(trainer._ctx, senone) == 0
+        for senone in non_filler_ci_senones
+    )
 
 
 @requires_c_library

@@ -556,7 +556,7 @@ def test_multipron_training_defaults_on(empty_project: Path) -> None:
 
 
 def test_transcript_reachable_untied_inventory_can_be_selected(empty_project: Path) -> None:
-    """The PP3g inventory dial is opt-in and independent of graph training."""
+    """The PP3g inventory dial is opt-in under graph training."""
     (empty_project / "etc" / "configs.yaml").write_text(
         "default:\n  description: reachable\n  training:\n"
         "    untied_inventory: transcript-reachable\n"
@@ -564,6 +564,27 @@ def test_transcript_reachable_untied_inventory_can_be_selected(empty_project: Pa
     ctx = PipelineContext.from_config(empty_project)
     assert ctx.train.untied_inventory == "transcript-reachable"
     assert ctx.train.multipron_training is True
+
+
+def test_transcript_reachable_untied_inventory_rejects_linear_mode(
+    empty_project: Path,
+) -> None:
+    """Linear training uses the equivalent occurrence-based inventory policy."""
+    (empty_project / "etc" / "configs.yaml").write_text(
+        "default:\n  description: redundant\n  training:\n"
+        "    multipron_training: false\n"
+        "    untied_inventory: transcript-reachable\n"
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"training\.untied_inventory 'transcript-reachable' requires "
+            r"training\.multipron_training: true; linear mode's equivalent is the "
+            r"'linear' policy"
+        ),
+    ):
+        PipelineContext.from_config(empty_project)
 
 
 def test_multipron_training_can_be_disabled(empty_project: Path) -> None:

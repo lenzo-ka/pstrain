@@ -418,6 +418,14 @@ pstrain_bw_count_active_fallback_senones(pstrain_bw_context_t *ctx)
 }
 
 int
+pstrain_bw_fallback_senone_active(pstrain_bw_context_t *ctx, uint32 senone)
+{
+    if (!ctx || senone >= ctx->mdef->n_tied_state)
+        return 0;
+    return ctx->fallback_senone[senone] != 0;
+}
+
+int
 pstrain_bw_process_utt_text(pstrain_bw_context_t *ctx,
                         const float *features,
                         uint32 n_frames,
@@ -849,6 +857,11 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
 
     /* Recompute Gaussian precomputation values */
     E_INFO("Recomputing Gaussian precomputation values...\n");
+    /* The activation set belongs only to the completed accumulation pass.
+     * Clear it before the final operation that can fail so callers may safely
+     * retry or reuse the context after every normalization exit. */
+    memset(ctx->fallback_senone, 0,
+           ctx->mdef->n_tied_state * sizeof(*ctx->fallback_senone));
     if (gauden_eval_precomp(g) != S3_SUCCESS) {
         E_ERROR("Failed to recompute Gaussian values\n");
         return -1;
@@ -856,8 +869,6 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
 
     /* Clear accumulators for next iteration */
     E_INFO("Clearing accumulators...\n");
-    memset(ctx->fallback_senone, 0,
-           ctx->mdef->n_tied_state * sizeof(*ctx->fallback_senone));
     for (i = 0; i < n_mgau; i++) {
         for (j = 0; j < n_feat; j++) {
             for (k = 0; k < n_density; k++) {

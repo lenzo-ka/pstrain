@@ -160,9 +160,9 @@ sphinxtrain:
     multipron_training: false
 ```
 
-Untied inventory selection is a separate dial. The default remains the full
-dictionary-producible set introduced for M4b. A PP3g-style cell selects the
-exact set of contexts reachable in its training pronunciation graphs:
+The default untied inventory remains the full dictionary-producible set
+introduced for M4b. A PP3g-style multipron cell selects the exact set of
+contexts reachable in its training pronunciation graphs:
 
 ```yaml
 training:
@@ -170,14 +170,14 @@ training:
   untied_inventory: transcript-reachable
 ```
 
-`transcript-reachable` uses the selected training mode: it expands every
-pronunciation variant in multipron mode and uses the first pronunciation in
-linear mode. In both cases it enumerates contexts with the same graph type
-the Baum-Welch runtime uses. The
-other policies are `all-triphone` and the upstream-compatible `linear`
-first-pronunciation occurrence policy. Inventory misses always back off to a
-trainable CI state; the inventory choice controls parameter allocation, not
-whether an utterance can train.
+`transcript-reachable` expands every pronunciation variant and is valid only
+with `multipron_training: true`, where inventory generation and Baum-Welch
+share the same graph construction. Configuration resolution rejects it in
+linear mode because the equivalent runtime-reachable inventory is already the
+upstream-compatible `linear` first-pronunciation occurrence policy. The other
+policy is `all-triphone`. Inventory misses always back off to a trainable CI
+state; the inventory choice controls parameter allocation, not whether an
+utterance can train.
 
 ### CI fallback survival prior
 
