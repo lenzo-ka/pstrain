@@ -416,6 +416,8 @@ void ckd_free_3d(void *ptr);
 // ============================================================
 
 void pstrain_session_reset(void);
+int pstrain_session_probe_set(void);
+int pstrain_session_probe_is_set(void);
 
 // ============================================================
 // CLUSTERING

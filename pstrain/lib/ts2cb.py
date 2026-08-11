@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from pstrain.lib import _pstrainc
+from pstrain.lib.native_worker import contained
 
 if TYPE_CHECKING:
     import numpy.typing as npt
@@ -25,6 +26,7 @@ class TyingType(Enum):
     PTM = "ptm"  # Phone-tied mixture: states share by phone
 
 
+@contained
 def create_ts2cb(
     n_tied_state: int,
     tying_type: TyingType | str = TyingType.CONT,
@@ -74,6 +76,7 @@ def create_ts2cb(
     return ts2cb, n_cb
 
 
+@contained
 def read_ts2cb(path: Path) -> tuple[npt.NDArray[np.uint32], int]:
     """Read a tied-state to codebook mapping from a file.
 
@@ -112,6 +115,7 @@ def read_ts2cb(path: Path) -> tuple[npt.NDArray[np.uint32], int]:
     return ts2cb, n_cb
 
 
+@contained
 def write_ts2cb(
     path: Path,
     ts2cb: npt.NDArray[np.uint32],
@@ -167,6 +171,7 @@ def _parse_mdef_n_tied_state(mdef_path: Path) -> int:
     raise RuntimeError(f"Could not find n_tied_state in mdef: {mdef_path}")
 
 
+@contained
 def create_and_write_ts2cb(
     mdef_path: Path,
     output_path: Path,

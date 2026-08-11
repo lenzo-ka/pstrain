@@ -1,10 +1,8 @@
-"""Crash containment for the ``contained-3`` native operations.
+"""Crash containment for the ``contained-all-operations`` native surface.
 
-Only ``prune_tree``, ``make_quests``, and ``mdef_gen_ci`` are guarded in this
-phase.  Every other native entry point remains in-process and keeps today's
-behaviour: a malformed input reaching one of them can still terminate the
-calling interpreter.  See ``docs/design/native-boundary.md`` for the phase
-contract.
+One-shot wrappers execute as complete Python/CFFI operations in the helper;
+BW, alignment, feature extraction, and logmath use opaque remote objects.
+See ``docs/design/native-boundary.md`` for the phase contract.
 
 Each Python process owns at most one lazily spawned helper process, created
 through an explicit ``spawn`` context and reused across calls.  The helper
@@ -29,25 +27,45 @@ import struct
 import tempfile
 import threading
 import time
+import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
+from functools import wraps
 from multiprocessing.connection import Connection, wait
 from multiprocessing.process import BaseProcess
 from multiprocessing.reduction import ForkingPickler
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, NoReturn, ParamSpec, TypeVar, cast
 
 _START_TIMEOUT = 30.0
 _REQUEST_TIMEOUT = 300.0
 _MAX_REQUEST_BYTES = 64 * 1024
+_MAX_BULK_REQUEST_BYTES = 256 * 1024 * 1024
 _DIAGNOSTIC_TAIL_BYTES = 64 * 1024
+_inside_worker = False
+P = ParamSpec("P")
+R = TypeVar("R")
 
 #: The ``contained-3`` set: the only native operations routed through the helper.
-GUARDED_OPERATIONS = frozenset({"prune_tree", "make_quests", "mdef_gen_ci"})
+GUARDED_OPERATIONS = frozenset(
+    {
+        "prune_tree",
+        "make_quests",
+        "mdef_gen_ci",
+        "python_call",
+        "object_create",
+        "object_call",
+        "object_close",
+    }
+)
 
 #: Fault-injection operations used only by the reliability tests.  They exist
 #: in the helper because a clean ``exit(0)`` mid-request and a signal death
 #: cannot be induced from outside the child.
-_FAULT_OPERATIONS = frozenset({"_fault_exit_zero", "_fault_signal"})
+_FAULT_OPERATIONS = frozenset(
+    {"_fault_exit_zero", "_fault_signal", "_session_probe_set", "_session_probe_is_set"}
+)
+_STATUS_OPERATIONS = frozenset({"prune_tree", "make_quests", "mdef_gen_ci"})
 
 _OPERATIONS = GUARDED_OPERATIONS | _FAULT_OPERATIONS
 
@@ -120,7 +138,23 @@ def _diagnostic_tail(path: str) -> str:
         return ""
 
 
-def _dispatch(lib: Any, ffi: Any, operation: str, arguments: tuple[Any, ...]) -> int:
+def _resolve_python_target(module_name: str, target_name: str) -> Any:
+    """Resolve a module-level function or class without importing CFFI in the owner."""
+    import importlib
+
+    target: Any = importlib.import_module(module_name)
+    for part in target_name.split("."):
+        target = getattr(target, part)
+    return target
+
+
+def _dispatch(
+    lib: Any,
+    ffi: Any,
+    operation: str,
+    arguments: tuple[Any, ...],
+    objects: dict[str, Any],
+) -> Any:
     """Run one native operation inside the helper process."""
     if operation == "prune_tree":
         return int(
@@ -157,16 +191,40 @@ def _dispatch(lib: Any, ffi: Any, operation: str, arguments: tuple[Any, ...]) ->
         return int(
             lib.pstrain_mdef_gen_ci(arguments[0].encode(), arguments[1].encode(), arguments[2])
         )
+    if operation == "python_call":
+        module_name, target_name, args, kwargs = arguments
+        return _resolve_python_target(module_name, target_name)(*args, **kwargs)
+    if operation == "object_create":
+        object_id, module_name, target_name, args, kwargs = arguments
+        objects[object_id] = _resolve_python_target(module_name, target_name)(*args, **kwargs)
+        return None
+    if operation == "object_call":
+        object_id, method_name, args, kwargs = arguments
+        return getattr(objects[object_id], method_name)(*args, **kwargs)
+    if operation == "object_close":
+        object_id = arguments[0]
+        instance = objects.pop(object_id, None)
+        if instance is not None:
+            close = getattr(instance, "close", None)
+            if close is not None:
+                close()
+        return None
     if operation == "_fault_exit_zero":
         os._exit(0)
     if operation == "_fault_signal":
         os.kill(os.getpid(), arguments[0])
         return 0
+    if operation == "_session_probe_set":
+        return int(lib.pstrain_session_probe_set())
+    if operation == "_session_probe_is_set":
+        return int(lib.pstrain_session_probe_is_set())
     raise ValueError(f"unknown native operation: {operation}")
 
 
 def _worker_main(connection: Connection, state: _WorkerState) -> None:
     """Entry point of the spawned helper process."""
+    global _inside_worker
+    _inside_worker = True
     # Own stderr permanently: sphinxbase writes every diagnostic level there,
     # and the parent cannot install an err callback (err_cb_f is variadic).
     diagnostic_fd = os.open(state.diagnostic_path, os.O_WRONLY | os.O_APPEND)
@@ -180,6 +238,7 @@ def _worker_main(connection: Connection, state: _WorkerState) -> None:
 
     lib = _pstrainc.get_lib()
     ffi = _pstrainc.get_ffi()
+    objects: dict[str, Any] = {}
 
     connection.send(("ready", os.getpid()))
 
@@ -192,16 +251,25 @@ def _worker_main(connection: Connection, state: _WorkerState) -> None:
             return
         request_id, operation, arguments = request
         try:
-            result = _dispatch(lib, ffi, operation, arguments)
-            lib.pstrain_session_reset()
+            result = _dispatch(lib, ffi, operation, arguments, objects)
+            # Stateful BW/alignment/logmath objects span multiple RPCs. Their
+            # native contexts may retain cmd_ln-backed configuration, so reset
+            # at the coarse operation boundary (when the final object closes),
+            # not between methods of a live object.
+            if not objects:
+                lib.pstrain_session_reset()
             connection.send(("result", request_id, result))
         except BaseException as exc:
             # Python-level faults are reportable; native process termination
             # bypasses this arm entirely and is classified by the owner.
             try:
-                lib.pstrain_session_reset()
+                if not objects:
+                    lib.pstrain_session_reset()
             finally:
-                connection.send(("error", request_id, repr(exc)))
+                if isinstance(exc, (FileNotFoundError, ValueError)):
+                    connection.send(("validation_error", request_id, exc))
+                else:
+                    connection.send(("error", request_id, repr(exc)))
 
 
 class _NativeWorker:
@@ -279,15 +347,27 @@ class _NativeWorker:
         self._discard()
         raise PstrainWorkerError(f"native worker failed to start: {diagnostic or 'no diagnostic'}")
 
-    def call(self, operation: str, arguments: tuple[Any, ...], inputs: tuple[str, ...]) -> int:
+    def call(
+        self,
+        operation: str,
+        arguments: tuple[Any, ...],
+        inputs: tuple[str, ...],
+        reported_operation: str | None = None,
+    ) -> Any:
+        label = reported_operation or operation
         request_id = self._request_id + 1
         request = bytes(ForkingPickler.dumps((request_id, operation, arguments)))
-        if len(request) > _MAX_REQUEST_BYTES:
+        maximum = (
+            _MAX_BULK_REQUEST_BYTES
+            if operation in {"python_call", "object_call", "object_create"}
+            else _MAX_REQUEST_BYTES
+        )
+        if len(request) > maximum:
             raise PstrainInvalidInputError(
-                operation,
+                label,
                 inputs,
                 f"serialized native-worker request is {len(request)} bytes; "
-                f"maximum is {_MAX_REQUEST_BYTES} bytes",
+                f"maximum is {maximum} bytes",
             )
         deadline = time.monotonic() + _REQUEST_TIMEOUT
         if self._process is None or not self._process.is_alive():
@@ -305,40 +385,42 @@ class _NativeWorker:
             try:
                 self._send_request(request, deadline)
             except TimeoutError:
-                self._raise_timeout(operation)
+                self._raise_timeout(label)
             except (BrokenPipeError, EOFError, OSError):
                 # The fresh helper died during the retried send; give up loudly
                 # rather than leaving a connection holding a partial frame.
                 self._discard()
-                self._raise_death(operation, inputs, eof=True)
+                self._raise_death(label, inputs, eof=True)
         except TimeoutError:
-            self._raise_timeout(operation)
+            self._raise_timeout(label)
 
         remaining = max(0.0, deadline - time.monotonic())
         ready = wait([self._connection, self._process.sentinel], timeout=remaining)
         if not ready:
-            self._raise_timeout(operation)
+            self._raise_timeout(label)
         if self._connection in ready:
             try:
                 message = self._connection.recv()
             except EOFError:
-                return self._raise_death(operation, inputs, eof=True)
+                return self._raise_death(label, inputs, eof=True)
             kind, response_id, payload = message
-            if response_id != request_id or kind not in {"result", "error"}:
+            if response_id != request_id or kind not in {"result", "error", "validation_error"}:
                 diagnostic = self._tail()
                 self._discard()
-                raise PstrainWorkerProtocolError(operation, inputs, diagnostic)
+                raise PstrainWorkerProtocolError(label, inputs, diagnostic)
             if kind == "error":
-                raise PstrainNativeError(operation, inputs, str(payload))
-            if payload != 0:
+                raise PstrainNativeError(label, inputs, str(payload))
+            if kind == "validation_error":
+                raise payload
+            if operation in _STATUS_OPERATIONS and payload != 0:
                 # The helper is alive and has run pstrain_session_reset; the
                 # operation itself reported failure.
                 diagnostic = self._tail()
                 if diagnostic.strip():
-                    raise PstrainNativeFatalError(operation, inputs, diagnostic, int(payload))
-                raise PstrainNativeError(operation, inputs, diagnostic, int(payload))
-            return 0
-        return self._raise_death(operation, inputs, eof=False)
+                    raise PstrainNativeFatalError(label, inputs, diagnostic, int(payload))
+                raise PstrainNativeError(label, inputs, diagnostic, int(payload))
+            return payload
+        return self._raise_death(label, inputs, eof=False)
 
     def _send_request(self, payload: bytes, deadline: float) -> None:
         """Send one bounded request without allowing a full pipe to hang."""
@@ -417,7 +499,7 @@ def _owned_worker() -> _NativeWorker:
     return _worker
 
 
-def call(operation: str, arguments: tuple[Any, ...], inputs: tuple[Path | str, ...]) -> None:
+def call(operation: str, arguments: tuple[Any, ...], inputs: tuple[Path | str, ...]) -> Any:
     """Execute one guarded native operation in this process's helper.
 
     Args:
@@ -441,7 +523,78 @@ def call(operation: str, arguments: tuple[Any, ...], inputs: tuple[Path | str, .
             operation, paths, f"operation is not routed through the native worker: {operation}"
         )
     with _lock:
-        _owned_worker().call(operation, arguments, paths)
+        return _owned_worker().call(operation, arguments, paths)
+
+
+def in_worker() -> bool:
+    """Return whether code is executing inside the contained native helper."""
+    return _inside_worker
+
+
+def call_python(
+    module_name: str,
+    target_name: str,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    inputs: tuple[Path | str, ...] = (),
+) -> Any:
+    """Run a complete Python/CFFI operation in the contained helper."""
+    paths = tuple(str(item) for item in inputs)
+    with _lock:
+        return _owned_worker().call(
+            "python_call", (module_name, target_name, args, kwargs), paths, target_name
+        )
+
+
+def contained(function: Callable[P, R]) -> Callable[P, R]:
+    """Route a complete stateless public CFFI operation through the helper."""
+    module_name = function.__module__
+    target_name = function.__name__
+
+    @wraps(function)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        if in_worker():
+            return function(*args, **kwargs)
+        inputs = tuple(item for item in (*args, *kwargs.values()) if isinstance(item, (Path, str)))
+        return cast("R", call_python(module_name, target_name, args, kwargs, inputs))
+
+    return wrapper
+
+
+class NativeObjectProxy:
+    """Proxy a stateful CFFI-backed Python object living in the helper."""
+
+    def __init__(
+        self,
+        module_name: str,
+        target_name: str,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        inputs: tuple[Path | str, ...] = (),
+    ) -> None:
+        self._object_id: str | None = uuid.uuid4().hex
+        self._inputs = inputs
+        call(
+            "object_create",
+            (self._object_id, module_name, target_name, args, kwargs),
+            inputs,
+        )
+
+    def call(self, method_name: str, *args: Any, **kwargs: Any) -> Any:
+        if self._object_id is None:
+            raise PstrainWorkerError("native object is closed")
+        return call(
+            "object_call",
+            (self._object_id, method_name, args, kwargs),
+            self._inputs,
+        )
+
+    def close(self) -> None:
+        if self._object_id is not None:
+            try:
+                call("object_close", (self._object_id,), self._inputs)
+            finally:
+                self._object_id = None
 
 
 def _shutdown() -> None:

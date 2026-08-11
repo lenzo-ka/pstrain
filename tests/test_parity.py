@@ -361,46 +361,22 @@ class TestIncCompParity:
 class TestMakeQuestsParity:
     """Test make_quests parity."""
 
-    # NOTE: make_quests needs -type (.cont./.semi.), which CommandBuilder now
-    # supplies via kwargs, but it segfaults on the tiny synthetic model in this
-    # file. The CFFI half of this comparison is no longer the problem: that call
-    # is routed through the contained native worker, so the crash arrives as a
-    # PstrainNativeCrashError (see tests/test_native_worker.py). What still
-    # blocks the test is the parity half — the shell-out CLI is not contained
-    # and exits 139 on the same fixture — and the fixture itself. Running it for
-    # real needs a realistic triphone model (plan 1.2, e2e corpus).
-    @pytest.mark.skip(
-        reason="Needs a realistic triphone model: the shell-out half of this "
-        "parity check exits 139 on the synthetic fixture. The CFFI half is "
-        "contained. Tracked: plan 1.2 (e2e corpus)."
-    )
     def test_questions_generation(self, test_data_dir: Path) -> None:
-        """CFFI vs shell-out question generation (needs a realistic model)."""
+        """The formerly skipped synthetic-model crash is a contained failure."""
         from pstrain.lib.dtree import make_quests
-
-        shell_quests = test_data_dir / "shell_quests.txt"
-        builder = CommandBuilder()
-        builder.make_quests(
-            moddeffn=test_data_dir / "mdef",
-            meanfn=test_data_dir / "means",
-            varfn=test_data_dir / "variances",
-            mixwfn=test_data_dir / "mixture_weights",
-            questsfn=shell_quests,
-            type=".cont.",
-        ).run()
+        from pstrain.lib.native_worker import PstrainNativeError
 
         cffi_quests = test_data_dir / "cffi_quests.txt"
-        make_quests(
-            mdef_path=test_data_dir / "mdef",
-            mean_path=test_data_dir / "means",
-            var_path=test_data_dir / "variances",
-            mixw_path=test_data_dir / "mixture_weights",
-            output_path=cffi_quests,
-        )
-
-        assert len(shell_quests.read_text().splitlines()) == len(
-            cffi_quests.read_text().splitlines()
-        )
+        with pytest.raises(PstrainNativeError) as raised:
+            make_quests(
+                mdef_path=test_data_dir / "mdef",
+                mean_path=test_data_dir / "means",
+                var_path=test_data_dir / "variances",
+                mixw_path=test_data_dir / "mixture_weights",
+                output_path=cffi_quests,
+            )
+        assert raised.value.operation == "make_quests"
+        assert raised.value.diagnostic
 
 
 # =============================================================================

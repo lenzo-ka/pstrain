@@ -22,10 +22,12 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from . import _pstrainc
+from .native_worker import contained
 
 __all__ = ["deleted_interpolation"]
 
 
+@contained
 def deleted_interpolation(
     mdef_path: Path | str,
     output_path: Path | str,

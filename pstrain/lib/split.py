@@ -13,8 +13,10 @@ import numpy as np
 import numpy.typing as npt
 
 from pstrain.lib import _pstrainc
+from pstrain.lib.native_worker import contained
 
 
+@contained
 def split_gaussians(
     in_mean_path: Path,
     in_var_path: Path,
@@ -112,6 +114,7 @@ def double_gaussians(
     }
 
 
+@contained
 def kmeans(
     observations: npt.NDArray[np.float32],
     n_clusters: int,
@@ -162,6 +165,7 @@ def kmeans(
     return centroids, labels, sqerr
 
 
+@contained
 def kmeans_init_gaussians(
     features: npt.NDArray[np.float32],
     n_density: int,

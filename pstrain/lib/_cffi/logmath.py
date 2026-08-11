@@ -5,6 +5,9 @@ Uses C library for numerical stability in probability computations.
 
 from __future__ import annotations
 
+import contextlib
+
+from pstrain.lib import native_worker
 from pstrain.lib._cffi.core import _init
 
 
@@ -23,6 +26,11 @@ class LogMath:
             shift: Bit shift for table lookup
             use_table: Whether to use lookup table for speed
         """
+        if not native_worker.in_worker():
+            self._proxy = native_worker.NativeObjectProxy(
+                __name__, "LogMath", (base, shift, use_table), {}
+            )
+            return
         ffi, lib = _init()
         self._ffi = ffi
         self._lib = lib
@@ -32,6 +40,10 @@ class LogMath:
 
     def __del__(self) -> None:
         """Free C resources."""
+        if hasattr(self, "_proxy"):
+            with contextlib.suppress(Exception):
+                self._proxy.close()
+            return
         if hasattr(self, "_lmath") and self._lmath is not None:
             self._lib.logmath_free(self._lmath)
 
@@ -44,6 +56,8 @@ class LogMath:
         Returns:
             Log-domain integer representation
         """
+        if hasattr(self, "_proxy"):
+            return int(self._proxy.call("log", p))
         result: int = self._lib.logmath_log(self._lmath, p)
         return result
 
@@ -56,6 +70,8 @@ class LogMath:
         Returns:
             Probability value
         """
+        if hasattr(self, "_proxy"):
+            return float(self._proxy.call("exp", logp))
         result: float = self._lib.logmath_exp(self._lmath, logp)
         return result
 
@@ -71,11 +87,19 @@ class LogMath:
         Returns:
             log(p + q)
         """
+        if hasattr(self, "_proxy"):
+            return int(self._proxy.call("add", logp, logq))
         result: int = self._lib.logmath_add(self._lmath, logp, logq)
         return result
 
     @property
     def base(self) -> float:
         """Get the log base."""
+        if hasattr(self, "_proxy"):
+            return float(self._proxy.call("get_base"))
         result: float = self._lib.logmath_get_base(self._lmath)
         return result
+
+    def get_base(self) -> float:
+        """Return the base for worker-side property access."""
+        return self.base

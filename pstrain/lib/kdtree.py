@@ -21,10 +21,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from . import _pstrainc
+from .native_worker import contained
 
 __all__ = ["build_kdtree"]
 
 
+@contained
 def build_kdtree(
     mean_path: Path | str,
     var_path: Path | str,

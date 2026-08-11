@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any, Self
 
 import numpy as np
 
+from pstrain.lib import native_worker
 from pstrain.lib._cffi.core import _init
 from pstrain.lib.alignment.core import AlignedSegment, AlignmentResult
 from pstrain.lib.features import FeatureExtractor
@@ -96,6 +97,29 @@ class Aligner:
         if not dict_path.exists():
             raise FileNotFoundError(f"Dictionary not found: {dict_path}")
 
+        if not native_worker.in_worker():
+            self._proxy = native_worker.NativeObjectProxy(
+                __name__,
+                "Aligner",
+                (model_dir, dict_path),
+                {
+                    "filler_dict": filler_dict,
+                    "beam": beam,
+                    "insert_sil": insert_sil,
+                    "include_phones": include_phones,
+                    "include_states": include_states,
+                    "cmn": cmn,
+                    "agc": agc,
+                    "varnorm": varnorm,
+                    "feat_type": feat_type,
+                    "frate": frate,
+                    "lts_mismatch": lts_mismatch,
+                },
+                (model_dir, dict_path),
+            )
+            Aligner._active = self
+            return
+
         ffi, lib = _init()
         self._ffi = ffi
         self._lib = lib
@@ -157,6 +181,11 @@ class Aligner:
 
     def close(self) -> None:
         """Release the underlying C state. Idempotent."""
+        if hasattr(self, "_proxy"):
+            self._proxy.close()
+            if Aligner._active is self:
+                Aligner._active = None
+            return
         if getattr(self, "_ctx", None) is not None and self._ctx != self._ffi.NULL:
             self._lib.pstrain_align_free(self._ctx)
             self._ctx = self._ffi.NULL
@@ -197,6 +226,10 @@ class Aligner:
             level segments. Variant suffixes like ``reading(2)`` are
             preserved when present in the dictionary.
         """
+        if hasattr(self, "_proxy"):
+            result = self._proxy.call("align_mfcc", mfcc, transcript, utterance_id)
+            assert isinstance(result, AlignmentResult)
+            return result
         if self._ctx == self._ffi.NULL:
             raise RuntimeError("Aligner is closed")
         arr = np.ascontiguousarray(mfcc, dtype=np.float32)
@@ -233,6 +266,10 @@ class Aligner:
         Convenience for parity checking against the standalone
         ``sphinx3_align`` binary, which also accepts ``.mfc`` input.
         """
+        if hasattr(self, "_proxy"):
+            result = self._proxy.call("align_mfc_file", mfc_path, transcript, utterance_id)
+            assert isinstance(result, AlignmentResult)
+            return result
         if self._ctx == self._ffi.NULL:
             raise RuntimeError("Aligner is closed")
         mfc_path = Path(mfc_path)
@@ -265,6 +302,10 @@ class Aligner:
         handing the MFCCs off to the aligner. The feature extractor is
         reused across calls.
         """
+        if hasattr(self, "_proxy"):
+            result = self._proxy.call("align_audio", audio_path, transcript, utterance_id)
+            assert isinstance(result, AlignmentResult)
+            return result
         audio_path = Path(audio_path)
         if not audio_path.exists():
             raise FileNotFoundError(f"Audio file not found: {audio_path}")

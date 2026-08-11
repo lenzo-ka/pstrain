@@ -13,9 +13,10 @@ the library, services one request at a time over a pipe, and is respawned
 whenever it dies. Its address space is the blast radius. See
 `pstrain.lib.native_worker`.
 
-## Phase contract: `contained-3`
+## Phase contract: `contained-all-operations`
 
-Exactly three operations are routed through the helper today:
+All supported Python operations that enter CFFI are routed through the helper.
+The original three operations retain their individual protocol names:
 
 | Python entry point | native entry point |
 | --- | --- |
@@ -27,14 +28,12 @@ For these three, malformed user input cannot terminate the calling process.
 Each failure arrives as a typed exception carrying the operation, the input
 paths, and the diagnostic text the native code wrote to its stderr.
 
-**Everything else is unguarded and keeps today's behaviour.** That includes the
-other 65 `pstrain_*` operations — among them `pstrain_agg_seg`, `pstrain_bw_*`,
-`pstrain_align_*`, `pstrain_tie_states`, `pstrain_init_mixw`, `pstrain_norm`,
-`pstrain_param_cnt` — and the 91 raw vendored functions declared in
-`pstrain/lib/_cffi/cdef.py` (`model_def_read`, the `s3gau_*` readers/writers,
-`fe_*`, `feat_*`, `logmath_*`, `acmod_set_*`). Calling any of them with input
-you have not validated can still end the interpreter. Extending containment to
-the full surface is the next phase.
+The remaining one-shot wrappers use the generic `python_call` route. Stateful
+BW, alignment and logmath objects live in the helper and are addressed through
+opaque object handles. Raw model I/O is exposed only through coarse complete
+read/write operations, and feature extraction through its complete operation;
+raw C pointers never cross the process boundary. Direct access through the
+private `_pstrainc` implementation module is not a supported public operation.
 
 Across every phase there is one standing rule: **one native call at a time per
 process.** Multi-threaded use of the library is unsupported and undefined —
@@ -74,16 +73,19 @@ Those two sites are now compiled out of the library build
   gets its own helper, so parallelism is not funnelled through a single child.
 - The `spawn` start method is used explicitly, everywhere. Construction state is
   picklable.
-- Between requests the helper calls `pstrain_session_reset()`, which frees and
+- At each complete-operation boundary the helper calls `pstrain_session_reset()`, which frees and
   NULLs `global_cmdln` (whose keys would otherwise accumulate across eight
   different argument tables) and clears the `pstrain_dtree` and `pstrain_kmeans`
-  module statics. Worker death remains the hard floor: the OS reclaims
+  module statics. Methods on a live stateful object form one coarse operation,
+  so reset occurs when that object closes rather than between its methods.
+  Worker death remains the hard floor: the OS reclaims
   everything.
 - Any death — signal, nonzero exit, clean exit mid-request, transport EOF — is
   classified, raised, and followed by a fresh helper on the next call.
-- Requests are limited to a 64 KiB serialized payload. The owner rejects larger
-  requests before sending, and one deadline covers both a non-blocking pipe send
-  and the response wait; expiry kills the helper so the next call starts fresh.
+- Control requests are limited to a 64 KiB serialized payload. Coarse operations
+  that explicitly accept arrays (model I/O and in-memory BW/alignment calls) have
+  a 256 MiB ceiling. One deadline covers both a non-blocking pipe send and the
+  response wait; expiry kills the helper so the next call starts fresh.
 
 ## No silent fallback
 

@@ -108,8 +108,8 @@ float64
 pstrain_bw_set_a_beam(pstrain_bw_context_t *ctx, float64 a_beam);
 
 /** Build an utterance state sequence for structural inspection.
- * Graph-mode results are owned and must be freed. Linear-mode results use
- * the historical builder's static storage and must not be freed.
+ * The returned sequence is caller-owned in both graph and linear modes and
+ * must be released exactly once with pstrain_bw_free_state_seq().
  */
 state_t *
 pstrain_bw_build_state_seq(pstrain_bw_context_t *ctx,
@@ -118,6 +118,9 @@ pstrain_bw_build_state_seq(pstrain_bw_context_t *ctx,
 
 void
 pstrain_bw_free_state_seq(state_t *state_seq, uint32 n_state);
+
+/** Internal ownership adapter, exposed for the C regression harness. */
+state_t *pstrain_bw_copy_state_seq(const state_t *source, uint32 n_state);
 
 /** Number of CI senones used as primary fallback models in this pass. */
 uint32 pstrain_bw_count_active_fallback_senones(pstrain_bw_context_t *ctx);

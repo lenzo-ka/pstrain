@@ -29,3 +29,14 @@ add_test(
   NAME gauden_scaling
   COMMAND test_gauden_scaling
 )
+
+add_executable(test_state_seq_ownership test_state_seq_ownership.c)
+target_link_libraries(test_state_seq_ownership pstrainc)
+target_include_directories(test_state_seq_ownership
+  PRIVATE ${CMAKE_BINARY_DIR}
+)
+
+add_test(
+  NAME state_seq_ownership
+  COMMAND test_state_seq_ownership
+)

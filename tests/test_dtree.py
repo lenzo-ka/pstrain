@@ -168,9 +168,7 @@ class TestBuildTree:
                 var_path=None,
             )
 
-    def test_count_threshold_excludes_zero_occupancy_from_questions(
-        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_count_threshold_excludes_zero_occupancy_from_questions(self, tmp_path: Path) -> None:
         """A dictionary-only triphone cannot steer the selected question."""
         model = tmp_path / "mdef"
         model.write_text(
@@ -211,9 +209,6 @@ AA L2 L1 s n/a 0 5 N
             csplitmax=1,
             cntthresh=1e-5,
         )
-        diagnostic = capfd.readouterr().err
-
-        assert "2 of 3 models have observation count at least 0.000010" in diagnostic
         assert "(!LEFT_ONE 1)" in filtered.read_text().splitlines()[1]
 
 

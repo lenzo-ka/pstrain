@@ -839,14 +839,18 @@ def test_configured_bw_parameters_reach_training_call(
             iteration=1,
             first_pass_2passvar=bool(kwargs["first_pass_2passvar"]),
         )
-        trainer = BWTrainer(
-            model / "mdef",
-            model / "means",
-            model / "variances",
-            model / "mixture_weights",
-            model / "transition_matrices",
-            config=engine_config,
-        )
+        with monkeypatch.context() as local_patch:
+            # This unit test deliberately substitutes the CFFI constructor;
+            # exercise that child-side implementation without spawning.
+            local_patch.setattr("pstrain.lib.native_worker.in_worker", lambda: True)
+            trainer = BWTrainer(
+                model / "mdef",
+                model / "means",
+                model / "variances",
+                model / "mixture_weights",
+                model / "transition_matrices",
+                config=engine_config,
+            )
         del trainer
         output = Path(kwargs["output_dir"])  # type: ignore[arg-type]
         output.mkdir(parents=True, exist_ok=True)
