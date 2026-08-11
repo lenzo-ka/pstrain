@@ -6,6 +6,11 @@ while making decisions; the current source of truth is the code in
 
 ## Current architecture
 
+* [`config-unification.md`](config-unification.md) — proposed canonical,
+  source-aware configuration schema and migration from the current split
+  configuration systems.
+* [`one-command-training.md`](one-command-training.md) — proposed
+  `pstrain train` workflow from prepared prompts, WAVs, and a dictionary.
 * [`native-boundary.md`](native-boundary.md) — the boundary between
   Python and the vendored C library: which operations run inside a
   contained helper process, which are still unguarded, and how native
