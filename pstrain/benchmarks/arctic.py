@@ -97,6 +97,37 @@ KNOWN_SKIPS: list[dict[str, Any]] = [
         "recorded-in": "on-mode parity anchor",
     },
 ]
+PIPELINE_STAGE_ORDER = (
+    "flat",
+    "ci-1g",
+    "cd-untied-init",
+    "cd-untied",
+    "trees",
+    "prune-trees",
+    "cd-1g-init",
+    "cd-1g",
+    "cd-2g",
+    "cd-4g",
+    "cd-8g",
+    "cd-16g",
+    "cd-32g",
+)
+_PIPELINE_STAGE_RANK = {stage: rank for rank, stage in enumerate(PIPELINE_STAGE_ORDER)}
+
+
+def _canonical_known_skips(skips: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return known skips in stable pipeline, utterance, and pass order."""
+
+    def key(item: dict[str, Any]) -> tuple[int, str, int]:
+        passes = item.get("passes", [])
+        pass_number = item.get("pass", min(passes) if passes else -1)
+        return (
+            _PIPELINE_STAGE_RANK.get(str(item["stage"]), len(PIPELINE_STAGE_ORDER)),
+            str(item["utterance"]),
+            int(pass_number),
+        )
+
+    return sorted(skips, key=key)
 
 
 @dataclass(frozen=True)
@@ -717,7 +748,7 @@ def audit_monotonicity(project: Path) -> list[dict[str, Any]]:
                         known_skips.append(match)
     if failures:
         raise RuntimeError("training telemetry gate failed:\n" + "\n".join(failures))
-    return known_skips
+    return _canonical_known_skips(known_skips)
 
 
 def score_model(
@@ -944,6 +975,7 @@ def make_record(output: dict[str, Any]) -> dict[str, Any]:
         mode: {
             dataset: {
                 **{key: value for key, value in cell.items() if key != "matched_pairs"},
+                "known_skips": _canonical_known_skips(cell["known_skips"]),
                 "wer": float(cell["wer"]) * 100,
                 "utterance_rows": [
                     [utterance, value["ref_words"], value["errors"]]

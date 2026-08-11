@@ -442,6 +442,11 @@ def test_on_mode_reports_multiple_manifest_entries(tmp_path: Path) -> None:
     on_skips = [item for item in KNOWN_SKIPS if item["mode"] == "on"]
     assert audit_monotonicity(project) == on_skips
 
+    actual, _ = _comparison_documents()
+    actual["results"]["on"]["slt55"]["known_skips"] = list(reversed(on_skips))  # type: ignore[index]
+    record = make_record(actual)
+    assert record["results"]["on"]["slt55"]["known_skips"] == on_skips
+
 
 @pytest.mark.parametrize(
     ("mode", "utterance", "stage", "pass_numbers"),
