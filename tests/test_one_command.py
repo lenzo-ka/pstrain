@@ -19,6 +19,7 @@ from pstrain.lib.one_command import (
     validate_inputs,
     write_validation_reports,
 )
+from pstrain.lib.testing import check_pocketsphinx
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_arctic"
 
@@ -424,6 +425,10 @@ def test_one_command_trains_ci_1g_and_decodes_without_transcript_munging(
     decoder_transcript = project / "experiments" / "default" / "etc" / "test.decoder.transcription"
     assert model.is_file()
     assert decoder_transcript.read_text().startswith("<s>")
+
+    available, reason = check_pocketsphinx()
+    if not available:
+        pytest.skip(f"decode step needs PocketSphinx: {reason}")
 
     monkeypatch.setattr(
         sys,
