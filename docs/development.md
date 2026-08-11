@@ -1,33 +1,39 @@
 # Development
 
-## Building Documentation
+## Canonical build and test commands
 
 ```bash
-cd docs
-make html
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_CLI=ON
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure --no-tests=error
+pip install -e ".[dev,test,docs]"
+PSTRAIN_REQUIRE_CLIB=1 pytest
 ```
 
-Or using sphinx-build directly:
+Always configure CMake from the repository root. The Makefile provides
+equivalent `build-c` and `test` shortcuts.
+
+## Building documentation
 
 ```bash
-sphinx-build -b html docs docs/_build/html
+make docs
 ```
 
-## Running Tests
-
-```bash
-pytest
-```
+This runs the existing Sphinx HTML build. Configuration-reference generation is
+available separately as `make docs-gen`.
 
 ## Code Quality
 
 ```bash
 # Linting
-ruff check .
+ruff check pstrain tests
 
 # Type checking
 mypy pstrain
 
 # Formatting
-ruff format .
+ruff format --check pstrain tests
+
+# All repository hooks
+pre-commit run --all-files
 ```

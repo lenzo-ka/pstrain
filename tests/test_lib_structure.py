@@ -1,5 +1,8 @@
 """Test library structure and imports."""
 
+from pathlib import Path
+from tomllib import load
+
 import pytest
 
 from pstrain import __version__
@@ -11,7 +14,8 @@ from tests.clib import c_library_available as _lib_exists
 
 def test_version() -> None:
     """Test that version is defined."""
-    assert __version__ == "0.1.0"
+    with (Path(__file__).parents[1] / "pyproject.toml").open("rb") as pyproject:
+        assert __version__ == load(pyproject)["project"]["version"]
 
 
 def test_lib_public_api() -> None:

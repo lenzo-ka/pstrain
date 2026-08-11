@@ -2,7 +2,7 @@
 # Install: pip install pre-commit && pre-commit install
 
 default_language_version:
-  python: python3.11
+  python: python3.12
 
 repos:
   # Basic file checks
@@ -43,7 +43,7 @@ repos:
     rev: v2.1.0
     hooks:
       - id: mypy
-        additional_dependencies: [pydantic>=2.0, types-PyYAML, pytest>=7.0]
+        additional_dependencies: [pydantic==2.12.5, types-PyYAML==6.0.12.20250915, pytest==9.0.2]
         exclude: ^(build/|\.eggs/|csrc/)
         args: [pstrain, --ignore-missing-imports]
         pass_filenames: false

@@ -14,7 +14,8 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
-    "Operating System :: OS Independent",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
     "Programming Language :: C",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
@@ -73,13 +74,14 @@ build-backend = "scikit_build_core.build"
 [tool.scikit-build]
 build.verbose = true
 logging.level = "INFO"
+sdist.include = ["benchmarks/arctic/data/**"]
 # Keep the benchmark's immutable data beside its repository-relative path in
 # wheels as well as sdists.  ``benchmarks`` is data-only (not an import package).
 wheel.packages = ["pstrain", "benchmarks"]
 # Install library and binaries to pstrain/_lib/
 wheel.install-dir = "pstrain/_lib"
 # Require cmake 3.15+ for scikit-build-core
-cmake.version = ">=3.15"
+cmake.version = ">=3.16"
 
 [tool.scikit-build.wheel.force-include]
 "benchmarks/arctic/data" = "benchmarks/arctic/data"
@@ -103,11 +105,10 @@ skip = [
 # Smoke-test the *installed* wheel: import it and load the bundled libpstrainc.
 # We deliberately do NOT run `pytest {project}/tests` here — pytest inserts the
 # project root onto sys.path, which imports the source `pstrain/` package (no
-# bundled library) instead of the wheel, so every CFFI test would "not find
-# libpstrainc". Running `python -c` from cibuildwheel's neutral working directory
-# imports the installed wheel and verifies the C substrate loads. The full
+# bundled library) instead of the wheel. The smoke script is launched from
+# cibuildwheel's neutral working directory and rejects source-tree imports. The full
 # test suite (including parity) runs against a dev build in the Tests workflow.
-test-command = "python -c \"import pstrain; from pstrain.lib import _pstrainc; _pstrainc.get_lib(); print('wheel OK', pstrain.__version__)\""
+test-command = "python {project}/scripts/test_installed_distribution.py"
 
 [tool.cibuildwheel.macos]
 archs = ["x86_64", "arm64"]

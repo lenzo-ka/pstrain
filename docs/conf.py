@@ -1,6 +1,7 @@
 """Sphinx configuration for pstrain documentation."""
 
 import sys
+from importlib.metadata import version as distribution_version
 from pathlib import Path
 
 # Add project root to path
@@ -9,10 +10,10 @@ sys.path.insert(0, str(project_root))
 
 # Project information
 project = "pstrain"
-copyright = "2025, Kevin Lenzo"
+copyright = "2026, Kevin Lenzo"
 author = "Kevin Lenzo"
-release = "0.1.0"
-version = "0.1.0"
+release = distribution_version("pstrain")
+version = release
 
 # Extensions
 extensions = [

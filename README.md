@@ -90,11 +90,19 @@ the end-to-end test).
 ## Development
 
 ```bash
-make build-c            # configure + build libpstrainc into build/
-pip install -e ".[dev,test]"
-make test               # pytest
-make lint               # ruff + mypy
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_CLI=ON
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure --no-tests=error
+pip install -e ".[dev,test,docs]"
+PSTRAIN_REQUIRE_CLIB=1 pytest
+ruff check pstrain tests && ruff format --check pstrain tests
+mypy pstrain
+pre-commit run --all-files
 ```
+
+These repository-root CMake commands are the canonical native build entry
+point; `make build-c`, `make test`, and `make lint` are shortcuts for the same
+build and checks.
 
 Set `PSTRAIN_REQUIRE_CLIB=1` when running the tests to turn "C library not built"
 from a skip into a hard failure (used in CI so the CFFI/parity tier can't be
@@ -120,9 +128,9 @@ This is an early alpha; a few rough edges are known and tracked:
   transcription *reader* accepts that format. Use `<fileid> <words…>`.
 - Two configuration systems coexist; the pydantic `etc/config.yaml` does not yet
   drive training (the pipeline reads `etc/configs.yaml`).
-- **Platforms:** Linux and macOS are supported (wheels + CI). Windows is not yet
-  supported — the vendored CMU Sphinx C does not build under MSVC (POSIX-only
-  `drand48` and some unresolved symbols); build from source on WSL for now.
+- **Platforms:** Linux and macOS are supported (wheels + CI). Windows/MSVC is
+  explicitly future work; build through WSL for now. See
+  [support and dependency policy](docs/support.md).
 
 ## Acknowledgements
 

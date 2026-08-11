@@ -1,7 +1,11 @@
 """Basic version test."""
 
+from pathlib import Path
+from tomllib import load
+
 from pstrain import __version__
 
 
 def test_version() -> None:
-    assert __version__ == "0.1.0"
+    with (Path(__file__).parents[1] / "pyproject.toml").open("rb") as pyproject:
+        assert __version__ == load(pyproject)["project"]["version"]
