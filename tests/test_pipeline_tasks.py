@@ -22,6 +22,7 @@ import yaml
 from pstrain.lib.pipeline import PipelineContext
 from pstrain.lib.pipeline.context import DEFAULT_CONFIGS, FeatParams, SplitParams
 from pstrain.lib.pipeline.tasks import TARGETS, build_pipeline
+from tests.clib import C_LIBRARY_AVAILABLE
 
 
 @pytest.fixture
@@ -580,6 +581,75 @@ def test_multipron_training_defaults_on(empty_project: Path) -> None:
     ctx = PipelineContext.from_config(empty_project)
     assert ctx.train.multipron_training is True
     assert ctx.train.untied_inventory == "all-triphone"
+
+
+def test_linear_training_defaults_to_occurrence_inventory(empty_project: Path) -> None:
+    """An omitted inventory policy retains the pre-PR31 linear behavior."""
+    (empty_project / "etc" / "configs.yaml").write_text(
+        "default:\n  training:\n    multipron_training: false\n"
+    )
+
+    ctx = PipelineContext.from_config(empty_project)
+
+    assert ctx.train.multipron_training is False
+    assert ctx.train.untied_inventory == "linear"
+
+
+@pytest.mark.parametrize(
+    ("multipron", "policy"),
+    [
+        (True, "linear"),
+        (True, "all-triphone"),
+        (False, "linear"),
+        (False, "all-triphone"),
+    ],
+)
+def test_explicit_untied_inventory_is_honored(
+    empty_project: Path, multipron: bool, policy: str
+) -> None:
+    (empty_project / "etc" / "configs.yaml").write_text(
+        "default:\n  training:\n"
+        f"    multipron_training: {str(multipron).lower()}\n"
+        f"    untied_inventory: {policy}\n"
+    )
+
+    assert PipelineContext.from_config(empty_project).train.untied_inventory == policy
+
+
+def test_resolved_untied_inventory_appears_in_provenance(empty_project: Path) -> None:
+    (empty_project / "etc" / "configs.yaml").write_text(
+        "default:\n  training:\n    multipron_training: false\n"
+    )
+
+    payload = PipelineContext.from_config(empty_project).provenance_payload("training")
+
+    assert payload["training"]["untied_inventory"] == "linear"
+
+
+@pytest.mark.skipif(not C_LIBRARY_AVAILABLE, reason="libpstrainc not built")
+def test_linear_default_untied_stage_builds_occurrence_inventory(
+    empty_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The untied-init stage retains the mini fixture's pre-PR31 count."""
+    (empty_project / "shared" / "phoneset.txt").write_text("AA\nAE\nAH\nB\nD\nSIL\n")
+    (empty_project / "shared" / "dictionary.dict").write_text(
+        "BAD B AE D\nDAD D AE D\nADD AE D\nBAA B AA\n"
+    )
+    (empty_project / "shared" / "filler.dict").write_text("<s> SIL\n</s> SIL\n<sil> SIL\n")
+    (empty_project / "experiments" / "default" / "etc" / "train.transcription").write_text(
+        "<s> BAD DAD </s> (utt1)\n<s> ADD BAA </s> (utt2)\n"
+    )
+    (empty_project / "etc" / "configs.yaml").write_text(
+        "default:\n  training:\n    multipron_training: false\n"
+    )
+    monkeypatch.setattr("pstrain.lib.steps.cd_pipeline.run_init_cd_untied", lambda **_kwargs: None)
+    monkeypatch.setattr("pstrain.lib.pipeline.tasks._record_model_provenance", lambda *_args: None)
+
+    ctx = PipelineContext.from_config(empty_project)
+    build_pipeline(ctx).tasks()["cd-untied-init"].fn()
+
+    mdef_lines = (ctx.model_dir("cd-untied-init") / "mdef").read_text().splitlines()
+    assert "10 n_tri" in mdef_lines
 
 
 def test_transcript_reachable_untied_inventory_can_be_selected(empty_project: Path) -> None:

@@ -135,8 +135,8 @@ class TrainParams:
     # default; set to False to fall back to the legacy linear path that
     # always picks the first listed variant per word.
     multipron_training: bool = True
-    # Keep the M4b all-dictionary policy by default; multipron PP3g
-    # experiments can opt into the exact transcript-reachable graph domain.
+    # PipelineContext resolves an omitted config value by training mode:
+    # all-dictionary for multipron and occurrence-based for linear training.
     untied_inventory: str = "all-triphone"
     # Experimental parity instrument: stage -> pass (or "*") -> utterance IDs.
     exclusion_schedule: dict[str, dict[int | str, list[str]]] = field(default_factory=dict)
@@ -414,29 +414,31 @@ class PipelineContext:
             not isinstance(configured_jobs, int) or configured_jobs < 1
         ):
             raise ValueError(f"config {config_name!r} runner.jobs must be a positive integer")
-        untied_inventory = training_values.get("untied_inventory", "all-triphone")
+        multipron_training = training_values.get("multipron_training", True)
+        untied_inventory = training_values.get(
+            "untied_inventory",
+            "all-triphone" if multipron_training else "linear",
+        )
         if untied_inventory not in {"all-triphone", "transcript-reachable", "linear"}:
             raise ValueError(
                 f"config {config_name!r} training.untied_inventory must be "
                 "all-triphone, transcript-reachable, or linear"
             )
         _validate_exclusion_schedule(config_name, training_values.get("exclusion_schedule", {}))
-        if (
-            untied_inventory == "transcript-reachable"
-            and training_values.get("multipron_training", True) is False
-        ):
+        if untied_inventory == "transcript-reachable" and multipron_training is False:
             raise ValueError(
                 f"config {config_name!r} training.untied_inventory "
                 "'transcript-reachable' requires training.multipron_training: true; "
                 "linear mode's equivalent is the 'linear' policy"
             )
+        resolved_training_values = {**training_values, "untied_inventory": untied_inventory}
         return cls(
             project_dir=project_dir,
             experiment=experiment,
             config_name=config_name,
             description=cfg.get("description", ""),
             feat=FeatParams(**_coerce_dataclass_values(feature_values, FeatParams)),
-            train=TrainParams(**_coerce_dataclass_values(training_values, TrainParams)),
+            train=TrainParams(**_coerce_dataclass_values(resolved_training_values, TrainParams)),
             split=SplitParams(**_coerce_dataclass_values(split_values, SplitParams)),
             runner=RunnerParams(**runner_values),
         )
