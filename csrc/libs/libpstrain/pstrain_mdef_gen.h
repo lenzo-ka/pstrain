@@ -55,8 +55,8 @@ int pstrain_mdef_gen_alltriphones(const char *phone_list_path,
  * @param output_path Output mdef file path
  * @param n_state Number of emitting states per phone
  * @param ignore_wpos If true, ignore word position
- * @param multipron If true, include every dictionary-producible triphone;
- * otherwise retain upstream occurrence-pruned behavior
+ * @param inventory_policy 0 for linear occurrence pruning, 1 for every
+ * dictionary-producible triphone, 2 for transcript-reachable graph contexts
  * @return 0 on success, -1 on error
  */
 int pstrain_mdef_gen_untied(const char *phone_list_path,
@@ -66,7 +66,7 @@ int pstrain_mdef_gen_untied(const char *phone_list_path,
                         const char *output_path,
                         uint32 n_state,
                         int32 ignore_wpos,
-                        int32 multipron);
+                        int32 inventory_policy);
 
 /**
  * Count triphones in transcripts.

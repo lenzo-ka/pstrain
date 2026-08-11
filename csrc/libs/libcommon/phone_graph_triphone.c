@@ -308,6 +308,54 @@ graph_btw_posn(char btw_mark, word_posn_t posn)
 }
 
 int
+phone_graph_visit_triphones(const phone_graph_t *graph,
+                            acmod_set_t *acmod_set,
+                            phone_graph_triphone_visitor_t visitor,
+                            void *user_data)
+{
+    uint32 i;
+    acmod_id_t sil;
+    word_posn_t *posn_track;
+
+    if (!graph || !acmod_set || !visitor) return S3_ERROR;
+    if (graph->n == 0) return S3_SUCCESS;
+
+    sil = acmod_set_name2id(acmod_set, "SIL");
+    posn_track = ckd_calloc(graph->n, sizeof(word_posn_t));
+    for (i = 0; i < graph->n; ++i) {
+        acmod_id_t b = graph->phone[i];
+        acmod_id_t l = sil;
+        acmod_id_t r = sil;
+        word_posn_t in_posn;
+
+        if (graph->n_prior[i] == 0)
+            in_posn = WORD_POSN_END;
+        else
+            in_posn = posn_track[graph->prior_idx[i][0]];
+        posn_track[i] = graph_btw_posn(graph->btw_mark[i], in_posn);
+
+        if (graph->n_prior[i] != 0) {
+            acmod_id_t phone = graph->phone[graph->prior_idx[i][0]];
+            if (!acmod_set_has_attrib(acmod_set, phone, "filler"))
+                l = acmod_set_base_phone(acmod_set, phone);
+        }
+        if (graph->n_next[i] != 0) {
+            acmod_id_t phone = graph->phone[graph->next_idx[i][0]];
+            if (!acmod_set_has_attrib(acmod_set, phone, "filler"))
+                r = acmod_set_base_phone(acmod_set, phone);
+        }
+        if (!acmod_set_has_attrib(acmod_set, b, "filler") &&
+            visitor(acmod_set_base_phone(acmod_set, b), l, r,
+                    posn_track[i], user_data) != S3_SUCCESS) {
+            ckd_free(posn_track);
+            return S3_ERROR;
+        }
+    }
+    ckd_free(posn_track);
+    return S3_SUCCESS;
+}
+
+int
 cvt2triphone_graph(phone_graph_t *graph, acmod_set_t *acmod_set)
 {
     uint32 i;

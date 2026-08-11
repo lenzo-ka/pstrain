@@ -450,6 +450,69 @@ def test_cd_variant_boundaries_expand_both_triphone_contexts(
 
 
 @requires_c_library
+def test_withheld_context_uses_live_ci_fallback_across_passes(
+    full_project: PipelineContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An inventory miss trains through CI fallback for every re-estimation pass."""
+    from pstrain.lib.mdef import generate_untied_mdef
+    from pstrain.lib.steps.cd_pipeline import run_init_cd_untied
+
+    transcript = tmp_path / "fallback.transcription"
+    transcript.write_text("<s> a and </s> (arctic_a0001)\n")
+    fileids = tmp_path / "fallback.fileids"
+    fileids.write_text("arctic_a0001\n")
+    linear_mdef = tmp_path / "linear.mdef"
+    generate_untied_mdef(
+        full_project.shared_dir / "phoneset.txt",
+        full_project.shared_dir / "dictionary.dict",
+        transcript,
+        linear_mdef,
+        filler_dict=full_project.filler_dict,
+        inventory_policy="linear",
+    )
+    rows = {tuple(row[:4]) for row in _mdef_rows(linear_mdef)}
+    withheld = ("EY", "SIL", "AE", "s")
+    assert withheld not in rows
+
+    initial = tmp_path / "initial"
+    run_init_cd_untied(full_project.model_dir("ci-1g"), linear_mdef, initial)
+    output = tmp_path / "trained"
+    monkeypatch.setenv("PSTRAIN_BW_CHECKPOINTS", "1")
+    result = run_bw_training(
+        initial,
+        output,
+        full_project.features_dir,
+        fileids,
+        transcript,
+        full_project.shared_dir / "dictionary.dict",
+        filler_dict=full_project.filler_dict,
+        n_iter=3,
+        min_iterations=3,
+        convergence_ratio=-1e30,
+        first_pass_2passvar=True,
+        config=BWConfig(pass2var=True, a_beam=1e-200, multipron=True),
+    )
+    assert result.iterations == 3
+    assert result.total_skipped == 0
+    assert all(row.skipped_utts == 0 for row in result.trajectory)
+
+    mfcc = read_sphinx_mfc(full_project.features_dir / "arctic_a0001.mfc")
+    for iteration in range(1, 4):
+        checkpoint = output / "iterations" / f"{iteration:02d}"
+        trainer = BWTrainer(
+            checkpoint / "mdef",
+            checkpoint / "means",
+            checkpoint / "variances",
+            checkpoint / "mixture_weights",
+            checkpoint / "transition_matrices",
+            BWConfig(pass2var=True, a_beam=1e-200, multipron=True),
+        )
+        trainer.set_dict(full_project.shared_dir / "dictionary.dict", full_project.filler_dict)
+        assert trainer.process_utterance_mfcc(mfcc, "<s> a and </s>")
+        assert not trainer.final_state_not_reached
+
+
+@requires_c_library
 @pytest.mark.parametrize("fileid", ["arctic_a0257", "arctic_a0336", "arctic_b0424"])
 def test_m4_real_utterances_reach_shared_final_state(
     fileid: str,

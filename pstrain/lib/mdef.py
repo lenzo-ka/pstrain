@@ -85,12 +85,12 @@ def generate_untied_mdef(
     n_state: int = 3,
     ignore_wpos: bool = False,
     multipron: bool = True,
+    inventory_policy: str | None = None,
 ) -> None:
     """Generate untied mdef from transcripts.
 
-    In multipron mode, creates every dictionary-producible triphone so the
-    untied inventory covers every pronunciation-graph path. In linear mode,
-    uses upstream-compatible occurrence pruning.
+    The default policy preserves current behavior: all dictionary-producible
+    triphones in multipron mode and occurrence pruning in linear mode.
 
     Args:
         phone_list: Path to CI phone list
@@ -101,10 +101,19 @@ def generate_untied_mdef(
         n_state: Number of emitting states per phone
         ignore_wpos: If True, ignore word position
         multipron: Whether the downstream trainer uses pronunciation graphs
+        inventory_policy: ``all-triphone``, ``transcript-reachable``, or
+            ``linear``. If omitted, derives the current policy from multipron.
 
     Raises:
         RuntimeError: If generation fails
     """
+    if inventory_policy is None:
+        inventory_policy = "all-triphone" if multipron else "linear"
+    policies = {"linear": 0, "all-triphone": 1, "transcript-reachable": 2}
+    if inventory_policy not in policies:
+        choices = ", ".join(sorted(policies))
+        raise ValueError(f"unknown untied inventory policy {inventory_policy!r}; choose {choices}")
+
     lib = _pstrainc.get_lib()
     ret = lib.pstrain_mdef_gen_untied(
         str(phone_list).encode(),
@@ -114,7 +123,7 @@ def generate_untied_mdef(
         str(output).encode(),
         n_state,
         1 if ignore_wpos else 0,
-        1 if multipron else 0,
+        policies[inventory_policy],
     )
     if ret != 0:
         raise RuntimeError(f"Failed to generate untied mdef: {output}")

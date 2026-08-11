@@ -160,6 +160,24 @@ sphinxtrain:
     multipron_training: false
 ```
 
+Untied inventory selection is a separate dial. The default remains the full
+dictionary-producible set introduced for M4b. A PP3g-style cell selects the
+exact set of contexts reachable in its training pronunciation graphs:
+
+```yaml
+training:
+  multipron_training: true
+  untied_inventory: transcript-reachable
+```
+
+`transcript-reachable` expands every pronunciation variant for each word in
+the training transcripts and enumerates both sides of variant-boundary
+cross-products with the same graph context logic used by Baum-Welch. The
+other policies are `all-triphone` and the upstream-compatible `linear`
+first-pronunciation occurrence policy. Inventory misses always back off to a
+trainable CI state; the inventory choice controls parameter allocation, not
+whether an utterance can train.
+
 Then `pstrain build cd-8g --config sphinxtrain` falls through to the
 legacy `mk_phone_list` + `cvt2triphone` + `state_seq_make` path.
 Output is bit-identical to pstrain's pre-multipron behavior.

@@ -123,6 +123,21 @@ phone_graph_split_contexts(const phone_graph_t *in, acmod_set_t *acmod_set);
 int
 cvt2triphone_graph(phone_graph_t *graph, acmod_set_t *acmod_set);
 
+typedef int (*phone_graph_triphone_visitor_t)(acmod_id_t base,
+                                              acmod_id_t left,
+                                              acmod_id_t right,
+                                              word_posn_t posn,
+                                              void *user_data);
+
+/* Visit the exact triphone contexts represented by an already-split graph.
+ * Filler slots are omitted. The context and word-position calculation is the
+ * same one used by cvt2triphone_graph(). */
+int
+phone_graph_visit_triphones(const phone_graph_t *graph,
+                            acmod_set_t *acmod_set,
+                            phone_graph_triphone_visitor_t visitor,
+                            void *user_data);
+
 #ifdef __cplusplus
 }
 #endif

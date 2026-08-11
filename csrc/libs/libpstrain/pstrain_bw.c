@@ -699,6 +699,50 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
     uint32 *veclen = g->veclen;
     uint32 i, j, k, l;
 
+    /* A missing CD model resolves to its CI senones. Once such a senone has
+     * occupancy, keep one observation of its previous CI distribution in the
+     * re-estimate. This is a proper survival prior: fallback states still
+     * learn from their posteriors, but a sparsely selected graph branch cannot
+     * collapse its Gaussian or mixture support after the first pass. It is
+     * inactive when the inventory has no misses, so established trajectories
+     * remain unchanged. */
+    if (acmod_set_n_multi(ctx->mdef->acmod_set) > 0 &&
+        n_mgau == ctx->mdef->n_tied_state) {
+        char *seeded = ckd_calloc(n_mgau, sizeof(*seeded));
+        acmod_id_t ci;
+        for (ci = 0; ci < ctx->mdef->acmod_set->n_ci; ++ci) {
+            uint32 state;
+            if (acmod_set_has_attrib(ctx->mdef->acmod_set, ci, "filler"))
+                continue;
+            for (state = 0; state + 1 < ctx->mdef->defn[ci].n_state; ++state) {
+                uint32 tied_state = ctx->mdef->defn[ci].state[state];
+                uint32 cb = tied_state;
+                int observed = 0;
+                if (cb >= n_mgau || seeded[cb]) continue;
+                for (j = 0; j < n_feat && !observed; ++j)
+                    for (k = 0; k < n_density; ++k)
+                        if (g->dnom[cb][j][k] > 0) { observed = 1; break; }
+                if (!observed) continue;
+                seeded[cb] = 1;
+                for (j = 0; j < n_feat; ++j) {
+                    for (k = 0; k < n_density; ++k) {
+                        float32 prior = ctx->inv->mixw[tied_state][j][k];
+                        g->dnom[cb][j][k] += prior;
+                        for (l = 0; l < veclen[j]; ++l) {
+                            float32 mean = g->mean[cb][j][k][l];
+                            g->macc[cb][j][k][l] += prior * mean;
+                            g->vacc[cb][j][k][l] += prior *
+                                (ctx->pass2var ? g->var[cb][j][k][l]
+                                               : g->var[cb][j][k][l] + mean * mean);
+                        }
+                        ctx->inv->mixw_acc[tied_state][j][k] += prior;
+                    }
+                }
+            }
+        }
+        ckd_free(seeded);
+    }
+
     /* Normalize Gaussians: mean and variance */
     E_INFO("Normalizing Gaussians...\n");
     for (i = 0; i < n_mgau; i++) {

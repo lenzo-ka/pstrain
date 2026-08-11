@@ -552,6 +552,18 @@ def test_multipron_training_defaults_on(empty_project: Path) -> None:
     """Multi-pron training is on by default at every layer."""
     ctx = PipelineContext.from_config(empty_project)
     assert ctx.train.multipron_training is True
+    assert ctx.train.untied_inventory == "all-triphone"
+
+
+def test_transcript_reachable_untied_inventory_can_be_selected(empty_project: Path) -> None:
+    """The PP3g inventory dial is opt-in and independent of graph training."""
+    (empty_project / "etc" / "configs.yaml").write_text(
+        "default:\n  description: reachable\n  training:\n"
+        "    untied_inventory: transcript-reachable\n"
+    )
+    ctx = PipelineContext.from_config(empty_project)
+    assert ctx.train.untied_inventory == "transcript-reachable"
+    assert ctx.train.multipron_training is True
 
 
 def test_multipron_training_can_be_disabled(empty_project: Path) -> None:
