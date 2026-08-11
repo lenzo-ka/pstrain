@@ -186,6 +186,40 @@ def test_bw_golden_trajectory_and_accounting(
 
 
 @requires_c_library
+def test_bw_exclusion_schedule_targets_named_passes_and_wildcard(
+    flat_project: PipelineContext, tmp_path: Path
+) -> None:
+    """Scheduled utterances are accounted for without reaching accumulation."""
+    fileids, transcription = write_golden_subset(flat_project)
+    common: dict[str, Any] = {
+        "model_dir": flat_project.model_dir("flat"),
+        "features_dir": flat_project.features_dir,
+        "train_fileids": fileids,
+        "transcription": transcription,
+        "dictionary": flat_project.shared_dir / "dictionary.dict",
+        "filler_dict": flat_project.filler_dict,
+        "first_pass_2passvar": False,
+        "n_iter": 1,
+        "max_skip_fraction": 1.0,
+        "config": BWConfig(pass2var=True, a_beam=1e-200),
+    }
+    cases = (
+        ("named", {1: ["arctic_a0001"], 2: ["arctic_a0002"]}),
+        ("wildcard", {"*": ["arctic_a0003"]}),
+    )
+    for name, schedule in cases:
+        output_dir = tmp_path / name
+        result = run_bw_training(output_dir=output_dir, exclusion_schedule=schedule, **common)
+
+        row = result.trajectory[0]
+        assert (row.input_utts, row.processed_utts, row.retried_utts) == (3, 2, 0)
+        assert (row.skipped_utts, row.excluded_by_schedule) == (1, 1)
+        telemetry = json.loads((output_dir / "bw_telemetry.json").read_text())
+        assert telemetry["schema_version"] == 2
+        assert telemetry["passes"][0]["accounting"]["skip_reasons"] == {"excluded_by_schedule": 1}
+
+
+@requires_c_library
 def test_per_utterance_aggregation_conserves_totals(flat_project: PipelineContext) -> None:
     """Choke point B: utterance contributions sum to the batch accumulator."""
     transcripts = {

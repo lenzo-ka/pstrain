@@ -306,6 +306,33 @@ def test_stage_fingerprints_cover_only_effective_relevant_values(empty_project: 
     assert document["fingerprint"] in base.provenance_path("training").name
 
 
+def test_exclusion_schedule_config_and_provenance_are_verbatim(empty_project: Path) -> None:
+    schedule = {
+        "ci-1g": {5: ["arctic_a0587"], 6: ["arctic_a0587"]},
+        "cd-untied": {"*": ["arctic_a0587"]},
+    }
+    (empty_project / "etc" / "configs.yaml").write_text(
+        yaml.safe_dump({"scheduled": {"training": {"exclusion_schedule": schedule}}})
+    )
+
+    ctx = PipelineContext.from_config(empty_project, config_name="scheduled")
+
+    assert ctx.train.exclusion_schedule == schedule
+    assert ctx.provenance_payload("training")["training"]["exclusion_schedule"] == schedule
+
+
+def test_exclusion_schedule_does_not_change_decode_eval_inputs(empty_project: Path) -> None:
+    (empty_project / "etc" / "configs.yaml").write_text(
+        "scheduled:\n  training:\n    exclusion_schedule:\n      ci-8g: {'*': [arctic_a0587]}\n"
+    )
+    ctx = PipelineContext.from_config(empty_project, config_name="scheduled")
+    task = build_pipeline(ctx).tasks()["test-ci-8g"]
+
+    assert ctx.etc_dir / "test.transcription" in task.inputs
+    assert ctx.etc_dir / "train.fileids" not in task.inputs
+    assert ctx.etc_dir / "train.transcription" not in task.inputs
+
+
 def test_native_library_identity_is_content_based_not_path_based(
     empty_project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

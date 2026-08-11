@@ -358,6 +358,7 @@ def _make_bw_train_task(
             max_skip_fraction=ctx.train.max_skip_fraction,
             retry_beam_factor=ctx.train.retry_beam_factor,
             first_pass_2passvar=first_pass_2passvar,
+            exclusion_schedule=ctx.train.exclusion_schedule.get(out_model),
         )
         if copy_mdef_from_src:
             shutil.copy(src_dir / "mdef", out_dir / "mdef")
@@ -428,6 +429,7 @@ def _make_split_and_train_task(
             max_skip_fraction=ctx.train.max_skip_fraction,
             retry_beam_factor=ctx.train.retry_beam_factor,
             first_pass_2passvar=first_pass_2passvar,
+            exclusion_schedule=ctx.train.exclusion_schedule.get(out_model),
         )
         write_feat_params(out_dir / "feat.params", ctx.feat)
         _record_model_provenance(ctx, out_dir)
