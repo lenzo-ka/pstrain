@@ -16,6 +16,7 @@ from pstrain.benchmarks.arctic import (
     PIN_CONFIGS,
     PINNED_RESOURCE_HASHES,
     RECORD_SCHEMA_VERSION,
+    _run_trusted_child,
     audit_monotonicity,
     authenticate_pin_resources,
     band_resources,
@@ -23,12 +24,14 @@ from pstrain.benchmarks.arctic import (
     bootstrap_ci,
     compare_results,
     extract_archive,
+    fetch_archive,
     load_transcripts,
     main,
     make_record,
     paired_delta_ci,
     resolve_data_dir,
     sha256,
+    training_corpus_identity,
     validate_record,
 )
 from pstrain.lib.lm import build_lm
@@ -44,8 +47,40 @@ def test_archive_manifest_matches_runtime_config() -> None:
     assert all(len(archive.sha256) == 64 for archive in ARCHIVES)
 
 
+def test_network_and_benchmark_children_use_safe_launch_shape(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> None:
+        calls.append((command, kwargs))
+
+    def reject_in_process_network(*args: object, **kwargs: object) -> None:
+        raise AssertionError("the harness parent must never access the network")
+
+    monkeypatch.setattr("pstrain.benchmarks.arctic.subprocess.run", fake_run)
+    monkeypatch.setattr(
+        "pstrain.benchmarks.arctic.urllib.request.urlopen", reject_in_process_network
+    )
+
+    destination = fetch_archive(ARCHIVES[0], tmp_path)
+    assert destination == tmp_path / Path(ARCHIVES[0].url).name
+    assert calls[0][0][2] == "_fetch-archive"
+    _run_trusted_child(["/absolute/python", "/absolute/child.py"])
+    assert len(calls) == 2
+    for _command, kwargs in calls:
+        assert "cwd" not in kwargs
+        assert kwargs["close_fds"] is False
+        assert kwargs["check"] is True
+
+
 def test_committed_transcripts_are_normalized_and_complete() -> None:
-    expected = {"train.transcription": 1132, "slt55.transcription": 55, "big.transcription": 3395}
+    expected = {
+        "pin-train.transcription": 1043,
+        "full-slt.transcription": 1132,
+        "slt55.transcription": 55,
+        "big.transcription": 3395,
+    }
     for name, count in expected.items():
         transcripts = load_transcripts(DATA_DIR / name)
         assert len(transcripts) == count
@@ -54,9 +89,24 @@ def test_committed_transcripts_are_normalized_and_complete() -> None:
     big = load_transcripts(DATA_DIR / "big.transcription")
     assert {utterance.split("/", 1)[0] for utterance in big} == {"bdl", "rms", "clb"}
 
-    train = set(load_transcripts(DATA_DIR / "train.transcription"))
-    assert set(load_transcripts(DATA_DIR / "slt55.transcription")) <= train
+    train = set(load_transcripts(DATA_DIR / "pin-train.transcription"))
+    fileids = (DATA_DIR / "pin-train.fileids").read_text().splitlines()
+    assert len(fileids) == len(set(fileids)) == 1043
+    assert fileids == list(load_transcripts(DATA_DIR / "pin-train.transcription"))
+    assert not (set(load_transcripts(DATA_DIR / "slt55.transcription")) & train)
     assert not (set(big) & train)
+
+    assert training_corpus_identity() == {
+        "utterances": 1043,
+        "transcription": {
+            "name": "pin-train.transcription",
+            "sha256": "7b6beae122d9da47ad89861a15490c531c194ca9bc2e329b8b133d94ed960ad6",
+        },
+        "fileids": {
+            "name": "pin-train.fileids",
+            "sha256": "8ce9a55c5929f6f86579ee1b244c38fd4d0a9d41e436e2057337f74c1bb4d631",
+        },
+    }
 
 
 def test_data_resolves_from_wheel_and_repo_layouts(tmp_path: Path) -> None:
@@ -66,10 +116,10 @@ def test_data_resolves_from_wheel_and_repo_layouts(tmp_path: Path) -> None:
     repo_data = repo_root / "benchmarks/arctic/data"
     wheel_data.mkdir(parents=True)
     repo_data.mkdir(parents=True)
-    (wheel_data / "train.transcription").write_text("wheel text\n")
-    (repo_data / "train.transcription").write_text("repo text\n")
+    (wheel_data / "pin-train.transcription").write_text("wheel text\n")
+    (repo_data / "pin-train.transcription").write_text("repo text\n")
     assert resolve_data_dir(package_root=wheel_root, repo_root=repo_root) == wheel_data
-    (wheel_data / "train.transcription").unlink()
+    (wheel_data / "pin-train.transcription").unlink()
     assert resolve_data_dir(package_root=wheel_root, repo_root=repo_root) == repo_data
 
 
@@ -83,18 +133,17 @@ def test_pin_band_resources_and_hashes() -> None:
     authenticate_pin_resources(dictionary, lm, FILLER_DICTIONARY.encode())
 
 
-def test_unigram_builder_difference_is_known(tmp_path: Path) -> None:
-    """The 1,132-prompt corpus is not the 1,043-prompt canonical LM corpus."""
+def test_unigram_builder_difference_from_canonical_is_known(tmp_path: Path) -> None:
     built = tmp_path / "training-unigram.lm"
-    build_lm(load_transcripts(DATA_DIR / "train.transcription"), built, max_order=1)
-    assert sha256(built) == "43ea28991421ff8d1c2cc375ca59822ddf3ad15408ef49a8ae16a6a9c43e3f6c"
+    build_lm(load_transcripts(DATA_DIR / "pin-train.transcription"), built, max_order=1)
+    assert sha256(built) == "2c75cacb19b45c442fd857b791a2abaef7645eb9a1da510907546ac8503179c6"
     assert built.read_bytes() != (DATA_DIR / "training-unigram.lm").read_bytes()
 
 
 def test_transcript_serializations_are_enforced() -> None:
-    train_lines = (DATA_DIR / "train.transcription").read_text().splitlines()
-    assert all(line.startswith("arctic_") and "<s>" not in line for line in train_lines)
-    for name in ("slt55.transcription", "big.transcription"):
+    full_lines = (DATA_DIR / "full-slt.transcription").read_text().splitlines()
+    assert all(line.startswith("arctic_") and "<s>" not in line for line in full_lines)
+    for name in ("pin-train.transcription", "slt55.transcription", "big.transcription"):
         lines = (DATA_DIR / name).read_text().splitlines()
         assert all(
             line.startswith("<s> ") and " </s> (" in line and line.endswith(")") for line in lines
@@ -216,7 +265,7 @@ def test_comparison_authenticates_inputs_and_pair_ids() -> None:
 
 def test_record_schema_and_bootstrap_smoke() -> None:
     conditions = benchmark_conditions()
-    assert conditions["cells"]["slt55"] == "same-speaker resubstitution cell"
+    assert conditions["cells"]["slt55"] == "same-speaker held-out cell"
     assert conditions["bootstrap"]["resamples"] == 100_000
     pairs = {
         "a/1": {"errors": 0, "ref_words": 10},

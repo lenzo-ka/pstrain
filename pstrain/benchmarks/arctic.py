@@ -28,7 +28,7 @@ def resolve_data_dir(*, package_root: Path | None = None, repo_root: Path | None
     installed = (package_root or ROOT) / "benchmarks" / "arctic" / "data"
     checkout = (repo_root or Path.cwd()) / "benchmarks" / "arctic" / "data"
     for candidate in (installed, checkout):
-        if (candidate / "train.transcription").is_file():
+        if (candidate / "pin-train.transcription").is_file():
             return candidate
     raise RuntimeError(
         "CMU Arctic benchmark data is unavailable; checked "
@@ -195,6 +195,24 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _run_trusted_child(
+    command: list[str],
+    *,
+    stdout: Any = None,
+    stderr: Any = None,
+    env: dict[str, str] | None = None,
+) -> None:
+    """Run a trusted benchmark child using the posix_spawn-eligible shape."""
+    subprocess.run(
+        command,
+        check=True,
+        close_fds=False,
+        stdout=stdout,
+        stderr=stderr,
+        env=env,
+    )
+
+
 def _tracked_modifications_hash() -> str:
     """Hash paths, states, and contents of tracked worktree modifications."""
     status = subprocess.run(
@@ -282,7 +300,7 @@ def benchmark_conditions(band: str = "pin") -> dict[str, Any]:
             "seed": BOOTSTRAP_SEED,
             "big_speaker_stratified": True,
         },
-        "cells": {"slt55": "same-speaker resubstitution cell", "big": "cross-speaker"},
+        "cells": {"slt55": "same-speaker held-out cell", "big": "cross-speaker"},
         "frozen_dataclass_fields": frozen_fields,
     }
 
@@ -451,7 +469,24 @@ def paired_delta_ci(
 
 
 def fetch_archive(archive: Archive, cache: Path) -> Path:
-    """HEAD-check, download, and authenticate an archive."""
+    """Fetch an archive without performing network operations in this process."""
+    destination = cache / Path(archive.url).name
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "_fetch-archive",
+        json.dumps(asdict(archive), separators=(",", ":")),
+        str(cache.resolve()),
+    ]
+    # pp8-segv-report-2026-08-11.md diagnosed a macOS 27 Network.framework atfork
+    # crash: after any in-process HTTP connection, a raw fork child can segfault
+    # before exec. Keep the harness network-clean and this helper posix_spawn-eligible.
+    _run_trusted_child(command)
+    return destination
+
+
+def _fetch_archive_in_helper(archive: Archive, cache: Path) -> Path:
+    """HEAD-check, download, and authenticate an archive in the network helper."""
     cache.mkdir(parents=True, exist_ok=True)
     request = urllib.request.Request(archive.url, method="HEAD")
     try:
@@ -497,6 +532,21 @@ def load_transcripts(path: Path) -> dict[str, str]:
     return result
 
 
+def training_corpus_identity() -> dict[str, Any]:
+    """Return and validate the immutable pin-training corpus identity."""
+    transcription = DATA_DIR / "pin-train.transcription"
+    fileids_path = DATA_DIR / "pin-train.fileids"
+    transcripts = load_transcripts(transcription)
+    fileids = [line.strip() for line in fileids_path.read_text().splitlines() if line.strip()]
+    if fileids != list(transcripts):
+        raise RuntimeError("pin training transcript and fileids differ")
+    return {
+        "utterances": len(fileids),
+        "transcription": {"name": transcription.name, "sha256": sha256(transcription)},
+        "fileids": {"name": fileids_path.name, "sha256": sha256(fileids_path)},
+    }
+
+
 def pocketsphinx_dictionary() -> Path:
     """Resolve the dictionary shipped by the required pip package."""
     try:
@@ -540,7 +590,7 @@ def write_project(project: Path, corpus: Path, dictionary: Path) -> None:
     """Materialize shared benchmark inputs and explicit pin configs."""
     (project / "etc").mkdir(parents=True, exist_ok=True)
     (project / "shared").mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(DATA_DIR / "train.transcription", project / "etc" / "all.transcription")
+    shutil.copyfile(DATA_DIR / "pin-train.transcription", project / "etc" / "all.transcription")
     shutil.copyfile(dictionary, project / "shared" / "dictionary.dict")
     phones = {
         phone.rstrip("0123456789")
@@ -849,6 +899,7 @@ def run(
             for item in ARCHIVES
         },
         "transcripts": {path.name: sha256(path) for path in DATA_DIR.glob("*.transcription")},
+        "training_corpus": training_corpus_identity(),
         "dictionary_sha256": sha256(dictionary),
         "lm_sha256": sha256(lm),
         "filler_dictionary_sha256": hashlib.sha256(FILLER_DICTIONARY.encode()).hexdigest(),
@@ -880,7 +931,16 @@ def run(
             command.extend(["--jobs", str(jobs)])
         training_log = project / "training.log"
         with training_log.open("w", encoding="utf-8") as log:
-            subprocess.run(command, cwd=ROOT, check=True, stdout=log, stderr=subprocess.STDOUT)
+            env = os.environ.copy()
+            env["PYTHONPATH"] = os.pathsep.join(
+                filter(None, (str(ROOT), env.get("PYTHONPATH", "")))
+            )
+            _run_trusted_child(
+                command,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                env=env,
+            )
         audit_monotonicity(project)
         model = project / "shared" / "models" / "cd-8g" / mode
         slt = load_transcripts(DATA_DIR / "slt55.transcription")
@@ -920,6 +980,13 @@ def run(
 
 
 def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv[:1] == ["_fetch-archive"]:
+        if len(argv) != 3:
+            raise SystemExit("_fetch-archive requires an archive JSON object and cache path")
+        _fetch_archive_in_helper(Archive(**json.loads(argv[1])), Path(argv[2]))
+        return 0
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--work-dir", type=Path, default=Path(".pstrain-benchmark/arctic"))
     parser.add_argument("--record", type=Path, help="committed docs/benchmarks JSON record")
