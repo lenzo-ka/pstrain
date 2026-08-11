@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Literal
@@ -105,12 +106,18 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
     flat_project: PipelineContext, tmp_path: Path
 ) -> None:
     """Zero/retain differ only on empty cells; occupied raw variance is lossless."""
-    model = flat_project.model_dir("flat")
+    model = tmp_path / "input"
+    shutil.copytree(flat_project.model_dir("flat"), model)
     prior_means_raw, n_cb, n_feat, n_density, veclens = _pstrainc.read_gau(str(model / "means"))
     assert n_feat == 1
     veclen = veclens[0]
     prior_means = prior_means_raw.reshape(n_cb, n_density, veclen)
     prior_vars = _pstrainc.read_gau(str(model / "variances"))[0].reshape(n_cb, n_density, veclen)
+    # Exercise both sides of the evaluation floor on every codebook. Retain
+    # must serialize these exact input floats for cells with zero occupancy.
+    prior_vars[..., 0::2] = np.float32(5e-5)
+    prior_vars[..., 1::2] = np.float32(0.0)
+    _pstrainc.write_gau(str(model / "variances"), prior_vars)
     features = np.full((60, 39), 0.25, dtype=np.float32)
     phones = np.array([0], dtype=np.uint32)
     outputs: dict[str, dict[str, np.ndarray[Any, Any]]] = {}
@@ -154,6 +161,8 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
     assert np.count_nonzero(outputs["zero"]["variances"][empty]) == 0
     np.testing.assert_array_equal(outputs["retain"]["means"][empty], prior_means[empty])
     np.testing.assert_array_equal(outputs["retain"]["variances"][empty], prior_vars[empty])
+    assert np.any(outputs["retain"]["variances"][empty] == np.float32(5e-5))
+    assert np.any(outputs["retain"]["variances"][empty] == np.float32(0.0))
 
     # Every occupied cell saw the same value, so direct one-pass V/N-E[x]^2
     # is exactly zero in float32.  The saved artifact must not contain the
@@ -821,6 +830,8 @@ def test_withheld_context_uses_live_ci_fallback_across_passes(
         positive_mass = fallback_counts.sum(axis=1)
         positive_mass = positive_mass[positive_mass > 0]
         assert positive_mass.min() < 1.1  # comparable to the unit-mass prior
+        zero_mass_senones = fallback_senones[fallback_counts.sum(axis=1) == 0]
+        assert zero_mass_senones.size, "fixture must include an unselected fallback branch"
         for name in ("means", "variances", "mixture_weights"):
             current_values = checkpoint_arrays[name].reshape(
                 -1, 2, *(() if name == "mixture_weights" else (39,))
@@ -829,6 +840,10 @@ def test_withheld_context_uses_live_ci_fallback_across_passes(
                 -1, 2, *(() if name == "mixture_weights" else (39,))
             )[fallback_senones]
             assert np.any(current_values != previous_values), (iteration, name)
+            if name != "mixture_weights":
+                zero_current = checkpoint_arrays[name].reshape(-1, 2, 39)[zero_mass_senones]
+                zero_previous = previous[name].reshape(-1, 2, 39)[zero_mass_senones]
+                np.testing.assert_array_equal(zero_current, zero_previous)
         previous = checkpoint_arrays
 
     mfcc = read_sphinx_mfc(full_project.features_dir / "arctic_a0001.mfc")

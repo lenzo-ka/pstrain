@@ -28,7 +28,25 @@ numeric expectation changed.
 
 - Native CMake rebuild: passed.
 - CTest: 2/2 passed.
-- Full pytest after rebuild: 411 passed, 2 skipped, 1 expected failure.
+- Full pytest after rebuild: 414 passed, 2 skipped, 1 expected failure. The
+  sandboxed run first blocked 12 process-control tests with `EPERM`; the full
+  unsandboxed rerun passed. Goldens were unchanged.
 - Ruff check and format: passed.
 - Mypy with the repository's missing-import policy: passed.
 - Pre-commit (all files): passed.
+
+## Fugu fold-in
+
+- Retain now reloads the serialized, unfloored variance representation before
+  evaluation flooring. Empty cells containing both `5e-5` and `0` survive a
+  retain pass exactly.
+- Zero policy exempts graph-marked fallback senones. The multipron regression
+  includes fallback branches with zero posterior mass, proves their Gaussian
+  cells remain identical to the prior pass, and trains the utterance from every
+  later checkpoint.
+- The C boundary directly rejects null, INVALID, and out-of-range policies.
+- Evaluation invariance is scoped to a given loaded float; save/reload behavior
+  intentionally changes because the lossless value now reaches the next pass.
+- Follow-up only: add a discriminating decode test for PocketSphinx handling of
+  zero/unfloored exports versus upstream artifacts; parity is currently matched
+  by upstream's zero-writing convention but is not directly tested.

@@ -251,20 +251,32 @@ pstrain_bw_init(const char *mdef_path,
            ctx->inv->gauden->n_mgau, ctx->inv->gauden->n_feat,
            ctx->inv->gauden->n_density);
 
-    /* Preserve the file representation separately.  g->var is mutated into
-     * evaluation reciprocals by gauden_eval_precomp(). */
-    ctx->raw_var = gauden_alloc_param(ctx->inv->gauden->n_mgau,
-                                     ctx->inv->gauden->n_feat,
-                                     ctx->inv->gauden->n_density,
-                                     ctx->inv->gauden->veclen);
+    /* Reload the serialized representation before evaluation flooring can
+     * affect it.  mod_inv_read_gauden() has already floored g->var, and that
+     * copy is subsequently mutated into reciprocals by precomputation. */
     {
         gauden_t *g = ctx->inv->gauden;
-        uint32 i, j, k;
-        for (i = 0; i < g->n_mgau; ++i)
-            for (j = 0; j < g->n_feat; ++j)
-                for (k = 0; k < g->n_density; ++k)
-                    memcpy(ctx->raw_var[i][j][k], g->var[i][j][k],
-                           g->veclen[j] * sizeof(float32));
+        uint32 raw_n_mgau, raw_n_feat, raw_n_density, *raw_veclen;
+        uint32 j;
+        if (s3gau_read(vars_path, &ctx->raw_var, &raw_n_mgau, &raw_n_feat,
+                       &raw_n_density, &raw_veclen) != S3_SUCCESS) {
+            E_ERROR("Failed to reload unfloored variances\n");
+            goto error;
+        }
+        if (raw_n_mgau != g->n_mgau || raw_n_feat != g->n_feat ||
+            raw_n_density != g->n_density) {
+            E_ERROR("Reloaded variance dimensions do not match Gaussians\n");
+            ckd_free(raw_veclen);
+            goto error;
+        }
+        for (j = 0; j < raw_n_feat; ++j) {
+            if (raw_veclen[j] != g->veclen[j]) {
+                E_ERROR("Reloaded variance vector length does not match Gaussians\n");
+                ckd_free(raw_veclen);
+                goto error;
+            }
+        }
+        ckd_free(raw_veclen);
     }
 
     /* Precompute Gaussian evaluation values */
@@ -836,8 +848,10 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
                         }
                     }
                 } else {
+                    int fallback_tracked = i < ctx->mdef->n_tied_state &&
+                        ctx->fallback_senone[i];
                     if (ctx->unobserved_gaussian_policy ==
-                        PSTRAIN_BW_UNOBSERVED_GAUSSIAN_ZERO) {
+                        PSTRAIN_BW_UNOBSERVED_GAUSSIAN_ZERO && !fallback_tracked) {
                         memset(g->mean[i][j][k], 0,
                                veclen[j] * sizeof(float32));
                         memset(ctx->raw_var[i][j][k], 0,
@@ -846,7 +860,8 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
                     E_WARN("mgau %u feat %u density %u has no data, %s values\n",
                            i, j, k,
                            ctx->unobserved_gaussian_policy ==
-                           PSTRAIN_BW_UNOBSERVED_GAUSSIAN_ZERO ? "zeroing" : "retaining");
+                           PSTRAIN_BW_UNOBSERVED_GAUSSIAN_ZERO && !fallback_tracked
+                           ? "zeroing" : "retaining");
                 }
             }
         }

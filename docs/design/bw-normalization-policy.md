@@ -17,6 +17,22 @@ one of two explicit policies:
 - `retain` preserves the input Gaussian. This can be safer for sparse or
   exploratory training, but it is a deliberate divergence and never a default.
 
+Fallback-tracked CI senones are always retained when they receive no posterior
+mass, including under `zero`. Graph membership marks these cells, so a branch
+that is not selected in one pass remains usable in a later pass. Linear/parity
+runs do not mark fallback senones and therefore retain upstream zero semantics.
+
+For a given loaded float, the evaluation floor (`1e-4`) and reciprocal formula
+are unchanged. Evaluation is not invariant across a save/reload boundary:
+lossless serialization means the next pass sees the original sub-floor value,
+where the former path saw a floored, round-tripped value. That difference is the
+intended correction to the lossy path.
+
 Documenting `retain` as an opt-in alternative, and potentially adding the same
 choice upstream, is an `UPSTREAM.md` contribution candidate. Artifact parity
 requires `zero` unless upstream itself adopts a different explicit policy.
+
+Follow-up: add a discriminating decode test proving PocketSphinx handles
+zero/unfloored exported artifacts the same way it handles upstream artifacts.
+Upstream norm writes the same zeros, so parity is currently by convention rather
+than direct decode coverage.
