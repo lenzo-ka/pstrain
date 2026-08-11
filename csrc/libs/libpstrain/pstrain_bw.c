@@ -114,6 +114,8 @@ struct pstrain_bw_context_s {
     int32 mean_reest;
     int32 var_reest;
     int32 pass2var;  /* Use 2-pass variance estimation for numerical stability */
+    pstrain_bw_unobserved_gaussian_policy_t unobserved_gaussian_policy;
+    vector_t ***raw_var; /* Lossless normalized/serialized variances. */
     int32 multipron; /* Multi-pron training: build wide utterance graphs */
     char *fallback_senone; /* CI senones used as primary models this pass */
 
@@ -148,23 +150,31 @@ pstrain_bw_init(const char *mdef_path,
     pstrain_bw_context_t *ctx;
     uint32 n_ts, n_cb;
 
+    if (config == NULL ||
+        (config->unobserved_gaussian_policy != PSTRAIN_BW_UNOBSERVED_GAUSSIAN_ZERO &&
+         config->unobserved_gaussian_policy != PSTRAIN_BW_UNOBSERVED_GAUSSIAN_RETAIN)) {
+        E_ERROR("pstrain_bw_init requires an explicit unobserved-Gaussian policy\n");
+        return NULL;
+    }
+
     ctx = ckd_calloc(1, sizeof(*ctx));
     if (!ctx) return NULL;
 
     /* Set config with defaults */
-    ctx->a_beam = config ? config->a_beam : 1e-90;
-    ctx->b_beam = config ? config->b_beam : 1e-10;  /* SphinxTrain default */
-    ctx->topn = config ? config->topn : 1;
-    ctx->spthresh = config ? config->spthresh : 0.0;
-    ctx->mixw_floor = config ? config->mixw_floor : 1e-8;
+    ctx->a_beam = config->a_beam;
+    ctx->b_beam = config->b_beam;
+    ctx->topn = config->topn;
+    ctx->spthresh = config->spthresh;
+    ctx->mixw_floor = config->mixw_floor;
     /* Provenance: upstream bw/train_cmd_ln.c supplies the live -tpfloor
      * default because the SphinxTrain Perl stage drivers do not override it. */
-    ctx->tmat_floor = config ? config->tmat_floor : 1e-4;
-    ctx->mixw_reest = config ? config->mixw_reest : 1;
-    ctx->tmat_reest = config ? config->tmat_reest : 1;
-    ctx->mean_reest = config ? config->mean_reest : 1;
-    ctx->var_reest = config ? config->var_reest : 1;
-    ctx->pass2var = config ? config->pass2var : 1;  /* Match SphinxTrain -2passvar yes */
+    ctx->tmat_floor = config->tmat_floor;
+    ctx->mixw_reest = config->mixw_reest;
+    ctx->tmat_reest = config->tmat_reest;
+    ctx->mean_reest = config->mean_reest;
+    ctx->var_reest = config->var_reest;
+    ctx->pass2var = config->pass2var;
+    ctx->unobserved_gaussian_policy = config->unobserved_gaussian_policy;
     ctx->multipron = 1;  /* On by default; disable via pstrain_bw_set_multipron(ctx, 0). */
 
     /* Initialize cmd_ln with default values - required for gauden_alloc_acc etc.
@@ -241,6 +251,34 @@ pstrain_bw_init(const char *mdef_path,
            ctx->inv->gauden->n_mgau, ctx->inv->gauden->n_feat,
            ctx->inv->gauden->n_density);
 
+    /* Reload the serialized representation before evaluation flooring can
+     * affect it.  mod_inv_read_gauden() has already floored g->var, and that
+     * copy is subsequently mutated into reciprocals by precomputation. */
+    {
+        gauden_t *g = ctx->inv->gauden;
+        uint32 raw_n_mgau, raw_n_feat, raw_n_density, *raw_veclen;
+        uint32 j;
+        if (s3gau_read(vars_path, &ctx->raw_var, &raw_n_mgau, &raw_n_feat,
+                       &raw_n_density, &raw_veclen) != S3_SUCCESS) {
+            E_ERROR("Failed to reload unfloored variances\n");
+            goto error;
+        }
+        if (raw_n_mgau != g->n_mgau || raw_n_feat != g->n_feat ||
+            raw_n_density != g->n_density) {
+            E_ERROR("Reloaded variance dimensions do not match Gaussians\n");
+            ckd_free(raw_veclen);
+            goto error;
+        }
+        for (j = 0; j < raw_n_feat; ++j) {
+            if (raw_veclen[j] != g->veclen[j]) {
+                E_ERROR("Reloaded variance vector length does not match Gaussians\n");
+                ckd_free(raw_veclen);
+                goto error;
+            }
+        }
+        ckd_free(raw_veclen);
+    }
+
     /* Precompute Gaussian evaluation values */
     E_INFO("Precomputing Gaussian evaluation values...\n");
     if (gauden_eval_precomp(ctx->inv->gauden) != S3_SUCCESS) {
@@ -284,6 +322,7 @@ pstrain_bw_free(pstrain_bw_context_t *ctx)
     if (ctx->inv) mod_inv_free(ctx->inv);
     if (ctx->mdef) model_def_free(ctx->mdef);
     if (ctx->feat) feat_free(ctx->feat);
+    if (ctx->raw_var) gauden_free_param(ctx->raw_var);
     ckd_free(ctx->fallback_senone);
 
     ckd_free(ctx);
@@ -500,7 +539,7 @@ pstrain_bw_process_utt_text(pstrain_bw_context_t *ctx,
 
         ckd_free_2d((void **)feat_vecs);
 
-        if (ret == S3_SUCCESS)
+        if (ret == S3_SUCCESS && ctx->multipron)
             mark_fallback_senones(ctx, state_seq, n_state);
 
         /* Linear path uses static internal buffers (do NOT free).
@@ -621,7 +660,7 @@ pstrain_bw_process_utt_mfcc(pstrain_bw_context_t *ctx,
                                 NULL,  /* latfh */
                                 ctx->feat);
 
-        if (ret == S3_SUCCESS)
+        if (ret == S3_SUCCESS && ctx->multipron)
             mark_fallback_senones(ctx, state_seq, n_state);
 
         feat_array_free(feat_buf);
@@ -773,8 +812,8 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
                             float32 mean = g->mean[cb][j][k][l];
                             g->macc[cb][j][k][l] += prior * mean;
                             g->vacc[cb][j][k][l] += prior *
-                                (ctx->pass2var ? g->var[cb][j][k][l]
-                                               : g->var[cb][j][k][l] + mean * mean);
+                                (ctx->pass2var ? ctx->raw_var[cb][j][k][l]
+                                               : ctx->raw_var[cb][j][k][l] + mean * mean);
                         }
                         ctx->inv->mixw_acc[tied_state][j][k] += prior;
                     }
@@ -805,15 +844,24 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
                                 v = (g->vacc[i][j][k][l] / d) -
                                     (g->mean[i][j][k][l] * g->mean[i][j][k][l]);
                             }
-                            /* Floor variance to prevent numerical issues.
-                             * Use 1e-4 as minimum floor (matching SphinxTrain). */
-                            if (v < 1e-4f) v = 1e-4f;
-                            g->var[i][j][k][l] = v;
+                            ctx->raw_var[i][j][k][l] = v;
                         }
                     }
                 } else {
-                    /* No data for this senone - keep old values from previous model */
-                    E_WARN("mgau %u feat %u density %u has no data, keeping old values\n", i, j, k);
+                    int fallback_tracked = i < ctx->mdef->n_tied_state &&
+                        ctx->fallback_senone[i];
+                    if (ctx->unobserved_gaussian_policy ==
+                        PSTRAIN_BW_UNOBSERVED_GAUSSIAN_ZERO && !fallback_tracked) {
+                        memset(g->mean[i][j][k], 0,
+                               veclen[j] * sizeof(float32));
+                        memset(ctx->raw_var[i][j][k], 0,
+                               veclen[j] * sizeof(float32));
+                    }
+                    E_WARN("mgau %u feat %u density %u has no data, %s values\n",
+                           i, j, k,
+                           ctx->unobserved_gaussian_policy ==
+                           PSTRAIN_BW_UNOBSERVED_GAUSSIAN_ZERO && !fallback_tracked
+                           ? "zeroing" : "retaining");
                 }
             }
         }
@@ -862,6 +910,15 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
      * retry or reuse the context after every normalization exit. */
     memset(ctx->fallback_senone, 0,
            ctx->mdef->n_tied_state * sizeof(*ctx->fallback_senone));
+    /* Evaluation gets its own floored copy.  raw_var remains exactly what
+     * normalization computed so artifacts match upstream norm output. */
+    for (i = 0; i < n_mgau; ++i)
+        for (j = 0; j < n_feat; ++j)
+            for (k = 0; k < n_density; ++k)
+                for (l = 0; l < veclen[j]; ++l)
+                    g->var[i][j][k][l] =
+                        ctx->raw_var[i][j][k][l] < 1e-4f
+                        ? 1e-4f : ctx->raw_var[i][j][k][l];
     if (gauden_eval_precomp(g) != S3_SUCCESS) {
         E_ERROR("Failed to recompute Gaussian values\n");
         return -1;
@@ -895,10 +952,6 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
         }
     }
 
-    /* Note: gauden_eval_precomp was already called above (line 634).
-     * Do NOT call it again here - it would flip variances back to raw form,
-     * but pstrain_bw_save expects precomputed form (1/(2*sigma^2)). */
-
     /* Reset stats for next iteration */
     ctx->total_log_lik = 0;
     ctx->total_frames = 0;
@@ -916,7 +969,6 @@ pstrain_bw_save(pstrain_bw_context_t *ctx,
             const char *tmat_path)
 {
     gauden_t *g = ctx->inv->gauden;
-    uint32 i, j, k, l;
 
     E_INFO("Saving Gaussians to %s and %s\n", means_path, vars_path);
     if (s3gau_write(means_path,
@@ -929,42 +981,14 @@ pstrain_bw_save(pstrain_bw_context_t *ctx,
         return -1;
     }
 
-    /* After gauden_eval_precomp, g->var contains 1/(2*sigma^2).
-     * We need to convert back to sigma^2 for saving.
-     * var_original = 1 / (2 * var_precomputed) */
-    for (i = 0; i < g->n_mgau; i++) {
-        for (j = 0; j < g->n_feat; j++) {
-            for (k = 0; k < g->n_density; k++) {
-                for (l = 0; l < g->veclen[j]; l++) {
-                    if (g->var[i][j][k][l] > 0) {
-                        g->var[i][j][k][l] = 1.0f / (2.0f * g->var[i][j][k][l]);
-                    }
-                }
-            }
-        }
-    }
-
     if (s3gau_write(vars_path,
-                    (const vector_t ***)g->var,
+                    (const vector_t ***)ctx->raw_var,
                     g->n_mgau,
                     g->n_feat,
                     g->n_density,
                     g->veclen) != S3_SUCCESS) {
         E_ERROR("Failed to write variances\n");
         return -1;
-    }
-
-    /* Convert back to precomputed form for subsequent iterations */
-    for (i = 0; i < g->n_mgau; i++) {
-        for (j = 0; j < g->n_feat; j++) {
-            for (k = 0; k < g->n_density; k++) {
-                for (l = 0; l < g->veclen[j]; l++) {
-                    if (g->var[i][j][k][l] > 0) {
-                        g->var[i][j][k][l] = 1.0f / (2.0f * g->var[i][j][k][l]);
-                    }
-                }
-            }
-        }
     }
 
     E_INFO("Saving mixture weights to %s\n", mixw_path);

@@ -10,6 +10,12 @@
 
 #define PSTRAIN_BW_FINAL_STATE_NOT_REACHED -2
 
+typedef enum pstrain_bw_unobserved_gaussian_policy_e {
+    PSTRAIN_BW_UNOBSERVED_GAUSSIAN_INVALID = 0,
+    PSTRAIN_BW_UNOBSERVED_GAUSSIAN_ZERO = 1,
+    PSTRAIN_BW_UNOBSERVED_GAUSSIAN_RETAIN = 2
+} pstrain_bw_unobserved_gaussian_policy_t;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -29,6 +35,7 @@ typedef struct pstrain_bw_config_s {
     int32 mean_reest;    /**< Re-estimate means (default: 1) */
     int32 var_reest;     /**< Re-estimate variances (default: 1) */
     int32 pass2var;      /**< Use 2-pass variance estimation (default: 1) */
+    pstrain_bw_unobserved_gaussian_policy_t unobserved_gaussian_policy;
 } pstrain_bw_config_t;
 
 /**
@@ -45,7 +52,8 @@ typedef struct state_s state_t;
  * @param vars_path Path to variances file
  * @param mixw_path Path to mixture weights file
  * @param tmat_path Path to transition matrices file
- * @param config Training configuration (NULL for defaults)
+ * @param config Training configuration; must explicitly select an
+ *               unobserved-Gaussian policy
  * @return Training context, or NULL on error
  */
 pstrain_bw_context_t *

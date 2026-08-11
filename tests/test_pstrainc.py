@@ -528,13 +528,23 @@ def test_pstrain_bw_init(tmp_path: Path) -> None:
     lib = _pstrainc.get_lib()
     ffi = _pstrainc.get_ffi()
 
+    config = ffi.new("pstrain_bw_config_t *")
+    config.a_beam = 1e-90
+    config.b_beam = 1e-10
+    config.topn = 1
+    config.mixw_floor = 1e-8
+    config.tmat_floor = 1e-4
+    config.mean_reest = config.var_reest = 1
+    config.mixw_reest = config.tmat_reest = 1
+    config.pass2var = 1
+    config.unobserved_gaussian_policy = 1
     ctx = lib.pstrain_bw_init(
         str(model_dir / "mdef").encode(),
         str(model_dir / "means").encode(),
         str(model_dir / "variances").encode(),
         str(model_dir / "mixture_weights").encode(),
         str(model_dir / "transition_matrices").encode(),
-        ffi.NULL,  # Use default config
+        config,
     )
 
     assert ctx != ffi.NULL, "BW context should initialize successfully"
@@ -549,6 +559,49 @@ def test_pstrain_bw_init(tmp_path: Path) -> None:
     assert total_utts[0] == 0
 
     lib.pstrain_bw_free(ctx)
+
+
+@pytest.mark.parametrize("policy", [0, 99])
+def test_pstrain_bw_init_rejects_invalid_policy(tmp_path: Path, policy: int) -> None:
+    """The C API rejects invalid policy enum values, including INVALID."""
+    from pstrain.lib import flat
+
+    model_dir = tmp_path / "model"
+    flat.init_flat_model(["SIL", "AA"], model_dir, n_density=1, n_state=3)
+    lib = _pstrainc.get_lib()
+    ffi = _pstrainc.get_ffi()
+    config = ffi.new("pstrain_bw_config_t *")
+    config.topn = 1
+    config.unobserved_gaussian_policy = policy
+
+    ctx = lib.pstrain_bw_init(
+        str(model_dir / "mdef").encode(),
+        str(model_dir / "means").encode(),
+        str(model_dir / "variances").encode(),
+        str(model_dir / "mixture_weights").encode(),
+        str(model_dir / "transition_matrices").encode(),
+        config,
+    )
+    assert ctx == ffi.NULL
+
+
+def test_pstrain_bw_init_rejects_null_config(tmp_path: Path) -> None:
+    """The C API rejects a null policy/config pointer."""
+    from pstrain.lib import flat
+
+    model_dir = tmp_path / "model"
+    flat.init_flat_model(["SIL", "AA"], model_dir, n_density=1, n_state=3)
+    lib = _pstrainc.get_lib()
+    ffi = _pstrainc.get_ffi()
+    ctx = lib.pstrain_bw_init(
+        str(model_dir / "mdef").encode(),
+        str(model_dir / "means").encode(),
+        str(model_dir / "variances").encode(),
+        str(model_dir / "mixture_weights").encode(),
+        str(model_dir / "transition_matrices").encode(),
+        ffi.NULL,
+    )
+    assert ctx == ffi.NULL
 
 
 @requires_c_library
@@ -575,13 +628,23 @@ def test_pstrain_bw_process_utt(tmp_path: Path) -> None:
     lib = _pstrainc.get_lib()
     ffi = _pstrainc.get_ffi()
 
+    config = ffi.new("pstrain_bw_config_t *")
+    config.a_beam = 1e-90
+    config.b_beam = 1e-10
+    config.topn = 1
+    config.mixw_floor = 1e-8
+    config.tmat_floor = 1e-4
+    config.mean_reest = config.var_reest = 1
+    config.mixw_reest = config.tmat_reest = 1
+    config.pass2var = 1
+    config.unobserved_gaussian_policy = 1
     ctx = lib.pstrain_bw_init(
         str(model_dir / "mdef").encode(),
         str(model_dir / "means").encode(),
         str(model_dir / "variances").encode(),
         str(model_dir / "mixture_weights").encode(),
         str(model_dir / "transition_matrices").encode(),
-        ffi.NULL,
+        config,
     )
     assert ctx != ffi.NULL
 

@@ -260,6 +260,7 @@ typedef struct pstrain_bw_config_s {
     int32 mean_reest;
     int32 var_reest;
     int32 pass2var;
+    int32 unobserved_gaussian_policy;
 } pstrain_bw_config_t;
 
 typedef struct pstrain_bw_context_s pstrain_bw_context_t;

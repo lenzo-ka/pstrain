@@ -97,9 +97,9 @@ def test_build_ci_1g_produces_finite_model(tmp_path: Path) -> None:
     assert np.isfinite(means).all(), "non-finite values in means"
     assert np.isfinite(variances).all(), "non-finite values in variances"
     assert np.isfinite(mixw).all(), "non-finite values in mixture_weights"
-    # Variances must stay positive (variance flooring); a non-positive
-    # variance would make the Gaussians degenerate at decode time.
-    assert (variances > 0).all(), "non-positive variances"
+    # Saved variances are upstream-style raw normalization output. Decode/BW
+    # load applies the floor, including to exact-zero unobserved cells.
+    assert (np.maximum(variances, np.float32(1e-4)) > 0).all()
 
 
 @requires_c_library
@@ -147,7 +147,12 @@ def test_bw_preserves_extreme_forward_density_scale(tmp_path: Path) -> None:
         vars_path=model_dir / "variances",
         mixw_path=model_dir / "mixture_weights",
         tmat_path=model_dir / "transition_matrices",
-        config=BWConfig(pass2var=True, a_beam=1e-200, multipron=False),
+        config=BWConfig(
+            pass2var=True,
+            unobserved_gaussian_policy="zero",
+            a_beam=1e-200,
+            multipron=False,
+        ),
     )
     trainer.set_dict(ctx.shared_dir / "dictionary.dict", ctx.filler_dict)
 
@@ -279,10 +284,14 @@ def test_build_cd_8g_produces_genuine_tied_model(tmp_path: Path) -> None:
     assert np.isfinite(variances).all()
     assert np.isfinite(mixw).all()
 
+    cd1_counts = _pstrainc.read_dnom(str(model_dir / "gauden_counts"))[0]
+    zero_var_cells = np.all(variances == 0, axis=-1)
+    assert zero_var_cells.any(), "fixture must exercise the upstream zero-cell policy"
+    assert np.all(cd1_counts[zero_var_cells] == 0)
+
     counts, _, _, n_density = _pstrainc.read_dnom(str(ctx.model_dir("cd-8g") / "gauden_counts"))
     assert n_density == 8
     # topn=1 can update only one density for each state.  This assertion
     # proves the tied-stage BW pass accumulates posterior mass in several.
     assert np.any(np.count_nonzero(counts > 0, axis=2) > 1)
-    assert (variances > 0).all()
     np.testing.assert_allclose(mixw.sum(axis=-1), 1.0, rtol=1e-5, atol=1e-6)

@@ -698,8 +698,11 @@ def test_bw_config_multipron_default_on() -> None:
     get the new behavior unless they explicitly opt out."""
     from pstrain.lib.bw import BWConfig
 
-    assert BWConfig(pass2var=True).multipron is True
-    assert BWConfig(pass2var=True, multipron=False).multipron is False
+    assert BWConfig(pass2var=True, unobserved_gaussian_policy="zero").multipron is True
+    assert (
+        BWConfig(pass2var=True, unobserved_gaussian_policy="zero", multipron=False).multipron
+        is False
+    )
 
 
 def test_bw_mixture_floor_is_higher_only_for_tied_cd_stages() -> None:
@@ -757,7 +760,7 @@ def test_stage_variance_policy_reaches_first_engine_iteration(empty_project: Pat
     from pstrain.lib.steps.train import _config_for_iteration
 
     ctx = PipelineContext.from_config(empty_project)
-    base = BWConfig(pass2var=True)
+    base = BWConfig(pass2var=True, unobserved_gaussian_policy="zero")
     observed = {}
     for stage in ("ci-1g", "cd-untied"):
         _, first_pass_2passvar = _bw_policy_for_stage(ctx, stage)
@@ -771,12 +774,15 @@ def test_stage_variance_policy_reaches_first_engine_iteration(empty_project: Pat
     assert observed == {"ci-1g": False, "cd-untied": True}
 
 
-def test_bw_config_requires_explicit_variance_policy() -> None:
-    """Library callers cannot inherit a free-floating variance default."""
+def test_bw_config_requires_explicit_normalization_policies() -> None:
+    """Library callers cannot inherit free-floating normalization defaults."""
     from pstrain.lib.bw import BWConfig
 
     with pytest.raises(TypeError, match="pass2var"):
         BWConfig()  # type: ignore[call-arg]
+
+    with pytest.raises(TypeError, match="unobserved_gaussian_policy"):
+        BWConfig(pass2var=True)  # type: ignore[call-arg]
 
 
 def test_configured_bw_parameters_reach_training_call(
@@ -859,12 +865,14 @@ def test_configured_bw_parameters_reach_training_call(
     assert config.topn == 1
     assert config.mixw_floor == 1e-8
     assert config.tmat_floor == 1e-4
+    assert config.unobserved_gaussian_policy == "zero"
     c_config: Any = captured["c_config"]
     assert c_config.a_beam == 1e-123
     assert c_config.b_beam == 1e-9
     assert c_config.topn == 1
     assert c_config.mixw_floor == 1e-8
     assert c_config.tmat_floor == 1e-4
+    assert c_config.unobserved_gaussian_policy == 1
     assert c_config.pass2var == 0
     assert captured["convergence_ratio"] == 0.004
     assert captured["min_iterations"] == 3

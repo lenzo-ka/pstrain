@@ -107,7 +107,7 @@ def train_golden(ctx: PipelineContext, output: Path) -> TrainingResult:
         first_pass_2passvar=False,
         n_iter=3,
         min_iterations=4,
-        config=BWConfig(pass2var=True, a_beam=1e-200),
+        config=BWConfig(pass2var=True, unobserved_gaussian_policy="zero", a_beam=1e-200),
     )
 
 
