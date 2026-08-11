@@ -10,7 +10,15 @@ from pathlib import Path
 import pytest
 
 from pstrain.cli.cli import main
-from pstrain.lib.one_command import PromptFormatError, detect_prompt_format, parse_prompts
+from pstrain.lib.one_command import (
+    PromptFormatError,
+    detect_prompt_format,
+    input_identity,
+    installed_corpus_identity,
+    parse_prompts,
+    validate_inputs,
+    write_validation_reports,
+)
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_arctic"
 
@@ -19,7 +27,6 @@ FIXTURE = Path(__file__).parent / "fixtures" / "mini_arctic"
     ("content", "expected"),
     [
         ("utt1 HELLO WORLD\n", "leading-id"),
-        ("<s> HELLO WORLD </s> (utt1)\n", "sphinx"),
         ("utt1\tHELLO WORLD\n", "tsv"),
         ('"utt1","HELLO, WORLD"\n', "csv"),
     ],
@@ -38,6 +45,32 @@ def test_comma_requires_explicit_prompt_format(tmp_path: Path) -> None:
     selected, parsed = parse_prompts(prompts, "csv")
     assert selected == "csv"
     assert (parsed[0].fileid, parsed[0].text) == ("utt1", "HELLO WORLD")
+
+
+@pytest.mark.parametrize(
+    ("content", "explicit", "expected"),
+    [
+        ("<s> HELLO WORLD </s> (utt1)\n", "sphinx", ("utt1", "HELLO WORLD")),
+        ("<s> HELLO </s>\n", "leading-id", ("<s>", "HELLO </s>")),
+    ],
+)
+def test_sphinx_tokens_require_explicit_format(
+    tmp_path: Path, content: str, explicit: str, expected: tuple[str, str]
+) -> None:
+    prompts = tmp_path / "prompts.txt"
+    prompts.write_text(content)
+    with pytest.raises(PromptFormatError, match="Ambiguous"):
+        detect_prompt_format(prompts)
+    selected, parsed = parse_prompts(prompts, explicit)
+    assert selected == explicit
+    assert (parsed[0].fileid, parsed[0].text) == expected
+
+
+def test_prompt_bom_is_rejected_explicitly(tmp_path: Path) -> None:
+    prompts = tmp_path / "prompts.txt"
+    prompts.write_text("\ufeffutt1 HELLO\n")
+    with pytest.raises(PromptFormatError, match="BOM"):
+        parse_prompts(prompts, "leading-id")
 
 
 def _invoke(monkeypatch: pytest.MonkeyPatch, *arguments: str) -> int:
@@ -61,6 +94,29 @@ def _base_arguments(project: Path, prompts: Path | None = None) -> tuple[str, ..
         "-j",
         "1",
     )
+
+
+def _seed_project(project: Path) -> None:
+    from pstrain.lib.setup import setup_project
+
+    setup_project(
+        project,
+        transcription_path=FIXTURE / "transcription.txt",
+        audio_path=FIXTURE / "wav",
+        dictionary_path=FIXTURE / "dictionary.dict",
+        phoneset_path=FIXTURE / "phoneset.txt",
+        filler_dict_path=FIXTURE / "filler.dict",
+    )
+    source = input_identity(
+        FIXTURE / "wav",
+        FIXTURE / "transcription.txt",
+        FIXTURE / "dictionary.dict",
+        FIXTURE / "filler.dict",
+        FIXTURE / "phoneset.txt",
+    )
+    installed = installed_corpus_identity(project, audio_ownership="copy")
+    manifest = {"version": 2, "source": source, "installed": installed}
+    (project / "etc" / "input-identity.json").write_text(json.dumps(manifest))
 
 
 def test_oov_blocks_before_setup_and_names_report(
@@ -88,26 +144,7 @@ def test_resume_and_replace_input_semantics(
     assert not project.exists()
 
     # Seed a compatible destination without paying the model-training cost here.
-    from pstrain.lib.one_command import input_identity
-    from pstrain.lib.setup import setup_project
-
-    setup_project(
-        project,
-        transcription_path=FIXTURE / "transcription.txt",
-        audio_path=FIXTURE / "wav",
-        dictionary_path=FIXTURE / "dictionary.dict",
-        phoneset_path=FIXTURE / "phoneset.txt",
-        filler_dict_path=FIXTURE / "filler.dict",
-    )
-
-    identity = input_identity(
-        FIXTURE / "wav",
-        FIXTURE / "transcription.txt",
-        FIXTURE / "dictionary.dict",
-        FIXTURE / "filler.dict",
-        FIXTURE / "phoneset.txt",
-    )
-    (project / "etc" / "input-identity.json").write_text(json.dumps(identity))
+    _seed_project(project)
     assert _invoke(monkeypatch, *args, "--resume", "--dry-run") == 0
 
     changed = tmp_path / "changed.txt"
@@ -116,6 +153,100 @@ def test_resume_and_replace_input_semantics(
     changed_args = _base_arguments(project, changed)
     assert _invoke(monkeypatch, *changed_args, "--resume", "--dry-run") == 1
     assert _invoke(monkeypatch, *changed_args, "--replace-inputs", "--dry-run") == 0
+
+
+def test_resume_authenticates_installed_wav(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    project = tmp_path / "project"
+    _seed_project(project)
+    changed = project / "audio" / "arctic_a0001.wav"
+    changed.write_bytes(changed.read_bytes() + b"changed")
+    assert _invoke(monkeypatch, *_base_arguments(project), "--resume", "--dry-run") == 1
+    assert "audio/arctic_a0001.wav" in capsys.readouterr().err
+
+
+def test_resume_refuses_repointed_installed_symlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    project = tmp_path / "project"
+    _seed_project(project)
+    installed = project / "audio" / "arctic_a0001.wav"
+    installed.unlink()
+    installed.symlink_to(FIXTURE / "wav" / "arctic_a0002.wav")
+    assert _invoke(monkeypatch, *_base_arguments(project), "--resume", "--dry-run") == 1
+    error = capsys.readouterr().err
+    assert "Unexpected symlink" in error
+    assert "arctic_a0001.wav" in error
+
+
+@pytest.mark.parametrize(
+    "relative",
+    ["shared/dictionary.dict", "etc/all.transcription", "audio/arctic_a0001.wav"],
+)
+def test_replace_refuses_installed_symlinks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    relative: str,
+) -> None:
+    project = tmp_path / "project"
+    _seed_project(project)
+    installed = project / relative
+    external = tmp_path / f"external-{installed.name}"
+    external.write_bytes(installed.read_bytes())
+    installed.unlink()
+    installed.symlink_to(external)
+    assert _invoke(monkeypatch, *_base_arguments(project), "--replace-inputs") == 1
+    error = capsys.readouterr().err
+    assert "containing symlink" in error
+    assert relative in error
+    assert external.read_bytes()
+
+
+def test_failed_replacement_leaves_original_project_intact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pstrain.cli.train as train_module
+
+    project = tmp_path / "project"
+    _seed_project(project)
+    marker = project / "original.marker"
+    marker.write_text("intact")
+
+    def fail_setup(*args: object, **kwargs: object) -> None:
+        target = Path(str(kwargs["project_dir"]))
+        (target / "partial").write_text("partial")
+        raise ValueError("injected setup failure")
+
+    monkeypatch.setattr(train_module, "setup_project", fail_setup)
+    assert _invoke(monkeypatch, *_base_arguments(project), "--replace-inputs") == 1
+    assert marker.read_text() == "intact"
+    assert not (project / "partial").exists()
+
+
+def test_oov_report_lists_every_utterance_and_accepts_filler_words(tmp_path: Path) -> None:
+    prompts = tmp_path / "prompts.txt"
+    rows = [f"utt{number} UNKNOWN" for number in range(7)]
+    rows.append("utt7 <sil>")
+    prompts.write_text("\n".join(rows) + "\n")
+    audio = tmp_path / "audio"
+    audio.mkdir()
+    source_wav = FIXTURE / "wav" / "arctic_a0001.wav"
+    for number in range(8):
+        shutil.copyfile(source_wav, audio / f"utt{number}.wav")
+    report, _ = validate_inputs(
+        audio,
+        prompts,
+        FIXTURE / "dictionary.dict",
+        "leading-id",
+        FIXTURE / "phoneset.txt",
+        FIXTURE / "filler.dict",
+    )
+    assert "<sil>" not in report.oov
+    assert report.oov["UNKNOWN"]["examples"] == [f"utt{number}" for number in range(7)]
+    _, oov_path = write_validation_reports(tmp_path / "project", report)
+    assert oov_path.read_text().splitlines()[1].endswith("utt0,utt1,utt2,utt3,utt4,utt5,utt6")
 
 
 def test_one_command_trains_ci_1g_and_decodes_without_transcript_munging(

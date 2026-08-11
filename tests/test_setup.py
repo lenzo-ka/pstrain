@@ -256,14 +256,14 @@ def test_setup_copy_without_clobber_rejects_linked_project_audio(tmp_path: Path)
     project = tmp_path / "project"
     setup_project(project, audio_path=external, link_audio=True)
 
-    with pytest.raises(FileExistsError, match="Project audio is a link"):
+    with pytest.raises(ValueError, match="destination symlink"):
         setup_project(project, audio_path=incoming)
 
     assert (project / "audio").is_symlink()
     assert external_wav.read_bytes() == b"external"
 
 
-def test_setup_copy_with_clobber_replaces_link_without_touching_source(
+def test_setup_copy_with_clobber_refuses_link_without_touching_source(
     tmp_path: Path,
 ) -> None:
     external = tmp_path / "external"
@@ -276,11 +276,10 @@ def test_setup_copy_with_clobber_replaces_link_without_touching_source(
     project = tmp_path / "project"
     setup_project(project, audio_path=external, link_audio=True)
 
-    setup_project(project, audio_path=incoming, clobber=True)
+    with pytest.raises(ValueError, match="destination symlink"):
+        setup_project(project, audio_path=incoming, clobber=True)
 
-    assert (project / "audio").is_dir()
-    assert not (project / "audio").is_symlink()
-    assert (project / "audio" / "sample.wav").read_bytes() == b"incoming"
+    assert (project / "audio").is_symlink()
     assert external_wav.read_bytes() == b"external"
 
 

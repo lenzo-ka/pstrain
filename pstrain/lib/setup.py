@@ -16,6 +16,29 @@ from pstrain.lib.pipeline.context import DEFAULT_CONFIGS
 __all__ = ["setup_project"]
 
 
+def _assert_safe_destination(project_dir: Path, destination: Path) -> None:
+    """Use lstat semantics to prevent writes through links below the project."""
+    current = project_dir
+    for part in destination.relative_to(project_dir).parts:
+        current /= part
+        try:
+            if current.is_symlink():
+                raise ValueError(f"Refusing to write through destination symlink: {current}")
+        except OSError as exc:
+            raise ValueError(f"Cannot inspect destination path {current}: {exc}") from exc
+
+
+def _safe_mkdir(project_dir: Path, path: Path, *, parents: bool = False) -> None:
+    _assert_safe_destination(project_dir, path)
+    path.mkdir(parents=parents, exist_ok=True)
+
+
+def _safe_copy(project_dir: Path, source: Path, destination: Path) -> None:
+    _assert_safe_destination(project_dir, destination)
+    _safe_mkdir(project_dir, destination.parent, parents=True)
+    shutil.copy(source, destination)
+
+
 def setup_project(
     project_dir: Path,
     transcription_path: Path | None = None,
@@ -43,7 +66,7 @@ def setup_project(
     Returns:
         Dict with setup status and paths
     """
-    project_dir = project_dir.resolve()
+    project_dir = Path(project_dir).absolute()
     audio_dir = project_dir / "audio"
 
     if config_path is not None:
@@ -61,24 +84,18 @@ def setup_project(
                     f"Cannot link project audio from or around the project directory: {audio_path}"
                 )
 
-    if audio_path is not None and not link_audio and audio_dir.is_symlink():
-        if not clobber:
-            raise FileExistsError(
-                f"Project audio is a link; use clobber to replace it: {audio_dir}"
-            )
-        audio_dir.unlink()
-
     # Create directory structure
     project_dir.mkdir(parents=True, exist_ok=True)
-    (project_dir / "etc").mkdir(exist_ok=True)
+    _safe_mkdir(project_dir, project_dir / "etc")
     if not (link_audio and audio_path is not None):
-        audio_dir.mkdir(exist_ok=True)
-    (project_dir / "shared").mkdir(exist_ok=True)
-    (project_dir / "shared" / "features").mkdir(exist_ok=True)
-    (project_dir / "experiments" / "default" / "etc").mkdir(parents=True, exist_ok=True)
+        _safe_mkdir(project_dir, audio_dir)
+    _safe_mkdir(project_dir, project_dir / "shared")
+    _safe_mkdir(project_dir, project_dir / "shared" / "features")
+    _safe_mkdir(project_dir, project_dir / "experiments" / "default" / "etc", parents=True)
 
     # Create or load configuration
     config_file = project_dir / "etc" / "config.yaml"
+    _assert_safe_destination(project_dir, config_file)
     if config_path:
         if clobber or not config_file.exists():
             raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
@@ -91,6 +108,7 @@ def setup_project(
         )
 
     configs_file = project_dir / "etc" / "configs.yaml"
+    _assert_safe_destination(project_dir, configs_file)
     if clobber or not configs_file.exists():
         with configs_file.open("w", encoding="utf-8") as f:
             yaml.safe_dump(
@@ -112,18 +130,20 @@ def setup_project(
         if transcription_path != dest_transcription and (
             clobber or not dest_transcription.exists()
         ):
-            shutil.copy(transcription_path, dest_transcription)
+            _safe_copy(project_dir, transcription_path, dest_transcription)
 
     # Handle audio files
     if audio_path:
         if link_audio:
             # Symlink entire audio directory
             if clobber and (audio_dir.exists() or audio_dir.is_symlink()):
+                _assert_safe_destination(project_dir, audio_dir)
                 if audio_dir.is_symlink():
                     audio_dir.unlink()
                 elif audio_dir.is_dir():
                     shutil.rmtree(audio_dir)
             if not audio_dir.exists() and not audio_dir.is_symlink():
+                _assert_safe_destination(project_dir, audio_dir)
                 try:
                     audio_dir.symlink_to(audio_path)
                 except OSError:
@@ -134,7 +154,8 @@ def setup_project(
                             if not audio_file.is_file():
                                 continue
                             link_path = audio_dir / audio_file.relative_to(audio_path)
-                            link_path.parent.mkdir(parents=True, exist_ok=True)
+                            _safe_mkdir(project_dir, link_path.parent, parents=True)
+                            _assert_safe_destination(project_dir, link_path)
                             if clobber or not link_path.exists():
                                 if link_path.exists():
                                     link_path.unlink()
@@ -147,12 +168,11 @@ def setup_project(
                         continue
                     dest_file = audio_dir / audio_file.relative_to(audio_path)
                     if clobber or not dest_file.exists():
-                        dest_file.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy(audio_file, dest_file)
+                        _safe_copy(project_dir, audio_file, dest_file)
             else:
                 dest_file = audio_dir / audio_path.name
                 if clobber or not dest_file.exists():
-                    shutil.copy(audio_path, dest_file)
+                    _safe_copy(project_dir, audio_path, dest_file)
     # If no audio_path, do nothing (directory already created above)
 
     # Copy dictionary
@@ -160,29 +180,30 @@ def setup_project(
         dictionary_path = Path(dictionary_path).resolve()
         dest_dict = project_dir / "shared" / "dictionary.dict"
         if dictionary_path != dest_dict and (clobber or not dest_dict.exists()):
-            shutil.copy(dictionary_path, dest_dict)
+            _safe_copy(project_dir, dictionary_path, dest_dict)
 
     # Copy filler dictionary
     dest_filler = project_dir / "shared" / "filler.dict"
     if filler_dict_path:
         filler_dict_path = Path(filler_dict_path).resolve()
         if filler_dict_path != dest_filler and (clobber or not dest_filler.exists()):
-            shutil.copy(filler_dict_path, dest_filler)
+            _safe_copy(project_dir, filler_dict_path, dest_filler)
     else:
         # Use default filler dictionary from package data
         if clobber or not dest_filler.exists():
             from pstrain.data import get_data_file
 
             default_filler = get_data_file("filler.dict")
-            shutil.copy(default_filler, dest_filler)
+            _safe_copy(project_dir, default_filler, dest_filler)
 
     # Extract or copy phoneset after installing the filler dictionary so an
     # extracted inventory covers every trainable dictionary entry.
     dest_phoneset = project_dir / "shared" / "phoneset.txt"
+    _assert_safe_destination(project_dir, dest_phoneset)
     if phoneset_path:
         phoneset_path = Path(phoneset_path).resolve()
         if phoneset_path != dest_phoneset and (clobber or not dest_phoneset.exists()):
-            shutil.copy(phoneset_path, dest_phoneset)
+            _safe_copy(project_dir, phoneset_path, dest_phoneset)
     elif dictionary_path:
         dict_file = project_dir / "shared" / "dictionary.dict"
         if dict_file.exists() and (clobber or not dest_phoneset.exists()):

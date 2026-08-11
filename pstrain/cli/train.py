@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import tempfile
 import time
@@ -14,7 +15,9 @@ from pstrain.cli.base import Command, CommandContext, CommandResult
 from pstrain.lib.one_command import (
     PROMPT_FORMATS,
     PromptFormatError,
+    identity_difference,
     input_identity,
+    installed_corpus_identity,
     validate_inputs,
     write_training_transcription,
     write_validation_reports,
@@ -23,6 +26,77 @@ from pstrain.lib.pipeline import PipelineContext, UnknownTargetError
 from pstrain.lib.pipeline.context import DEFAULT_CONFIGS
 from pstrain.lib.pipeline.tasks import TARGETS, build_pipeline
 from pstrain.lib.setup import setup_project
+
+
+def _refuse_project_symlinks(project_dir: Path) -> None:
+    """Replacement never adopts or traverses links from the old project."""
+    for directory, dirnames, filenames in os.walk(project_dir, followlinks=False):
+        base = Path(directory)
+        for name in [*dirnames, *filenames]:
+            path = base / name
+            if path.is_symlink():
+                raise ValueError(f"Refusing to replace project containing symlink: {path}")
+
+
+def _install_project_transactionally(
+    project_dir: Path,
+    *,
+    transcription_path: Path,
+    audio_path: Path,
+    dictionary_path: Path,
+    phoneset_path: Path | None,
+    filler_path: Path | None,
+    prompts_path: Path,
+    source_identity: dict[str, object],
+    link_audio: bool,
+    replacing: bool,
+) -> None:
+    """Build a complete replacement beside the destination, then rename it into place."""
+    project_dir.parent.mkdir(parents=True, exist_ok=True)
+    if replacing:
+        _refuse_project_symlinks(project_dir)
+    staging = Path(
+        tempfile.mkdtemp(prefix=f".{project_dir.name}.replacement-", dir=project_dir.parent)
+    )
+    backup: Path | None = None
+    installed = False
+    try:
+        setup_project(
+            project_dir=staging,
+            transcription_path=transcription_path,
+            audio_path=audio_path,
+            dictionary_path=dictionary_path,
+            phoneset_path=phoneset_path,
+            filler_dict_path=filler_path,
+            link_audio=link_audio,
+        )
+        shutil.copyfile(prompts_path, staging / "etc" / "prompts.source")
+        installed_identity = installed_corpus_identity(
+            staging, audio_ownership="link" if link_audio else "copy"
+        )
+        manifest = {"version": 2, "source": source_identity, "installed": installed_identity}
+        (staging / "etc" / "input-identity.json").write_text(
+            json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+        )
+        if replacing:
+            backup = Path(
+                tempfile.mkdtemp(prefix=f".{project_dir.name}.previous-", dir=project_dir.parent)
+            )
+            backup.rmdir()
+            project_dir.rename(backup)
+        staging.rename(project_dir)
+        installed = True
+        if backup is not None:
+            shutil.rmtree(backup)
+            backup = None
+    except Exception:
+        if backup is not None and backup.exists() and not project_dir.exists():
+            backup.rename(project_dir)
+            backup = None
+        raise
+    finally:
+        if staging.exists() and not installed:
+            shutil.rmtree(staging)
 
 
 class TrainCommand(Command):
@@ -130,7 +204,7 @@ class TrainCommand(Command):
         except (PromptFormatError, UnicodeDecodeError, ValueError) as exc:
             return self._failure(ctx, "invalid_input", str(exc))
 
-        identity = input_identity(
+        source_identity = input_identity(
             audio_dir,
             prompts_path,
             dictionary_path,
@@ -140,6 +214,14 @@ class TrainCommand(Command):
         )
         manifest_path = project_dir / "etc" / "input-identity.json"
         if ctx.args.resume:
+            try:
+                current = project_dir
+                for part in manifest_path.relative_to(project_dir).parts:
+                    current /= part
+                    if current.is_symlink():
+                        raise ValueError(f"Unexpected symlink in installed corpus: {current}")
+            except ValueError as exc:
+                return self._failure(ctx, "incompatible_resume", f"Cannot resume: {exc}")
             if not manifest_path.is_file():
                 return self._failure(
                     ctx,
@@ -147,13 +229,41 @@ class TrainCommand(Command):
                     f"Cannot resume: input identity is missing at {manifest_path}. "
                     "Use --replace-inputs to adopt the requested inputs.",
                 )
-            installed = json.loads(manifest_path.read_text(encoding="utf-8"))
-            if installed != identity:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if manifest.get("version") != 2:
                 return self._failure(
                     ctx,
                     "incompatible_resume",
-                    "Cannot resume: requested inputs differ from the installed corpus. "
+                    "Cannot resume: installed corpus identity uses an unsupported manifest. "
                     "Use --replace-inputs to replace them explicitly.",
+                )
+            source_difference = identity_difference(manifest.get("source"), source_identity)
+            if source_difference:
+                return self._failure(
+                    ctx,
+                    "incompatible_resume",
+                    f"Cannot resume: requested source arguments differ ({source_difference}). "
+                    "Use --replace-inputs to replace them explicitly.",
+                )
+            expected_installed = manifest.get("installed")
+            ownership = (
+                expected_installed.get("audio_ownership")
+                if isinstance(expected_installed, dict)
+                else None
+            )
+            try:
+                actual_installed = installed_corpus_identity(
+                    project_dir, audio_ownership=str(ownership)
+                )
+            except (OSError, ValueError) as exc:
+                return self._failure(ctx, "incompatible_resume", f"Cannot resume: {exc}")
+            installed_difference = identity_difference(expected_installed, actual_installed)
+            if installed_difference:
+                return self._failure(
+                    ctx,
+                    "incompatible_resume",
+                    f"Cannot resume: installed corpus diverged ({installed_difference}). "
+                    "Use --replace-inputs to replace it explicitly.",
                 )
 
         if not report.valid:
@@ -227,25 +337,23 @@ class TrainCommand(Command):
             canonical = Path(temporary) / "all.transcription"
             write_training_transcription(canonical, prompts)
             if not ctx.args.resume:
-                if ctx.args.replace_inputs:
-                    installed_audio = project_dir / "audio"
-                    if installed_audio.is_symlink():
-                        installed_audio.unlink()
-                    elif installed_audio.is_dir():
-                        shutil.rmtree(installed_audio)
-                setup_project(
-                    project_dir=project_dir,
-                    transcription_path=canonical,
-                    audio_path=audio_dir,
-                    dictionary_path=dictionary_path,
-                    phoneset_path=phoneset_path,
-                    filler_dict_path=filler_path,
-                    link_audio=ctx.args.link_audio,
-                    clobber=ctx.args.replace_inputs,
-                )
-                source_copy = project_dir / "etc" / "prompts.source"
-                shutil.copyfile(prompts_path, source_copy)
-                manifest_path.write_text(json.dumps(identity, indent=2) + "\n", encoding="utf-8")
+                try:
+                    _install_project_transactionally(
+                        project_dir,
+                        transcription_path=canonical,
+                        audio_path=audio_dir,
+                        dictionary_path=dictionary_path,
+                        phoneset_path=phoneset_path,
+                        filler_path=filler_path,
+                        prompts_path=prompts_path,
+                        source_identity=source_identity,
+                        link_audio=ctx.args.link_audio,
+                        replacing=ctx.args.replace_inputs,
+                    )
+                except (OSError, ValueError) as exc:
+                    return self._failure(
+                        ctx, "project_setup_failed", f"Project setup failed: {exc}"
+                    )
         validation_path, oov_path = write_validation_reports(project_dir, report)
 
         try:

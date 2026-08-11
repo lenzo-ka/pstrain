@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import os
 import re
 import unicodedata
 import wave
@@ -53,11 +54,10 @@ class InputReport:
 
 
 def _nonempty_lines(path: Path) -> list[tuple[int, str]]:
-    return [
-        (number, raw.strip())
-        for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
-        if raw.strip()
-    ]
+    text = path.read_text(encoding="utf-8")
+    if text.startswith("\ufeff"):
+        raise PromptFormatError(f"Prompt file has a UTF-8 BOM, which is unsupported: {path}")
+    return [(number, raw.strip()) for number, raw in enumerate(text.splitlines(), 1) if raw.strip()]
 
 
 def detect_prompt_format(path: Path) -> str:
@@ -68,9 +68,14 @@ def detect_prompt_format(path: Path) -> str:
     values = [line for _, line in lines]
     sphinx = [_SPHINX_RE.fullmatch(line) is not None for line in values]
     if any(sphinx):
-        if not all(sphinx):
-            raise PromptFormatError("Mixed Sphinx and non-Sphinx prompt lines; use one format")
-        return "sphinx"
+        raise PromptFormatError(
+            "Ambiguous Sphinx-form prompts; pass --prompt-format sphinx explicitly"
+        )
+    if any("<s>" in line or "</s>" in line for line in values):
+        raise PromptFormatError(
+            "Ambiguous prompts contain <s>/</s> tokens but no Sphinx (fileid); "
+            "pass --prompt-format explicitly"
+        )
     if any("\t" in line for line in values):
         if not all(line.count("\t") == 1 for line in values):
             raise PromptFormatError("Ambiguous TSV prompts; pass --prompt-format explicitly")
@@ -201,15 +206,18 @@ def validate_inputs(
                     f"Phones outside phoneset in {label}: {len(missing_phones)} "
                     f"(e.g. {sorted(missing_phones)[0]})"
                 )
-    words = dictionary.words()
-    report.dictionary_words = len(words)
+    dictionary_words = dictionary.words()
+    words = set(dictionary_words)
+    if filler is not None:
+        words.update(filler.words())
+    report.dictionary_words = len(dictionary_words)
     occurrences: Counter[str] = Counter()
     examples: dict[str, list[str]] = defaultdict(list)
     for prompt in prompts:
         for token in prompt.text.split():
             if token not in words:
                 occurrences[token] += 1
-                if len(examples[token]) < 5:
+                if prompt.fileid not in examples[token]:
                     examples[token].append(prompt.fileid)
     report.oov = {
         token: {"count": occurrences[token], "examples": examples[token]}
@@ -231,10 +239,14 @@ def validate_inputs(
 
 
 def write_validation_reports(project_dir: Path, report: InputReport) -> tuple[Path, Path]:
+    project_dir = Path(project_dir).absolute()
     reports = project_dir / "reports"
+    _refuse_symlink(reports, project_dir)
     reports.mkdir(parents=True, exist_ok=True)
     validation_path = reports / "input-validation.json"
     oov_path = reports / "oov.txt"
+    _refuse_symlink(validation_path, project_dir)
+    _refuse_symlink(oov_path, project_dir)
     validation_path.write_text(json.dumps(report.to_dict(), indent=2) + "\n", encoding="utf-8")
     lines = ["token\tcount\texample_utterances"]
     for token, detail in report.oov.items():
@@ -258,6 +270,90 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _refuse_symlink(path: Path, root: Path) -> None:
+    """Refuse a symlink at path or in its existing ancestry below root."""
+    relative = path.relative_to(root)
+    current = root
+    for part in relative.parts:
+        current /= part
+        try:
+            if current.is_symlink():
+                raise ValueError(f"Unexpected symlink in installed corpus: {current}")
+        except OSError as exc:
+            raise ValueError(f"Cannot inspect installed corpus path {current}: {exc}") from exc
+
+
+def _audio_inventory(audio_dir: Path, project_dir: Path, *, linked: bool) -> dict[str, str]:
+    if linked:
+        if not audio_dir.is_symlink():
+            raise ValueError(f"Installed audio link is missing or was replaced: {audio_dir}")
+        scan_root = audio_dir.resolve(strict=True)
+        if not scan_root.is_dir():
+            raise ValueError(f"Installed audio link does not resolve to a directory: {audio_dir}")
+    else:
+        _refuse_symlink(audio_dir, project_dir)
+        scan_root = audio_dir
+    inventory: dict[str, str] = {}
+    for directory, dirnames, filenames in os.walk(scan_root, followlinks=False):
+        directory_path = Path(directory)
+        for name in [*dirnames, *filenames]:
+            entry = directory_path / name
+            if entry.is_symlink():
+                display = audio_dir / entry.relative_to(scan_root)
+                raise ValueError(f"Unexpected symlink in installed corpus: {display}")
+        for name in filenames:
+            source = directory_path / name
+            if source.suffix == ".wav":
+                relative = source.relative_to(scan_root).as_posix()
+                inventory[f"audio/{relative}"] = sha256_file(source)
+    return dict(sorted(inventory.items()))
+
+
+def installed_corpus_identity(project_dir: Path, *, audio_ownership: str) -> dict[str, object]:
+    """Hash exactly the installed corpus consumed by training."""
+    project_dir = Path(project_dir).absolute()
+    linked = audio_ownership == "link"
+    if audio_ownership not in {"copy", "link"}:
+        raise ValueError(f"Unknown installed audio ownership: {audio_ownership!r}")
+    files: dict[str, str] = _audio_inventory(project_dir / "audio", project_dir, linked=linked)
+    for relative in (
+        "etc/all.transcription",
+        "shared/dictionary.dict",
+        "shared/phoneset.txt",
+        "shared/filler.dict",
+    ):
+        path = project_dir / relative
+        _refuse_symlink(path, project_dir)
+        if not path.is_file():
+            raise ValueError(f"Installed corpus file is missing: {path}")
+        files[relative] = sha256_file(path)
+    identity: dict[str, object] = {
+        "audio_ownership": audio_ownership,
+        "files": dict(sorted(files.items())),
+    }
+    if linked:
+        identity["audio_link_target"] = str((project_dir / "audio").resolve(strict=True))
+    return identity
+
+
+def identity_difference(expected: object, actual: object, prefix: str = "") -> str | None:
+    """Return the first stable, human-readable identity difference."""
+    if isinstance(expected, dict) and isinstance(actual, dict):
+        for key in sorted(set(expected) | set(actual)):
+            name = f"{prefix}/{key}" if prefix else str(key)
+            if key not in expected:
+                return f"unexpected {name}"
+            if key not in actual:
+                return f"missing {name}"
+            difference = identity_difference(expected[key], actual[key], name)
+            if difference:
+                return difference
+        return None
+    if expected != actual:
+        return f"modified {prefix}"
+    return None
 
 
 def input_identity(
