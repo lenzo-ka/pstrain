@@ -39,6 +39,9 @@ Engine drift requires the explicit `--allow-engine-drift` override.
 The gate keeps zero failed decode alignments as a hard requirement. Named,
 documented terminal training skips are permitted only through the benchmark's
 known-skips manifest and are always reported in each affected record cell.
+The measured on-mode parity anchor itself carried nine terminal skip events;
+these documented skips are a property of the measured band, not a new
+concession.
 
 `PSTRAIN_BENCH_CACHE`
 selects the archive cache; authenticated archives there are reused. The work
