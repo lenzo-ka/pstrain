@@ -31,6 +31,7 @@ class SplitResult:
     test_fileids: Path
     train_transcription: Path
     test_transcription: Path
+    test_decoder_transcription: Path
     n_train: int
     n_test: int
 
@@ -109,9 +110,11 @@ def train_test_split(
     test_fileids = output_dir / "test.fileids"
     train_transcription = output_dir / "train.transcription"
     test_transcription = output_dir / "test.transcription"
+    test_decoder_transcription = output_dir / "test.decoder.transcription"
 
     _write_transcription(train_transcription, train)
     _write_transcription(test_transcription, test)
+    _write_decoder_transcription(test_decoder_transcription, test)
     _write_fileids(train_fileids, train)
     _write_fileids(test_fileids, test)
 
@@ -120,6 +123,7 @@ def train_test_split(
         test_fileids=test_fileids,
         train_transcription=train_transcription,
         test_transcription=test_transcription,
+        test_decoder_transcription=test_decoder_transcription,
         n_train=len(train),
         n_test=len(test),
     )
@@ -135,3 +139,9 @@ def _write_fileids(path: Path, entries: list[tuple[str, str]]) -> None:
     with path.open("w") as f:
         for fileid, _ in entries:
             f.write(f"{fileid}\n")
+
+
+def _write_decoder_transcription(path: Path, entries: list[tuple[str, str]]) -> None:
+    with path.open("w") as f:
+        for fileid, text in entries:
+            f.write(f"<s> {text} </s> ({fileid})\n")
