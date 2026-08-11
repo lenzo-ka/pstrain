@@ -301,6 +301,14 @@ def run_bw_training(
         skipped = 0
         retried = 0
         excluded = 0
+        skip_reasons = {
+            "excluded_by_schedule": 0,
+            "feature_not_found": 0,
+            "transcript_not_found": 0,
+            "feature_dimension": 0,
+            "alignment_failure": 0,
+            "exception": 0,
+        }
         excluded_fileids = set(exclusion_schedule.get("*", ()))
         excluded_fileids.update(exclusion_schedule.get(iteration, ()))
         excluded_fileids.update(exclusion_schedule.get(str(iteration), ()))
@@ -309,18 +317,21 @@ def run_bw_training(
                 logger.info("Skipping %s on iteration %d: excluded_by_schedule", fileid, iteration)
                 skipped += 1
                 excluded += 1
+                skip_reasons["excluded_by_schedule"] += 1
                 continue
             # Load features
             mfc_path = features_dir / f"{fileid}.mfc"
             if not mfc_path.exists():
                 logger.warning("Features not found: %s", mfc_path)
                 skipped += 1
+                skip_reasons["feature_not_found"] += 1
                 continue
 
             # Get transcript
             if fileid not in transcripts:
                 logger.warning("Transcript not found: %s", fileid)
                 skipped += 1
+                skip_reasons["transcript_not_found"] += 1
                 continue
 
             try:
@@ -330,6 +341,7 @@ def run_bw_training(
                 if mfcc.shape[1] != 13:
                     logger.warning("Unexpected feature dimension %d for %s", mfcc.shape[1], fileid)
                     skipped += 1
+                    skip_reasons["feature_dimension"] += 1
                     continue
 
                 # Get transcript and add <s> / </s> markers for C code
@@ -353,9 +365,11 @@ def run_bw_training(
                 else:
                     logger.warning("Failed to process: %s", fileid)
                     skipped += 1
+                    skip_reasons["alignment_failure"] += 1
             except Exception as e:
                 logger.warning("Error processing %s: %s", fileid, e)
                 skipped += 1
+                skip_reasons["exception"] += 1
 
         total_skipped += skipped
         if skipped:
@@ -434,14 +448,13 @@ def run_bw_training(
             "signed_convergence_delta": per_frame_delta,
             "stop_decision": stop_decision,
         }
-        if exclusion_schedule:
-            telemetry_row["accounting"] = {
-                "input_utts": len(fileids),
-                "processed_utts": processed,
-                "retried_utts": retried,
-                "skipped_utts": skipped,
-                "skip_reasons": {"excluded_by_schedule": excluded},
-            }
+        telemetry_row["accounting"] = {
+            "input_utts": len(fileids),
+            "processed_utts": processed,
+            "retried_utts": retried,
+            "skipped_utts": skipped,
+            "skip_reasons": skip_reasons,
+        }
         telemetry_rows.append(telemetry_row)
         logger.info(
             "BW telemetry: pass=%d total_log_likelihood=%.6f total_frames=%d "
@@ -456,7 +469,7 @@ def run_bw_training(
         _write_telemetry(
             output_dir,
             telemetry_rows,
-            schema_version=2 if exclusion_schedule else 1,
+            schema_version=2,
         )
 
         # Check for degenerate training (no successful utterances)
