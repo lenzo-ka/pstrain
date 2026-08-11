@@ -539,7 +539,7 @@ pstrain_bw_process_utt_text(pstrain_bw_context_t *ctx,
 
         ckd_free_2d((void **)feat_vecs);
 
-        if (ret == S3_SUCCESS)
+        if (ret == S3_SUCCESS && ctx->multipron)
             mark_fallback_senones(ctx, state_seq, n_state);
 
         /* Linear path uses static internal buffers (do NOT free).
@@ -660,7 +660,7 @@ pstrain_bw_process_utt_mfcc(pstrain_bw_context_t *ctx,
                                 NULL,  /* latfh */
                                 ctx->feat);
 
-        if (ret == S3_SUCCESS)
+        if (ret == S3_SUCCESS && ctx->multipron)
             mark_fallback_senones(ctx, state_seq, n_state);
 
         feat_array_free(feat_buf);

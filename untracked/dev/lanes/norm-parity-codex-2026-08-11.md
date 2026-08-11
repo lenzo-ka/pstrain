@@ -50,3 +50,14 @@ numeric expectation changed.
 - Follow-up only: add a discriminating decode test for PocketSphinx handling of
   zero/unfloored exports versus upstream artifacts; parity is currently matched
   by upstream's zero-writing convention but is not directly tested.
+
+## Fold-in #2
+
+- Fallback senone marking now runs only for multipron graph updates; successful
+  text and MFCC updates in linear mode leave the marking set empty.
+- The zero-occupancy fixture expands its copied flat model to two densities and
+  runs linear training with `topn=1`. It asserts no fallback senones are marked
+  and that zero-policy output zeros every zero-posterior Gaussian cell exactly.
+- Native rebuild, full pytest, CTest, Ruff check/format, mypy with the repository
+  missing-import policy, and pre-commit all passed. The numeric golden was
+  unchanged.

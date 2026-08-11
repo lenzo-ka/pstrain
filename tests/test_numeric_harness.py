@@ -113,6 +113,16 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
     veclen = veclens[0]
     prior_means = prior_means_raw.reshape(n_cb, n_density, veclen)
     prior_vars = _pstrainc.read_gau(str(model / "variances"))[0].reshape(n_cb, n_density, veclen)
+    # Split the one-density flat model into two identical densities so top-N
+    # pruning leaves genuine zero-posterior cells in otherwise active senones.
+    prior_means = np.repeat(prior_means, 2, axis=1)
+    prior_vars = np.repeat(prior_vars, 2, axis=1)
+    n_density = 2
+    _pstrainc.write_gau(str(model / "means"), prior_means)
+    mixw = _pstrainc.read_mixw(str(model / "mixture_weights"))[0]
+    mixw = np.repeat(mixw.reshape(-1, 1, 1), n_density, axis=2)
+    mixw.fill(np.float32(1.0 / n_density))
+    _pstrainc.write_mixw(str(model / "mixture_weights"), mixw)
     # Exercise both sides of the evaluation floor on every codebook. Retain
     # must serialize these exact input floats for cells with zero occupancy.
     prior_vars[..., 0::2] = np.float32(5e-5)
@@ -134,10 +144,12 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
                 pass2var=False,
                 unobserved_gaussian_policy=policy,
                 a_beam=1e-200,
+                topn=n_density - 1,
                 multipron=False,
             ),
         )
         assert trainer.process_utterance(features, phones)
+        assert trainer._lib.pstrain_bw_count_active_fallback_senones(trainer._ctx) == 0
         assert trainer.normalize()
         out = tmp_path / policy
         out.mkdir()
