@@ -33,6 +33,19 @@ def test_lib_public_api() -> None:
     assert callable(validate_project)
 
 
+def test_pstrainc_dunder_probe_does_not_load_library(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Module metadata probes remain safe when libpstrainc is unavailable."""
+    from pstrain.lib import _pstrainc
+
+    def fail_if_loaded() -> None:
+        raise AssertionError("dunder probe attempted to load libpstrainc")
+
+    monkeypatch.setattr(_pstrainc, "get_lib", fail_if_loaded)
+
+    with pytest.raises(AttributeError, match="__sphinx_mock__"):
+        _ = _pstrainc.__sphinx_mock__
+
+
 @pytest.mark.skipif(not _lib_exists(), reason="C library not built")
 def test_pstrainc_bindings() -> None:
     """Test that C bindings work (requires built library)."""

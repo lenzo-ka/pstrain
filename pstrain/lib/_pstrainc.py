@@ -57,6 +57,12 @@ __all__ = [
 # Convenience: allow direct attribute access to C functions
 def __getattr__(name: str) -> Any:
     """Allow pstrainc.function_name() syntax."""
+    # Introspection tools such as Sphinx probe module metadata through dunder
+    # attributes.  Those are Python attributes, not raw C symbols, and must
+    # not force the native library to load merely by importing this module.
+    if name.startswith("__"):
+        raise AttributeError(f"module 'pstrain.lib._pstrainc' has no attribute '{name}'")
+
     lib = get_lib()
     if hasattr(lib, name):
         return getattr(lib, name)
