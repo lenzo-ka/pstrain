@@ -227,8 +227,10 @@ phone_graph_split_contexts(const phone_graph_t *in, acmod_set_t *acmod_set)
                 uint32 p = in->prior_idx[i][u];
                 acmod_id_t p_ci = context_phone(acmod_set, in->phone[p], sil);
                 acmod_id_t c_ci = context_phone(acmod_set, in->phone[i], sil);
-                uint32 p_right = context_group(info[p].right_ci, info[p].n_right, c_ci);
-                uint32 c_left = context_group(info[i].left_ci, info[i].n_left, p_ci);
+                uint32 p_right = acmod_set_has_attrib(acmod_set, in->phone[p], "filler")
+                    ? 0 : context_group(info[p].right_ci, info[p].n_right, c_ci);
+                uint32 c_left = acmod_set_has_attrib(acmod_set, in->phone[i], "filler")
+                    ? 0 : context_group(info[i].left_ci, info[i].n_left, p_ci);
                 uint32 pl, cr;
                 for (pl = 0; pl < info[p].n_left; ++pl) {
                     uint32 p_source = info[p].first_new + pl * info[p].n_right + p_right;
@@ -257,8 +259,10 @@ phone_graph_split_contexts(const phone_graph_t *in, acmod_set_t *acmod_set)
                 uint32 p = in->prior_idx[i][u];
                 acmod_id_t p_ci = context_phone(acmod_set, in->phone[p], sil);
                 acmod_id_t c_ci = context_phone(acmod_set, in->phone[i], sil);
-                uint32 p_right = context_group(info[p].right_ci, info[p].n_right, c_ci);
-                uint32 c_left = context_group(info[i].left_ci, info[i].n_left, p_ci);
+                uint32 p_right = acmod_set_has_attrib(acmod_set, in->phone[p], "filler")
+                    ? 0 : context_group(info[p].right_ci, info[p].n_right, c_ci);
+                uint32 c_left = acmod_set_has_attrib(acmod_set, in->phone[i], "filler")
+                    ? 0 : context_group(info[i].left_ci, info[i].n_left, p_ci);
                 uint32 pl, cr;
                 for (pl = 0; pl < info[p].n_left; ++pl) {
                     uint32 p_source = info[p].first_new + pl * info[p].n_right + p_right;

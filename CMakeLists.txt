@@ -1,6 +1,12 @@
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.16)
 
-project(pstrain VERSION 0.1.0
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/pyproject.toml" PSTRAIN_PYPROJECT)
+string(REGEX MATCH "version[ \t]*=[ \t]*\"([^\"]+)\"" _ "${PSTRAIN_PYPROJECT}")
+if(NOT CMAKE_MATCH_1)
+  message(FATAL_ERROR "Could not read project.version from pyproject.toml")
+endif()
+
+project(pstrain VERSION ${CMAKE_MATCH_1}
   DESCRIPTION "pstrain, the Peace Train - acoustic model training toolkit"
   HOMEPAGE_URL "https://github.com/lenzo-ka/pstrain"
   LANGUAGES C)

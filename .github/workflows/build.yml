@@ -43,6 +43,13 @@ jobs:
           name: sdist
           path: dist/*.tar.gz
 
+      - name: Test installed source distribution from a neutral directory
+        run: |
+          python -m venv "$RUNNER_TEMP/sdist-test"
+          "$RUNNER_TEMP/sdist-test/bin/pip" install dist/*.tar.gz
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/sdist-test/bin/python" "$GITHUB_WORKSPACE/scripts/test_installed_distribution.py"
+
   # Build wheels on multiple platforms.
   # Windows is intentionally omitted: the vendored CMU Sphinx C does not yet
   # build under MSVC (POSIX-only drand48 and several unresolved sphinx3_align

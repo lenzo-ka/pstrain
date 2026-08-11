@@ -13,6 +13,7 @@ pstrain is an acoustic model training toolkit.
    examples
    cffi-progress
    development
+   support
 
 .. toctree::
    :maxdepth: 2

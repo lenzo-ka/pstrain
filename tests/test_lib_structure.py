@@ -1,5 +1,8 @@
 """Test library structure and imports."""
 
+from pathlib import Path
+from tomllib import load
+
 import pytest
 
 from pstrain import __version__
@@ -11,7 +14,8 @@ from tests.clib import c_library_available as _lib_exists
 
 def test_version() -> None:
     """Test that version is defined."""
-    assert __version__ == "0.1.0"
+    with (Path(__file__).parents[1] / "pyproject.toml").open("rb") as pyproject:
+        assert __version__ == load(pyproject)["project"]["version"]
 
 
 def test_lib_public_api() -> None:
@@ -27,6 +31,19 @@ def test_lib_public_api() -> None:
     assert ConfigManager is not None
     assert callable(setup_project)
     assert callable(validate_project)
+
+
+def test_pstrainc_dunder_probe_does_not_load_library(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Module metadata probes remain safe when libpstrainc is unavailable."""
+    from pstrain.lib import _pstrainc
+
+    def fail_if_loaded() -> None:
+        raise AssertionError("dunder probe attempted to load libpstrainc")
+
+    monkeypatch.setattr(_pstrainc, "get_lib", fail_if_loaded)
+
+    with pytest.raises(AttributeError, match="__sphinx_mock__"):
+        _ = _pstrainc.__sphinx_mock__
 
 
 @pytest.mark.skipif(not _lib_exists(), reason="C library not built")

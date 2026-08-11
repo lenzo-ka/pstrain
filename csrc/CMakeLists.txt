@@ -1,6 +1,3 @@
-cmake_minimum_required(VERSION 3.16)
-project(pstrainc VERSION 0.1.0 LANGUAGES C)
-
 # pstrain C library and programs
 
 # All library source files
@@ -358,8 +355,7 @@ endif()
 # C smoke tests (CTest). Guarded by BUILD_TESTING (CMake convention).
 # Default ON for normal/dev/CI builds; OFF inside scikit-build-core wheel
 # builds (SKBUILD), where the tests add nothing shippable. enable_testing()
-# is idempotent and also covers the standalone `cmake -S csrc` build used by
-# the Makefile, where this file is top-level.
+# is idempotent. The supported entry point is the repository root.
 if(SKBUILD)
   option(BUILD_TESTING "Build the C smoke tests" OFF)
 else()

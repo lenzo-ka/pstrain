@@ -10,7 +10,7 @@ all: build-c install-dev
 .PHONY: build-c
 build-c:
 	@echo "Building C library..."
-	cmake -S csrc -B $(BUILD_DIR) \
+	cmake -S . -B $(BUILD_DIR) \
 		-DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) \
 		-DBUILD_SHARED_LIBS=ON
 	cmake --build $(BUILD_DIR) --parallel
@@ -18,11 +18,11 @@ build-c:
 # Verify C library was built
 .PHONY: check-c
 check-c:
-	@if [ ! -f $(BUILD_DIR)/libpstrainc.dylib ] && [ ! -f $(BUILD_DIR)/libpstrainc.so ]; then \
+	@if [ ! -f $(BUILD_DIR)/lib/libpstrainc.dylib ] && [ ! -f $(BUILD_DIR)/lib/libpstrainc.so ]; then \
 		echo "Error: C library not built. Run 'make build-c' first."; \
 		exit 1; \
 	fi
-	@echo "C library found at $(BUILD_DIR)/"
+	@echo "C library found at $(BUILD_DIR)/lib/"
 
 # Test CFFI bindings work
 .PHONY: check-cffi
@@ -40,7 +40,8 @@ install-dev: build-c
 
 .PHONY: test
 test: check-c
-	pytest
+	ctest --test-dir $(BUILD_DIR) --output-on-failure --no-tests=error
+	PSTRAIN_REQUIRE_CLIB=1 pytest
 
 .PHONY: lint
 lint:
@@ -68,7 +69,7 @@ docs-gen:
 	python -c "from pstrain.lib.config import generate_rst_docs; open('docs/api/config-reference.rst', 'w').write(generate_rst_docs())"
 
 .PHONY: docs
-docs: docs-gen
+docs:
 	cd docs && $(MAKE) html
 
 .PHONY: docs-clean

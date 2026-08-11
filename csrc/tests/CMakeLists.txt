@@ -40,3 +40,22 @@ add_test(
   NAME state_seq_ownership
   COMMAND test_state_seq_ownership
 )
+
+add_executable(test_bw_state_seq_build test_bw_state_seq_build.c)
+target_link_libraries(test_bw_state_seq_build pstrainc)
+target_include_directories(test_bw_state_seq_build
+  PRIVATE ${CMAKE_BINARY_DIR}
+)
+
+set(BW_FIXTURE ${PROJECT_SOURCE_DIR}/tests/fixtures/multipron_final_state)
+add_test(
+  NAME bw_state_seq_build
+  COMMAND test_bw_state_seq_build
+    ${BW_FIXTURE}/model/mdef
+    ${BW_FIXTURE}/model/means
+    ${BW_FIXTURE}/model/variances
+    ${BW_FIXTURE}/model/mixture_weights
+    ${BW_FIXTURE}/model/transition_matrices
+    ${BW_FIXTURE}/dictionary.dict
+    ${BW_FIXTURE}/filler.dict
+)

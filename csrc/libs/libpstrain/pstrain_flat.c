@@ -69,9 +69,9 @@
 #include <s3/s3acc_io.h>
 #include <s3/s3.h>
 
-/* Forward declaration for init_gau core function */
-int pstrain_init_gau_core(lexicon_t *lex, model_def_t *mdef, feat_t *feat,
-                      const char *accumdir, const char *meanfn);
+/* Implementation detail of the public pstrain_init_gau wrapper. */
+static int pstrain_init_gau_core(lexicon_t *lex, model_def_t *mdef, feat_t *feat,
+                                 const char *accumdir, const char *meanfn);
 
 int
 pstrain_flat_tmat(const char *mdef_path,
@@ -285,7 +285,7 @@ cleanup:
  *
  * This is adapted from SphinxTrain's init_gau.c
  */
-int
+static int
 pstrain_init_gau_core(lexicon_t *lex, model_def_t *mdef, feat_t *feat,
                   const char *accumdir, const char *meanfn)
 {
