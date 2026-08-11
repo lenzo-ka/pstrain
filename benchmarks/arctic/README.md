@@ -45,7 +45,7 @@ deterministic 32-file hash sample per voice; `--deep-verify` hashes every WAV.
 
 `data/pin-train.transcription` and `data/pin-train.fileids` are the exact
 1,043-utterance upstream training inputs used by the parity program (SHA-256
-`7b6beae122d9da47ad89861a15490c531c194ca9bc2e329b8b133d94ed960ad6` and
+`28788cd1ce2269d344b50420d74007fa8c443778680724f6334e2712ea110959` and
 `8ce9a55c5929f6f86579ee1b244c38fd4d0a9d41e436e2057337f74c1bb4d631`).
 `data/full-slt.transcription` retains the normalized 1,132-prompt SLT set for
 corpus-wide feature extraction and provenance (SHA-256
@@ -71,10 +71,12 @@ The current `arpabo` builder remains tested against the 1,043-utterance pin
 training corpus but produces `2c75cacb19b4...`, not the preserved canonical
 LM's bytes; the committed measured-band LM therefore remains canonical.
 
-The committed serializations are intentional. The exact pin transcript and
-decoder references use Sphinx form (`<s> text </s> (fileid)`), including a
-voice prefix for the cross-speaker cell; the retained full set uses normalized
-leading-ID form (`fileid text`). Format tests enforce each file's contract.
+The committed serializations match their consumers. The pin training transcript
+uses normalized leading-ID form (`fileid text`), as required by the split,
+flat-initialization control, and Baum-Welch path. Decoder references use Sphinx
+form (`<s> text </s> (fileid)`), including a voice prefix for the cross-speaker
+cell. The retained full set also uses normalized leading-ID form. Consumption
+tests enforce the training boundary while the decoder-format tests remain.
 
 An empty `exclusion_schedule` is correct for the pin band: it records pstrain's
 honest whole-set-training behavior, while composition emulation was only a
