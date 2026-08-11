@@ -14,6 +14,7 @@ from pstrain.benchmarks.arctic import (
     DATA_DIR,
     DECODER_CONDITIONS,
     FILLER_DICTIONARY,
+    KNOWN_SKIPS,
     PIN_CONFIGS,
     PINNED_RESOURCE_HASHES,
     RECORD_SCHEMA_VERSION,
@@ -176,6 +177,19 @@ def test_eval_transcript_serializations_are_enforced() -> None:
 
 
 def test_pin_configs_resolve_ratified_conditions() -> None:
+    assert benchmark_conditions()["known_skips"] == [
+        {
+            "mode": "off",
+            "stage": "cd-2g",
+            "pass": 1,
+            "utterance": "arctic_a0587",
+            "mechanism": (
+                "beam failure on a hard utterance after permitted retry; mirrored upstream: "
+                "the preserved upstream build ignores the same utterance at CI passes 5-6"
+            ),
+            "recorded-in": "thresh01-off anchor",
+        }
+    ]
     off = PIN_CONFIGS["off"]["training"]
     on = PIN_CONFIGS["on"]["training"]
     assert off["multipron_training"] is False
@@ -222,6 +236,7 @@ def _cell(errors: tuple[int, ...], *, recorded: bool) -> dict[str, object]:
         "utterances": len(errors),
         "decoded": len(errors),
         "oov_tokens": 0,
+        "known_skips": [],
     }
     if recorded:
         cell["utterance_rows"] = rows
@@ -283,7 +298,7 @@ def test_comparison_authenticates_inputs_and_pair_ids() -> None:
         {**actual, "engine": {"version": "other"}}, record, allow_engine_drift=True
     )
     pairs = actual["results"]["off"]["slt55"]["matched_pairs"]  # type: ignore[index]
-    pairs["voice/extra"] = pairs.pop("voice/u0")  # type: ignore[union-attr]
+    pairs["voice/extra"] = pairs.pop("voice/u0")
     with pytest.raises(RuntimeError, match="utterance ID mismatch"):
         compare_results(actual, record)
 
@@ -357,6 +372,65 @@ def test_gate_failure_blocks_comparison(tmp_path: Path) -> None:
     path.write_text(json.dumps({"passes": [{"pass": 1, "signed_convergence_delta": None}]}))
     with pytest.raises(RuntimeError, match="telemetry gate failed"):
         audit_monotonicity(tmp_path)
+
+
+def _write_skip_telemetry(
+    project: Path, *, utterance: str | None, reason: str = "alignment_failure"
+) -> None:
+    path = project / "shared/models/cd-2g/off/bw_telemetry.json"
+    path.parent.mkdir(parents=True)
+    terminal = [] if utterance is None else [{"utterance": utterance, "reason": reason}]
+    path.write_text(
+        json.dumps(
+            {
+                "passes": [
+                    {
+                        "pass": 1,
+                        "signed_convergence_delta": None,
+                        "accounting": {
+                            "skipped_utts": len(terminal),
+                            "skip_reasons": {
+                                "excluded_by_schedule": 0,
+                                "alignment_failure": len(terminal),
+                            },
+                            "terminal_skips": terminal,
+                        },
+                    }
+                ]
+            }
+        )
+    )
+
+
+def test_listed_terminal_skip_passes_and_lands_in_record(tmp_path: Path) -> None:
+    project = tmp_path / "off"
+    _write_skip_telemetry(project, utterance="arctic_a0587")
+    assert audit_monotonicity(project) == KNOWN_SKIPS
+    actual, _ = _comparison_documents()
+    actual["results"]["off"]["slt55"]["known_skips"] = KNOWN_SKIPS  # type: ignore[index]
+    record = make_record(actual)
+    assert record["results"]["off"]["slt55"]["known_skips"] == KNOWN_SKIPS
+
+
+def test_unlisted_terminal_skip_fails(tmp_path: Path) -> None:
+    project = tmp_path / "off"
+    _write_skip_telemetry(project, utterance="arctic_a0001")
+    with pytest.raises(RuntimeError, match="unlisted terminal skip"):
+        audit_monotonicity(project)
+
+
+def test_absent_expected_skip_is_comparison_deviation() -> None:
+    actual, record = _comparison_documents()
+    record["results"]["off"]["slt55"]["known_skips"] = KNOWN_SKIPS  # type: ignore[index]
+    with pytest.raises(RuntimeError, match="known_skips mismatch"):
+        compare_results(actual, record)
+
+
+def test_non_manifest_failure_reason_still_fails(tmp_path: Path) -> None:
+    project = tmp_path / "off"
+    _write_skip_telemetry(project, utterance="arctic_a0587", reason="exception")
+    with pytest.raises(RuntimeError, match="unlisted terminal skip"):
+        audit_monotonicity(project)
 
 
 @pytest.mark.benchmark

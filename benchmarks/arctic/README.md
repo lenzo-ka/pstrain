@@ -36,6 +36,10 @@ one-point `off/big` floor. Engine identity includes dirty tracked-source state,
 the native library, Python, PocketSphinx, and the selected decode dictionary.
 Engine drift requires the explicit `--allow-engine-drift` override.
 
+The gate keeps zero failed decode alignments as a hard requirement. Named,
+documented terminal training skips are permitted only through the benchmark's
+known-skips manifest and are always reported in each affected record cell.
+
 `PSTRAIN_BENCH_CACHE`
 selects the archive cache; authenticated archives there are reused. The work
 tree defaults to `.pstrain-benchmark/arctic`. Expect approximately 8–16 hours

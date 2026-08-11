@@ -309,6 +309,7 @@ def run_bw_training(
             "alignment_failure": 0,
             "exception": 0,
         }
+        terminal_skips: list[dict[str, str]] = []
         excluded_fileids = set(exclusion_schedule.get("*", ()))
         excluded_fileids.update(exclusion_schedule.get(iteration, ()))
         excluded_fileids.update(exclusion_schedule.get(str(iteration), ()))
@@ -366,10 +367,12 @@ def run_bw_training(
                     logger.warning("Failed to process: %s", fileid)
                     skipped += 1
                     skip_reasons["alignment_failure"] += 1
+                    terminal_skips.append({"utterance": fileid, "reason": "alignment_failure"})
             except Exception as e:
                 logger.warning("Error processing %s: %s", fileid, e)
                 skipped += 1
                 skip_reasons["exception"] += 1
+                terminal_skips.append({"utterance": fileid, "reason": "exception"})
 
         total_skipped += skipped
         if skipped:
@@ -454,6 +457,7 @@ def run_bw_training(
             "retried_utts": retried,
             "skipped_utts": skipped,
             "skip_reasons": skip_reasons,
+            "terminal_skips": terminal_skips,
         }
         telemetry_rows.append(telemetry_row)
         logger.info(
