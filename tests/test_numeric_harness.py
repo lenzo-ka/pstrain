@@ -330,7 +330,7 @@ def test_bw_golden_trajectory_and_accounting(
 
     artifact = json.loads((output_dir / "bw_telemetry.json").read_text(encoding="utf-8"))
     assert json.loads(json.dumps(artifact, allow_nan=False)) == artifact
-    assert artifact["schema_version"] == 1
+    assert artifact["schema_version"] == 2
     rows = artifact["passes"]
     assert len(rows) == 3
     assert [row["pass"] for row in rows] == [1, 2, 3]
@@ -381,7 +381,14 @@ def test_bw_exclusion_schedule_targets_named_passes_and_wildcard(
         assert (row.skipped_utts, row.excluded_by_schedule) == (1, 1)
         telemetry = json.loads((output_dir / "bw_telemetry.json").read_text())
         assert telemetry["schema_version"] == 2
-        assert telemetry["passes"][0]["accounting"]["skip_reasons"] == {"excluded_by_schedule": 1}
+        assert telemetry["passes"][0]["accounting"]["skip_reasons"] == {
+            "alignment_failure": 0,
+            "exception": 0,
+            "excluded_by_schedule": 1,
+            "feature_dimension": 0,
+            "feature_not_found": 0,
+            "transcript_not_found": 0,
+        }
 
 
 @requires_c_library

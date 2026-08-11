@@ -162,4 +162,7 @@ warn_required_dynamic_aliases = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v"
+addopts = "-v -m 'not benchmark'"
+markers = [
+    "benchmark: long-running, networked benchmark tests excluded from default runs",
+]
