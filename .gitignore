@@ -76,11 +76,12 @@ experiments/
 dist/
 *.mfc
 *.wav
-data/
+/data/
 
 # ...but committed test fixtures are not generated artifacts. Keep them.
 # (These broad patterns over-reach — see plan 3.5; this negation is the
 # minimal fix so the mini_arctic e2e corpus is tracked.)
 !tests/fixtures/**
 !tests/fixtures/mini_arctic/wav/*.wav
+!pstrain/data/sample/*.wav
 .claude
