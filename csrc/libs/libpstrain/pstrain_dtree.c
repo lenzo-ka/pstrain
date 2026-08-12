@@ -180,6 +180,8 @@ pstrain_build_tree(const char *mdef_path,
                float32 cntthresh,
                float32 *stwt,
                uint32 n_stwt,
+               int32 rotate_state_weights,
+               int32 directional_questions,
                int32 allphones,
                int32 intermediate_dumps)
 {
@@ -429,8 +431,14 @@ pstrain_build_tree(const char *mdef_path,
         uint32 qi;
 
         for (i = 0; i < n_pset; i++) {
-            if (pset[i].member)
-                n_phone_q += 2;  /* left and right context */
+            if (pset[i].member) {
+                if (directional_questions
+                    && (strstr(pset[i].name, "_L") != NULL
+                        || strstr(pset[i].name, "_R") != NULL))
+                    n_phone_q += 1;
+                else
+                    n_phone_q += 2;  /* left and right context */
+            }
             else
                 n_wdbndry++;
         }
@@ -440,32 +448,32 @@ pstrain_build_tree(const char *mdef_path,
 
         for (i = 0, qi = 0; i < n_pset; i++) {
             if (pset[i].member) {
-                /* Left context question */
-                all_q[qi].pset = i;
-                all_q[qi].member = pset[i].member;
-                all_q[qi].neg = FALSE;
-                all_q[qi].ctxt = -1;
-                qi++;
+                int left = !directional_questions
+                    || strstr(pset[i].name, "_L") != NULL
+                    || (strstr(pset[i].name, "_L") == NULL
+                        && strstr(pset[i].name, "_R") == NULL);
+                int right = !directional_questions
+                    || strstr(pset[i].name, "_R") != NULL
+                    || (strstr(pset[i].name, "_L") == NULL
+                        && strstr(pset[i].name, "_R") == NULL);
+                int neg;
 
-                /* Right context question */
-                all_q[qi].pset = i;
-                all_q[qi].member = pset[i].member;
-                all_q[qi].neg = FALSE;
-                all_q[qi].ctxt = 1;
-                qi++;
-
-                /* Negations */
-                all_q[qi].pset = i;
-                all_q[qi].member = pset[i].member;
-                all_q[qi].neg = TRUE;
-                all_q[qi].ctxt = -1;
-                qi++;
-
-                all_q[qi].pset = i;
-                all_q[qi].member = pset[i].member;
-                all_q[qi].neg = TRUE;
-                all_q[qi].ctxt = 1;
-                qi++;
+                for (neg = FALSE; neg <= TRUE; neg++) {
+                    if (left) {
+                        all_q[qi].pset = i;
+                        all_q[qi].member = pset[i].member;
+                        all_q[qi].neg = neg;
+                        all_q[qi].ctxt = -1;
+                        qi++;
+                    }
+                    if (right) {
+                        all_q[qi].pset = i;
+                        all_q[qi].member = pset[i].member;
+                        all_q[qi].neg = neg;
+                        all_q[qi].ctxt = 1;
+                        qi++;
+                    }
+                }
             }
             else if (pset[i].posn) {
                 all_q[qi].pset = i;
@@ -484,8 +492,15 @@ pstrain_build_tree(const char *mdef_path,
 
     /* Set up state weights */
     state_wt = ckd_calloc(n_state, sizeof(float32));
-    if (stwt && n_stwt == n_state) {
-        memcpy(state_wt, stwt, n_state * sizeof(float32));
+    if (stwt && n_stwt != n_state) {
+        E_ERROR("State weight count mismatch: expected %u, got %u\n", n_state, n_stwt);
+        return -(int)n_state - 2;
+    }
+    if (stwt) {
+        for (i = 0; i < n_state; i++) {
+            uint32 distance = i > state ? i - state : state - i;
+            state_wt[i] = stwt[rotate_state_weights ? distance : i];
+        }
     } else {
         /* Uniform weights */
         for (i = 0; i < n_state; i++)

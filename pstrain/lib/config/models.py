@@ -78,6 +78,18 @@ class TrainingConfig(StrictModel):
     tree_state_weights: Annotated[
         tuple[float, ...], Field(min_length=1, description="Decision-tree state weights")
     ] = (1.0, 0.05, 0.0)
+    tree_rotate_state_weights: Annotated[
+        bool,
+        Field(
+            description="Apply target-relative tree state weights; disable only for isolation measurements"
+        ),
+    ] = True
+    tree_directional_questions: Annotated[
+        bool,
+        Field(
+            description="Honor _L/_R tree-question suffixes; disable only for isolation measurements"
+        ),
+    ] = True
     tree_ssplitmax: Annotated[int, Field(ge=0, description="Maximum state splits")] = 7
     tree_ssplitthr: Annotated[float, Field(ge=0, description="State split threshold")] = 0.0
     tree_csplitmax: Annotated[int, Field(ge=0, description="Maximum phone-context splits")] = 2000
@@ -111,6 +123,15 @@ class TrainingConfig(StrictModel):
             data = dict(data)
             data.setdefault("untied_inventory", "linear")
         return data
+
+    @model_validator(mode="after")
+    def validate_tree_state_weights(self) -> TrainingConfig:
+        if len(self.tree_state_weights) != self.n_state:
+            raise ValueError(
+                "tree_state_weights must contain exactly one weight per emitting state "
+                f"(expected {self.n_state}, got {len(self.tree_state_weights)})"
+            )
+        return self
 
     @field_validator("exclusion_schedule")
     @classmethod

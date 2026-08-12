@@ -517,6 +517,8 @@ int pstrain_build_tree(const char *mdef_path,
                    float32 cntthresh,
                    float32 *stwt,
                    uint32 n_stwt,
+                   int32 rotate_state_weights,
+                   int32 directional_questions,
                    int32 allphones,
                    int32 intermediate_dumps);
 

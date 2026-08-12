@@ -211,6 +211,53 @@ AA L2 L1 s n/a 0 5 N
         )
         assert "(!LEFT_ONE 1)" in filtered.read_text().splitlines()[1]
 
+        questions.write_text("ONLY_LEFT_L L1\n")
+        directional = tmp_path / "directional.dtree"
+        dtree.build_tree(
+            model,
+            mixw_path,
+            questions,
+            directional,
+            "AA",
+            0,
+            continuous=False,
+            ssplitmax=1,
+            csplitmax=1,
+            cntthresh=1e-5,
+        )
+        assert "ONLY_LEFT_L" not in directional.read_text()
+
+        legacy = tmp_path / "legacy-directions.dtree"
+        dtree.build_tree(
+            model,
+            mixw_path,
+            questions,
+            legacy,
+            "AA",
+            0,
+            continuous=False,
+            ssplitmax=1,
+            csplitmax=1,
+            cntthresh=1e-5,
+            directional_questions=False,
+        )
+        assert "ONLY_LEFT_L" in legacy.read_text()
+
+        with pytest.raises(
+            ValueError,
+            match="State weight count mismatch: expected 1 .* got 2",
+        ):
+            dtree.build_tree(
+                model,
+                mixw_path,
+                questions,
+                tmp_path / "wrong-weights.dtree",
+                "AA",
+                0,
+                continuous=False,
+                state_weights=np.ones(2, dtype=np.float32),
+            )
+
 
 @pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
 class TestTieStates:

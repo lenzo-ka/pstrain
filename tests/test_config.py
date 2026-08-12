@@ -22,6 +22,17 @@ def test_tree_intermediate_dumps_are_off_by_default() -> None:
     assert TrainingConfig().tree_intermediate_dumps is False
 
 
+def test_tree_semantic_fixes_are_on_by_default() -> None:
+    training = TrainingConfig()
+    assert training.tree_rotate_state_weights is True
+    assert training.tree_directional_questions is True
+
+
+def test_tree_state_weight_count_must_match_emitting_states() -> None:
+    with pytest.raises(ValueError, match="expected 4, got 3"):
+        TrainingConfig(n_state=4)
+
+
 def test_active_names_and_defaults_are_canonical() -> None:
     profile = Profile()
     assert profile.features.ncep == 13

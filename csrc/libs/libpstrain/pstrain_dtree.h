@@ -60,9 +60,11 @@ void pstrain_free_pset(pset_t *pset, uint32 n_pset);
  * @param cntthresh Count threshold for model inclusion
  * @param stwt State weights (n_state floats, or NULL for uniform)
  * @param n_stwt Number of state weights
+ * @param rotate_state_weights Interpret weights relative to the target state
+ * @param directional_questions Honor _L/_R question-name restrictions
  * @param allphones Build for all phones at once
  * @param intermediate_dumps Write intermediate trees to the diagnostic sink
- * @return 0 on success, -1 on error
+ * @return 0 on success, nonzero on error
  */
 int pstrain_build_tree(const char *mdef_path,
                    const char *mixw_path,
@@ -84,6 +86,8 @@ int pstrain_build_tree(const char *mdef_path,
                    float32 cntthresh,
                    float32 *stwt,
                    uint32 n_stwt,
+                   int32 rotate_state_weights,
+                   int32 directional_questions,
                    int32 allphones,
                    int32 intermediate_dumps);
 
