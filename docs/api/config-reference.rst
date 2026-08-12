@@ -213,6 +213,11 @@ training
    :Default: ``0.0``
    :Description: Phone-context split threshold
 
+``training.tree_directional_questions``
+   :Type: ``bool``
+   :Default: ``True``
+   :Description: Honor _L/_R tree-question suffixes; disable only for isolation measurements
+
 ``training.tree_intermediate_dumps``
    :Type: ``bool``
    :Default: ``False``
@@ -222,6 +227,11 @@ training
    :Type: ``float``
    :Default: ``1e-08``
    :Description: Tree mixture-weight floor
+
+``training.tree_rotate_state_weights``
+   :Type: ``bool``
+   :Default: ``True``
+   :Description: Apply target-relative tree state weights; disable only for isolation measurements
 
 ``training.tree_ssplitmax``
    :Type: ``int``

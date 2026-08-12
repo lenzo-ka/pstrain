@@ -194,6 +194,9 @@ PIN_CONFIGS: dict[str, dict[str, Any]] = {
             "max_skip_fraction": 0.05,
             "retry_beam_factor": 1e10,
             "tree_state_weights": [1.0, 0.05, 0.0],
+            # Historical pin predates S1/S2; keep its recorded baseline explicit.
+            "tree_rotate_state_weights": False,
+            "tree_directional_questions": False,
             "tree_ssplitmax": 7,
             "tree_ssplitthr": 0.0,
             "tree_csplitmax": 2000,
@@ -237,6 +240,9 @@ PIN_CONFIGS: dict[str, dict[str, Any]] = {
             "max_skip_fraction": 0.05,
             "retry_beam_factor": 1e10,
             "tree_state_weights": [1.0, 0.05, 0.0],
+            # Historical pin predates S1/S2; keep its recorded baseline explicit.
+            "tree_rotate_state_weights": False,
+            "tree_directional_questions": False,
             "tree_ssplitmax": 7,
             "tree_ssplitthr": 0.0,
             "tree_csplitmax": 2000,

@@ -38,6 +38,8 @@ def build_tree(
     varfloor: float = 1e-5,
     cntthresh: float = 1e-5,
     state_weights: npt.NDArray[np.float32] | None = None,
+    rotate_state_weights: bool = True,
+    directional_questions: bool = True,
     allphones: bool = False,
     intermediate_dumps: bool = False,
 ) -> None:
@@ -63,6 +65,8 @@ def build_tree(
         varfloor: Variance floor.
         cntthresh: Count threshold for model inclusion.
         state_weights: State weights array (or None for uniform).
+        rotate_state_weights: Interpret weights by distance from the target state.
+        directional_questions: Honor ``_L``/``_R`` question-name restrictions.
         allphones: Build for all phones at once.
         intermediate_dumps: Write recursive intermediate-tree dumps to the
             worker's isolated diagnostic sink. Disabled by default.
@@ -107,10 +111,18 @@ def build_tree(
         cntthresh,
         stwt,
         n_stwt,
+        1 if rotate_state_weights else 0,
+        1 if directional_questions else 0,
         1 if allphones else 0,
         1 if intermediate_dumps else 0,
     )
 
+    if ret < -1:
+        expected = -ret - 2
+        raise ValueError(
+            "State weight count mismatch: "
+            f"expected {expected} for the model definition, got {n_stwt}"
+        )
     if ret != 0:
         raise RuntimeError(f"Failed to build tree: {output_path}")
 

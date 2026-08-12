@@ -132,6 +132,12 @@ class TrainParams:
     tree_state_weights: tuple[float, ...] = field(
         default_factory=lambda: Profile().training.tree_state_weights
     )
+    tree_rotate_state_weights: bool = field(
+        default_factory=lambda: Profile().training.tree_rotate_state_weights
+    )
+    tree_directional_questions: bool = field(
+        default_factory=lambda: Profile().training.tree_directional_questions
+    )
     tree_ssplitmax: int = field(default_factory=lambda: Profile().training.tree_ssplitmax)
     tree_ssplitthr: float = field(default_factory=lambda: Profile().training.tree_ssplitthr)
     tree_csplitmax: int = field(default_factory=lambda: Profile().training.tree_csplitmax)
