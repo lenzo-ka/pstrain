@@ -192,6 +192,7 @@ mk_phone_graph(char **word,
         }
         if (n_var == 0) {
             E_WARN("Unable to look up word '%s' in the dictionary\n", word[i]);
+            ckd_free(word_active);
             word_plan_free_all(plan, n_word);
             return NULL;
         }
