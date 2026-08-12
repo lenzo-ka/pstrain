@@ -38,9 +38,6 @@ def empty_project(tmp_path: Path) -> Path:
     (project / "shared" / "phoneset.txt").write_text("AA\nAE\nB\nSIL\n")
     (project / "shared" / "dictionary.dict").write_text("HELLO HH EH L OW\n")
     (project / "etc" / "all.transcription").write_text("")
-    (project / "experiments" / "default" / "etc" / "train.fileids").write_text("")
-    (project / "experiments" / "default" / "etc" / "test.fileids").write_text("")
-    (project / "experiments" / "default" / "etc" / "train.transcription").write_text("")
     (project / "audio" / "placeholder.wav").write_text("fake-wav")
 
     return project
@@ -461,8 +458,10 @@ def test_split_task_produces_fileid_files(empty_project: Path) -> None:
         "train.transcription",
         "test.transcription",
         "test.decoder.transcription",
+        ".split.generated.json",
+        ".split.validated.json",
     }
-    assert pl.targets()["split"].name == "train.fileids"
+    assert pl.targets()["split"].name == ".split.validated.json"
 
 
 def test_split_runs_end_to_end_and_partitions(tmp_path: Path) -> None:
