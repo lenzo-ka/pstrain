@@ -12,7 +12,12 @@ from pstrain.lib.corpus.normalize import (
     normalize_transcript_file,
     strip_boundary_punct,
 )
-from pstrain.lib.corpus.split import SplitResult, train_test_split
+from pstrain.lib.corpus.split import (
+    SplitResult,
+    split_is_external,
+    train_test_split,
+    validate_external_split,
+)
 
 __all__ = [
     # Filelist I/O
@@ -30,4 +35,6 @@ __all__ = [
     # Train/test split
     "SplitResult",
     "train_test_split",
+    "split_is_external",
+    "validate_external_split",
 ]

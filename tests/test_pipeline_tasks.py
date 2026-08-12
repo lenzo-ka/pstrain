@@ -38,9 +38,6 @@ def empty_project(tmp_path: Path) -> Path:
     (project / "shared" / "phoneset.txt").write_text("AA\nAE\nB\nSIL\n")
     (project / "shared" / "dictionary.dict").write_text("HELLO HH EH L OW\n")
     (project / "etc" / "all.transcription").write_text("")
-    (project / "experiments" / "default" / "etc" / "train.fileids").write_text("")
-    (project / "experiments" / "default" / "etc" / "test.fileids").write_text("")
-    (project / "experiments" / "default" / "etc" / "train.transcription").write_text("")
     (project / "audio" / "placeholder.wav").write_text("fake-wav")
 
     return project
@@ -461,8 +458,10 @@ def test_split_task_produces_fileid_files(empty_project: Path) -> None:
         "train.transcription",
         "test.transcription",
         "test.decoder.transcription",
+        ".split.generated.json",
+        ".split.validated.json",
     }
-    assert pl.targets()["split"].name == "train.fileids"
+    assert pl.targets()["split"].name == ".split.validated.json"
 
 
 def test_split_runs_end_to_end_and_partitions(tmp_path: Path) -> None:
@@ -488,6 +487,68 @@ def test_split_runs_end_to_end_and_partitions(tmp_path: Path) -> None:
     test_ids = (etc / "test.fileids").read_text().splitlines()
     assert len(train_ids) + len(test_ids) == 20
     assert set(train_ids).isdisjoint(set(test_ids))
+
+
+def test_editing_persistent_split_revalidates_and_changes_membership(tmp_path: Path) -> None:
+    """A consistent edit becomes authoritative and invalidates the split marker."""
+    project = tmp_path / "proj"
+    (project / "etc").mkdir(parents=True)
+    (project / "shared").mkdir()
+    (project / "audio").mkdir()
+    etc = project / "experiments" / "default" / "etc"
+    etc.mkdir(parents=True)
+    (project / "shared" / "phoneset.txt").write_text("AA\n")
+    (project / "shared" / "dictionary.dict").write_text("WORD W ER D\n")
+    rows = {f"utt_{i}": f"WORD {i}" for i in range(4)}
+    (project / "etc" / "all.transcription").write_text(
+        "".join(f"{fileid} {text}\n" for fileid, text in rows.items())
+    )
+    for fileid in rows:
+        (project / "audio" / f"{fileid}.wav").write_bytes(b"wav")
+
+    assert build_pipeline(PipelineContext.from_config(project)).run("split") == 0
+    original_train = (etc / "train.fileids").read_text().splitlines()
+    original_test = (etc / "test.fileids").read_text().splitlines()
+    moved = original_train[-1]
+    new_train = original_train[:-1]
+    new_test = [moved, *original_test]
+    (etc / "train.fileids").write_text("".join(f"{fileid}\n" for fileid in new_train))
+    (etc / "test.fileids").write_text("".join(f"{fileid}\n" for fileid in new_test))
+    (etc / "train.transcription").write_text(
+        "".join(f"{fileid} {rows[fileid]}\n" for fileid in new_train)
+    )
+    (etc / "test.transcription").write_text(
+        "".join(f"{fileid} {rows[fileid]}\n" for fileid in new_test)
+    )
+    before = {
+        name: (etc / name).read_bytes()
+        for name in ("train.fileids", "test.fileids", "train.transcription", "test.transcription")
+    }
+
+    rerun = build_pipeline(PipelineContext.from_config(project))
+    plan = rerun.plan("split")
+    assert plan[-1].stale
+    assert plan[-1].reason == "missing completion marker"
+    assert rerun.run("split") == 0
+
+    assert {name: (etc / name).read_bytes() for name in before} == before
+    assert json.loads((etc / ".split.validated.json").read_text())["mode"] == "external"
+    assert (etc / "train.fileids").read_text().splitlines() == new_train
+    assert (etc / "test.fileids").read_text().splitlines() == new_test
+
+    # Once external mode is established, a further ordered edit invalidates
+    # the existing completion marker through the files' declared-input mtimes.
+    reordered_train = list(reversed(new_train))
+    (etc / "train.fileids").write_text("".join(f"{fileid}\n" for fileid in reordered_train))
+    (etc / "train.transcription").write_text(
+        "".join(f"{fileid} {rows[fileid]}\n" for fileid in reordered_train)
+    )
+    edited = build_pipeline(PipelineContext.from_config(project))
+    edited_plan = edited.plan("split")
+    assert edited_plan[-1].stale
+    assert edited_plan[-1].reason == "inputs not older than outputs"
+    assert edited.run("split") == 0
+    assert (etc / "train.fileids").read_text().splitlines() == reordered_train
 
 
 def test_tree_building_is_fanned_out(empty_project: Path) -> None:

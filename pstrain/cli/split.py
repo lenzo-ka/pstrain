@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 
 from pstrain.cli.base import CommandContext, CommandResult, ProjectCommand
-from pstrain.lib.corpus import train_test_split
+from pstrain.lib.corpus import split_is_external, train_test_split, validate_external_split
 
 
 class SplitCommand(ProjectCommand):
@@ -56,25 +56,38 @@ class SplitCommand(ProjectCommand):
         if not transcription_file.exists():
             return CommandResult.fail(f"Transcription file not found: {transcription_file}")
 
+        try:
+            external = split_is_external(etc_dir)
+        except ValueError as exc:
+            return CommandResult.fail(str(exc))
+
         if ctx.dry_run:
             ctx.log_action("Split", str(transcription_file))
             ctx.mkdir(etc_dir)
-            ctx.log(f"# Would write train/test fileids + transcriptions to {etc_dir}")
+            action = (
+                "validate persistent train/test files in" if external else "write split files to"
+            )
+            ctx.log(f"# Would {action} {etc_dir}")
             return CommandResult.ok("Dry run complete")
 
         try:
-            result = train_test_split(
-                transcription_file,
-                etc_dir,
-                train_ratio=ctx.args.train_ratio,
-                test_count=ctx.args.test_count,
-                seed=ctx.args.seed,
-            )
+            if external:
+                result = validate_external_split(transcription_file, etc_dir, project_dir / "audio")
+            else:
+                result = train_test_split(
+                    transcription_file,
+                    etc_dir,
+                    train_ratio=ctx.args.train_ratio,
+                    test_count=ctx.args.test_count,
+                    seed=ctx.args.seed,
+                )
         except (FileNotFoundError, ValueError) as exc:
             return CommandResult.fail(str(exc))
 
         total = result.n_train + result.n_test
         ctx.log(f"Split {total} utterances into:")
+        if external:
+            ctx.log("  Mode: persistent external split (validated without rewriting)")
         ctx.log(f"  Train: {result.n_train} ({result.n_train / total * 100:.1f}%)")
         ctx.log(f"    {result.train_transcription}")
         ctx.log(f"    {result.train_fileids}")

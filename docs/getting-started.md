@@ -34,6 +34,29 @@ pstrain features --project-dir my_project
 pstrain flat --project-dir my_project
 ```
 
+### Supplying an existing train/test split
+
+To preserve a corpus's canonical partition or your own held-out set, create all
+four Sphinx-format files before running `pstrain split` or `pstrain build`:
+
+```text
+my_project/experiments/default/etc/train.fileids
+my_project/experiments/default/etc/test.fileids
+my_project/experiments/default/etc/train.transcription
+my_project/experiments/default/etc/test.transcription
+```
+
+Each `.fileids` file contains one utterance ID per line. Its matching
+`.transcription` contains the same IDs in exactly the same order, followed by
+the transcript text from `etc/all.transcription`. Together, train and test must
+partition `all.transcription` exactly, may not overlap, and every ID must have a
+matching `audio/<fileid>.wav` (nested file IDs are supported).
+
+When all four files are supplied, they are authoritative: pstrain validates but
+does not rewrite or reorder them. Any mismatch, omission, overlap, transcript
+change, or missing audio is an error. If the files are absent, the existing
+automatic 95/5 seeded split remains the default.
+
 ### Python API
 
 ```python

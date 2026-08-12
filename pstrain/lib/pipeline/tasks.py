@@ -200,24 +200,39 @@ def _make_split_task(ctx: PipelineContext) -> Task:
     transcriptions, written under the experiment's etc/ directory."""
     src = ctx.all_transcription
     etc = ctx.etc_dir
-    outputs = (
+    from pstrain.lib.corpus.split import (
+        GENERATED_SPLIT_METADATA,
+        SPLIT_FILENAMES,
+        VALIDATED_SPLIT,
+        split_is_external,
+    )
+
+    external = split_is_external(etc)
+    split_files = tuple(etc / name for name in SPLIT_FILENAMES)
+    guard = etc / VALIDATED_SPLIT
+    generated_outputs = (
         etc / "train.fileids",
         etc / "test.fileids",
         etc / "train.transcription",
         etc / "test.transcription",
         etc / "test.decoder.transcription",
+        etc / GENERATED_SPLIT_METADATA,
+        guard,
     )
 
     def run() -> None:
-        from pstrain.lib.corpus import train_test_split
+        from pstrain.lib.corpus import train_test_split, validate_external_split
 
-        result = train_test_split(
-            src,
-            etc,
-            train_ratio=ctx.split.train_ratio,
-            test_count=ctx.split.test_count,
-            seed=ctx.split.seed,
-        )
+        if external:
+            result = validate_external_split(src, etc, ctx.audio_dir)
+        else:
+            result = train_test_split(
+                src,
+                etc,
+                train_ratio=ctx.split.train_ratio,
+                test_count=ctx.split.test_count,
+                seed=ctx.split.seed,
+            )
         total = result.n_train + result.n_test
         print(
             f"   split: {result.n_train} train / {result.n_test} test "
@@ -227,9 +242,15 @@ def _make_split_task(ctx: PipelineContext) -> Task:
     return Task(
         name="split",
         fn=run,
-        inputs=(src, ctx.provenance_path("split")),
-        outputs=outputs,
-        description="Partition all.transcription into train/test fileids + transcripts",
+        inputs=(src, ctx.provenance_path("split"), *split_files)
+        if external
+        else (src, ctx.provenance_path("split")),
+        outputs=(guard, etc / "test.decoder.transcription") if external else generated_outputs,
+        description=(
+            "Validate persistent external train/test files without rewriting them"
+            if external
+            else "Partition all.transcription into train/test fileids + transcripts"
+        ),
     )
 
 
@@ -262,7 +283,13 @@ def _make_flat_task(ctx: PipelineContext) -> Task:
     return Task(
         name="flat",
         fn=run,
-        inputs=(phoneset, train_fileids, *feature_files, ctx.provenance_path("training")),
+        inputs=(
+            phoneset,
+            train_fileids,
+            ctx.etc_dir / ".split.validated.json",
+            *feature_files,
+            ctx.provenance_path("training"),
+        ),
         outputs=tuple(ctx.model_files("flat")),
         description="Initialize flat (uniform) acoustic model",
     )
@@ -317,6 +344,7 @@ def _make_bw_train_task(
         *ctx.model_files(src_model),
         train_fileids,
         transcription,
+        ctx.etc_dir / ".split.validated.json",
         dictionary,
         *feature_files,
         *extra_inputs,
@@ -445,6 +473,7 @@ def _make_split_and_train_task(
             *ctx.model_files(src_model),
             train_fileids,
             transcription,
+            ctx.etc_dir / ".split.validated.json",
             dictionary,
             *feature_files,
         ),
@@ -492,6 +521,7 @@ def _make_cd_untied_init_task(ctx: PipelineContext) -> Task:
             phoneset,
             dictionary,
             transcription,
+            ctx.etc_dir / ".split.validated.json",
             ctx.provenance_path("training"),
         ),
         outputs=tuple(ctx.model_files("cd-untied-init")),
@@ -774,7 +804,7 @@ def _make_lm_task(ctx: PipelineContext) -> Task:
     return Task(
         name="lm",
         fn=run,
-        inputs=(transcription,),
+        inputs=(transcription, ctx.etc_dir / ".split.validated.json"),
         outputs=(out_path,),
         description="Build 3-gram language model from training transcripts",
     )
@@ -812,7 +842,13 @@ def _make_test_task(ctx: PipelineContext, *, model: str) -> Task:
     return Task(
         name=name,
         fn=run,
-        inputs=(*ctx.model_files(model), lm_path, transcription, dictionary),
+        inputs=(
+            *ctx.model_files(model),
+            lm_path,
+            transcription,
+            ctx.etc_dir / ".split.validated.json",
+            dictionary,
+        ),
         outputs=(report_path,),
         description=f"Test {model} and write WER report",
     )
@@ -937,7 +973,7 @@ def build_pipeline(ctx: PipelineContext) -> Pipeline:
             # "features" is a fan-out; the sentinel is feat.params.
             pl.register_target(spec.name, ctx.features_dir / "feat.params")
         elif spec.kind == "split":
-            pl.register_target(spec.name, ctx.etc_dir / "train.fileids")
+            pl.register_target(spec.name, ctx.etc_dir / ".split.validated.json")
         elif spec.kind == "ci" or spec.kind == "cd":
             pl.register_target(spec.name, ctx.model_dir(spec.name) / "mdef")
         elif spec.kind == "lm":
