@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 from pstrain.lib import _pstrainc, dtree, mdef, native_worker
+from pstrain.lib.steps import cd_pipeline
 
 # Check if library exists
 # libpstrainc availability comes from the shared helper (real loader-based
@@ -257,6 +258,117 @@ AA L2 L1 s n/a 0 5 N
                 continuous=False,
                 state_weights=np.ones(2, dtype=np.float32),
             )
+
+    @staticmethod
+    def _continuous_inputs(tmp_path: Path) -> tuple[Path, Path, Path, Path, Path]:
+        model = tmp_path / "mdef"
+        model.write_text(
+            """0.3
+3 n_base
+3 n_tri
+12 n_state_map
+6 n_tied_state
+3 n_tied_ci_state
+3 n_tied_tmat
+AA - - - n/a 0 0 N
+L1 - - - n/a 1 1 N
+L2 - - - n/a 2 2 N
+AA L1 L1 s n/a 0 3 N
+AA L1 L2 s n/a 0 4 N
+AA L2 L1 s n/a 0 5 N
+"""
+        )
+        mixw_path = tmp_path / "mixture_weights"
+        mean_path = tmp_path / "means"
+        var_path = tmp_path / "variances"
+        questions = tmp_path / "questions"
+        assert _pstrainc.write_mixw(str(mixw_path), np.ones((6, 1, 2), dtype=np.float32)) == 0
+        assert _pstrainc.write_gau(str(mean_path), np.zeros((6, 1, 2, 3), dtype=np.float32)) == 0
+        assert _pstrainc.write_gau(str(var_path), np.ones((6, 1, 2, 3), dtype=np.float32)) == 0
+        questions.write_text("CONTEXT_L L1\n")
+        return model, mixw_path, mean_path, var_path, questions
+
+    def test_continuous_dimensions_accept_matching_inputs(self, tmp_path: Path) -> None:
+        model, mixw, means, variances, questions = self._continuous_inputs(tmp_path)
+
+        output = tmp_path / "tree"
+        dtree.build_tree(model, mixw, questions, output, "AA", 0, means, variances)
+
+        assert output.read_text().startswith("n_node")
+
+    @pytest.mark.parametrize(
+        ("artifact", "shape", "message"),
+        [
+            ("means", (6, 2, 3, 3), "Mean/mixture-weight dimension mismatch"),
+            ("variances", (6, 2, 3, 3), "Variance/mixture-weight dimension mismatch"),
+            ("variances", (6, 1, 2, 4), "Mean/variance vector-length mismatch"),
+            ("variances", (5, 1, 2, 3), "Mean/variance state-count mismatch"),
+        ],
+    )
+    def test_continuous_dimension_mismatch_is_rejected(
+        self,
+        tmp_path: Path,
+        artifact: str,
+        shape: tuple[int, int, int, int],
+        message: str,
+    ) -> None:
+        model, mixw, means, variances, questions = self._continuous_inputs(tmp_path)
+        path = means if artifact == "means" else variances
+        assert _pstrainc.write_gau(str(path), np.ones(shape, dtype=np.float32)) == 0
+
+        with pytest.raises(native_worker.PstrainNativeError) as raised:
+            dtree.build_tree(model, mixw, questions, tmp_path / "tree", "AA", 0, means, variances)
+
+        assert message in raised.value.diagnostic
+
+    def test_phone_set_requires_a_known_member(self, tmp_path: Path) -> None:
+        model, mixw, means, variances, questions = self._continuous_inputs(tmp_path)
+        questions.write_text("EMPTY NOT_A_PHONE\n")
+
+        with pytest.raises(native_worker.PstrainNativeError) as raised:
+            dtree.build_tree(model, mixw, questions, tmp_path / "tree", "AA", 0, means, variances)
+
+        assert "expected at least one known phone member" in raised.value.diagnostic
+
+    def test_nonuniform_model_topology_is_rejected(self, tmp_path: Path) -> None:
+        model, mixw, means, variances, questions = self._continuous_inputs(tmp_path)
+        model.write_text(
+            model.read_text()
+            .replace("12 n_state_map", "13 n_state_map")
+            .replace("AA L1 L2 s n/a 0 4 N", "AA L1 L2 s n/a 0 4 5 N")
+        )
+
+        with pytest.raises(native_worker.PstrainNativeFatalError) as raised:
+            dtree.build_tree(model, mixw, questions, tmp_path / "tree", "AA", 0, means, variances)
+
+        assert "expected 1 emitting states, got 2" in raised.value.diagnostic
+
+
+def test_build_tree_one_propagates_failure_without_placeholder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "AA-0.dtree"
+
+    def fail(**kwargs: object) -> None:
+        raise RuntimeError("malformed tree input")
+
+    monkeypatch.setattr(cd_pipeline, "build_tree", fail)
+    with pytest.raises(RuntimeError, match="malformed tree input"):
+        cd_pipeline.build_tree_one(tmp_path, tmp_path / "questions", output, "AA", 0)
+    assert not output.exists()
+
+
+def test_build_tree_one_allows_normal_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "AA-0.dtree"
+
+    def succeed(**kwargs: object) -> None:
+        Path(kwargs["output_path"]).write_text("n_node 1\n")  # type: ignore[arg-type]
+
+    monkeypatch.setattr(cd_pipeline, "build_tree", succeed)
+    cd_pipeline.build_tree_one(tmp_path, tmp_path / "questions", output, "AA", 0)
+    assert output.read_text() == "n_node 1\n"
 
 
 @pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")

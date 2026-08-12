@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from pstrain.lib.steps.train import _process_with_final_state_retry
+from pstrain.lib.steps.train import TerminalAlignmentError, _process_with_final_state_retry
 from tests.clib import requires_c_library
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_arctic"
@@ -63,6 +63,25 @@ def test_non_final_state_failure_is_not_retried() -> None:
         fileid="other-failure",
     )
     assert trainer.attempt_beams == [pytest.approx(1e-80)]
+
+
+def test_final_state_retry_exhaustion_fails_loudly() -> None:
+    trainer = TightBeamTrainer()
+    trainer.process_utterance_mfcc = lambda mfcc, transcript: False  # type: ignore[method-assign]
+
+    with pytest.raises(
+        TerminalAlignmentError,
+        match=r"Final state not reached for malformed after retry: expected .*a_beam=1e-100",
+    ):
+        _process_with_final_state_retry(
+            trainer,  # type: ignore[arg-type]
+            np.zeros((4, 13), dtype=np.float32),
+            "<s> TEST </s>",
+            normal_beam=1e-90,
+            retry_beam_factor=1e10,
+            fileid="malformed",
+        )
+    assert trainer.beam == pytest.approx(1e-90)
 
 
 @requires_c_library

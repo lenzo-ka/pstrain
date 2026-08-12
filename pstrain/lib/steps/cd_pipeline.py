@@ -379,37 +379,32 @@ def build_tree_one(
 ) -> None:
     """Build a single decision tree file for one (phone, state).
 
-    On C-level failure, writes a trivial tree placeholder rather than
-    raising; this matches the prior `run_build_trees` behavior so a
-    couple of pathological phones don't bring the whole pipeline down.
+    Tree-build failures propagate so an incomplete tree set cannot advance
+    to pruning and state tying.
     """
-    try:
-        build_tree(
-            mdef_path=untied_model_dir / "mdef",
-            mixw_path=untied_model_dir / "mixture_weights",
-            pset_path=questions_path,
-            output_path=output_path,
-            phone=phone,
-            state=state,
-            mean_path=untied_model_dir / "means" if continuous else None,
-            var_path=untied_model_dir / "variances" if continuous else None,
-            continuous=continuous,
-            # Tuned 3-state vector and split recipe from SphinxTrain's
-            # scripts/40.buildtrees/buildtree.pl.
-            state_weights=np.asarray(state_weights, dtype=np.float32),
-            rotate_state_weights=rotate_state_weights,
-            directional_questions=directional_questions,
-            ssplitmax=ssplitmax,
-            ssplitthr=ssplitthr,
-            csplitmax=csplitmax,
-            csplitthr=csplitthr,
-            mwfloor=mwfloor,
-            cntthresh=cntthresh,
-            intermediate_dumps=intermediate_dumps,
-        )
-    except RuntimeError as exc:
-        logger.warning("Failed to build tree for %s state %d: %s", phone, state, exc)
-        output_path.write_text(f"# Trivial tree for {phone} state {state}\n")
+    build_tree(
+        mdef_path=untied_model_dir / "mdef",
+        mixw_path=untied_model_dir / "mixture_weights",
+        pset_path=questions_path,
+        output_path=output_path,
+        phone=phone,
+        state=state,
+        mean_path=untied_model_dir / "means" if continuous else None,
+        var_path=untied_model_dir / "variances" if continuous else None,
+        continuous=continuous,
+        # Tuned 3-state vector and split recipe from SphinxTrain's
+        # scripts/40.buildtrees/buildtree.pl.
+        state_weights=np.asarray(state_weights, dtype=np.float32),
+        rotate_state_weights=rotate_state_weights,
+        directional_questions=directional_questions,
+        ssplitmax=ssplitmax,
+        ssplitthr=ssplitthr,
+        csplitmax=csplitmax,
+        csplitthr=csplitthr,
+        mwfloor=mwfloor,
+        cntthresh=cntthresh,
+        intermediate_dumps=intermediate_dumps,
+    )
 
 
 def run_build_trees(

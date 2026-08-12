@@ -266,6 +266,16 @@ pstrain_build_tree(const char *mdef_path,
 
     E_INFO("Building tree for phones %u through %u\n", p_s, p_e);
 
+    n_state = mdef->defn[p_s].n_state - 1;
+    n_model = p_e - p_s + 1;
+    for (i = p_s + 1; i <= p_e; i++) {
+        uint32 model_n_state = mdef->defn[i].n_state - 1;
+        if (model_n_state != n_state) {
+            E_FATAL("Model topology mismatch for model %u: expected %u emitting states, got %u\n",
+                    i, n_state, model_n_state);
+        }
+    }
+
     /* Find mixw range */
     mixw_s = mdef->defn[p_s].state[0];
     mixw_e = mdef->defn[p_e].state[mdef->defn[p_e].n_state-2];
@@ -277,9 +287,6 @@ pstrain_build_tree(const char *mdef_path,
         E_ERROR("Failed to read mixw\n");
         return -1;
     }
-
-    n_state = mdef->defn[p_s].n_state - 1;
-    n_model = p_e - p_s + 1;
 
     /* Allocate mixw arrays */
     mixw_occ = (float32 ****)ckd_calloc_2d(n_model, n_state, sizeof(float32 **));
@@ -353,11 +360,29 @@ pstrain_build_tree(const char *mdef_path,
             return -1;
         }
         veclen = l_veclen;
+        if (t_nfeat != n_stream && t_ndensity != n_density) {
+            E_FATAL("Mean/mixture-weight dimension mismatch: expected %u streams and %u densities, got %u streams and %u densities\n",
+                    n_stream, n_density, t_nfeat, t_ndensity);
+        }
 
         E_INFO("Reading vars: %s\n", var_path);
         if (s3gau_read(var_path, &fullvar, &t_nstates, &t_nfeat, &t_ndensity, &t_veclen) != S3_SUCCESS) {
             E_ERROR("Failed to read vars\n");
             return -1;
+        }
+        if (t_nfeat != n_stream && t_ndensity != n_density) {
+            E_FATAL("Variance/mixture-weight dimension mismatch: expected %u streams and %u densities, got %u streams and %u densities\n",
+                    n_stream, n_density, t_nfeat, t_ndensity);
+        }
+        for (i = 0; i < n_stream; i++) {
+            if (t_veclen[i] != l_veclen[i]) {
+                E_FATAL("Mean/variance vector-length mismatch for stream %u: expected %u, got %u\n",
+                        i, l_veclen[i], t_veclen[i]);
+            }
+        }
+        if (t_nstates != l_nstates) {
+            E_FATAL("Mean/variance state-count mismatch: expected %u, got %u\n",
+                    l_nstates, t_nstates);
         }
 
         /* Allocate and compute merged Gaussians */
@@ -432,6 +457,18 @@ pstrain_build_tree(const char *mdef_path,
 
         for (i = 0; i < n_pset; i++) {
             if (pset[i].member) {
+                uint32 phone_id;
+                int has_member = FALSE;
+                for (phone_id = 0; phone_id < acmod_set_n_ci(mdef->acmod_set); phone_id++) {
+                    if (pset[i].member[phone_id]) {
+                        has_member = TRUE;
+                        break;
+                    }
+                }
+                if (!has_member) {
+                    E_FATAL("Invalid phone-set record %u (%s): expected at least one known phone member or a word-position marker\n",
+                            i, pset[i].name ? pset[i].name : "<unnamed>");
+                }
                 if (directional_questions
                     && (strstr(pset[i].name, "_L") != NULL
                         || strstr(pset[i].name, "_R") != NULL))
@@ -439,8 +476,12 @@ pstrain_build_tree(const char *mdef_path,
                 else
                     n_phone_q += 2;  /* left and right context */
             }
-            else
+            else if (pset[i].posn)
                 n_wdbndry++;
+            else {
+                E_FATAL("Invalid phone-set record %u (%s): expected members or a word-position marker\n",
+                        i, pset[i].name ? pset[i].name : "<unnamed>");
+            }
         }
         n_all_q = 2 * n_phone_q + 2 * n_wdbndry;
 

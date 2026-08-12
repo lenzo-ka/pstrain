@@ -40,6 +40,10 @@ _CHECKPOINT_FILES = (
 _TELEMETRY_FILENAME = "bw_telemetry.json"
 
 
+class TerminalAlignmentError(RuntimeError):
+    """An utterance still cannot reach its final state after retry."""
+
+
 def _write_telemetry(
     output_dir: Path, rows: list[dict[str, object]], *, schema_version: int = 1
 ) -> None:
@@ -109,8 +113,17 @@ def _process_with_final_state_retry(
     trainer._retry_transaction_active = True
     try:
         success = trainer.process_utterance_mfcc(mfcc, transcript)
-        if success or not trainer.final_state_not_reached or retry_beam_factor <= 1.0:
+        if success:
             return success
+
+        if not trainer.final_state_not_reached:
+            return False
+
+        if retry_beam_factor <= 1.0:
+            raise TerminalAlignmentError(
+                f"Final state not reached for {fileid} with a_beam={normal_beam:.3g}; "
+                "retry is disabled"
+            )
 
         retry_beam = normal_beam / retry_beam_factor
         trainer._last_process_retried = True
@@ -121,7 +134,13 @@ def _process_with_final_state_retry(
         )
         previous_beam = trainer.set_a_beam(retry_beam)
         try:
-            return trainer.process_utterance_mfcc(mfcc, transcript)
+            success = trainer.process_utterance_mfcc(mfcc, transcript)
+            if not success:
+                raise TerminalAlignmentError(
+                    f"Final state not reached for {fileid} after retry: "
+                    f"expected a complete alignment at a_beam={retry_beam:.3g}"
+                )
+            return True
         finally:
             trainer.set_a_beam(previous_beam)
     finally:
@@ -368,6 +387,8 @@ def run_bw_training(
                     skipped += 1
                     skip_reasons["alignment_failure"] += 1
                     terminal_skips.append({"utterance": fileid, "reason": "alignment_failure"})
+            except TerminalAlignmentError:
+                raise
             except Exception as e:
                 logger.warning("Error processing %s: %s", fileid, e)
                 skipped += 1
