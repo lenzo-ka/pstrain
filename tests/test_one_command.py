@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import shutil
 import sys
 from pathlib import Path
@@ -265,6 +266,29 @@ def test_link_audio_project_can_be_replaced_only_in_link_mode(
     monkeypatch.setattr(train_module, "build_pipeline", lambda context: SuccessfulPipeline())
     assert _invoke(monkeypatch, *_base_arguments(project), "--replace-inputs", "--link-audio") == 0
     assert (project / "audio").is_symlink()
+
+
+def test_resume_command_preserves_explicit_intermediate_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import pstrain.cli.train as train_module
+
+    class SuccessfulPipeline:
+        def run(self, *args: object, **kwargs: object) -> int:
+            return 0
+
+    monkeypatch.setattr(train_module, "build_pipeline", lambda context: SuccessfulPipeline())
+    project = tmp_path / "project"
+    assert _invoke(monkeypatch, *_base_arguments(project), "--target", "ci-1g", "--json") == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    resume_arguments = shlex.split(payload["resume_command"])
+    assert resume_arguments[resume_arguments.index("--target") + 1] == "ci-1g"
+    assert "--phoneset" in resume_arguments
+    assert "--filler-dict" in resume_arguments
+    assert resume_arguments[-1] == "--resume"
 
 
 @pytest.mark.parametrize("complete_staging", [False, True])
