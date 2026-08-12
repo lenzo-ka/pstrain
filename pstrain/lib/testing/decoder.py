@@ -193,7 +193,7 @@ class Decoder:
             with wave.open(str(audio_file), "rb") as wf:
                 audio_data = wf.readframes(wf.getnframes())
 
-            samples = self._ffi.from_buffer("int16_t[]", audio_data)
+            samples = self._ffi.from_buffer("int16[]", audio_data)
             if self._lib.pstrain_decoder_start_utt(self._decoder) < 0:
                 raise RuntimeError("Failed to start utterance processing")
             if (
