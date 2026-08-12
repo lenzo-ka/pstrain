@@ -1,0 +1,103 @@
+{
+  "mode": "off",
+  "corpus": "slt55",
+  "pin_root": "/mnt/shrub-data/decode-state-pin/arctic",
+  "sample_per_voice": null,
+  "seed": null,
+  "utterances": 55,
+  "decoder_config": {
+    "remove_noise": true,
+    "remove_dc": false,
+    "dither": false,
+    "cmn": "batch",
+    "cmninit": "40,3,-1",
+    "varnorm": false,
+    "agc": "none"
+  },
+  "canonical_vs_reverse_count": 6,
+  "canonical_vs_reverse": [
+    {
+      "utterance": "arctic_a0113",
+      "canonical": "the suppose you picked that lingo up among the indians",
+      "other": "a suppose you picked that lingo up among the indians"
+    },
+    {
+      "utterance": "arctic_a0311",
+      "canonical": "therefore her raw for the game",
+      "other": "therefore her rocks the game"
+    },
+    {
+      "utterance": "arctic_a0377",
+      "canonical": "this sound did not disturb the fresh and all of a place",
+      "other": "this sound did not disturb the fresh and all of the place"
+    },
+    {
+      "utterance": "arctic_b0143",
+      "canonical": "it took him half and our to reach the edges it",
+      "other": "to took him half and our to reach the edges it"
+    },
+    {
+      "utterance": "arctic_b0502",
+      "canonical": "and as we hurried up town joe goose explained",
+      "other": "an as we hurried up town joe goose explained"
+    },
+    {
+      "utterance": "arctic_b0539",
+      "canonical": "you were making them talk shop at truth charged him",
+      "other": "you were making them talk shop of truth charged him"
+    }
+  ],
+  "canonical_vs_start_stream_each_count": 10,
+  "canonical_vs_start_stream_each": [
+    {
+      "utterance": "arctic_a0113",
+      "canonical": "the suppose you picked that lingo up among the indians",
+      "other": "a suppose you picked that lingo up among the indians"
+    },
+    {
+      "utterance": "arctic_a0155",
+      "canonical": "want to dropped endowment",
+      "other": "want to dropped gentlemen"
+    },
+    {
+      "utterance": "arctic_a0173",
+      "canonical": "the date was nearly to eighteen ears old",
+      "other": "did ate was nearly to eighteen ears old"
+    },
+    {
+      "utterance": "arctic_a0311",
+      "canonical": "therefore her raw for the game",
+      "other": "therefore her rocks the game"
+    },
+    {
+      "utterance": "arctic_a0377",
+      "canonical": "this sound did not disturb the fresh and all of a place",
+      "other": "this sound did not disturb the caution all of the place"
+    },
+    {
+      "utterance": "arctic_b0241",
+      "canonical": "the woman the carried away with and the big valley",
+      "other": "the woman the carried away with em to the big valley"
+    },
+    {
+      "utterance": "arctic_b0242",
+      "canonical": "the japanese understood is the could never school ourselves or hope to understand",
+      "other": "the japanese understood is a could never school ourselves or hope to understand"
+    },
+    {
+      "utterance": "arctic_b0389",
+      "canonical": "come a my minor afflictions time imagine and you when mysterious one",
+      "other": "i'm a my minor afflictions time imagine and you when mysterious one"
+    },
+    {
+      "utterance": "arctic_b0502",
+      "canonical": "and as we hurried up town joe goose explained",
+      "other": "an as we hurried up town joe goose explained"
+    },
+    {
+      "utterance": "arctic_b0539",
+      "canonical": "you were making them talk shop at truth charged him",
+      "other": "you were making them talk shop of truth charged him"
+    }
+  ]
+}

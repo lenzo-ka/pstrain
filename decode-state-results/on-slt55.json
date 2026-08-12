@@ -1,0 +1,93 @@
+{
+  "mode": "on",
+  "corpus": "slt55",
+  "pin_root": "/mnt/shrub-data/decode-state-pin/arctic",
+  "sample_per_voice": null,
+  "seed": null,
+  "utterances": 55,
+  "decoder_config": {
+    "remove_noise": true,
+    "remove_dc": false,
+    "dither": false,
+    "cmn": "batch",
+    "cmninit": "40,3,-1",
+    "varnorm": false,
+    "agc": "none"
+  },
+  "canonical_vs_reverse_count": 6,
+  "canonical_vs_reverse": [
+    {
+      "utterance": "arctic_a0113",
+      "canonical": "the suppose you picked that lingo up among the indians",
+      "other": "as suppose you picked that lingo up among the indians"
+    },
+    {
+      "utterance": "arctic_a0219",
+      "canonical": "at first he puzzled lover something untoward you ashore had happened",
+      "other": "but first he puzzled lover something untoward you ashore had happened"
+    },
+    {
+      "utterance": "arctic_a0258",
+      "canonical": "soaked in seawater they offset the heat race",
+      "other": "soaked in seawater they offset the heat rays"
+    },
+    {
+      "utterance": "arctic_b0075",
+      "canonical": "in i case he could not must them puffy used caution",
+      "other": "in i case he could not must them to he used caution"
+    },
+    {
+      "utterance": "arctic_b0143",
+      "canonical": "it took him half and our to reach the edges it",
+      "other": "to took him half and our to reach the edges it"
+    },
+    {
+      "utterance": "arctic_b0266",
+      "canonical": "in now put herself in my place for moments",
+      "other": "and now put herself and my place for moments"
+    }
+  ],
+  "canonical_vs_start_stream_each_count": 8,
+  "canonical_vs_start_stream_each": [
+    {
+      "utterance": "arctic_a0097",
+      "canonical": "then you canoe ranged us else come curly among these robes and about",
+      "other": "then eaten grain just else come curly among these robes and about"
+    },
+    {
+      "utterance": "arctic_a0113",
+      "canonical": "the suppose you picked that lingo up among the indians",
+      "other": "as suppose you picked that lingo up among the indians"
+    },
+    {
+      "utterance": "arctic_a0270",
+      "canonical": "and act the bath shave would not be bad",
+      "other": "and and to the bath shave would not be bad"
+    },
+    {
+      "utterance": "arctic_a0373",
+      "canonical": "points of you knew ideas life",
+      "other": "points of you of knew ideas life"
+    },
+    {
+      "utterance": "arctic_a0576",
+      "canonical": "candidate persian you of his existence before he did of hers",
+      "other": "an the dig persian you of his existence before he did of hers"
+    },
+    {
+      "utterance": "arctic_b0075",
+      "canonical": "in i case he could not must them puffy used caution",
+      "other": "in i case he could not must them to he used caution"
+    },
+    {
+      "utterance": "arctic_b0215",
+      "canonical": "it is good property and worth more the that",
+      "other": "is good property and worth more the that"
+    },
+    {
+      "utterance": "arctic_b0266",
+      "canonical": "in now put herself in my place for moments",
+      "other": "in now put herself and my place for moments"
+    }
+  ]
+}
