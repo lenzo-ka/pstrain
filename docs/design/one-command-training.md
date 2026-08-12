@@ -39,7 +39,7 @@ Sensible defaults are:
 
 - experiment `default`;
 - profile `default`;
-- target `ci-1g`, which gives a quick, complete first model;
+- target `cd-8g`, which gives a usable context-dependent model;
 - deterministic split policy from the selected canonical profile (currently
   95 percent training and seed 42 in the active pipeline defaults);
 - copy inputs into the project for portability;
@@ -184,10 +184,9 @@ a normalizer.
 
 ## Open decisions for Kevin
 
-1. **Default target.** Recommendation: `ci-1g`. It is fast enough for a first
-   successful run and proves the complete path. A CD target is more useful for
-   production but makes the advertised first command substantially slower and
-   more failure-prone on small corpora.
+1. **Default target.** The selected default is `cd-8g`, a useful
+   context-dependent model. `ci-1g` remains available as an explicit target
+   for users who only need the bootstrap stage.
 2. **Prompt syntax.** Recommendation: make leading-ID text canonical, accept
    Sphinx/TSV/CSV through explicit or unambiguous detection, and store typed
    training and decoder derivatives. Supporting many formats is convenient but

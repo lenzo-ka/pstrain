@@ -873,6 +873,7 @@ class TargetSpec:
     description: str
     n_density: int = 0
     n_senones: int = 0
+    default: bool = False
 
 
 TARGETS: list[TargetSpec] = [
@@ -887,7 +888,12 @@ TARGETS: list[TargetSpec] = [
     TargetSpec("cd-2g", "cd", "CD tied model with 2 Gaussians", n_density=2, n_senones=200),
     TargetSpec("cd-4g", "cd", "CD tied model with 4 Gaussians", n_density=4, n_senones=200),
     TargetSpec(
-        "cd-8g", "cd", "CD tied model with 8 Gaussians (default)", n_density=8, n_senones=200
+        "cd-8g",
+        "cd",
+        "CD tied model with 8 Gaussians (default)",
+        n_density=8,
+        n_senones=200,
+        default=True,
     ),
     TargetSpec("cd-16g", "cd", "CD tied model with 16 Gaussians", n_density=16, n_senones=200),
     TargetSpec("cd-32g", "cd", "CD tied model with 32 Gaussians", n_density=32, n_senones=200),
@@ -899,6 +905,8 @@ TARGETS: list[TargetSpec] = [
     TargetSpec("package-cd-8g", "package", "Package cd-8g for distribution"),
     TargetSpec("package-cd-32g", "package", "Package cd-32g for distribution"),
 ]
+
+DEFAULT_TARGET = next(spec.name for spec in TARGETS if spec.default)
 
 
 def build_pipeline(ctx: PipelineContext) -> Pipeline:

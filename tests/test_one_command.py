@@ -416,12 +416,12 @@ def test_oov_report_lists_every_utterance_and_accepts_filler_words(tmp_path: Pat
     assert oov_path.read_text().splitlines()[1].endswith("utt0,utt1,utt2,utt3,utt4,utt5,utt6")
 
 
-def test_one_command_trains_ci_1g_and_decodes_without_transcript_munging(
+def test_one_command_trains_default_cd_8g_and_decodes_without_transcript_munging(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     project = tmp_path / "project"
     assert _invoke(monkeypatch, *_base_arguments(project)) == 0
-    model = project / "shared" / "models" / "ci-1g" / "default" / "mdef"
+    model = project / "shared" / "models" / "cd-8g" / "default" / "mdef"
     decoder_transcript = project / "experiments" / "default" / "etc" / "test.decoder.transcription"
     assert model.is_file()
     assert decoder_transcript.read_text().startswith("<s>")
@@ -433,6 +433,6 @@ def test_one_command_trains_ci_1g_and_decodes_without_transcript_munging(
     monkeypatch.setattr(
         sys,
         "argv",
-        ["pstrain", "test", "ci-1g", "--project-dir", str(project), "--no-lm"],
+        ["pstrain", "test", "cd-8g", "--project-dir", str(project), "--no-lm"],
     )
     assert main() == 0
