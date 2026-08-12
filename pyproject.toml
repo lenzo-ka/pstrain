@@ -82,8 +82,8 @@ sdist.include = ["benchmarks/arctic/data/**"]
 wheel.packages = []
 # Install library and binaries to pstrain/_lib/
 wheel.install-dir = "pstrain/_lib"
-# Require cmake 3.15+ for scikit-build-core
-cmake.version = ">=3.16"
+# PocketSphinx 5.1.1's CMake project requires 3.25+.
+cmake.version = ">=3.25"
 
 [tool.scikit-build.wheel.force-include]
 "pstrain" = "pstrain"
