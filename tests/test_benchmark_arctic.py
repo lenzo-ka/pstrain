@@ -417,7 +417,7 @@ def _write_skip_telemetry(
                                         "sentinel": utterance,
                                         "quantity": "exact_zero_codebooks",
                                         "value": occupancy,
-                                        "band": [4548, 7963],
+                                        "band": [4548, 4623],
                                     }
                                 ]
                                 if occupancy is not None
@@ -468,7 +468,7 @@ def test_a0302_band_declaration_passes_without_becoming_a_known_skip(tmp_path: P
         reason="accepted_exception_band",
         stage="cd-untied",
         pass_numbers=tuple(range(3, 11)),
-        occupancy=6200,
+        occupancy=4600,
     )
     assert audit_monotonicity(project) == []
 
@@ -481,7 +481,7 @@ def test_on_mode_reports_multiple_manifest_entries(tmp_path: Path) -> None:
         reason="accepted_exception_band",
         stage="cd-untied",
         pass_numbers=tuple(range(3, 11)),
-        occupancy=6200,
+        occupancy=4600,
     )
     _write_skip_telemetry(project, utterance="arctic_a0587", stage="cd-1g", pass_numbers=(6,))
     on_skips = [item for item in KNOWN_SKIPS if item["mode"] == "on"]

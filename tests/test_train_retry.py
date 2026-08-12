@@ -91,31 +91,31 @@ def test_final_state_retry_exhaustion_fails_loudly() -> None:
 def test_a0302_exception_reports_current_value_inside_band(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr("pstrain.lib.steps.train._exact_zero_codebooks", lambda model: 6200)
+    monkeypatch.setattr("pstrain.lib.steps.train._exact_zero_codebooks", lambda model: 4600)
     caplog.set_level(logging.WARNING, logger="pstrain.lib.steps.train")
 
     assert (
-        _accept_arctic_a0302_exception(fileid="arctic_a0302", model_dir=tmp_path, band=(4548, 7963))
-        == 6200
+        _accept_arctic_a0302_exception(fileid="arctic_a0302", model_dir=tmp_path, band=(4548, 4623))
+        == 4600
     )
-    assert "exact_zero_codebooks=6200 is inside inclusive band [4548, 7963]" in caplog.text
+    assert "exact_zero_codebooks=4600 is inside inclusive band [4548, 4623]" in caplog.text
 
 
-@pytest.mark.parametrize("value", [4547, 7964])
+@pytest.mark.parametrize("value", [4547, 4624])
 def test_a0302_exception_halts_outside_either_side(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, value: int
 ) -> None:
     monkeypatch.setattr("pstrain.lib.steps.train._exact_zero_codebooks", lambda model: value)
     with pytest.raises(
         TerminalAlignmentError,
-        match=rf"exact_zero_codebooks={value} is outside inclusive band \[4548, 7963\]",
+        match=rf"exact_zero_codebooks={value} is outside inclusive band \[4548, 4623\]",
     ):
-        _accept_arctic_a0302_exception(fileid="arctic_a0302", model_dir=tmp_path, band=(4548, 7963))
+        _accept_arctic_a0302_exception(fileid="arctic_a0302", model_dir=tmp_path, band=(4548, 4623))
 
 
 def test_a0302_band_does_not_accept_another_utterance(tmp_path: Path) -> None:
     assert (
-        _accept_arctic_a0302_exception(fileid="arctic_a0587", model_dir=tmp_path, band=(4548, 7963))
+        _accept_arctic_a0302_exception(fileid="arctic_a0587", model_dir=tmp_path, band=(4548, 4623))
         is None
     )
 
