@@ -1,12 +1,11 @@
 """Package data access utilities."""
 
-from importlib.resources import files
 from pathlib import Path
 
 
 def get_data_path() -> Path:
     """Return the path to the package data directory."""
-    return Path(str(files("pstrain.data")))
+    return Path(__file__).parent
 
 
 def get_data_file(name: str) -> Path:
