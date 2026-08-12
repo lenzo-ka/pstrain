@@ -42,6 +42,30 @@ jobs:
         # set (the previous failure mode: no add_test() anywhere).
         run: ctest --test-dir build --output-on-failure --no-tests=error
 
+  # Linux-only sanitizer coverage. AppleClang is excluded because ASan hangs
+  # before main on macOS in this project.
+  c-tests-sanitizers:
+    name: C tests with ASan and UBSan on Linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Debug
+          -DBUILD_CLI=ON
+          -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        env:
+          ASAN_OPTIONS: halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ctest --test-dir build --output-on-failure --no-tests=error
+
   # Python tests across versions
   python-tests:
     name: Python ${{ matrix.python }} on ${{ matrix.os }}
