@@ -62,8 +62,13 @@ pstrain_decoder_create(const pstrain_decoder_config_t *options)
     return decoder;
 }
 
-int pstrain_decoder_start_utt(pstrain_decoder_t *decoder)
-{ return decoder == NULL ? -1 : ps_start_utt(decoder->ps); }
+int
+pstrain_decoder_start_utt(pstrain_decoder_t *decoder)
+{
+    if (decoder == NULL || ps_start_stream(decoder->ps) < 0)
+        return -1;
+    return ps_start_utt(decoder->ps);
+}
 
 int
 pstrain_decoder_process_raw(pstrain_decoder_t *decoder, const int16_t *samples,
