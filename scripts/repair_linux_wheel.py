@@ -30,6 +30,7 @@ def main() -> None:
             library.write_bytes(archive.read(libraries[0]))
             environment = os.environ.copy()
             environment["AUDITWHEEL_LD_LIBRARY_PATH"] = str(lookup)
+            environment["LD_LIBRARY_PATH"] = str(lookup)
             subprocess.run(
                 ["auditwheel", "repair", "-w", str(destination), str(wheel)],
                 check=True,
