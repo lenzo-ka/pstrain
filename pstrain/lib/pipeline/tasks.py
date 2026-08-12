@@ -575,6 +575,8 @@ def _make_tree_tasks(ctx: PipelineContext) -> list[Task]:
                         state,
                         {
                             "state_weights": ctx.train.tree_state_weights,
+                            "rotate_state_weights": ctx.train.tree_rotate_state_weights,
+                            "directional_questions": ctx.train.tree_directional_questions,
                             "ssplitmax": ctx.train.tree_ssplitmax,
                             "ssplitthr": ctx.train.tree_ssplitthr,
                             "csplitmax": ctx.train.tree_csplitmax,

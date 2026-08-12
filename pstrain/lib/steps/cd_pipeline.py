@@ -367,6 +367,8 @@ def build_tree_one(
     state: int,
     continuous: bool = True,
     state_weights: tuple[float, ...] = (1.0, 0.05, 0.0),
+    rotate_state_weights: bool = True,
+    directional_questions: bool = True,
     ssplitmax: int = 7,
     ssplitthr: float = 0.0,
     csplitmax: int = 2000,
@@ -395,6 +397,8 @@ def build_tree_one(
             # Tuned 3-state vector and split recipe from SphinxTrain's
             # scripts/40.buildtrees/buildtree.pl.
             state_weights=np.asarray(state_weights, dtype=np.float32),
+            rotate_state_weights=rotate_state_weights,
+            directional_questions=directional_questions,
             ssplitmax=ssplitmax,
             ssplitthr=ssplitthr,
             csplitmax=csplitmax,
