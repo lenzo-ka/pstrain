@@ -14,7 +14,6 @@ import urllib.error
 import urllib.request
 from contextlib import suppress
 from dataclasses import asdict, dataclass, fields
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
@@ -69,19 +68,6 @@ KNOWN_SKIPS: list[dict[str, Any]] = [
             "the preserved upstream build ignores the same utterance at CI passes 5-6"
         ),
         "recorded-in": "thresh01-off anchor",
-    },
-    {
-        "mode": "on",
-        "stage": "cd-untied",
-        "passes": list(range(3, 11)),
-        "utterance": "arctic_a0302",
-        "mechanism": (
-            "beam failure on a known-hard utterance after permitted retry in the multipron "
-            "posture — the recorded on-mode remainder class (V7-era: a0302/b0486; set shifted "
-            "with the reachable inventory: b0320 now trains); deep diagnosis deferred per "
-            "banked Q6, tracked as an open item"
-        ),
-        "recorded-in": "on-mode parity anchor",
     },
     {
         "mode": "on",
@@ -193,6 +179,8 @@ PIN_CONFIGS: dict[str, dict[str, Any]] = {
             "b_beam": 1e-10,
             "max_skip_fraction": 0.05,
             "retry_beam_factor": 1e10,
+            "arctic_a0302_zero_codebook_band": None,
+            "accept_arctic_a0587_known_skip": True,
             "tree_state_weights": [1.0, 0.05, 0.0],
             # Historical pin predates S1/S2; keep its recorded baseline explicit.
             "tree_rotate_state_weights": False,
@@ -239,6 +227,9 @@ PIN_CONFIGS: dict[str, dict[str, Any]] = {
             "b_beam": 1e-10,
             "max_skip_fraction": 0.05,
             "retry_beam_factor": 1e10,
+            # Singular accepted exception. Widening requires changing these numbers.
+            "arctic_a0302_zero_codebook_band": [4548, 4623],
+            "accept_arctic_a0587_known_skip": True,
             "tree_state_weights": [1.0, 0.05, 0.0],
             # Historical pin predates S1/S2; keep its recorded baseline explicit.
             "tree_rotate_state_weights": False,
@@ -325,10 +316,9 @@ def engine_identity(dictionary: Path | None = None) -> dict[str, str]:
     if dictionary is None:
         dictionary = pocketsphinx_dictionary()
     identity["decode_dictionary_sha256"] = sha256(dictionary)
-    try:
-        identity["pocketsphinx_version"] = version("pocketsphinx")
-    except PackageNotFoundError as exc:
-        raise RuntimeError("pocketsphinx package metadata is unavailable") from exc
+    from pstrain.lib.testing.decoder import pocketsphinx_version
+
+    identity["pocketsphinx_version"] = pocketsphinx_version()
     native = get_lib_path()
     identity["native_library_sha256"] = sha256(native) if native is not None else "absent"
     try:
@@ -732,6 +722,30 @@ def audit_monotonicity(project: Path) -> list[dict[str, Any]]:
             for skip in terminal:
                 utterance = skip.get("utterance") if isinstance(skip, dict) else None
                 reason = skip.get("reason") if isinstance(skip, dict) else None
+                if reason == "accepted_exception_band":
+                    declarations = accounting.get("accepted_exceptions")
+                    declaration = (
+                        declarations[0]
+                        if isinstance(declarations, list) and len(declarations) == 1
+                        else None
+                    )
+                    band = PIN_CONFIGS["on"]["training"]["arctic_a0302_zero_codebook_band"]
+                    if not (
+                        mode == "on"
+                        and stage == "cd-untied"
+                        and utterance == "arctic_a0302"
+                        and isinstance(declaration, dict)
+                        and declaration.get("sentinel") == utterance
+                        and declaration.get("quantity") == "exact_zero_codebooks"
+                        and declaration.get("band") == band
+                        and isinstance(declaration.get("value"), int)
+                        and band[0] <= declaration["value"] <= band[1]
+                    ):
+                        failures.append(
+                            f"{path}: pass {row.get('pass')}: invalid accepted-exception "
+                            f"declaration: utterance={utterance!r}, declaration={declaration!r}"
+                        )
+                    continue
                 match = next(
                     (
                         item

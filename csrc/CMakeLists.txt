@@ -117,6 +117,7 @@ set(LIB_SRCS
   libs/libpstrain/pstrain_delint.c
   libs/libpstrain/pstrain_map_adapt.c
   libs/libpstrain/pstrain_align.c
+  libs/libpstrain/pstrain_decode.c
 
   # sphinx3 forced aligner (vendored from sphinx3, formerly under
   # programs/sphinx3_align). Compiled into the library so pstrain_align
@@ -233,6 +234,20 @@ else()
   target_link_libraries(pstrainc_shared PUBLIC ${LAPACK_LIBRARIES})
 endif()
 set_target_properties(pstrainc_shared PROPERTIES OUTPUT_NAME pstrainc)
+if(APPLE)
+  set_target_properties(pstrainc_shared PROPERTIES INSTALL_RPATH "@loader_path")
+elseif(UNIX)
+  set_target_properties(pstrainc_shared PROPERTIES INSTALL_RPATH "$ORIGIN")
+endif()
+
+target_link_libraries(pstrainc PUBLIC pocketsphinx)
+target_link_libraries(pstrainc_shared PUBLIC pocketsphinx)
+target_compile_definitions(pstrainc PRIVATE
+  PSTRAIN_POCKETSPHINX_VERSION="${PSTRAIN_POCKETSPHINX_VERSION}"
+  PSTRAIN_POCKETSPHINX_COMMIT="${PSTRAIN_POCKETSPHINX_RESOLVED_COMMIT}")
+target_compile_definitions(pstrainc_shared PRIVATE
+  PSTRAIN_POCKETSPHINX_VERSION="${PSTRAIN_POCKETSPHINX_VERSION}"
+  PSTRAIN_POCKETSPHINX_COMMIT="${PSTRAIN_POCKETSPHINX_RESOLVED_COMMIT}")
 
 target_include_directories(pstrainc
   PRIVATE ${CMAKE_BINARY_DIR}
