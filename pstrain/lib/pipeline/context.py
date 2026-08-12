@@ -128,6 +128,12 @@ class TrainParams:
     # Retry forward-final-state pruning failures once at a beam this many
     # times wider (1e-90 / 1e10 = 1e-100).
     retry_beam_factor: float = field(default_factory=lambda: Profile().training.retry_beam_factor)
+    arctic_a0302_zero_codebook_band: tuple[int, int] | None = field(
+        default_factory=lambda: Profile().training.arctic_a0302_zero_codebook_band
+    )
+    accept_arctic_a0587_known_skip: bool = field(
+        default_factory=lambda: Profile().training.accept_arctic_a0587_known_skip
+    )
     # Tuned by SphinxTrain scripts/40.buildtrees/buildtree.pl for 3-state HMMs.
     tree_state_weights: tuple[float, ...] = field(
         default_factory=lambda: Profile().training.tree_state_weights

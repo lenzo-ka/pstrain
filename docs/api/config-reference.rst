@@ -123,6 +123,16 @@ training
    :Default: ``1e-90``
    :Description: Forward alignment beam
 
+``training.accept_arctic_a0587_known_skip``
+   :Type: ``bool``
+   :Default: ``False``
+   :Description: Honor only the two ratified Arctic a0587 stage/pass skip events
+
+``training.arctic_a0302_zero_codebook_band``
+   :Type: ``tuple[int, int] | None``
+   :Default: ``None``
+   :Description: Accepted inclusive exact-zero codebook occupancy band for the singular Arctic a0302 terminal-alignment exception
+
 ``training.b_beam``
    :Type: ``float``
    :Default: ``1e-10``

@@ -40,6 +40,49 @@ _CHECKPOINT_FILES = (
 _TELEMETRY_FILENAME = "bw_telemetry.json"
 
 
+class TerminalAlignmentError(RuntimeError):
+    """An utterance still cannot reach its final state after retry."""
+
+
+def _exact_zero_codebooks(model_dir: Path) -> int:
+    """Count codebooks whose serialized mean and variance are entirely zero."""
+    import numpy as np
+
+    from pstrain.lib import _pstrainc
+
+    means = _pstrainc.read_gau(str(model_dir / "means"))[0]
+    variances = _pstrainc.read_gau(str(model_dir / "variances"))[0]
+    parameter_axes = tuple(range(1, means.ndim))
+    return int(
+        np.count_nonzero(
+            np.all(means == 0, axis=parameter_axes) & np.all(variances == 0, axis=parameter_axes)
+        )
+    )
+
+
+def _accept_arctic_a0302_exception(
+    *, fileid: str, model_dir: Path, band: tuple[int, int] | None
+) -> int | None:
+    """Accept only the named sentinel when its governing occupancy is in band."""
+    if fileid != "arctic_a0302" or band is None:
+        return None
+    value = _exact_zero_codebooks(model_dir)
+    lower, upper = band
+    if not lower <= value <= upper:
+        raise TerminalAlignmentError(
+            "arctic_a0302 accepted-exception band refused: "
+            f"exact_zero_codebooks={value} is outside inclusive band [{lower}, {upper}]"
+        )
+    logger.warning(
+        "ACCEPTED EXCEPTION arctic_a0302: exact_zero_codebooks=%d is inside "
+        "inclusive band [%d, %d]; continuing without this utterance update",
+        value,
+        lower,
+        upper,
+    )
+    return value
+
+
 def _write_telemetry(
     output_dir: Path, rows: list[dict[str, object]], *, schema_version: int = 1
 ) -> None:
@@ -109,8 +152,17 @@ def _process_with_final_state_retry(
     trainer._retry_transaction_active = True
     try:
         success = trainer.process_utterance_mfcc(mfcc, transcript)
-        if success or not trainer.final_state_not_reached or retry_beam_factor <= 1.0:
+        if success:
             return success
+
+        if not trainer.final_state_not_reached:
+            return False
+
+        if retry_beam_factor <= 1.0:
+            raise TerminalAlignmentError(
+                f"Final state not reached for {fileid} with a_beam={normal_beam:.3g}; "
+                "retry is disabled"
+            )
 
         retry_beam = normal_beam / retry_beam_factor
         trainer._last_process_retried = True
@@ -121,7 +173,13 @@ def _process_with_final_state_retry(
         )
         previous_beam = trainer.set_a_beam(retry_beam)
         try:
-            return trainer.process_utterance_mfcc(mfcc, transcript)
+            success = trainer.process_utterance_mfcc(mfcc, transcript)
+            if not success:
+                raise TerminalAlignmentError(
+                    f"Final state not reached for {fileid} after retry: "
+                    f"expected a complete alignment at a_beam={retry_beam:.3g}"
+                )
+            return True
         finally:
             trainer.set_a_beam(previous_beam)
     finally:
@@ -192,6 +250,8 @@ def run_bw_training(
     max_skip_fraction: float = 0.05,
     retry_beam_factor: float = 1e10,
     exclusion_schedule: dict[int | str, list[str]] | None = None,
+    arctic_a0302_zero_codebook_band: tuple[int, int] | None = None,
+    accept_arctic_a0587_pass: int | None = None,
 ) -> TrainingResult:
     """Run Baum-Welch training iterations.
 
@@ -310,6 +370,7 @@ def run_bw_training(
             "exception": 0,
         }
         terminal_skips: list[dict[str, str]] = []
+        accepted_exceptions: list[dict[str, object]] = []
         excluded_fileids = set(exclusion_schedule.get("*", ()))
         excluded_fileids.update(exclusion_schedule.get(iteration, ()))
         excluded_fileids.update(exclusion_schedule.get(str(iteration), ()))
@@ -368,6 +429,36 @@ def run_bw_training(
                     skipped += 1
                     skip_reasons["alignment_failure"] += 1
                     terminal_skips.append({"utterance": fileid, "reason": "alignment_failure"})
+            except TerminalAlignmentError:
+                if fileid == "arctic_a0587" and iteration == accept_arctic_a0587_pass:
+                    logger.warning(
+                        "KNOWN EXCEPTION arctic_a0587: terminal alignment failure at "
+                        "ratified pass %d; continuing without this utterance update",
+                        iteration,
+                    )
+                    skipped += 1
+                    skip_reasons["alignment_failure"] += 1
+                    terminal_skips.append({"utterance": fileid, "reason": "alignment_failure"})
+                    continue
+                occupancy = _accept_arctic_a0302_exception(
+                    fileid=fileid,
+                    model_dir=current_model,
+                    band=arctic_a0302_zero_codebook_band,
+                )
+                if occupancy is None:
+                    raise
+                assert arctic_a0302_zero_codebook_band is not None
+                skipped += 1
+                skip_reasons["alignment_failure"] += 1
+                terminal_skips.append({"utterance": fileid, "reason": "accepted_exception_band"})
+                accepted_exceptions.append(
+                    {
+                        "sentinel": fileid,
+                        "quantity": "exact_zero_codebooks",
+                        "value": occupancy,
+                        "band": list(arctic_a0302_zero_codebook_band),
+                    }
+                )
             except Exception as e:
                 logger.warning("Error processing %s: %s", fileid, e)
                 skipped += 1
@@ -458,6 +549,7 @@ def run_bw_training(
             "skipped_utts": skipped,
             "skip_reasons": skip_reasons,
             "terminal_skips": terminal_skips,
+            "accepted_exceptions": accepted_exceptions,
         }
         telemetry_rows.append(telemetry_row)
         logger.info(

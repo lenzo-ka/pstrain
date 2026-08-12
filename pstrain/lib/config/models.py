@@ -75,6 +75,19 @@ class TrainingConfig(StrictModel):
     retry_beam_factor: Annotated[
         float, Field(gt=0, description="Beam widening factor for one retry")
     ] = 1e10
+    arctic_a0302_zero_codebook_band: Annotated[
+        tuple[int, int] | None,
+        Field(
+            description=(
+                "Accepted inclusive exact-zero codebook occupancy band for the singular "
+                "Arctic a0302 terminal-alignment exception"
+            )
+        ),
+    ] = None
+    accept_arctic_a0587_known_skip: Annotated[
+        bool,
+        Field(description="Honor only the two ratified Arctic a0587 stage/pass skip events"),
+    ] = False
     tree_state_weights: Annotated[
         tuple[float, ...], Field(min_length=1, description="Decision-tree state weights")
     ] = (1.0, 0.05, 0.0)
@@ -163,6 +176,11 @@ class TrainingConfig(StrictModel):
 
     @model_validator(mode="after")
     def validate_training(self) -> TrainingConfig:
+        if (
+            self.arctic_a0302_zero_codebook_band is not None
+            and self.arctic_a0302_zero_codebook_band[0] > self.arctic_a0302_zero_codebook_band[1]
+        ):
+            raise ValueError("arctic_a0302_zero_codebook_band lower bound exceeds upper bound")
         if not self.multipron_training and self.untied_inventory == "transcript-reachable":
             raise ValueError(
                 "training.untied_inventory 'transcript-reachable' requires "

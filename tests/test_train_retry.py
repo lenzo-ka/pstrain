@@ -6,7 +6,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from pstrain.lib.steps.train import _process_with_final_state_retry
+from pstrain.lib.steps.train import (
+    TerminalAlignmentError,
+    _accept_arctic_a0302_exception,
+    _process_with_final_state_retry,
+)
 from tests.clib import requires_c_library
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_arctic"
@@ -63,6 +67,57 @@ def test_non_final_state_failure_is_not_retried() -> None:
         fileid="other-failure",
     )
     assert trainer.attempt_beams == [pytest.approx(1e-80)]
+
+
+def test_final_state_retry_exhaustion_fails_loudly() -> None:
+    trainer = TightBeamTrainer()
+    trainer.process_utterance_mfcc = lambda mfcc, transcript: False  # type: ignore[method-assign]
+
+    with pytest.raises(
+        TerminalAlignmentError,
+        match=r"Final state not reached for malformed after retry: expected .*a_beam=1e-100",
+    ):
+        _process_with_final_state_retry(
+            trainer,  # type: ignore[arg-type]
+            np.zeros((4, 13), dtype=np.float32),
+            "<s> TEST </s>",
+            normal_beam=1e-90,
+            retry_beam_factor=1e10,
+            fileid="malformed",
+        )
+    assert trainer.beam == pytest.approx(1e-90)
+
+
+def test_a0302_exception_reports_current_value_inside_band(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("pstrain.lib.steps.train._exact_zero_codebooks", lambda model: 4600)
+    caplog.set_level(logging.WARNING, logger="pstrain.lib.steps.train")
+
+    assert (
+        _accept_arctic_a0302_exception(fileid="arctic_a0302", model_dir=tmp_path, band=(4548, 4623))
+        == 4600
+    )
+    assert "exact_zero_codebooks=4600 is inside inclusive band [4548, 4623]" in caplog.text
+
+
+@pytest.mark.parametrize("value", [4547, 4624])
+def test_a0302_exception_halts_outside_either_side(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, value: int
+) -> None:
+    monkeypatch.setattr("pstrain.lib.steps.train._exact_zero_codebooks", lambda model: value)
+    with pytest.raises(
+        TerminalAlignmentError,
+        match=rf"exact_zero_codebooks={value} is outside inclusive band \[4548, 4623\]",
+    ):
+        _accept_arctic_a0302_exception(fileid="arctic_a0302", model_dir=tmp_path, band=(4548, 4623))
+
+
+def test_a0302_band_does_not_accept_another_utterance(tmp_path: Path) -> None:
+    assert (
+        _accept_arctic_a0302_exception(fileid="arctic_a0587", model_dir=tmp_path, band=(4548, 4623))
+        is None
+    )
 
 
 @requires_c_library
