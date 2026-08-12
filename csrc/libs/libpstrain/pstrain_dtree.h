@@ -61,6 +61,7 @@ void pstrain_free_pset(pset_t *pset, uint32 n_pset);
  * @param stwt State weights (n_state floats, or NULL for uniform)
  * @param n_stwt Number of state weights
  * @param allphones Build for all phones at once
+ * @param intermediate_dumps Write intermediate trees to the diagnostic sink
  * @return 0 on success, -1 on error
  */
 int pstrain_build_tree(const char *mdef_path,
@@ -83,7 +84,8 @@ int pstrain_build_tree(const char *mdef_path,
                    float32 cntthresh,
                    float32 *stwt,
                    uint32 n_stwt,
-                   int32 allphones);
+                   int32 allphones,
+                   int32 intermediate_dumps);
 
 /**
  * Tie states using decision trees.

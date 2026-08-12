@@ -137,6 +137,9 @@ class TrainParams:
     tree_csplitmax: int = field(default_factory=lambda: Profile().training.tree_csplitmax)
     tree_csplitthr: float = field(default_factory=lambda: Profile().training.tree_csplitthr)
     tree_mwfloor: float = field(default_factory=lambda: Profile().training.tree_mwfloor)
+    tree_intermediate_dumps: bool = field(
+        default_factory=lambda: Profile().training.tree_intermediate_dumps
+    )
     question_npermute: int = field(default_factory=lambda: Profile().training.question_npermute)
     question_quests_per_state: int = field(
         default_factory=lambda: Profile().training.question_quests_per_state

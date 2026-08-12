@@ -752,7 +752,7 @@ int main(int argc, char *argv[])
 		      cmd_ln_int32("-csplitmin"),
 		      cmd_ln_int32("-csplitmax"),
 		      cmd_ln_float32("-csplitthr"),
-		      mwfloor);
+		      mwfloor, TRUE);
 
     /* Save it to a file */
     fp = fopen(cmd_ln_str("-treefn"), "w");

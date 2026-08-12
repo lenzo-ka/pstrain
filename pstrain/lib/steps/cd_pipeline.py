@@ -373,6 +373,7 @@ def build_tree_one(
     csplitthr: float = 0.0,
     mwfloor: float = 1e-8,
     cntthresh: float = 1e-5,
+    intermediate_dumps: bool = False,
 ) -> None:
     """Build a single decision tree file for one (phone, state).
 
@@ -400,6 +401,7 @@ def build_tree_one(
             csplitthr=csplitthr,
             mwfloor=mwfloor,
             cntthresh=cntthresh,
+            intermediate_dumps=intermediate_dumps,
         )
     except RuntimeError as exc:
         logger.warning("Failed to build tree for %s state %d: %s", phone, state, exc)
