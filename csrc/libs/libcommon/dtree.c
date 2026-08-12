@@ -1012,7 +1012,8 @@ split_node_comp(dtree_t *tr,
 		uint32  split_min,
 		uint32  split_max,
 		float32 split_thr,
-		float32 mwfloor)
+		float32 mwfloor,
+                int32 intermediate_dumps)
 {
     uint32 *id, n_id;
     uint32 *id_yes, n_yes;
@@ -1079,7 +1080,8 @@ split_node_comp(dtree_t *tr,
                                        stwt, id_yes, n_yes,
 				       all_q, n_all_q, pset, n_base_phone,
 				       dfeat, n_dfeat,
-				       split_min, split_max, split_thr, mwfloor);
+				       split_min, split_max, split_thr, mwfloor,
+                                       intermediate_dumps);
 
     mk_node(node->n,
 	    node_id_no,
@@ -1093,7 +1095,8 @@ split_node_comp(dtree_t *tr,
                                        stwt, id_no, n_no,
 				       all_q, n_all_q, pset, n_base_phone,
 				       dfeat, n_dfeat,
-				       split_min, split_max, split_thr, mwfloor);
+				       split_min, split_max, split_thr, mwfloor,
+                                       intermediate_dumps);
 }
 
 
@@ -1280,7 +1283,8 @@ mk_tree_comp(float32 ****mixw,
 	     uint32  split_max_comp,
 	     float32 split_thr_comp,
 
-	     float32 mwfloor)
+	     float32 mwfloor,
+             int32 intermediate_dumps)
 {
     dtree_t *comp_tree;
     dtree_node_t *root, *b_n;
@@ -1307,7 +1311,7 @@ mk_tree_comp(float32 ****mixw,
 				    all_q, n_all_q, pset, n_base_phone,
 				    dfeat, n_dfeat,
 				    split_min, split_max, split_thr,
-				    mwfloor);
+			    mwfloor, intermediate_dumps);
 
     for (i = 0; i < split_max_comp; i++) {
 	b_n = best_leaf_node(root);
@@ -1337,7 +1341,8 @@ mk_tree_comp(float32 ****mixw,
                         n_model, n_state, n_stream, n_density, stwt,
 			all_q, n_all_q, pset, n_base_phone,
 			dfeat, n_dfeat,
-			split_min, split_max, split_thr, mwfloor);
+			split_min, split_max, split_thr, mwfloor,
+                        intermediate_dumps);
 
 #if 0
 	printf("Comp Split %u:\n", i);
@@ -1380,7 +1385,8 @@ mk_tree(float32 ****mixw,
 	uint32 split_max,
 	float32 split_thr,
 
-	float32 mwfloor)
+	float32 mwfloor,
+        int32 intermediate_dumps)
 {
     dtree_t *s_tree;
     uint32 i;
@@ -1474,11 +1480,11 @@ mk_tree(float32 ****mixw,
 		   mwfloor);
     }
 
-#if 1
-    E_INFO("Final simple tree\n");
-    print_tree(stderr, "|", root, pset, 0);
-    fprintf(stderr, "\n");
-#endif
+    if (intermediate_dumps) {
+        E_INFO("Final simple tree\n");
+        print_tree(stderr, "|", root, pset, 0);
+        fprintf(stderr, "\n");
+    }
 
     return s_tree;
 }
@@ -1626,7 +1632,8 @@ mk_comp_quest(float64 *wt_ent_dec,
 	      uint32 split_max,
 	      float32 split_thr,
 
-	      float32 mwfloor)
+	      float32 mwfloor,
+              int32 intermediate_dumps)
 {
     dtree_t *tr;
     uint32 n_a, n_b;
@@ -1638,14 +1645,15 @@ mk_comp_quest(float64 *wt_ent_dec,
 		 all_q, n_all_q, pset,
 		 dfeat, n_dfeat,
 		 split_min, split_max, split_thr,
-		 mwfloor);
+		 mwfloor, intermediate_dumps);
 
     if (tr == NULL) {
 	*wt_ent_dec = 0;
 	return NULL;
     }
 
-    print_tree(stderr, "s>", &tr->node[0], pset, 1);
+    if (intermediate_dumps)
+        print_tree(stderr, "s>", &tr->node[0], pset, 1);
 
     /* Note that the tree now contains both mixw and mean and var info
        so they no longer need to be passed */

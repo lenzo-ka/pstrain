@@ -580,6 +580,7 @@ def _make_tree_tasks(ctx: PipelineContext) -> list[Task]:
                             "csplitmax": ctx.train.tree_csplitmax,
                             "csplitthr": ctx.train.tree_csplitthr,
                             "mwfloor": ctx.train.tree_mwfloor,
+                            "intermediate_dumps": ctx.train.tree_intermediate_dumps,
                             # SphinxTrain bldtree -cntthresh default and the
                             # A7 parity audit value (parse_cmd_ln.c:121).
                             "cntthresh": 1e-5,

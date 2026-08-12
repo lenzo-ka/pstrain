@@ -18,6 +18,10 @@ from pstrain.lib.config.resolver import (
 from pstrain.lib.pipeline.context import DEFAULT_CONFIGS, PipelineContext
 
 
+def test_tree_intermediate_dumps_are_off_by_default() -> None:
+    assert TrainingConfig().tree_intermediate_dumps is False
+
+
 def test_active_names_and_defaults_are_canonical() -> None:
     profile = Profile()
     assert profile.features.ncep == 13

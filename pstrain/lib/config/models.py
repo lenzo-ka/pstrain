@@ -83,6 +83,10 @@ class TrainingConfig(StrictModel):
     tree_csplitmax: Annotated[int, Field(ge=0, description="Maximum phone-context splits")] = 2000
     tree_csplitthr: Annotated[float, Field(ge=0, description="Phone-context split threshold")] = 0.0
     tree_mwfloor: Annotated[float, Field(gt=0, description="Tree mixture-weight floor")] = 1e-8
+    tree_intermediate_dumps: Annotated[
+        bool,
+        Field(description="Dump intermediate decision trees to worker diagnostics"),
+    ] = False
     question_npermute: Annotated[int, Field(ge=1, description="Question permutations")] = 12
     question_quests_per_state: Annotated[
         int, Field(ge=1, description="Questions generated per state")

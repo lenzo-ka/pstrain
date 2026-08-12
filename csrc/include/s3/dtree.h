@@ -233,7 +233,8 @@ mk_tree(float32 ****mixw,
 	uint32 min_split,
 	float32 split_thr,
 
-	float32 mwfloor);
+	float32 mwfloor,
+        int32 intermediate_dumps);
 
 dtree_t *
 mk_tree_comp(float32 ****mixw,
@@ -265,7 +266,8 @@ mk_tree_comp(float32 ****mixw,
 	     uint32  split_max_comp,
 	     float32 split_thr_comp,
 
-	     float32 mwfloor);
+	     float32 mwfloor,
+             int32 intermediate_dumps);
 
 void
 cluster_leaves(dtree_t *tr,
@@ -301,7 +303,8 @@ split_node_comp(dtree_t *tr,
                 uint32  split_min,
                 uint32  split_max,
                 float32 split_thr,
-                float32 mwfloor);
+                float32 mwfloor,
+                int32 intermediate_dumps);
 
 void
 split_node(dtree_t *tr,
@@ -366,7 +369,8 @@ mk_comp_quest(float64 *wt_ent_dec,
 	      uint32 split_max,
 	      float32 split_thr,
 
-	      float32 mwfloor);
+	      float32 mwfloor,
+              int32 intermediate_dumps);
 
 int
 ins_twigs(dtree_node_t *node,

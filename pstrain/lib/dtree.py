@@ -39,6 +39,7 @@ def build_tree(
     cntthresh: float = 1e-5,
     state_weights: npt.NDArray[np.float32] | None = None,
     allphones: bool = False,
+    intermediate_dumps: bool = False,
 ) -> None:
     """Build a decision tree for triphones of a given base phone.
 
@@ -63,6 +64,8 @@ def build_tree(
         cntthresh: Count threshold for model inclusion.
         state_weights: State weights array (or None for uniform).
         allphones: Build for all phones at once.
+        intermediate_dumps: Write recursive intermediate-tree dumps to the
+            worker's isolated diagnostic sink. Disabled by default.
 
     Raises:
         ValueError: If continuous=True but mean_path or var_path not provided.
@@ -105,6 +108,7 @@ def build_tree(
         stwt,
         n_stwt,
         1 if allphones else 0,
+        1 if intermediate_dumps else 0,
     )
 
     if ret != 0:

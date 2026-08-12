@@ -213,6 +213,11 @@ training
    :Default: ``0.0``
    :Description: Phone-context split threshold
 
+``training.tree_intermediate_dumps``
+   :Type: ``bool``
+   :Default: ``False``
+   :Description: Dump intermediate decision trees to worker diagnostics
+
 ``training.tree_mwfloor``
    :Type: ``float``
    :Default: ``1e-08``

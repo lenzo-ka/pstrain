@@ -517,7 +517,8 @@ int pstrain_build_tree(const char *mdef_path,
                    float32 cntthresh,
                    float32 *stwt,
                    uint32 n_stwt,
-                   int32 allphones);
+                   int32 allphones,
+                   int32 intermediate_dumps);
 
 // Tie states using decision trees
 int pstrain_tie_states(const char *input_mdef_path,
