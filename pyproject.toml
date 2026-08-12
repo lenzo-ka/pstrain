@@ -74,16 +74,20 @@ build-backend = "scikit_build_core.build"
 [tool.scikit-build]
 build.verbose = true
 logging.level = "INFO"
+editable.mode = "redirect"
+editable.rebuild = false
 sdist.include = ["benchmarks/arctic/data/**"]
-# Keep the benchmark's immutable data beside its repository-relative path in
-# wheels as well as sdists.  ``benchmarks`` is data-only (not an import package).
-wheel.packages = ["pstrain", "benchmarks"]
+# Package files are mapped explicitly below. This keeps redirect-mode editable
+# installs from adding their package search directory (the repository root) to
+# sys.path; ``benchmarks`` remains data-only rather than an import package.
+wheel.packages = []
 # Install library and binaries to pstrain/_lib/
 wheel.install-dir = "pstrain/_lib"
 # Require cmake 3.15+ for scikit-build-core
 cmake.version = ">=3.16"
 
 [tool.scikit-build.wheel.force-include]
+"pstrain" = "pstrain"
 "benchmarks/arctic/data" = "benchmarks/arctic/data"
 
 [tool.scikit-build.cmake.define]
