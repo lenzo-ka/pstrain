@@ -392,6 +392,9 @@ def _make_bw_train_task(
             arctic_a0302_zero_codebook_band=(
                 ctx.train.arctic_a0302_zero_codebook_band if out_model == "cd-untied" else None
             ),
+            accept_arctic_a0587_pass=(
+                6 if ctx.train.accept_arctic_a0587_known_skip and out_model == "cd-1g" else None
+            ),
         )
         if copy_mdef_from_src:
             shutil.copy(src_dir / "mdef", out_dir / "mdef")
@@ -464,6 +467,9 @@ def _make_split_and_train_task(
             retry_beam_factor=ctx.train.retry_beam_factor,
             first_pass_2passvar=first_pass_2passvar,
             exclusion_schedule=ctx.train.exclusion_schedule.get(out_model),
+            accept_arctic_a0587_pass=(
+                1 if ctx.train.accept_arctic_a0587_known_skip and out_model == "cd-2g" else None
+            ),
         )
         write_feat_params(out_dir / "feat.params", ctx.feat)
         _record_model_provenance(ctx, out_dir)

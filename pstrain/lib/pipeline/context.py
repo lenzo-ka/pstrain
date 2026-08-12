@@ -131,6 +131,9 @@ class TrainParams:
     arctic_a0302_zero_codebook_band: tuple[int, int] | None = field(
         default_factory=lambda: Profile().training.arctic_a0302_zero_codebook_band
     )
+    accept_arctic_a0587_known_skip: bool = field(
+        default_factory=lambda: Profile().training.accept_arctic_a0587_known_skip
+    )
     # Tuned by SphinxTrain scripts/40.buildtrees/buildtree.pl for 3-state HMMs.
     tree_state_weights: tuple[float, ...] = field(
         default_factory=lambda: Profile().training.tree_state_weights

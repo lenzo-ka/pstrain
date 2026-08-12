@@ -251,6 +251,7 @@ def run_bw_training(
     retry_beam_factor: float = 1e10,
     exclusion_schedule: dict[int | str, list[str]] | None = None,
     arctic_a0302_zero_codebook_band: tuple[int, int] | None = None,
+    accept_arctic_a0587_pass: int | None = None,
 ) -> TrainingResult:
     """Run Baum-Welch training iterations.
 
@@ -429,6 +430,16 @@ def run_bw_training(
                     skip_reasons["alignment_failure"] += 1
                     terminal_skips.append({"utterance": fileid, "reason": "alignment_failure"})
             except TerminalAlignmentError:
+                if fileid == "arctic_a0587" and iteration == accept_arctic_a0587_pass:
+                    logger.warning(
+                        "KNOWN EXCEPTION arctic_a0587: terminal alignment failure at "
+                        "ratified pass %d; continuing without this utterance update",
+                        iteration,
+                    )
+                    skipped += 1
+                    skip_reasons["alignment_failure"] += 1
+                    terminal_skips.append({"utterance": fileid, "reason": "alignment_failure"})
+                    continue
                 occupancy = _accept_arctic_a0302_exception(
                     fileid=fileid,
                     model_dir=current_model,

@@ -181,6 +181,7 @@ PIN_CONFIGS: dict[str, dict[str, Any]] = {
             "max_skip_fraction": 0.05,
             "retry_beam_factor": 1e10,
             "arctic_a0302_zero_codebook_band": None,
+            "accept_arctic_a0587_known_skip": True,
             "tree_state_weights": [1.0, 0.05, 0.0],
             # Historical pin predates S1/S2; keep its recorded baseline explicit.
             "tree_rotate_state_weights": False,
@@ -229,6 +230,7 @@ PIN_CONFIGS: dict[str, dict[str, Any]] = {
             "retry_beam_factor": 1e10,
             # Singular accepted exception. Widening requires changing these numbers.
             "arctic_a0302_zero_codebook_band": [4548, 4623],
+            "accept_arctic_a0587_known_skip": True,
             "tree_state_weights": [1.0, 0.05, 0.0],
             # Historical pin predates S1/S2; keep its recorded baseline explicit.
             "tree_rotate_state_weights": False,
