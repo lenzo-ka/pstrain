@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,31 +27,14 @@ def check_pocketsphinx() -> tuple[bool, str]:
         Tuple of (available, message)
     """
     try:
-        import importlib.util
+        from pstrain.lib._cffi.core import get_ffi, get_lib
 
-        if importlib.util.find_spec("pocketsphinx") is not None:
-            return (True, "PocketSphinx Python module available")
-    except (ImportError, AttributeError):
-        pass
-
-    # Try CLI
-    try:
-        import subprocess
-
-        result = subprocess.run(
-            ["pocketsphinx", "--help"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if result.returncode in (0, 1):
-            return (True, "PocketSphinx CLI available")
-    except FileNotFoundError:
-        pass
+        version = get_ffi().string(get_lib().pstrain_pocketsphinx_version()).decode()
+        return (True, f"PocketSphinx C library available ({version})")
     except Exception:
         pass
 
-    return (False, "PocketSphinx not found. Install with: pip install pocketsphinx")
+    return (False, "PocketSphinx is not present in libpstrainc; rebuild the native library")
 
 
 class Decoder:
@@ -82,6 +66,7 @@ class Decoder:
         lponlybeam: float = 1e-80,
         fwdflatbeam: float = 1e-80,
         fwdflatwbeam: float = 1e-40,
+        samprate: int = 16000,
     ):
         """Initialize decoder.
 
@@ -102,7 +87,7 @@ class Decoder:
         self.dict_file = Path(dict_file)
         self.filler_dict = Path(filler_dict) if filler_dict else None
         self.lm = Path(lm) if lm else None
-        self._decoder = None
+        self._decoder: object | None = None
 
         if beam is None:
             beam = self.DEFAULT_BEAM
@@ -121,41 +106,34 @@ class Decoder:
         if self.lm and not self.lm.exists():
             raise FileNotFoundError(f"Language model not found: {lm}")
 
-        # Try to initialize PocketSphinx
         try:
-            from pocketsphinx import Decoder as PSDecoder
+            from pstrain.lib._cffi.core import get_ffi, get_lib, path_or_null
 
-            config = {
-                "hmm": str(self.model_dir),
-                "dict": str(self.dict_file),
-                "beam": beam,
-                "wbeam": wbeam,
-                "lw": lw,
-                "fwdflatlw": lw,
-                "bestpathlw": lw,
-                "wip": wip,
-                "pbeam": pbeam,
-                "lpbeam": lpbeam,
-                "lponlybeam": lponlybeam,
-                "fwdflatbeam": fwdflatbeam,
-                "fwdflatwbeam": fwdflatwbeam,
-            }
-
-            if pl_window is not None:
-                config["pl_window"] = pl_window
-
-            if self.filler_dict:
-                config["fdict"] = str(self.filler_dict)
-
-            if self.lm:
-                config["lm"] = str(self.lm)
-
-            self._decoder = PSDecoder(**config)
-
-        except ImportError as e:
-            raise ImportError(
-                "PocketSphinx not available. Install with: pip install pocketsphinx"
-            ) from e
+            self._ffi = get_ffi()
+            self._lib = get_lib()
+            config = self._ffi.new("pstrain_decoder_config_t *")
+            # Keep CFFI-owned strings alive through ps_init(), which copies them.
+            strings = [
+                self._ffi.new("char[]", str(self.model_dir).encode()),
+                self._ffi.new("char[]", str(self.dict_file).encode()),
+            ]
+            config.hmm, config.dict = strings
+            config.fdict = path_or_null(self.filler_dict)
+            config.lm = path_or_null(self.lm)
+            config.beam = beam
+            config.wbeam = wbeam
+            config.lw = lw
+            config.wip = wip
+            config.pbeam = pbeam
+            config.lpbeam = lpbeam
+            config.lponlybeam = lponlybeam
+            config.fwdflatbeam = fwdflatbeam
+            config.fwdflatwbeam = fwdflatwbeam
+            config.pl_window = 5 if pl_window is None else pl_window
+            config.samprate = samprate
+            self._decoder = self._lib.pstrain_decoder_create(config)
+            if self._decoder == self._ffi.NULL:
+                raise RuntimeError("PocketSphinx decoder initialization failed")
         except Exception as e:
             error_msg = str(e)
             # Check for senone limit error
@@ -167,6 +145,16 @@ class Decoder:
                     "This model has too many tied states for PocketSphinx."
                 ) from e
             raise RuntimeError(f"Failed to initialize decoder: {e}") from e
+
+    def close(self) -> None:
+        """Release the linked decoder."""
+        if self._decoder is not None:
+            self._lib.pstrain_decoder_free(self._decoder)
+            self._decoder = None
+
+    def __del__(self) -> None:
+        with contextlib.suppress(Exception):
+            self.close()
 
     def decode_file(self, audio_file: Path) -> DecodingResult:
         """Decode a single audio file.
@@ -197,12 +185,20 @@ class Decoder:
             with wave.open(str(audio_file), "rb") as wf:
                 audio_data = wf.readframes(wf.getnframes())
 
-            self._decoder.start_utt()
-            self._decoder.process_raw(audio_data, no_search=False, full_utt=True)
-            self._decoder.end_utt()
-
-            hypothesis = self._decoder.hyp()
-            hyp_text = hypothesis.hypstr if hypothesis else ""
+            samples = self._ffi.from_buffer("int16_t[]", audio_data)
+            if self._lib.pstrain_decoder_start_utt(self._decoder) < 0:
+                raise RuntimeError("Failed to start utterance processing")
+            if (
+                self._lib.pstrain_decoder_process_raw(
+                    self._decoder, samples, len(audio_data) // 2, 0, 1
+                )
+                < 0
+            ):
+                raise RuntimeError("Failed to process raw audio")
+            if self._lib.pstrain_decoder_end_utt(self._decoder) < 0:
+                raise RuntimeError("Failed to end utterance processing")
+            hypothesis = self._lib.pstrain_decoder_hyp(self._decoder)
+            hyp_text = self._ffi.string(hypothesis).decode() if hypothesis else ""
 
             return DecodingResult(
                 utterance_id=utterance_id,

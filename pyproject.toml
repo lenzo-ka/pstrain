@@ -41,7 +41,6 @@ align = []
 # by `pstrain test` (pstrain.lib.testing.decoder). Forced alignment does not
 # touch it.
 test = [
-    "pocketsphinx>=5.0.0",
     "jiwer>=3.0.0",
 ]
 dev = [

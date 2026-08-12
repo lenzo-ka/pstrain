@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.25)
 
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/pyproject.toml" PSTRAIN_PYPROJECT)
 string(REGEX MATCH "version[ \t]*=[ \t]*\"([^\"]+)\"" _ "${PSTRAIN_PYPROJECT}")
@@ -17,6 +17,7 @@ include(CheckSymbolExists)
 include(CheckIncludeFile)
 include(TestBigEndian)
 include(GNUInstallDirs)
+include(FetchContent)
 
 # Package info
 set(PACKAGE_NAME ${PROJECT_NAME})
@@ -55,6 +56,39 @@ endif()
 # Build options
 option(BUILD_SHARED_LIBS "Build shared library (required for Python bindings)" ON)
 option(BUILD_CLI "Build CLI programs for development/testing" ON)
+
+# PocketSphinx is a source dependency, pinned by both immutable commit and
+# archive digest.  Keep all integration changes here: the upstream source is
+# built verbatim.
+set(PSTRAIN_POCKETSPHINX_VERSION "5.1.1" CACHE INTERNAL
+    "PocketSphinx version included in the pstrain measurement identity")
+set(PSTRAIN_POCKETSPHINX_COMMIT
+    "511126b492dcb267cf30d49d631946d7b61a9530" CACHE INTERNAL
+    "PocketSphinx source commit")
+FetchContent_Declare(pocketsphinx_source
+  URL "https://github.com/cmusphinx/pocketsphinx/archive/${PSTRAIN_POCKETSPHINX_COMMIT}.tar.gz"
+  URL_HASH "SHA256=9e20444c67c3381a0cef68a125c9c6b2830fdac278c5344dd6eab17228c988aa"
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+FetchContent_MakeAvailable(pocketsphinx_source)
+
+# PocketSphinx 5.1.1 supports FetchContent but uses top-level source/binary
+# include paths.  Add the subproject paths at our call boundary without
+# changing any upstream files.
+target_include_directories(pocketsphinx PUBLIC
+  "${pocketsphinx_source_SOURCE_DIR}/include"
+  "${pocketsphinx_source_BINARY_DIR}/include"
+)
+set_target_properties(pocketsphinx PROPERTIES
+  ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+if(UNIX AND NOT APPLE)
+  # Prevent ELF symbol interposition with the intentionally vendored older
+  # sphinxbase implementation exported by libpstrainc.
+  target_link_options(pocketsphinx PRIVATE "LINKER:-Bsymbolic")
+endif()
 
 # Output directories (for development builds)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
