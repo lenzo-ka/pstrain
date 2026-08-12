@@ -125,6 +125,7 @@ archs = ["x86_64", "arm64"]
 # runner or a release-only job when arm64 Linux wheels are needed.
 archs = ["x86_64"]
 manylinux-x86_64-image = "manylinux_2_28"
+repair-wheel-command = "python {project}/scripts/repair_linux_wheel.py {wheel} {dest_dir}"
 
 # Windows is unsupported for now (vendored C does not build under MSVC); the
 # build-wheels matrix omits the Windows runner. See .github/workflows/build.yml.
