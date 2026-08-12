@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import hashlib
 import json
+import multiprocessing
 import os
 import shutil
 import subprocess
@@ -16,7 +18,7 @@ from contextlib import suppress
 from dataclasses import asdict, dataclass, fields
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import yaml
 
@@ -52,6 +54,7 @@ DECODER_CONDITIONS: dict[str, Any] = {
     "fwdflatbeam": 1e-80,
     "fwdflatwbeam": 1e-40,
 }
+T = TypeVar("T")
 PINNED_RESOURCE_HASHES = {
     "lm_sha256": "2cf11ab0474a0bdd165cbee59db674b05764fdb00bf6f9824c0dccce571637b5",
     "dictionary_sha256": "24ff2852a707b63f499fd968294d5e4c02d44e0eb1ec511e40be1f380d785846",
@@ -753,14 +756,16 @@ def audit_monotonicity(project: Path) -> list[dict[str, Any]]:
     return _canonical_known_skips(known_skips)
 
 
-def score_model(
-    model: Path, audio_roots: dict[str, Path], refs: dict[str, str], dictionary: Path, lm: Path
-) -> dict[str, Any]:
-    """Decode, matched-pair score, and count reference OOVs."""
+def _decode_partition(
+    model: Path,
+    dictionary: Path,
+    filler: Path,
+    lm: Path,
+    utterances: list[tuple[str, Path]],
+) -> list[tuple[str, Any]]:
+    """Decode one contiguous corpus partition with one reusable decoder."""
     from pstrain.lib.testing.decoder import Decoder
-    from pstrain.lib.testing.wer import aggregate_wer, calculate_wer
 
-    filler = model.parents[2] / "filler.dict"
     decoder = Decoder(
         model,
         dictionary,
@@ -777,15 +782,61 @@ def score_model(
         fwdflatbeam=1e-80,
         fwdflatwbeam=1e-40,
     )
-    results = []
-    pairs: dict[str, dict[str, Any]] = {}
-    decoded = 0
-    for utterance, text in refs.items():
+    return [(utterance, decoder.decode_file(audio_file)) for utterance, audio_file in utterances]
+
+
+def _corpus_partitions(items: list[T], count: int) -> list[list[T]]:
+    """Split items into the contiguous ranges used by SphinxTrain decode."""
+    if count < 1:
+        raise ValueError("decode partitions must be at least 1")
+    return [
+        items[len(items) * part // count : len(items) * (part + 1) // count]
+        for part in range(count)
+    ]
+
+
+def score_model(
+    model: Path,
+    audio_roots: dict[str, Path],
+    refs: dict[str, str],
+    dictionary: Path,
+    lm: Path,
+    decode_partitions: int = 1,
+) -> dict[str, Any]:
+    """Decode, matched-pair score, and count reference OOVs."""
+    from pstrain.lib.testing.wer import aggregate_wer, calculate_wer
+
+    filler = model.parents[2] / "filler.dict"
+    utterances = []
+    for utterance in refs:
         if "/" in utterance:
             voice, local_id = utterance.split("/", 1)
         else:
             voice, local_id = "slt", utterance
-        result = decoder.decode_file(audio_roots[voice] / f"{local_id}.wav")
+        utterances.append((utterance, audio_roots[voice] / f"{local_id}.wav"))
+    partitions = [part for part in _corpus_partitions(utterances, decode_partitions) if part]
+    if decode_partitions == 1:
+        decoded_partitions = [_decode_partition(model, dictionary, filler, lm, partitions[0])]
+    else:
+        context = multiprocessing.get_context("spawn")
+        with concurrent.futures.ProcessPoolExecutor(
+            max_workers=len(partitions), mp_context=context
+        ) as executor:
+            decoded_partitions = list(
+                executor.map(
+                    _decode_partition,
+                    [model] * len(partitions),
+                    [dictionary] * len(partitions),
+                    [filler] * len(partitions),
+                    [lm] * len(partitions),
+                    partitions,
+                )
+            )
+    results = []
+    pairs: dict[str, dict[str, Any]] = {}
+    decoded = 0
+    for utterance, result in (item for part in decoded_partitions for item in part):
+        text = refs[utterance]
         if not result.success:
             pairs[utterance] = {"reference": text, "error": result.error}
             continue
@@ -1004,6 +1055,7 @@ def run(
     work_dir: Path,
     record_path: Path | None,
     jobs: int | None,
+    decode_partitions: int = 1,
     *,
     emit_record: Path | None = None,
     allow_engine_drift: bool = False,
@@ -1011,6 +1063,8 @@ def run(
     band: str = "pin",
 ) -> dict[str, Any]:
     """Run BM1 from downloads through comparison."""
+    if decode_partitions < 1:
+        raise RuntimeError("decode partitions must be at least 1")
     cache = Path(
         os.environ.get("PSTRAIN_BENCH_CACHE", Path.home() / ".cache" / "pstrain" / "benchmarks")
     )
@@ -1075,8 +1129,8 @@ def run(
         slt = load_transcripts(DATA_DIR / "slt55.transcription")
         big = load_transcripts(DATA_DIR / "big.transcription")
         actual[mode] = {
-            "slt55": score_model(model, audio_roots, slt, dictionary, lm),
-            "big": score_model(model, audio_roots, big, dictionary, lm),
+            "slt55": score_model(model, audio_roots, slt, dictionary, lm, decode_partitions),
+            "big": score_model(model, audio_roots, big, dictionary, lm, decode_partitions),
         }
         for cell in actual[mode].values():
             cell["known_skips"] = known_skips
@@ -1133,11 +1187,19 @@ def main(argv: list[str] | None = None) -> int:
         "--no-compare", action="store_true", help="run before the PIN record exists"
     )
     parser.add_argument("-j", "--jobs", type=int)
+    parser.add_argument(
+        "--decode-partitions",
+        type=int,
+        default=1,
+        help="contiguous decode partitions (default: 1, preserving serial behavior)",
+    )
     args = parser.parse_args(argv)
     if args.no_compare and args.record:
         parser.error("--record and --no-compare are mutually exclusive")
     if args.emit_record and args.record:
         parser.error("--record and --emit-record are mutually exclusive")
+    if args.decode_partitions < 1:
+        parser.error("--decode-partitions must be at least 1")
     if not args.no_compare and args.record is None and args.emit_record is None:
         parser.error("--record is required unless --no-compare or --emit-record is used")
     try:
@@ -1145,6 +1207,7 @@ def main(argv: list[str] | None = None) -> int:
             args.work_dir.resolve(),
             args.record,
             args.jobs,
+            args.decode_partitions,
             emit_record=args.emit_record,
             allow_engine_drift=args.allow_engine_drift,
             deep_verify=args.deep_verify,

@@ -18,6 +18,7 @@ from pstrain.benchmarks.arctic import (
     PIN_CONFIGS,
     PINNED_RESOURCE_HASHES,
     RECORD_SCHEMA_VERSION,
+    _corpus_partitions,
     _run_trusted_child,
     audit_monotonicity,
     authenticate_pin_resources,
@@ -42,6 +43,15 @@ from pstrain.lib.config.resolver import resolve_config
 from pstrain.lib.corpus.split import train_test_split
 from pstrain.lib.lm import build_lm
 from pstrain.lib.transcription import parse_transcription_file
+
+
+def test_decode_corpus_partitions_are_contiguous_and_complete() -> None:
+    items = list(range(11))
+    partitions = _corpus_partitions(items, 4)
+    assert partitions == [[0, 1], [2, 3, 4], [5, 6, 7], [8, 9, 10]]
+    assert [item for partition in partitions for item in partition] == items
+    with pytest.raises(ValueError, match="at least 1"):
+        _corpus_partitions(items, 0)
 
 
 def test_archive_manifest_matches_runtime_config() -> None:
