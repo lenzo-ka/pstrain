@@ -12,6 +12,18 @@ pip install -e .
 
 ## Quick Start
 
+For the turnkey path, provide the corpus inputs in one command. It builds the
+default `cd-8g` context-dependent model:
+
+```bash
+pstrain train my_project \
+    --audio audio/ \
+    --prompts prompts.txt \
+    --dictionary dictionary.dict
+```
+
+Pass `--target ci-1g` to stop at the context-independent bootstrap stage.
+
 ### CLI Usage
 
 ```bash

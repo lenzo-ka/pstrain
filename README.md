@@ -37,7 +37,7 @@ python -m pip install ".[test]"
 ```
 
 The repository includes a small CMU ARCTIC fixture for a complete local run.
-Set up a project and train a one-Gaussian context-independent model:
+Set up a project and train the default eight-Gaussian context-dependent model:
 
 ```bash
 pstrain train /tmp/pstrain-demo \
@@ -53,13 +53,16 @@ The command stores separate typed training and decoder transcripts. Decode the
 held-out set without a language model directly—no transcript conversion is needed:
 
 ```bash
-pstrain test ci-1g --project-dir /tmp/pstrain-demo --no-lm
+pstrain test cd-8g --project-dir /tmp/pstrain-demo --no-lm
 ```
 
 For a project of your own, `pstrain train --help` describes the accepted audio,
 prompt, dictionary, phoneset, and configuration inputs. The lower-level
 `setup`, `validate`, and `build` commands remain available for decomposed workflows. The
 [getting-started guide](docs/getting-started.md) continues from project setup.
+
+The default `pstrain train` target is `cd-8g`. Use `--target ci-1g` when only
+the faster context-independent bootstrap model is wanted.
 
 ## Benchmark pin
 

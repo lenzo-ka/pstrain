@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import shutil
 import stat
 import tempfile
@@ -26,7 +27,7 @@ from pstrain.lib.one_command import (
 )
 from pstrain.lib.pipeline import PipelineContext, UnknownTargetError
 from pstrain.lib.pipeline.context import DEFAULT_CONFIGS
-from pstrain.lib.pipeline.tasks import TARGETS, build_pipeline
+from pstrain.lib.pipeline.tasks import DEFAULT_TARGET, TARGETS, build_pipeline
 from pstrain.lib.setup import setup_project
 
 _TEMPFILE_TOKEN_PATTERN = r"[a-z0-9_]{8}"
@@ -46,6 +47,39 @@ _REQUIRED_STAGING_FILES = (
     "shared/filler.dict",
     "shared/phoneset.txt",
 )
+
+
+def _resume_command(ctx: CommandContext, project_dir: Path) -> str:
+    """Return a resume command that preserves the selected build and inputs."""
+    arguments = [
+        "pstrain",
+        "train",
+        str(project_dir),
+        "--audio",
+        str(Path(ctx.args.audio).resolve()),
+        "--prompts",
+        str(Path(ctx.args.prompts).resolve()),
+        "--dictionary",
+        str(Path(ctx.args.dictionary).resolve()),
+        "--target",
+        ctx.args.target,
+        "--profile",
+        ctx.args.profile,
+        "--experiment",
+        ctx.args.experiment,
+        "--prompt-format",
+        ctx.args.prompt_format,
+    ]
+    if ctx.args.phoneset:
+        arguments.extend(("--phoneset", str(Path(ctx.args.phoneset).resolve())))
+    if ctx.args.filler_dict:
+        arguments.extend(("--filler-dict", str(Path(ctx.args.filler_dict).resolve())))
+    if ctx.args.link_audio:
+        arguments.append("--link-audio")
+    if ctx.args.jobs is not None:
+        arguments.extend(("--jobs", str(ctx.args.jobs)))
+    arguments.append("--resume")
+    return shlex.join(arguments)
 
 
 def _swap_state_path(project_dir: Path) -> Path:
@@ -277,7 +311,11 @@ class TrainCommand(Command):
         parser.add_argument(
             "--dictionary", required=True, type=str, help="Pronunciation dictionary"
         )
-        parser.add_argument("--target", default="ci-1g", help="Training target (default: ci-1g)")
+        parser.add_argument(
+            "--target",
+            default=DEFAULT_TARGET,
+            help=f"Training target (default: {DEFAULT_TARGET})",
+        )
         parser.add_argument(
             "--profile", default="default", help="Canonical profile (default: default)"
         )
@@ -565,8 +603,7 @@ class TrainCommand(Command):
             return self._failure(
                 ctx,
                 "training_failed",
-                f"Training failed: {exc}. Resume with: pstrain train {project_dir} "
-                f"--audio {audio_dir} --prompts {prompts_path} --dictionary {dictionary_path} --resume",
+                f"Training failed: {exc}. Resume with: {_resume_command(ctx, project_dir)}",
             )
         if rc:
             return self._failure(ctx, "training_failed", f"Pipeline exited with code {rc}")
@@ -579,8 +616,7 @@ class TrainCommand(Command):
             "experiment": ctx.args.experiment,
             "elapsed_seconds": round(time.monotonic() - started, 3),
             "reports": {"validation": str(validation_path), "oov": str(oov_path)},
-            "resume_command": f"pstrain train {project_dir} --audio {audio_dir} --prompts "
-            f"{prompts_path} --dictionary {dictionary_path} --resume",
+            "resume_command": _resume_command(ctx, project_dir),
             "test_command": f"pstrain test {ctx.args.target} --project-dir {project_dir} --no-lm",
             "config_command": f"pstrain config show --project-dir {project_dir} --profile {ctx.args.profile}",
         }

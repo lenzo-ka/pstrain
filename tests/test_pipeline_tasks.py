@@ -21,7 +21,7 @@ import yaml
 
 from pstrain.lib.pipeline import PipelineContext
 from pstrain.lib.pipeline.context import DEFAULT_CONFIGS, FeatParams, SplitParams
-from pstrain.lib.pipeline.tasks import TARGETS, build_pipeline
+from pstrain.lib.pipeline.tasks import DEFAULT_TARGET, TARGETS, build_pipeline
 from tests.clib import C_LIBRARY_AVAILABLE
 
 
@@ -71,6 +71,12 @@ def test_every_target_in_TARGETS_is_registered(empty_project: Path) -> None:
     # standalone target since it always runs as a dependency of ci-1g; allow it.
     missing.discard("flat")
     assert not missing, f"declared but not registered: {sorted(missing)}"
+
+
+def test_target_registry_declares_one_default() -> None:
+    defaults = [spec.name for spec in TARGETS if spec.default]
+    assert defaults == ["cd-8g"]
+    assert defaults[0] == DEFAULT_TARGET
 
 
 def test_can_plan_each_ci_and_cd_target(empty_project: Path) -> None:
