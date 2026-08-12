@@ -392,6 +392,7 @@ def _write_skip_telemetry(
     reason: str = "alignment_failure",
     stage: str = "cd-2g",
     pass_numbers: tuple[int, ...] = (1,),
+    occupancy: int | None = None,
 ) -> None:
     path = project / f"shared/models/{stage}/{project.name}/bw_telemetry.json"
     path.parent.mkdir(parents=True)
@@ -410,6 +411,18 @@ def _write_skip_telemetry(
                                 "alignment_failure": len(terminal),
                             },
                             "terminal_skips": terminal,
+                            "accepted_exceptions": (
+                                [
+                                    {
+                                        "sentinel": utterance,
+                                        "quantity": "exact_zero_codebooks",
+                                        "value": occupancy,
+                                        "band": [4548, 7963],
+                                    }
+                                ]
+                                if occupancy is not None
+                                else []
+                            ),
                         },
                     }
                     for pass_number in pass_numbers
@@ -430,18 +443,12 @@ def test_listed_terminal_skip_passes_and_lands_in_record(tmp_path: Path) -> None
     assert record["results"]["off"]["slt55"]["known_skips"] == off_skips
 
 
-@pytest.mark.parametrize(
-    ("utterance", "stage", "pass_numbers"),
-    [
-        ("arctic_a0302", "cd-untied", tuple(range(3, 11))),
-        ("arctic_a0587", "cd-1g", (6,)),
-    ],
-)
-def test_on_mode_manifest_entries_pass_once_and_are_mandatorily_reported(
-    tmp_path: Path, utterance: str, stage: str, pass_numbers: tuple[int, ...]
+def test_on_mode_manifest_entry_passes_once_and_is_mandatorily_reported(
+    tmp_path: Path,
 ) -> None:
     project = tmp_path / "on"
-    _write_skip_telemetry(project, utterance=utterance, stage=stage, pass_numbers=pass_numbers)
+    utterance = "arctic_a0587"
+    _write_skip_telemetry(project, utterance=utterance, stage="cd-1g", pass_numbers=(6,))
     matching_entry = next(
         item for item in KNOWN_SKIPS if item["utterance"] == utterance and item["mode"] == "on"
     )
@@ -453,13 +460,28 @@ def test_on_mode_manifest_entries_pass_once_and_are_mandatorily_reported(
         compare_results(actual, record)
 
 
+def test_a0302_band_declaration_passes_without_becoming_a_known_skip(tmp_path: Path) -> None:
+    project = tmp_path / "on"
+    _write_skip_telemetry(
+        project,
+        utterance="arctic_a0302",
+        reason="accepted_exception_band",
+        stage="cd-untied",
+        pass_numbers=tuple(range(3, 11)),
+        occupancy=6200,
+    )
+    assert audit_monotonicity(project) == []
+
+
 def test_on_mode_reports_multiple_manifest_entries(tmp_path: Path) -> None:
     project = tmp_path / "on"
     _write_skip_telemetry(
         project,
         utterance="arctic_a0302",
+        reason="accepted_exception_band",
         stage="cd-untied",
         pass_numbers=tuple(range(3, 11)),
+        occupancy=6200,
     )
     _write_skip_telemetry(project, utterance="arctic_a0587", stage="cd-1g", pass_numbers=(6,))
     on_skips = [item for item in KNOWN_SKIPS if item["mode"] == "on"]
