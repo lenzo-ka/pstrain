@@ -175,17 +175,27 @@ configure_file("${pocketsphinx_source_SOURCE_DIR}/sphinx_config.h.in"
 # the verified source checkout during a build.
 set(_pstrain_disable_bison "${CMAKE_DISABLE_FIND_PACKAGE_BISON}")
 set(_pstrain_disable_flex "${CMAKE_DISABLE_FIND_PACKAGE_FLEX}")
+set(_pstrain_build_shared_libs "${BUILD_SHARED_LIBS}")
 set(CMAKE_DISABLE_FIND_PACKAGE_BISON TRUE)
 set(CMAKE_DISABLE_FIND_PACKAGE_FLEX TRUE)
+if(NOT APPLE)
+  set(BUILD_SHARED_LIBS OFF)
+endif()
 add_subdirectory("${pocketsphinx_source_SOURCE_DIR}/src"
   "${pocketsphinx_source_BINARY_DIR}/src")
 get_target_property(_pstrain_pocketsphinx_type pocketsphinx TYPE)
-if(NOT _pstrain_pocketsphinx_type STREQUAL "SHARED_LIBRARY")
+if(APPLE)
+  set(_pstrain_expected_pocketsphinx_type "SHARED_LIBRARY")
+else()
+  set(_pstrain_expected_pocketsphinx_type "STATIC_LIBRARY")
+endif()
+if(NOT _pstrain_pocketsphinx_type STREQUAL "${_pstrain_expected_pocketsphinx_type}")
   message(FATAL_ERROR
-    "PocketSphinx must be shared when building the bundled fallback; configured target type: "
+    "PocketSphinx target type must be ${_pstrain_expected_pocketsphinx_type}; configured: "
     "${_pstrain_pocketsphinx_type}")
 endif()
 message(STATUS "PocketSphinx target type: ${_pstrain_pocketsphinx_type}")
+set(BUILD_SHARED_LIBS "${_pstrain_build_shared_libs}")
 set(CMAKE_DISABLE_FIND_PACKAGE_BISON "${_pstrain_disable_bison}")
 set(CMAKE_DISABLE_FIND_PACKAGE_FLEX "${_pstrain_disable_flex}")
 set(PACKAGE_NAME "${_pstrain_package_name}")
@@ -199,20 +209,23 @@ target_include_directories(pocketsphinx BEFORE PUBLIC
 )
 target_compile_definitions(pocketsphinx PRIVATE HAVE_CONFIG_H)
 set_target_properties(pocketsphinx PROPERTIES
+  POSITION_INDEPENDENT_CODE ON
   VERSION "${PSTRAIN_POCKETSPHINX_VERSION}"
   SOVERSION "${PSTRAIN_POCKETSPHINX_VERSION}"
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
-if(UNIX AND NOT APPLE)
+if(UNIX AND NOT APPLE AND _pstrain_pocketsphinx_type STREQUAL "SHARED_LIBRARY")
   # Prevent ELF symbol interposition with the intentionally vendored older
   # sphinxbase implementation exported by libpstrainc.
   target_link_options(pocketsphinx PRIVATE "LINKER:-Bsymbolic")
 endif()
-install(TARGETS pocketsphinx
-  LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" NAMELINK_SKIP
-  RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+if(_pstrain_pocketsphinx_type STREQUAL "SHARED_LIBRARY")
+  install(TARGETS pocketsphinx
+    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" NAMELINK_SKIP
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+endif()
 
 # Output directories (for development builds)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
