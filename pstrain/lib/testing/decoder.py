@@ -6,6 +6,7 @@ import contextlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,13 @@ class DecodingResult:
     error: str | None = None
 
 
+def pocketsphinx_version() -> str:
+    """Return the linked PocketSphinx version and verified source commit."""
+    from pstrain.lib._cffi.core import get_ffi, get_lib
+
+    return cast(bytes, get_ffi().string(get_lib().pstrain_pocketsphinx_version())).decode()
+
+
 def check_pocketsphinx() -> tuple[bool, str]:
     """Check if PocketSphinx is available.
 
@@ -27,9 +35,7 @@ def check_pocketsphinx() -> tuple[bool, str]:
         Tuple of (available, message)
     """
     try:
-        from pstrain.lib._cffi.core import get_ffi, get_lib
-
-        version = get_ffi().string(get_lib().pstrain_pocketsphinx_version()).decode()
+        version = pocketsphinx_version()
         return (True, f"PocketSphinx C library available ({version})")
     except Exception:
         pass

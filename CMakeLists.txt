@@ -187,6 +187,11 @@ target_include_directories(pocketsphinx BEFORE PUBLIC
 )
 target_compile_definitions(pocketsphinx PRIVATE HAVE_CONFIG_H)
 set_target_properties(pocketsphinx PROPERTIES
+  # Make the ABI and full versions equal so installation has one runtime file
+  # plus only the optional namelink.  Wheel archives expand symlinks into full
+  # copies, so the install rule below deliberately omits that namelink.
+  VERSION "${PSTRAIN_POCKETSPHINX_VERSION}"
+  SOVERSION "${PSTRAIN_POCKETSPHINX_VERSION}"
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
@@ -198,7 +203,7 @@ if(UNIX AND NOT APPLE)
 endif()
 install(TARGETS pocketsphinx
   ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-  LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+  LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" NAMELINK_SKIP
   RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 
 # Output directories (for development builds)

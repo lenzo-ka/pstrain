@@ -6,7 +6,12 @@ This module provides:
 - Test result structures and report generation
 """
 
-from pstrain.lib.testing.decoder import Decoder, DecodingResult, check_pocketsphinx
+from pstrain.lib.testing.decoder import (
+    Decoder,
+    DecodingResult,
+    check_pocketsphinx,
+    pocketsphinx_version,
+)
 from pstrain.lib.testing.report import TestReport, create_report
 from pstrain.lib.testing.test import TestResult, load_transcripts, test_model
 from pstrain.lib.testing.wer import WERResult, aggregate_wer, calculate_wer, format_wer_summary
@@ -21,6 +26,7 @@ __all__ = [
     "Decoder",
     "DecodingResult",
     "check_pocketsphinx",
+    "pocketsphinx_version",
     # Testing
     "TestResult",
     "test_model",
