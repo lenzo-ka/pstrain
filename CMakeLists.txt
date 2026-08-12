@@ -175,10 +175,24 @@ configure_file("${pocketsphinx_source_SOURCE_DIR}/sphinx_config.h.in"
 # the verified source checkout during a build.
 set(_pstrain_disable_bison "${CMAKE_DISABLE_FIND_PACKAGE_BISON}")
 set(_pstrain_disable_flex "${CMAKE_DISABLE_FIND_PACKAGE_FLEX}")
+set(_pstrain_build_shared_libs "${BUILD_SHARED_LIBS}")
 set(CMAKE_DISABLE_FIND_PACKAGE_BISON TRUE)
 set(CMAKE_DISABLE_FIND_PACKAGE_FLEX TRUE)
+# BUILD_SHARED_LIBS is consulted when PocketSphinx's src directory creates its
+# library target.  Keep pstrain's own shared-library setting out of that
+# subdirectory so the decoder is absorbed into libpstrainc instead of becoming
+# an external wheel dependency.
+set(BUILD_SHARED_LIBS OFF)
 add_subdirectory("${pocketsphinx_source_SOURCE_DIR}/src"
   "${pocketsphinx_source_BINARY_DIR}/src")
+get_target_property(_pstrain_pocketsphinx_type pocketsphinx TYPE)
+if(NOT _pstrain_pocketsphinx_type STREQUAL "STATIC_LIBRARY")
+  message(FATAL_ERROR
+    "PocketSphinx must be static for wheel portability; configured target type: "
+    "${_pstrain_pocketsphinx_type}")
+endif()
+message(STATUS "PocketSphinx target type: ${_pstrain_pocketsphinx_type}")
+set(BUILD_SHARED_LIBS "${_pstrain_build_shared_libs}")
 set(CMAKE_DISABLE_FIND_PACKAGE_BISON "${_pstrain_disable_bison}")
 set(CMAKE_DISABLE_FIND_PACKAGE_FLEX "${_pstrain_disable_flex}")
 set(PACKAGE_NAME "${_pstrain_package_name}")
@@ -192,9 +206,7 @@ target_include_directories(pocketsphinx BEFORE PUBLIC
 )
 target_compile_definitions(pocketsphinx PRIVATE HAVE_CONFIG_H)
 set_target_properties(pocketsphinx PROPERTIES
-  # Make the ABI and full versions equal so installation has one runtime file
-  # plus only the optional namelink.  Wheel archives expand symlinks into full
-  # copies, so the install rule below deliberately omits that namelink.
+  POSITION_INDEPENDENT_CODE ON
   VERSION "${PSTRAIN_POCKETSPHINX_VERSION}"
   SOVERSION "${PSTRAIN_POCKETSPHINX_VERSION}"
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
@@ -206,11 +218,6 @@ if(UNIX AND NOT APPLE)
   # sphinxbase implementation exported by libpstrainc.
   target_link_options(pocketsphinx PRIVATE "LINKER:-Bsymbolic")
 endif()
-install(TARGETS pocketsphinx
-  ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-  LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" NAMELINK_SKIP
-  RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-
 # Output directories (for development builds)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
