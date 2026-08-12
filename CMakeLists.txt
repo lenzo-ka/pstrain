@@ -107,7 +107,12 @@ function(pstrain_verify_pocketsphinx_source source_dir)
   set(PSTRAIN_POCKETSPHINX_RESOLVED_COMMIT "${_resolved_commit}" PARENT_SCOPE)
 endfunction()
 
-if(IS_DIRECTORY "${PSTRAIN_POCKETSPHINX_SOURCE_DIR}/.git")
+if(IS_DIRECTORY "${PSTRAIN_POCKETSPHINX_SOURCE_DIR}")
+  if(NOT EXISTS "${PSTRAIN_POCKETSPHINX_SOURCE_DIR}/.git")
+    message(FATAL_ERROR
+      "PocketSphinx source path exists but is not a Git checkout: "
+      "${PSTRAIN_POCKETSPHINX_SOURCE_DIR}")
+  endif()
   pstrain_verify_pocketsphinx_source("${PSTRAIN_POCKETSPHINX_SOURCE_DIR}")
   message(STATUS "Using verified local PocketSphinx source: ${PSTRAIN_POCKETSPHINX_SOURCE_DIR}")
   FetchContent_Declare(pocketsphinx_source
