@@ -268,12 +268,21 @@ Library: `pstrain.lib.corpus.train_test_split`. Pipeline: registered as the
 * Outputs: `experiments/{experiment}/etc/{train,test}.{fileids,transcription}`.
 * Default split: 95% train, seed 42. Override via a `split:` block in
   `etc/configs.yaml`.
+* A complete pre-existing set of the four output files is instead treated as
+  an authoritative external split. It is validated for exact ordered pairing,
+  disjoint and complete corpus membership, transcript equality, and audio
+  presence, then preserved byte-for-byte.
 
 The CLI (`pstrain split`) and the pipeline task both call the same library
 function. The pipeline's feature-extraction fan-out is keyed on
 `audio_fileids()` (corpus-wide, derived from `audio/*.wav`), so the
 extract tasks and the split task are **parallel branches** in the
-DAG that join at the model tasks.
+DAG that join at the model tasks. A content-hash sidecar distinguishes
+untouched automatically generated files from supplied or subsequently edited
+files. The pipeline runner's completion-marker suffix hashes the task name,
+not file contents; split files are therefore explicit inputs to the validation
+task and its sentinel is an explicit input to downstream consumers, so an edit
+invalidates the protected work by mtime.
 
 ---
 
