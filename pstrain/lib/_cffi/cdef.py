@@ -71,6 +71,35 @@ typedef void *lineiter_t;
 typedef void *logadd_t;
 typedef void *ptmr_t;
 typedef void *pctr_t;
+typedef void *pstrain_decoder_t;
+
+typedef struct {
+    const char *hmm;
+    const char *dict;
+    const char *fdict;
+    const char *lm;
+    double beam;
+    double wbeam;
+    double lw;
+    double wip;
+    double pbeam;
+    double lpbeam;
+    double lponlybeam;
+    double fwdflatbeam;
+    double fwdflatwbeam;
+    long pl_window;
+    long samprate;
+} pstrain_decoder_config_t;
+
+pstrain_decoder_t *pstrain_decoder_create(const pstrain_decoder_config_t *config);
+int pstrain_decoder_start_utt(pstrain_decoder_t *decoder);
+int pstrain_decoder_process_raw(pstrain_decoder_t *decoder,
+                                const int16 *samples, size_t nsamples,
+                                int no_search, int full_utt);
+int pstrain_decoder_end_utt(pstrain_decoder_t *decoder);
+const char *pstrain_decoder_hyp(pstrain_decoder_t *decoder);
+void pstrain_decoder_free(pstrain_decoder_t *decoder);
+const char *pstrain_pocketsphinx_version(void);
 
 // Enum types (must come before functions that use them)
 typedef enum { CMN_NONE, CMN_LIVE, CMN_BATCH } cmn_type_t;

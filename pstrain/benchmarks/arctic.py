@@ -14,7 +14,6 @@ import urllib.error
 import urllib.request
 from contextlib import suppress
 from dataclasses import asdict, dataclass, fields
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
@@ -317,10 +316,9 @@ def engine_identity(dictionary: Path | None = None) -> dict[str, str]:
     if dictionary is None:
         dictionary = pocketsphinx_dictionary()
     identity["decode_dictionary_sha256"] = sha256(dictionary)
-    try:
-        identity["pocketsphinx_version"] = version("pocketsphinx")
-    except PackageNotFoundError as exc:
-        raise RuntimeError("pocketsphinx package metadata is unavailable") from exc
+    from pstrain.lib.testing.decoder import pocketsphinx_version
+
+    identity["pocketsphinx_version"] = pocketsphinx_version()
     native = get_lib_path()
     identity["native_library_sha256"] = sha256(native) if native is not None else "absent"
     try:
