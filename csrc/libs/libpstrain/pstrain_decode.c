@@ -89,4 +89,4 @@ pstrain_decoder_free(pstrain_decoder_t *decoder)
 }
 
 const char *pstrain_pocketsphinx_version(void)
-{ return "5.1.1+511126b492dcb267cf30d49d631946d7b61a9530"; }
+{ return PSTRAIN_POCKETSPHINX_VERSION "+" PSTRAIN_POCKETSPHINX_COMMIT; }

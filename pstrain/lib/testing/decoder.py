@@ -118,8 +118,16 @@ class Decoder:
                 self._ffi.new("char[]", str(self.dict_file).encode()),
             ]
             config.hmm, config.dict = strings
-            config.fdict = path_or_null(self.filler_dict)
-            config.lm = path_or_null(self.lm)
+            if self.filler_dict:
+                strings.append(self._ffi.new("char[]", str(self.filler_dict).encode()))
+                config.fdict = strings[-1]
+            else:
+                config.fdict = path_or_null(None)
+            if self.lm:
+                strings.append(self._ffi.new("char[]", str(self.lm).encode()))
+                config.lm = strings[-1]
+            else:
+                config.lm = path_or_null(None)
             config.beam = beam
             config.wbeam = wbeam
             config.lw = lw

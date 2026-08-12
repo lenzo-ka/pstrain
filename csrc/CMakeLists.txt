@@ -237,6 +237,12 @@ set_target_properties(pstrainc_shared PROPERTIES OUTPUT_NAME pstrainc)
 
 target_link_libraries(pstrainc PUBLIC pocketsphinx)
 target_link_libraries(pstrainc_shared PUBLIC pocketsphinx)
+target_compile_definitions(pstrainc PRIVATE
+  PSTRAIN_POCKETSPHINX_VERSION="${PSTRAIN_POCKETSPHINX_VERSION}"
+  PSTRAIN_POCKETSPHINX_COMMIT="${PSTRAIN_POCKETSPHINX_RESOLVED_COMMIT}")
+target_compile_definitions(pstrainc_shared PRIVATE
+  PSTRAIN_POCKETSPHINX_VERSION="${PSTRAIN_POCKETSPHINX_VERSION}"
+  PSTRAIN_POCKETSPHINX_COMMIT="${PSTRAIN_POCKETSPHINX_RESOLVED_COMMIT}")
 
 target_include_directories(pstrainc
   PRIVATE ${CMAKE_BINARY_DIR}
