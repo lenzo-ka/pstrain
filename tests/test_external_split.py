@@ -79,9 +79,8 @@ def test_external_split_rejects_missing_audio_without_dropping_id(tmp_path: Path
     assert (split / "train.fileids").read_text() == "c\na\n"
 
 
-def test_partial_persistent_split_is_an_error(tmp_path: Path) -> None:
+def test_partial_split_remains_recoverable_by_automatic_generation(tmp_path: Path) -> None:
     _, _, split = _corpus(tmp_path)
     (split / "train.fileids").write_text("a\n")
 
-    with pytest.raises(ValueError, match="incomplete persistent split"):
-        split_is_external(split)
+    assert not split_is_external(split)

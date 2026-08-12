@@ -169,9 +169,6 @@ def split_is_external(output_dir: Path) -> bool:
     """
     paths = [Path(output_dir) / name for name in SPLIT_FILENAMES]
     present = [path.exists() for path in paths]
-    if any(present) and not all(present):
-        missing = [path.name for path, exists in zip(paths, present, strict=True) if not exists]
-        raise ValueError("incomplete persistent split; missing: " + ", ".join(missing))
     if not all(present):
         return False
 
