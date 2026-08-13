@@ -98,6 +98,7 @@ set(LIB_SRCS
   libs/libcommon/mk_phone_seq.c
   libs/libcommon/was_added.c
   libs/libcommon/dtree.c
+  libs/libcommon/prunetree_order.c
   libs/libcommon/ts2cb.c
   libs/libcommon/mk_sseq.c
   libs/libcommon/lexicon.c

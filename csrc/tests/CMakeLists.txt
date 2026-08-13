@@ -41,6 +41,17 @@ add_test(
   COMMAND test_state_seq_ownership
 )
 
+add_executable(test_prunetree_order test_prunetree_order.c)
+target_link_libraries(test_prunetree_order pstrainc)
+target_include_directories(test_prunetree_order
+  PRIVATE ${CMAKE_BINARY_DIR}
+)
+
+add_test(
+  NAME prunetree_order
+  COMMAND test_prunetree_order
+)
+
 add_executable(test_bw_state_seq_build test_bw_state_seq_build.c)
 target_link_libraries(test_bw_state_seq_build pstrainc)
 target_include_directories(test_bw_state_seq_build
