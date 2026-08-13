@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -21,6 +22,8 @@ class DecodingResult:
     hypothesis: str
     success: bool
     error: str | None = None
+    # Monotonic wall duration for this utterance task, excluding decoder construction.
+    task_wall_seconds: float = 0.0
 
 
 def pocketsphinx_version() -> str:
@@ -189,6 +192,7 @@ class Decoder:
         """
         audio_file = Path(audio_file)
         utterance_id = audio_file.stem
+        started = time.perf_counter()
 
         if not audio_file.exists():
             return DecodingResult(
@@ -196,6 +200,7 @@ class Decoder:
                 hypothesis="",
                 success=False,
                 error=f"Audio file not found: {audio_file}",
+                task_wall_seconds=time.perf_counter() - started,
             )
 
         if self._decoder is None:
@@ -226,6 +231,7 @@ class Decoder:
                 utterance_id=utterance_id,
                 hypothesis=hyp_text,
                 success=True,
+                task_wall_seconds=time.perf_counter() - started,
             )
 
         except Exception as e:
@@ -234,6 +240,7 @@ class Decoder:
                 hypothesis="",
                 success=False,
                 error=str(e)[:200],
+                task_wall_seconds=time.perf_counter() - started,
             )
 
     def decode_batch(self, audio_files: list[Path]) -> dict[str, DecodingResult]:
