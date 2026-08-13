@@ -149,7 +149,7 @@ class FeatureExtractor:
         if not self._fe:
             raise RuntimeError("Failed to initialize front-end")
 
-        self._veclen = self._lib.fe_get_output_size(self._fe)
+        self._veclen = self._lib.pstrain_cffi_fe_get_output_size(self._fe)
 
     def close(self) -> None:
         """Release resources."""
@@ -157,7 +157,7 @@ class FeatureExtractor:
             self._proxy.close()
             return
         if self._fe:
-            self._lib.fe_free(self._fe)
+            self._lib.pstrain_cffi_fe_free(self._fe)
             self._fe = None
 
     def __enter__(self) -> Self:
@@ -223,14 +223,14 @@ class FeatureExtractor:
         nframes = self._ffi.new("int32*", max_frames)
 
         # Start utterance
-        self._lib.fe_start_stream(self._fe)
-        self._lib.fe_start_utt(self._fe)
+        self._lib.pstrain_cffi_fe_start_stream(self._fe)
+        self._lib.pstrain_cffi_fe_start_utt(self._fe)
 
         # Process all samples
         total_frames = 0
         while nsamp[0] > 0:
             nframes[0] = max_frames - total_frames
-            self._lib.fe_process_frames(
+            self._lib.pstrain_cffi_fe_process_frames(
                 self._fe, audio_ptr_ptr, nsamp, feat_ptrs + total_frames, nframes, self._ffi.NULL
             )
             total_frames += nframes[0]
@@ -239,7 +239,7 @@ class FeatureExtractor:
         if total_frames < max_frames:
             last_frame = self._ffi.new("float32[]", self._veclen)
             nframes[0] = 0
-            self._lib.fe_end_utt(self._fe, last_frame, nframes)
+            self._lib.pstrain_cffi_fe_end_utt(self._fe, last_frame, nframes)
             if nframes[0] > 0:
                 for i in range(self._veclen):
                     feat_buf[total_frames, i] = last_frame[i]
@@ -250,7 +250,7 @@ class FeatureExtractor:
         result_ptrs = self._ffi.new("float32*[]", total_frames)
         for i in range(total_frames):
             result_ptrs[i] = self._ffi.cast("float32*", self._ffi.from_buffer(feat_buf[i]))
-        self._lib.fe_mfcc_to_float(self._fe, result_ptrs, result_ptrs, total_frames)
+        self._lib.pstrain_cffi_fe_mfcc_to_float(self._fe, result_ptrs, result_ptrs, total_frames)
 
         return feat_buf[:total_frames].copy()
 

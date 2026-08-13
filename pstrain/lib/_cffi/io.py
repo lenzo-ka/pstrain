@@ -171,7 +171,7 @@ def read_mixw(filename: str) -> tuple[npt.NDArray[np.float32], int, int, int]:
                 mixw[i, j, k] = out_mixw[0][i][j][k]
 
     # Free C-allocated memory using proper 3d free
-    lib.ckd_free_3d(out_mixw[0])
+    lib.pstrain_cffi_ckd_free_3d(out_mixw[0])
 
     return mixw, n_mixw, n_feat, n_density
 
@@ -211,7 +211,7 @@ def read_tmat(filename: str) -> tuple[npt.NDArray[np.float32], int, int]:
                 tmat[t, i, j] = out_tmat[0][t][i][j]
 
     # Free C-allocated memory using proper 3d free
-    lib.ckd_free_3d(out_tmat[0])
+    lib.pstrain_cffi_ckd_free_3d(out_tmat[0])
 
     return tmat, n_tmat, n_state
 
@@ -261,9 +261,9 @@ def read_gau(filename: str) -> tuple[npt.NDArray[np.float32], int, int, int, lis
     # Free C-allocated memory (gauden_free_param pattern):
     # - p[0][0][0] is the raw data block
     # - p is the 3D pointer structure
-    lib.ckd_free(out_gau[0][0][0][0])  # Free raw data
-    lib.ckd_free_3d(out_gau[0])  # Free pointer structure
-    lib.ckd_free(out_veclen[0])  # Free veclen array
+    lib.pstrain_cffi_ckd_free(out_gau[0][0][0][0])  # Free raw data
+    lib.pstrain_cffi_ckd_free_3d(out_gau[0])  # Free pointer structure
+    lib.pstrain_cffi_ckd_free(out_veclen[0])  # Free veclen array
 
     return gau, n_mgau, n_feat, n_density, veclen
 
@@ -346,6 +346,6 @@ def read_dnom(filename: str) -> tuple[npt.NDArray[np.float32], int, int, int]:
                 dnom[i, j, k] = out_dnom[0][i][j][k]
 
     # Free C-allocated memory
-    lib.ckd_free_3d(out_dnom[0])
+    lib.pstrain_cffi_ckd_free_3d(out_dnom[0])
 
     return dnom, n_cb, n_feat, n_density
