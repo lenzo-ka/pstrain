@@ -3,16 +3,73 @@
 from __future__ import annotations
 
 import logging
+import multiprocessing
+import os
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from pstrain.lib.model import MODEL_FILES_REQUIRED
-from pstrain.lib.testing.decoder import Decoder, check_pocketsphinx
+from pstrain.lib.testing.decoder import Decoder, DecodingResult, check_pocketsphinx
 from pstrain.lib.testing.wer import WERResult, aggregate_wer, calculate_wer
 
 logger = logging.getLogger(__name__)
+
+MAX_DECODE_WORKERS = 12
+
+
+@dataclass(frozen=True)
+class _DecodeConfig:
+    model_dir: Path
+    dict_file: Path
+    filler_dict: Path | None
+    lm: Path | None
+
+
+def _decode_shard(
+    config: _DecodeConfig, shard: list[tuple[int, str, Path]]
+) -> list[tuple[int, str, DecodingResult]]:
+    """Decode one shard with one decoder, returning source positions."""
+    decoder = Decoder(
+        model_dir=config.model_dir,
+        dict_file=config.dict_file,
+        filler_dict=config.filler_dict,
+        lm=config.lm,
+    )
+    try:
+        return [(position, utt_id, decoder.decode_file(path)) for position, utt_id, path in shard]
+    finally:
+        decoder.close()
+
+
+def _resolve_decode_jobs(jobs: int | None) -> int:
+    if jobs is None or jobs == -1:
+        return min(MAX_DECODE_WORKERS, os.cpu_count() or 1)
+    if jobs < 1:
+        raise ValueError("jobs must be -1 (auto) or a positive integer")
+    return jobs
+
+
+def _decode_files(
+    config: _DecodeConfig, files: list[tuple[str, Path]], jobs: int | None
+) -> list[tuple[str, DecodingResult]]:
+    """Decode files serially or in stable process shards, preserving input order."""
+    worker_count = min(_resolve_decode_jobs(jobs), len(files))
+    indexed = [(position, utt_id, path) for position, (utt_id, path) in enumerate(files)]
+    if worker_count <= 1:
+        decoded = _decode_shard(config, indexed)
+    else:
+        shards = [indexed[worker::worker_count] for worker in range(worker_count)]
+        # PocketSphinx owns native process-global state. A fresh interpreter keeps
+        # workers independent of any decoder previously used by the parent.
+        context = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=worker_count, mp_context=context) as executor:
+            futures = [executor.submit(_decode_shard, config, shard) for shard in shards]
+            decoded = [item for future in futures for item in future.result()]
+    decoded.sort(key=lambda item: item[0])
+    return [(utt_id, result) for _, utt_id, result in decoded]
 
 
 @dataclass
@@ -121,6 +178,7 @@ def test_model(
     lm: Path | None = None,
     verbose: bool = False,
     compute_cer: bool = False,
+    jobs: int | None = None,
 ) -> TestResult:
     """Test an acoustic model and calculate all WER metrics.
 
@@ -133,6 +191,7 @@ def test_model(
         lm: Optional language model (ARPA format)
         verbose: Store per-utterance results
         compute_cer: Also compute Character Error Rate
+        jobs: Decoder worker processes. None auto-selects up to 12.
 
     Returns:
         TestResult with all jiwer metrics
@@ -161,8 +220,7 @@ def test_model(
     logger.info("Testing model: %s", model_dir)
     logger.info("Test utterances: %d", len(test_transcripts))
 
-    # Initialize decoder
-    decoder = Decoder(
+    decode_config = _DecodeConfig(
         model_dir=model_dir,
         dict_file=dict_file,
         filler_dict=filler_dict,
@@ -174,16 +232,17 @@ def test_model(
     per_utterance: dict[str, dict[str, Any]] = {}
     n_decoded = 0
 
-    for utt_id, reference in test_transcripts.items():
-        # Find audio file
+    decode_inputs: list[tuple[str, Path]] = []
+    for utt_id in test_transcripts:
         audio_file = test_audio_dir / f"{utt_id}.wav"
         if not audio_file.exists():
             logger.warning("Audio file not found: %s", audio_file)
             continue
+        decode_inputs.append((utt_id, audio_file))
 
-        # Decode
-        result = decoder.decode_file(audio_file)
-
+    logger.info("Decoder workers: %d", min(_resolve_decode_jobs(jobs), len(decode_inputs)))
+    for utt_id, result in _decode_files(decode_config, decode_inputs, jobs):
+        reference = test_transcripts[utt_id]
         if result.success:
             n_decoded += 1
             hypothesis = result.hypothesis

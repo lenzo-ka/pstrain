@@ -69,6 +69,13 @@ class TestCommand(Command):
             help="Also compute Character Error Rate",
         )
         parser.add_argument(
+            "-j",
+            "--jobs",
+            type=int,
+            default=None,
+            help="Decoder workers (-1 or omitted: auto, capped at 12)",
+        )
+        parser.add_argument(
             "--json",
             action="store_true",
             help="Output JSON to stdout instead of summary",
@@ -162,6 +169,7 @@ class TestCommand(Command):
         ctx.log_action("Test", str(model_dir))
         ctx.log(f"  Test utterances: {len(test_transcripts)}")
         ctx.log(f"  Dictionary: {dict_file}")
+        ctx.log(f"  Jobs: {ctx.args.jobs if ctx.args.jobs is not None else 'auto (max 12)'}")
         if lm_path:
             ctx.log(f"  Language model: {lm_path}")
         else:
@@ -182,10 +190,11 @@ class TestCommand(Command):
                 lm=lm_path,
                 verbose=ctx.args.verbose,
                 compute_cer=ctx.args.cer,
+                jobs=ctx.args.jobs,
             )
         except ImportError as e:
             return CommandResult.fail(f"Import error: {e}")
-        except RuntimeError as e:
+        except (RuntimeError, ValueError) as e:
             return CommandResult.fail(f"Test failed: {e}")
         except FileNotFoundError as e:
             return CommandResult.fail(f"File not found: {e}")
