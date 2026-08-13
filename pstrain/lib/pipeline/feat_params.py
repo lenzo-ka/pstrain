@@ -35,6 +35,8 @@ def feat_params_lines(feat: FeatParams) -> list[str]:
         f"-lowerf {feat.lowerf}\n",
         f"-upperf {feat.upperf}\n",
         f"-alpha {feat.alpha}\n",
+        f"-dither {'yes' if feat.dither else 'no'}\n",
+        f"-remove_dc {'yes' if feat.remove_dc else 'no'}\n",
         f"-feat {feat.feat_type}\n",
         f"-transform {feat.transform}\n",
         f"-lifter {feat.lifter}\n",
@@ -42,13 +44,10 @@ def feat_params_lines(feat: FeatParams) -> list[str]:
         f"-cmn {feat.cmn}\n",
         f"-varnorm {feat.varnorm}\n",
         # Invariants of pstrain's extraction path: unit_area/round_filters are the
-        # sphinxbase fe defaults it never overrides, and pstrain_fe_create pins
-        # remove_dc/remove_noise in its synthetic command line
-        # (csrc/libs/libpstrain/pstrain_fe.c). Writing them explicitly prevents
-        # decoder-version defaults drifting from the training front end.
+        # sphinxbase fe defaults it never overrides. Writing them explicitly
+        # prevents decoder-version defaults drifting from the training front end.
         "-unit_area yes\n",
         "-round_filters yes\n",
-        "-remove_dc no\n",
         "-remove_noise yes\n",
     ]
 

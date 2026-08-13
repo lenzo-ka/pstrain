@@ -53,8 +53,9 @@ regenerating commit must state why the baseline changed.
 1. **Feature extraction.** Every mini fixture produces a non-empty 13-wide,
    finite MFC array. `arctic_a0001` has portable count/envelope checks; strict
    mode additionally checks its exact bytes.
-   Front-end dithering is disabled in this exercised path, so it has no hidden
-   stochastic state.
+   Front-end dithering and DC removal use their canonical enabled defaults in
+   this path. Two independent fresh-project regenerations must produce the same
+   feature bytes before the checksum is updated.
 2. **Aggregation.** The same three utterances are accumulated separately and
    together. Utterance count, frame count, and total log-likelihood must
    conserve exactly (within floating addition tolerance).
@@ -109,9 +110,9 @@ training.
 
 ## Reproducibility
 
-The exercised corpus split records seed 42. Feature dithering is off and
-Gaussian splitting is deterministic; there are no other stochastic operations
-in these paths. Two independent one-pass BW runs must produce byte-identical
-means, variances, mixture weights, transition matrices, and density counts.
-The golden JSON also records the seed, providing the configuration seam for
-future PP5 stochastic stages.
+The exercised corpus split records seed 42. Feature dithering is repeatable
+across independent fresh-project builds, Gaussian splitting is deterministic,
+and there are no other stochastic operations in these paths. Two independent
+one-pass BW runs must produce byte-identical means, variances, mixture weights,
+transition matrices, and density counts. The golden JSON also records the seed,
+providing the configuration seam for future PP5 stochastic stages.

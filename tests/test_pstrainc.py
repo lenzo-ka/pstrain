@@ -431,7 +431,7 @@ def test_pstrain_fe_create_default() -> None:
     ffi, lib = _pstrainc._init()
 
     fe = lib.pstrain_fe_create_default()
-    explicit_fe = lib.pstrain_fe_create(16000.0, 25, 512, 130.0, 6800.0, 13, 0.97, 22)
+    explicit_fe = lib.pstrain_fe_create(16000.0, 25, 512, 130.0, 6800.0, 13, 0.97, 22, True, True)
     assert fe != _pstrainc.get_ffi().NULL
     assert explicit_fe != ffi.NULL
 
@@ -453,7 +453,11 @@ def test_pstrain_fe_create_default() -> None:
         default_features = extract(fe)
         explicit_features = extract(explicit_fe)
         assert default_features.shape[0] > 0
-        np.testing.assert_array_equal(default_features, explicit_features)
+        # Dither uses a fresh random seed for each front end, so identical
+        # configuration guarantees shape and finite output, not equal values.
+        assert default_features.shape == explicit_features.shape
+        assert np.isfinite(default_features).all()
+        assert np.isfinite(explicit_features).all()
     finally:
         lib.fe_free(fe)
         lib.fe_free(explicit_fe)
@@ -472,6 +476,8 @@ def test_pstrain_fe_create_custom() -> None:
         26,  # ncep - custom value
         0.97,  # alpha
         22,  # lifter
+        True,  # dither
+        True,  # remove_dc
     )
     assert fe != _pstrainc.get_ffi().NULL
 
@@ -495,6 +501,8 @@ def test_pstrain_fe_create_8khz() -> None:
         13,  # ncep
         0.97,  # alpha
         22,  # lifter
+        True,  # dither
+        True,  # remove_dc
     )
     assert fe != _pstrainc.get_ffi().NULL
 
