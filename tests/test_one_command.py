@@ -457,6 +457,6 @@ def test_one_command_trains_default_cd_8g_and_decodes_without_transcript_munging
     monkeypatch.setattr(
         sys,
         "argv",
-        ["pstrain", "test", "cd-8g", "--project-dir", str(project), "--no-lm"],
+        ["pstrain", "test", "cd-8g", "--project-dir", str(project), "--no-lm", "-j", "1"],
     )
     assert main() == 0

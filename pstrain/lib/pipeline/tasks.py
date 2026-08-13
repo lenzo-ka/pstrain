@@ -841,6 +841,7 @@ def _make_test_task(ctx: PipelineContext, *, model: str) -> Task:
             lm=lm_path,
             verbose=True,
             compute_cer=True,
+            jobs=ctx.runner.jobs,
         )
         report = create_report(
             result,
