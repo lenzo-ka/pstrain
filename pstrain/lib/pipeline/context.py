@@ -78,6 +78,8 @@ class FeatParams:
     upperf: int = field(default_factory=lambda: Profile().features.upperf)
     # Pre-emphasis coefficient (`-alpha`). 0.97 is the engine default.
     alpha: float = field(default_factory=lambda: Profile().features.alpha)
+    dither: bool = field(default_factory=lambda: Profile().features.dither)
+    remove_dc: bool = field(default_factory=lambda: Profile().features.remove_dc)
     feat_type: str = field(default_factory=lambda: Profile().features.feat_type)
     # Cepstral lifter window (sphinx_fe `-lifter`). 22 = SphinxTrain default.
     lifter: int = field(default_factory=lambda: Profile().features.lifter)

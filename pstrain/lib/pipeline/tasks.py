@@ -166,6 +166,8 @@ def _make_extract_tasks(ctx: PipelineContext) -> list[Task]:
         "upperf": ctx.feat.upperf,
         "lifter": ctx.feat.lifter,
         "alpha": ctx.feat.alpha,
+        "dither": ctx.feat.dither,
+        "remove_dc": ctx.feat.remove_dc,
     }
     fileids = ctx.audio_fileids()
     if not fileids:

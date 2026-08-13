@@ -218,7 +218,7 @@ int fe_mfcc_to_float(fe_t *fe, mfcc_t **input, float32 **output, int32 nframes);
 // pstrain helper functions - simplified FE initialization
 fe_t *pstrain_fe_create(float samprate, int nfilt, int nfft,
                     float lowerf, float upperf, int ncep,
-                    float alpha, int lifter);
+                    float alpha, int lifter, int dither, int remove_dc);
 fe_t *pstrain_fe_create_default(void);
 
 // pstrain flat initialization

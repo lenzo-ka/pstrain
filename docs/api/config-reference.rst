@@ -31,6 +31,11 @@ features
    :Default: ``'batch'``
    :Description: Cepstral mean-normalization mode
 
+``features.dither``
+   :Type: ``bool``
+   :Default: ``True``
+   :Description: Add half-bit dither to input audio
+
 ``features.feat_type``
    :Type: ``str``
    :Default: ``'1s_c_d_dd'``
@@ -60,6 +65,11 @@ features
    :Type: ``int``
    :Default: ``25``
    :Description: Number of mel filters
+
+``features.remove_dc``
+   :Type: ``bool``
+   :Default: ``True``
+   :Description: Remove DC offset from each frame
 
 ``features.samprate``
    :Type: ``int``

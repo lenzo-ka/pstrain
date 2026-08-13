@@ -61,6 +61,8 @@ class TestFEParams:
         assert cfg.ncep == 13
         assert cfg.alpha == pytest.approx(0.97)
         assert cfg.lifter == 22
+        assert cfg.dither is True
+        assert cfg.remove_dc is True
 
     def test_custom_values(self) -> None:
         """Test custom configuration values."""
@@ -136,6 +138,19 @@ class TestFeatureExtractor:
         cfg = FEParams(ncep=26)
         with FeatureExtractor(**cfg.__dict__) as fe:
             assert fe.config.ncep == 26
+
+    def test_remove_dc_configuration_changes_produced_features(self) -> None:
+        """A non-default FE option must reach signal processing, not just storage."""
+        samples = np.arange(16000, dtype=np.float64)
+        audio = (8000 + 3000 * np.sin(samples * 0.031)).astype(np.int16)
+
+        with FeatureExtractor(dither=False, remove_dc=True) as enabled:
+            with_dc_removal = enabled.process_audio(audio)
+        with FeatureExtractor(dither=False, remove_dc=False) as disabled:
+            without_dc_removal = disabled.process_audio(audio)
+
+        assert with_dc_removal.shape == without_dc_removal.shape
+        assert np.count_nonzero(with_dc_removal != without_dc_removal) > 0
 
 
 class TestReadWriteSphinxMfc:
