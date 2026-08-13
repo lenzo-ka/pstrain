@@ -66,6 +66,20 @@
 #include <s3/acmod_set.h>
 #include <s3/was_added.h>
 
+static uint64
+mixw_digest(const float32 *data, size_t n_float)
+{
+    const unsigned char *bytes = (const unsigned char *)data;
+    size_t i;
+    uint64 digest = 1469598103934665603ULL;
+
+    for (i = 0; i < n_float * sizeof(*data); i++) {
+        digest ^= bytes[i];
+        digest *= 1099511628211ULL;
+    }
+    return digest;
+}
+
 
 pset_t *
 pstrain_read_pset(const char *filename,
@@ -192,6 +206,9 @@ pstrain_build_tree(const char *mdef_path,
     uint32 n_model, n_state, n_stream, n_density;
     uint32 mixw_s, mixw_e;
     float32 ***in_mixw = NULL;
+    float32 *in_mixw_snapshot = NULL;
+    size_t in_mixw_n_float;
+    uint64 in_mixw_entry_digest;
     float32 ****mixw = NULL;
     float32 ****mixw_occ = NULL;
     float32 ****means = NULL;
@@ -287,9 +304,19 @@ pstrain_build_tree(const char *mdef_path,
         E_ERROR("Failed to read mixw\n");
         return -1;
     }
+    in_mixw_n_float = (size_t)n_in_mixw * n_stream * n_density;
+    in_mixw_snapshot = ckd_calloc(in_mixw_n_float, sizeof(*in_mixw_snapshot));
+    memcpy(in_mixw_snapshot, in_mixw[0][0],
+           in_mixw_n_float * sizeof(*in_mixw_snapshot));
+    in_mixw_entry_digest = mixw_digest(in_mixw_snapshot, in_mixw_n_float);
 
     /* Allocate mixw arrays */
-    mixw_occ = (float32 ****)ckd_calloc_2d(n_model, n_state, sizeof(float32 **));
+    /* Keep occupancies independently owned.  The continuous-model collapse
+     * below replaces density zero with the stream total; pointing these rows
+     * into in_mixw would silently mutate the parsed, read-only input and make
+     * later consumers observe order-dependent values. */
+    mixw_occ = (float32 ****)ckd_calloc_4d(n_model, n_state, n_stream,
+                                           n_density, sizeof(float32));
     mixw = (float32 ****)ckd_calloc_4d(n_model, n_state, n_stream, n_density, sizeof(float32));
 
     model_acmod = ckd_calloc(n_model, sizeof(uint32));
@@ -316,10 +343,22 @@ pstrain_build_tree(const char *mdef_path,
         model_acmod[j] = i;
         for (k = 0; k < n_state; k++) {
             s = mdef->defn[i].state[k] - mixw_s;
-            mixw_occ[j][k] = in_mixw[s];
+            for (m = 0; m < n_stream; m++)
+                memcpy(mixw_occ[j][k][m], in_mixw[s][m],
+                       n_density * sizeof(float32));
+            if (mixw_occ[j][k][0] == in_mixw[s][0])
+                E_FATAL("mixw_occ must not alias parsed mixture weights\n");
         }
         j++;
     }
+
+    /* This stage is declared read-only with respect to parsed input.  Keep
+     * both byte identity and an independent entry/exit digest as regression
+     * guards: either changing means a write escaped through an alias. */
+    if (memcmp(in_mixw_snapshot, in_mixw[0][0],
+               in_mixw_n_float * sizeof(*in_mixw_snapshot)) != 0
+        || mixw_digest(in_mixw[0][0], in_mixw_n_float) != in_mixw_entry_digest)
+        E_FATAL("model selection mutated parsed mixture weights\n");
     E_INFO("%u of %u models have observation count at least %f\n",
            j, p_e - p_s + 1, cntthresh);
     n_model = j;
@@ -346,6 +385,10 @@ pstrain_build_tree(const char *mdef_path,
             }
         }
     }
+    if (memcmp(in_mixw_snapshot, in_mixw[0][0],
+               in_mixw_n_float * sizeof(*in_mixw_snapshot)) != 0
+        || mixw_digest(in_mixw[0][0], in_mixw_n_float) != in_mixw_entry_digest)
+        E_FATAL("normalization mutated parsed mixture weights\n");
 
     /* Read means and variances for continuous models */
     if (continuous) {
@@ -430,6 +473,11 @@ pstrain_build_tree(const char *mdef_path,
         ckd_free_4d((void ****)fullvar);
         ckd_free(t_veclen);
     }
+
+    if (memcmp(in_mixw_snapshot, in_mixw[0][0],
+               in_mixw_n_float * sizeof(*in_mixw_snapshot)) != 0
+        || mixw_digest(in_mixw[0][0], in_mixw_n_float) != in_mixw_entry_digest)
+        E_FATAL("continuous-model collapse mutated parsed mixture weights\n");
 
     /* Read phone sets */
     E_INFO("Reading pset: %s\n", pset_path);
@@ -572,6 +620,11 @@ pstrain_build_tree(const char *mdef_path,
                       csplitmin, csplitmax, csplitthr,
                       mwfloor, intermediate_dumps);
 
+    if (memcmp(in_mixw_snapshot, in_mixw[0][0],
+               in_mixw_n_float * sizeof(*in_mixw_snapshot)) != 0
+        || mixw_digest(in_mixw[0][0], in_mixw_n_float) != in_mixw_entry_digest)
+        E_FATAL("tree construction mutated parsed mixture weights\n");
+
     if (tr == NULL) {
         E_ERROR("Failed to build tree\n");
         return -1;
@@ -595,7 +648,9 @@ pstrain_build_tree(const char *mdef_path,
     ckd_free(all_q);
     ckd_free_2d((void **)dfeat);
     ckd_free_4d((void ****)mixw);
-    ckd_free_2d((void **)mixw_occ);
+    ckd_free_4d((void ****)mixw_occ);
+    ckd_free_3d((void ***)in_mixw);
+    ckd_free(in_mixw_snapshot);
     if (means) ckd_free_4d((void ****)means);
     if (vars) ckd_free_4d((void ****)vars);
 

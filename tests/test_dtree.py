@@ -288,7 +288,8 @@ AA L2 L1 s n/a 0 5 N
         questions.write_text("CONTEXT_L L1\n")
         return model, mixw_path, mean_path, var_path, questions
 
-    def test_continuous_dimensions_accept_matching_inputs(self, tmp_path: Path) -> None:
+    def test_continuous_build_keeps_parsed_mixw_read_only(self, tmp_path: Path) -> None:
+        """Exercise byte-identity, digest, and non-alias guards in native code."""
         model, mixw, means, variances, questions = self._continuous_inputs(tmp_path)
 
         output = tmp_path / "tree"
