@@ -77,6 +77,8 @@ dist/
 *.mfc
 *.wav
 /data/
+benchmarks/timit/data/
+benchmarks/timit/pilot/
 
 # ...but committed test fixtures are not generated artifacts. Keep them.
 # (These broad patterns over-reach — see plan 3.5; this negation is the
