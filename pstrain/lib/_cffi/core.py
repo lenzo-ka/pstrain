@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from cffi import FFI  # type: ignore[import-untyped]
+from cffi import FFI
 
 from pstrain.lib._cffi.cdef import CDEF
 

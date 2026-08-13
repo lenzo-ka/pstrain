@@ -631,7 +631,7 @@ def training_corpus_identity() -> dict[str, Any]:
 def pocketsphinx_dictionary() -> Path:
     """Resolve the dictionary shipped by the required pip package."""
     try:
-        from pocketsphinx import get_model_path  # type: ignore[import-untyped]
+        from pocketsphinx import get_model_path
     except ImportError as exc:
         raise RuntimeError(
             "BM1 requires the pip requirement 'pocketsphinx' (install pstrain[test])"
