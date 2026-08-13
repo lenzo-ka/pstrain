@@ -37,9 +37,7 @@ def test_insertion_is_not_silently_dropped_from_accuracy() -> None:
 
 
 def test_no_comparable_boundaries_has_infinite_timing_error() -> None:
-    score = score_phone_boundaries(
-        _phones("a b", [0.0, 0.1, 0.2]), _phones("x y", [0.0, 0.1, 0.2])
-    )
+    score = score_phone_boundaries(_phones("a b", [0.0, 0.1, 0.2]), _phones("x y", [0.0, 0.1, 0.2]))
 
     assert score.substitutions == 2
     assert isinf(score.mean_absolute_error_ms)
