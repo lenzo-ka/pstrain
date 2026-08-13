@@ -53,10 +53,27 @@
 #include <s3/model_def_io.h>
 #include <s3/quest.h>
 #include <s3/pset_io.h>
+#include <s3/prunetree_order.h>
 #include <s3/s3.h>
 #include <sys_compat/file.h>
 
 #include <assert.h>
+
+static char *
+node_path(dtree_node_t *node)
+{
+    dtree_node_t *cur;
+    char *path;
+    size_t depth;
+
+    for (cur = node, depth = 0; cur->p != NULL; cur = cur->p)
+        ++depth;
+    path = (char *)ckd_calloc(depth + 1, sizeof(*path));
+    for (cur = node; cur->p != NULL; cur = cur->p) {
+        path[--depth] = cur->p->y == cur ? 'y' : 'n';
+    }
+    return path;
+}
 
 static int
 init(model_def_t **out_mdef,
@@ -205,8 +222,7 @@ prune_tree(model_def_t *mdef,
     dtree_t ***tree;	/* Decision trees indexed by phone and state */
     dtree_t *tr;
     dtree_node_t *node, *prnt;
-    float32 *twig_heap;	/* Heap of wt_ent_dec of split quest */
-    uint32 *twig_hkey;	/* Key's for items in the heap */
+    prune_candidate_t *twig_heap;
     uint32 *twig_phnid;	/* Phone id of items on heap */
     uint32 *twig_state;	/* State id of items on heap */
     uint32 *twig_nid;	/* Node id of items on heap */
@@ -218,7 +234,7 @@ prune_tree(model_def_t *mdef,
     uint32 n_seno_wanted;
     uint32 n_twig;
     uint32 n_node;
-    float32 wt_ent_dec;
+    prune_candidate_t candidate;
     uint32 key;
     uint32 sz;
     uint32 i;
@@ -279,35 +295,43 @@ prune_tree(model_def_t *mdef,
 
     if (n_seno_wanted < n_seno) {
 	/* Heap of wt_ent_dec for each "twig" question */
-	twig_heap  = (float32 *)ckd_calloc(n_twig, sizeof(float32));
-	twig_hkey  = (uint32 *)ckd_calloc(n_twig, sizeof(uint32));
+	twig_heap = (prune_candidate_t *)ckd_calloc(n_twig, sizeof(*twig_heap));
 
 	twig_phnid = (uint32 *)ckd_calloc(n_twig, sizeof(uint32));
 	twig_state = (uint32 *)ckd_calloc(n_twig, sizeof(uint32));
 	twig_nid   = (uint32 *)ckd_calloc(n_twig, sizeof(uint32));
 
 	/* Insert all twig questions over all trees into the heap */
+	sz = 0;
 	for (p = 0, free_key = 0; p < n_ci; p++) {
 	    for (s = 0; s < n_state_ci[p]; s++) {
 		if (allphones
 		    || !acmod_set_has_attrib(mdef->acmod_set, (acmod_id_t)p, "filler")) {
 		    tr = tree[p][s];
 
-		    ins_twigs(&tr->node[0],
-			      p, s,
-			      twig_heap,
-			      twig_hkey,
-			      twig_phnid,
-			      twig_state,
-			      twig_nid,
-			      &free_key);
+		    for (n = 0; n < tr->n_node; n++) {
+			node = get_node(&tr->node[0], n);
+			if (node != NULL && IS_TWIG(node)) {
+			    uint32 item = free_key++;
+			    twig_phnid[item] = p;
+			    twig_state[item] = s;
+			    twig_nid[item] = n;
+			    candidate.gain = (float32)node->wt_ent_dec;
+			    candidate.phone = acmod_set_id2name(mdef->acmod_set,
+							       (acmod_id_t)p);
+			    candidate.state = s;
+			    candidate.path = node_path(node);
+			    candidate.value = (void *)(size_t)item;
+			    sz = prune_candidate_insert(twig_heap, sz, candidate);
+			}
+		    }
 		}
 	    }
 	}
 
 	E_INFO("Pruning %u nodes\n", n_seno - n_seno_wanted);
 
-	for (i = n_seno, sz = n_twig; (i > n_seno_wanted) && (sz > 0); i--) {
+	for (i = n_seno; (i > n_seno_wanted) && (sz > 0); i--) {
 #if 0
 	    if (!heap_ok(twig_hkey, sz,
 			 twig_phnid, twig_state, twig_nid,
@@ -318,8 +342,9 @@ prune_tree(model_def_t *mdef,
 
 	    /* extract the top (minimum wt_ent_dec) node off the
 	       heap; this is the worst question of the tree. */
-	    sz = heap32b_extr_top(&wt_ent_dec, &key,
-				  twig_heap, twig_hkey, sz, heap32b_min_comp);
+	    sz = prune_candidate_extract(&candidate, twig_heap, sz);
+	    key = (uint32)(size_t)candidate.value;
+	    ckd_free((void *)candidate.path);
 
 	    /* Get the node to prune */
 	    p = twig_phnid[key];
@@ -347,8 +372,13 @@ prune_tree(model_def_t *mdef,
 
 		twig_nid[key] = prnt->node_id;
 
-		sz = heap32b_ins(twig_heap, twig_hkey, sz,
-				 prnt->wt_ent_dec, key, heap32b_min_comp);
+		candidate.gain = (float32)prnt->wt_ent_dec;
+		candidate.phone = acmod_set_id2name(mdef->acmod_set,
+						   (acmod_id_t)p);
+		candidate.state = s;
+		candidate.path = node_path(prnt);
+		candidate.value = (void *)(size_t)key;
+		sz = prune_candidate_insert(twig_heap, sz, candidate);
 	    }
 	    else {
 		/* Parent node not a "twig" as a result of pruning */
@@ -364,6 +394,14 @@ prune_tree(model_def_t *mdef,
 	if ((sz == 0) && (i > n_seno_wanted)) {
 	    E_WARN("%u seno's not generated because heap ran out\n", n_seno_wanted);
 	}
+	while (sz > 0) {
+	    sz = prune_candidate_extract(&candidate, twig_heap, sz);
+	    ckd_free((void *)candidate.path);
+	}
+	ckd_free(twig_heap);
+	ckd_free(twig_phnid);
+	ckd_free(twig_state);
+	ckd_free(twig_nid);
     }
 
     otreedir = cmd_ln_str("-otreedir");
