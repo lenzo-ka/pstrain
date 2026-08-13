@@ -47,7 +47,7 @@ from pstrain.lib.transcription import parse_transcription_file
 def test_archive_manifest_matches_runtime_config() -> None:
     manifest = json.loads((DATA_DIR.parent / "archives.json").read_text())
     assert manifest["archives"] == [asdict(archive) for archive in ARCHIVES]
-    assert {archive.voice for archive in ARCHIVES} == {"slt", "bdl", "rms", "clb"}
+    assert {archive.voice for archive in ARCHIVES} == {"slt", "bdl", "rms", "clb", "awb", "jmk"}
     assert all(
         archive.url.startswith("http://festvox.org/cmu_arctic/packed/") for archive in ARCHIVES
     )

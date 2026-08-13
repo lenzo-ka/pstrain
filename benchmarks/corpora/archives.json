@@ -1,0 +1,31 @@
+{
+  "corpora": [
+    {
+      "name": "cmu_us_kal_diphone",
+      "description": "US English nonsense words covering all phone-phone transitions",
+      "license": {
+        "name": "CMU US KAL Diphone license",
+        "url": "http://festvox.org/databases/cmu_us_kal_diphone/COPYING",
+        "archive_path": "cmu_us_kal_diphone/COPYING"
+      },
+      "archives": [
+        {
+          "url": "http://festvox.org/databases/cmu_us_kal_diphone/packed/cmu_us_kal_diphone.tar.bz2",
+          "sha256": "24cfccd3a965dab4393eb3a10495a86f24d11e7121bb3fcfd639ef7d5df55b74",
+          "checks": [
+            {"pattern": "cmu_us_kal_diphone/wav/*.wav", "count": 1349},
+            {"pattern": "cmu_us_kal_diphone/lab/*.lab", "count": 1349},
+            {"pattern": "cmu_us_kal_diphone/prompt-lab/*.lab", "count": 1349},
+            {"pattern": "cmu_us_kal_diphone/lar", "count": 1},
+            {"pattern": "cmu_us_kal_diphone/pm/*.pm", "count": 1349},
+            {"pattern": "cmu_us_kal_diphone/pm_lab/*.lab", "count": 1},
+            {"pattern": "cmu_us_kal_diphone/wrd", "count": 1},
+            {"pattern": "cmu_us_kal_diphone/dic/*", "count": 1},
+            {"pattern": "cmu_us_kal_diphone/etc/*", "count": 3},
+            {"pattern": "cmu_us_kal_diphone/COPYING", "count": 1}
+          ]
+        }
+      ]
+    }
+  ]
+}

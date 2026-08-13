@@ -23,6 +23,18 @@
       "url": "http://festvox.org/cmu_arctic/packed/cmu_us_clb_arctic.tar.bz2",
       "sha256": "3f16dc3f3b97955ea22623efb33b444341013fc660677b2e170efdcc959fa7c6",
       "expected_wavs": 1132
+    },
+    {
+      "voice": "awb",
+      "url": "http://festvox.org/cmu_arctic/packed/cmu_us_awb_arctic.tar.bz2",
+      "sha256": "d74a950c9739a65f7bfc4dfa6187f2730fa03de5b8eb3f2da97a51b74df64d3c",
+      "expected_wavs": 1138
+    },
+    {
+      "voice": "jmk",
+      "url": "http://festvox.org/cmu_arctic/packed/cmu_us_jmk_arctic.tar.bz2",
+      "sha256": "3a37c0e1dfc91e734fdbc88b562d9e2ebca621772402cdc693bbc9b09b211d73",
+      "expected_wavs": 1132
     }
   ]
 }

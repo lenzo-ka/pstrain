@@ -1,11 +1,17 @@
 # CMU Arctic BM1 benchmark
 
-This harness downloads and authenticates the CMU Arctic SLT, BDL, RMS, and
-CLB packed voices, prepares two acoustic-model projects, loads the committed
+This harness downloads and authenticates the CMU Arctic SLT, BDL, RMS, CLB,
+AWB, and JMK packed voices, prepares two acoustic-model projects, loads the committed
 canonical unigram LM, trains the multipron-off and multipron-on
 PIN configurations through 8 Gaussians, decodes SLT-55 and the 3,395-utterance
 cross-speaker set, reports WER and OOV counts, audits every inter-pass
 likelihood delta, and compares each result cell with a benchmark record.
+
+AWB is the Scottish-English male voice and contains 1,138 measured WAV files;
+JMK is the Canadian-English male voice and contains 1,132. The other four
+voices are US English. The archives are released under the CMU ARCTIC
+BSD-style license printed in Appendix A of the
+[CMU ARCTIC report](http://festvox.org/cmu_arctic/cmu_arctic_report.pdf).
 
 **The PIN band uses the committed Arctic dictionary and committed unigram LM.**
 Every recorded number, including the ratified `off/big` +1.0-point floor, was
