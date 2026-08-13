@@ -223,8 +223,10 @@ class Aligner:
 
         Returns:
             An :class:`AlignmentResult` with word- (and phone-/state-)
-            level segments. Variant suffixes like ``reading(2)`` are
-            preserved when present in the dictionary.
+            level segments. A variant suffix such as ``reading(2)`` labels the
+            dictionary pronunciation selected by Viterbi. A suffix in
+            ``transcript`` does not constrain that selection and need not be
+            preserved in the output.
         """
         if hasattr(self, "_proxy"):
             result = self._proxy.call("align_mfcc", mfcc, transcript, utterance_id)

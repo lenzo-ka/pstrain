@@ -118,8 +118,9 @@ def align_utterance(
 
     Returns:
         :class:`AlignmentResult` with word- (and optionally phone-)
-        level segments. Variant suffixes such as ``reading(2)`` are
-        preserved when the dictionary lists multiple pronunciations.
+        level segments. A variant suffix such as ``reading(2)`` labels the
+        dictionary pronunciation selected by Viterbi. A suffix in the input
+        transcript does not constrain that selection and need not be preserved.
 
     Raises:
         FileNotFoundError: Audio file or model files are missing.
