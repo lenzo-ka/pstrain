@@ -25,6 +25,8 @@ def test_default_feat_params_contains_complete_training_front_end() -> None:
         "-lowerf": "130",
         "-upperf": "6800",
         "-alpha": "0.97",
+        "-dither": "yes",
+        "-remove_dc": "yes",
         "-feat": "1s_c_d_dd",
         "-transform": "dct",
         "-lifter": "22",
@@ -33,7 +35,6 @@ def test_default_feat_params_contains_complete_training_front_end() -> None:
         "-varnorm": "no",
         "-unit_area": "yes",
         "-round_filters": "yes",
-        "-remove_dc": "no",
         "-remove_noise": "yes",
     }
 

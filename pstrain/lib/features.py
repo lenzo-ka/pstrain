@@ -135,6 +135,8 @@ class FeatureExtractor:
             cfg.ncep,
             float(cfg.alpha),
             cfg.lifter,
+            cfg.dither,
+            cfg.remove_dc,
         )
         if not self._fe:
             raise RuntimeError("Failed to initialize front-end")

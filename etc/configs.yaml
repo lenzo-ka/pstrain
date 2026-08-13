@@ -11,6 +11,8 @@ profiles:
       lowerf: 130
       upperf: 6800
       alpha: 0.97
+      dither: true
+      remove_dc: true
       feat_type: 1s_c_d_dd
       lifter: 22
       transform: dct

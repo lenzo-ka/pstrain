@@ -27,6 +27,8 @@ class FeatureConfig(StrictModel):
     lowerf: Annotated[int, Field(ge=0, description="Lower filter-bank frequency in Hz")] = 130
     upperf: Annotated[int, Field(gt=0, description="Upper filter-bank frequency in Hz")] = 6800
     alpha: Annotated[float, Field(description="Pre-emphasis coefficient")] = 0.97
+    dither: Annotated[bool, Field(description="Add half-bit dither to input audio")] = True
+    remove_dc: Annotated[bool, Field(description="Remove DC offset from each frame")] = True
     feat_type: Annotated[str, Field(description="Sphinx feature stream type")] = "1s_c_d_dd"
     lifter: Annotated[int, Field(ge=0, description="Cepstral lifter window")] = 22
     transform: Annotated[str, Field(description="Filter-bank transform")] = "dct"

@@ -24,11 +24,13 @@
  * @param ncep Number of cepstral coefficients (e.g., 13)
  * @param alpha Pre-emphasis coefficient (e.g., 0.97)
  * @param lifter Liftering coefficient (e.g., 22)
+ * @param dither Whether to add half-bit dither
+ * @param remove_dc Whether to remove DC offset from each frame
  * @return Initialized fe_t*, or NULL on failure
  */
 fe_t *pstrain_fe_create(float samprate, int nfilt, int nfft,
                     float lowerf, float upperf, int ncep,
-                    float alpha, int lifter);
+                    float alpha, int lifter, int dither, int remove_dc);
 
 /**
  * Create a front-end with default parameters for 16kHz audio.

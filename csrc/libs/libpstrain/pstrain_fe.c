@@ -63,18 +63,22 @@
  * @param ncep Number of cepstral coefficients (e.g., 13)
  * @param alpha Pre-emphasis coefficient (e.g., 0.97)
  * @param lifter Liftering coefficient (e.g., 22)
+ * @param dither Whether to add half-bit dither
+ * @param remove_dc Whether to remove DC offset from each frame
  * @return Initialized fe_t*, or NULL on failure
  */
 fe_t *
 pstrain_fe_create(float samprate, int nfilt, int nfft,
               float lowerf, float upperf, int ncep,
-              float alpha, int lifter)
+              float alpha, int lifter, int dither, int remove_dc)
 {
     cmd_ln_t *config;
     fe_t *fe;
     char samprate_str[32], nfilt_str[16], nfft_str[16];
     char lowerf_str[32], upperf_str[32], ncep_str[16];
     char alpha_str[32], lifter_str[16], frate_str[16], wlen_str[32];
+    const char *dither_str = dither ? "yes" : "no";
+    const char *remove_dc_str = remove_dc ? "yes" : "no";
 
     /* Convert numeric values to strings */
     snprintf(samprate_str, sizeof(samprate_str), "%f", samprate);
@@ -100,9 +104,8 @@ pstrain_fe_create(float samprate, int nfilt, int nfft,
                          "-alpha", alpha_str,
                          "-lifter", lifter_str,
                          "-transform", "dct",
-                         "-dither", "no",
-                         "-remove_dc", "no",
-                         "-remove_noise", "yes",
+                         "-dither", dither_str,
+                         "-remove_dc", remove_dc_str,
                          "-frate", frate_str,
                          "-wlen", wlen_str,
                          NULL);
@@ -135,6 +138,8 @@ pstrain_fe_create_default(void)
         6800.0f,   /* upperf */
         13,        /* ncep */
         0.97f,     /* alpha */
-        22         /* lifter */
+        22,        /* lifter */
+        TRUE,      /* dither */
+        TRUE       /* remove_dc */
     );
 }
