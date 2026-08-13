@@ -29,11 +29,19 @@ class FeatureConfig(StrictModel):
     alpha: Annotated[float, Field(description="Pre-emphasis coefficient")] = 0.97
     dither: Annotated[bool, Field(description="Add half-bit dither to input audio")] = True
     remove_dc: Annotated[bool, Field(description="Remove DC offset from each frame")] = True
+    remove_noise: Annotated[bool, Field(description="Remove noise with spectral subtraction")] = (
+        True
+    )
+    frate: Annotated[int, Field(gt=0, description="Feature frame rate in Hz")] = 100
+    wlen: Annotated[float, Field(gt=0, description="Analysis window length in seconds")] = 0.025625
     feat_type: Annotated[str, Field(description="Sphinx feature stream type")] = "1s_c_d_dd"
     lifter: Annotated[int, Field(ge=0, description="Cepstral lifter window")] = 22
     transform: Annotated[str, Field(description="Filter-bank transform")] = "dct"
     agc: Annotated[str, Field(description="Automatic gain-control mode")] = "none"
     cmn: Annotated[str, Field(description="Cepstral mean-normalization mode")] = "batch"
+    cmninit: Annotated[str, Field(description="Initial cepstral mean vector for live CMN")] = (
+        "40,3,-1"
+    )
     varnorm: Annotated[str, Field(description="Cepstral variance-normalization mode")] = "no"
 
     @model_validator(mode="after")

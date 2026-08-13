@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from pstrain.lib.config.models import FeatureConfig
+
 logger = logging.getLogger(__name__)
 
 
@@ -72,7 +74,7 @@ class Decoder:
         lponlybeam: float = 1e-80,
         fwdflatbeam: float = 1e-80,
         fwdflatwbeam: float = 1e-40,
-        samprate: int = 16000,
+        feature_config: FeatureConfig | None = None,
     ):
         """Initialize decoder.
 
@@ -84,6 +86,7 @@ class Decoder:
             beam: Main beam width (None = auto-detect based on model type)
             wbeam: Word beam width (None = auto-detect based on model type)
             pl_window: Phone lookahead window (None = use default 5)
+            feature_config: Canonical schema-owned acoustic front-end settings.
 
         Raises:
             ImportError: If PocketSphinx not available
@@ -94,6 +97,7 @@ class Decoder:
         self.filler_dict = Path(filler_dict) if filler_dict else None
         self.lm = Path(lm) if lm else None
         self._decoder: object | None = None
+        feature_config = feature_config or FeatureConfig()
 
         if beam is None:
             beam = self.DEFAULT_BEAM
@@ -144,7 +148,11 @@ class Decoder:
             config.fwdflatbeam = fwdflatbeam
             config.fwdflatwbeam = fwdflatwbeam
             config.pl_window = 5 if pl_window is None else pl_window
-            config.samprate = samprate
+            config.samprate = feature_config.samprate
+            for value in (feature_config.agc, feature_config.cmn, feature_config.cmninit):
+                strings.append(self._ffi.new("char[]", value.encode()))
+            config.agc, config.cmn, config.cmninit = strings[-3:]
+            config.varnorm = feature_config.varnorm == "yes"
             self._decoder = self._lib.pstrain_decoder_create(config)
             if self._decoder == self._ffi.NULL:
                 raise RuntimeError("PocketSphinx decoder initialization failed")

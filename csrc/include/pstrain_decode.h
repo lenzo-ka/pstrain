@@ -26,6 +26,10 @@ typedef struct {
     double fwdflatwbeam;
     long pl_window;
     long samprate;
+    const char *agc;
+    const char *cmn;
+    const char *cmninit;
+    int varnorm;
 } pstrain_decoder_config_t;
 
 pstrain_decoder_t *pstrain_decoder_create(const pstrain_decoder_config_t *config);
@@ -35,6 +39,8 @@ int pstrain_decoder_process_raw(pstrain_decoder_t *decoder,
                                 int no_search, int full_utt);
 int pstrain_decoder_end_utt(pstrain_decoder_t *decoder);
 const char *pstrain_decoder_hyp(pstrain_decoder_t *decoder);
+const char *pstrain_decoder_config_str(pstrain_decoder_t *decoder, const char *name);
+long pstrain_decoder_config_int(pstrain_decoder_t *decoder, const char *name);
 void pstrain_decoder_free(pstrain_decoder_t *decoder);
 const char *pstrain_pocketsphinx_version(void);
 

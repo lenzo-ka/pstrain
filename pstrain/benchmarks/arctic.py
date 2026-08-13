@@ -167,10 +167,14 @@ PIN_CONFIGS: dict[str, dict[str, Any]] = {
             "alpha": 0.97,
             "dither": True,
             "remove_dc": True,
+            "remove_noise": True,
+            "frate": 100,
+            "wlen": 0.025625,
             "lifter": 22,
             "transform": "dct",
             "agc": "none",
             "cmn": "batch",
+            "cmninit": "40,3,-1",
             "varnorm": "no",
             "feat_type": "1s_c_d_dd",
         },
@@ -217,10 +221,14 @@ PIN_CONFIGS: dict[str, dict[str, Any]] = {
             "alpha": 0.97,
             "dither": True,
             "remove_dc": True,
+            "remove_noise": True,
+            "frate": 100,
+            "wlen": 0.025625,
             "lifter": 22,
             "transform": "dct",
             "agc": "none",
             "cmn": "batch",
+            "cmninit": "40,3,-1",
             "varnorm": "no",
             "feat_type": "1s_c_d_dd",
         },
@@ -623,7 +631,7 @@ def training_corpus_identity() -> dict[str, Any]:
 def pocketsphinx_dictionary() -> Path:
     """Resolve the dictionary shipped by the required pip package."""
     try:
-        from pocketsphinx import get_model_path
+        from pocketsphinx import get_model_path  # type: ignore[import-untyped]
     except ImportError as exc:
         raise RuntimeError(
             "BM1 requires the pip requirement 'pocketsphinx' (install pstrain[test])"

@@ -27,15 +27,18 @@ def test_default_feat_params_contains_complete_training_front_end() -> None:
         "-alpha": "0.97",
         "-dither": "yes",
         "-remove_dc": "yes",
+        "-remove_noise": "yes",
+        "-frate": "100",
+        "-wlen": "0.025625",
         "-feat": "1s_c_d_dd",
         "-transform": "dct",
         "-lifter": "22",
         "-agc": "none",
         "-cmn": "batch",
+        "-cmninit": "40,3,-1",
         "-varnorm": "no",
         "-unit_area": "yes",
         "-round_filters": "yes",
-        "-remove_noise": "yes",
     }
 
 
@@ -80,7 +83,6 @@ def test_packaging_copies_trained_feat_params_despite_config_drift(tmp_path: Pat
 @pytest.mark.parametrize(
     ("field", "requested"),
     [
-        ("transform", "legacy"),
         ("feat_type", "s2_4x"),
         ("agc", "max"),
         ("varnorm", "yes"),

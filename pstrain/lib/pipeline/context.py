@@ -80,6 +80,9 @@ class FeatParams:
     alpha: float = field(default_factory=lambda: Profile().features.alpha)
     dither: bool = field(default_factory=lambda: Profile().features.dither)
     remove_dc: bool = field(default_factory=lambda: Profile().features.remove_dc)
+    remove_noise: bool = field(default_factory=lambda: Profile().features.remove_noise)
+    frate: int = field(default_factory=lambda: Profile().features.frate)
+    wlen: float = field(default_factory=lambda: Profile().features.wlen)
     feat_type: str = field(default_factory=lambda: Profile().features.feat_type)
     # Cepstral lifter window (sphinx_fe `-lifter`). 22 = SphinxTrain default.
     lifter: int = field(default_factory=lambda: Profile().features.lifter)
@@ -89,6 +92,7 @@ class FeatParams:
     agc: str = field(default_factory=lambda: Profile().features.agc)
     # Cepstral mean normalization (`-cmn`). "batch" matches SphinxTrain.
     cmn: str = field(default_factory=lambda: Profile().features.cmn)
+    cmninit: str = field(default_factory=lambda: Profile().features.cmninit)
     # Cepstral variance normalization (`-varnorm`).
     varnorm: str = field(default_factory=lambda: Profile().features.varnorm)
 
