@@ -837,7 +837,11 @@ make_quests_init(float32 *****out_mixw,
      * out of the usual mixw[][][] array
      *
      */
-    mixw_occ = (float32 ****)ckd_calloc_2d(n_model, n_state, sizeof(float32 **));
+    /* Keep the model-indexed view independently owned.  Other tree-building
+     * paths collapse densities in place, so sharing rows with parsed input is
+     * an unsafe ownership contract even when this path currently only reads. */
+    mixw_occ = (float32 ****)ckd_calloc_4d(n_model, n_state, n_stream,
+                                           n_density, sizeof(float32));
     *out_mixw = mixw;
 
     /* Re-index mixing weights by model and topological state position */
@@ -849,7 +853,9 @@ make_quests_init(float32 *****out_mixw,
 		E_FATAL("State index s=%d out of bounds [0,%d) for model %d state %d\n",
 			s, n_in_mixw, i, k);
 	    }
-	    mixw_occ[j][k] = in_mixw[s];
+	    for (m = 0; m < n_stream; m++)
+	        memcpy(mixw_occ[j][k][m], in_mixw[s][m],
+	               n_density * sizeof(float32));
 	}
     }
 

@@ -349,7 +349,11 @@ init(model_def_t **out_mdef,
      * out of the usual mixw[][][] array
      *
      */
-    mixw_occ = (float32 ****)ckd_calloc_2d(n_model, n_state, sizeof(float32 **));
+    /* The continuous-model collapse writes stream totals into mixw_occ.
+     * Own this storage so that operation cannot mutate the parsed input and
+     * make later consumers depend on execution order. */
+    mixw_occ = (float32 ****)ckd_calloc_4d(n_model, n_state, n_stream,
+                                           n_density, sizeof(float32));
     mixw     = (float32 ****)ckd_calloc_4d(n_model, n_state, n_stream, n_density,
 					   sizeof(float32));
     *out_mixw_occ = mixw_occ;
@@ -359,7 +363,9 @@ init(model_def_t **out_mdef,
         if (cntflag[mm]==1) {
 	    for (k = 0; k < n_state; k++) {
 	        s = mdef->defn[i].state[k] - mixw_s;
-	        mixw_occ[j][k] = in_mixw[s];
+	        for (kk = 0; kk < n_stream; kk++)
+	            memcpy(mixw_occ[j][k][kk], in_mixw[s][kk],
+	                   n_density * sizeof(float32));
 	    }
             j++;
 	}
