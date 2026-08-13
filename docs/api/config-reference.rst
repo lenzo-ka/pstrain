@@ -31,6 +31,11 @@ features
    :Default: ``'batch'``
    :Description: Cepstral mean-normalization mode
 
+``features.cmninit``
+   :Type: ``str``
+   :Default: ``'40,3,-1'``
+   :Description: Initial cepstral mean vector for live CMN
+
 ``features.dither``
    :Type: ``bool``
    :Default: ``True``
@@ -40,6 +45,11 @@ features
    :Type: ``str``
    :Default: ``'1s_c_d_dd'``
    :Description: Sphinx feature stream type
+
+``features.frate``
+   :Type: ``int``
+   :Default: ``100``
+   :Description: Feature frame rate in Hz
 
 ``features.lifter``
    :Type: ``int``
@@ -71,6 +81,11 @@ features
    :Default: ``True``
    :Description: Remove DC offset from each frame
 
+``features.remove_noise``
+   :Type: ``bool``
+   :Default: ``True``
+   :Description: Remove noise with spectral subtraction
+
 ``features.samprate``
    :Type: ``int``
    :Default: ``16000``
@@ -90,6 +105,11 @@ features
    :Type: ``str``
    :Default: ``'no'``
    :Description: Cepstral variance-normalization mode
+
+``features.wlen``
+   :Type: ``float``
+   :Default: ``0.025625``
+   :Description: Analysis window length in seconds
 
 
 runner

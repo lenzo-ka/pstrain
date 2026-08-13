@@ -58,6 +58,10 @@ class FEParams:
     lifter: int = 22
     dither: bool = True
     remove_dc: bool = True
+    remove_noise: bool = True
+    transform: str = "dct"
+    frate: int = 100
+    wlen: float = 0.025625
 
     @classmethod
     def from_config(cls, audio_config: Any, feature_config: Any) -> Self:
@@ -137,6 +141,10 @@ class FeatureExtractor:
             cfg.lifter,
             cfg.dither,
             cfg.remove_dc,
+            cfg.remove_noise,
+            cfg.transform.encode(),
+            cfg.frate,
+            float(cfg.wlen),
         )
         if not self._fe:
             raise RuntimeError("Failed to initialize front-end")

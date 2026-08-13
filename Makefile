@@ -70,7 +70,10 @@ docs-gen:
 
 .PHONY: config-check
 config-check:
-	pytest tests/test_config.py tests/test_pipeline_runner.py::test_config_reference_names_runner_keys_used_by_context
+	pytest tests/test_config.py \
+		tests/test_pipeline_runner.py::test_config_reference_names_runner_keys_used_by_context \
+		tests/test_decoder_config.py \
+		tests/test_features.py::TestFeatureExtractor::test_new_front_end_options_change_produced_features
 	$(MAKE) docs-gen
 	git diff --exit-code -- docs/api/config-reference.rst
 

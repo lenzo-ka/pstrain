@@ -44,10 +44,10 @@ pstrain_decoder_create(const pstrain_decoder_config_t *options)
         || !set_float(config, "fwdflatwbeam", options->fwdflatwbeam)
         || ps_config_set_int(config, "pl_window", options->pl_window) == NULL
         || ps_config_set_int(config, "samprate", options->samprate) == NULL
-        || !set_str(config, "cmn", "batch")
-        || !set_str(config, "cmninit", "40,3,-1")
-        || ps_config_set_bool(config, "varnorm", 0) == NULL
-        || !set_str(config, "agc", "none")) {
+        || !set_str(config, "cmn", options->cmn)
+        || !set_str(config, "cmninit", options->cmninit)
+        || ps_config_set_bool(config, "varnorm", options->varnorm) == NULL
+        || !set_str(config, "agc", options->agc)) {
         ps_config_free(config);
         return NULL;
     }
@@ -83,6 +83,18 @@ int pstrain_decoder_end_utt(pstrain_decoder_t *decoder)
 
 const char *pstrain_decoder_hyp(pstrain_decoder_t *decoder)
 { return decoder == NULL ? NULL : ps_get_hyp(decoder->ps, NULL); }
+
+const char *
+pstrain_decoder_config_str(pstrain_decoder_t *decoder, const char *name)
+{
+    return decoder == NULL ? NULL : ps_config_str(ps_get_config(decoder->ps), name);
+}
+
+long
+pstrain_decoder_config_int(pstrain_decoder_t *decoder, const char *name)
+{
+    return decoder == NULL ? 0 : ps_config_int(ps_get_config(decoder->ps), name);
+}
 
 void
 pstrain_decoder_free(pstrain_decoder_t *decoder)

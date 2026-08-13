@@ -70,7 +70,8 @@
 fe_t *
 pstrain_fe_create(float samprate, int nfilt, int nfft,
               float lowerf, float upperf, int ncep,
-              float alpha, int lifter, int dither, int remove_dc)
+              float alpha, int lifter, int dither, int remove_dc,
+              int remove_noise, const char *transform, int frate, float wlen)
 {
     cmd_ln_t *config;
     fe_t *fe;
@@ -79,6 +80,7 @@ pstrain_fe_create(float samprate, int nfilt, int nfft,
     char alpha_str[32], lifter_str[16], frate_str[16], wlen_str[32];
     const char *dither_str = dither ? "yes" : "no";
     const char *remove_dc_str = remove_dc ? "yes" : "no";
+    const char *remove_noise_str = remove_noise ? "yes" : "no";
 
     /* Convert numeric values to strings */
     snprintf(samprate_str, sizeof(samprate_str), "%f", samprate);
@@ -89,8 +91,8 @@ pstrain_fe_create(float samprate, int nfilt, int nfft,
     snprintf(ncep_str, sizeof(ncep_str), "%d", ncep);
     snprintf(alpha_str, sizeof(alpha_str), "%f", alpha);
     snprintf(lifter_str, sizeof(lifter_str), "%d", lifter);
-    snprintf(frate_str, sizeof(frate_str), "%d", 100);
-    snprintf(wlen_str, sizeof(wlen_str), "%f", 0.025625);
+    snprintf(frate_str, sizeof(frate_str), "%d", frate);
+    snprintf(wlen_str, sizeof(wlen_str), "%f", wlen);
 
     /* Create a command line with FE defaults plus our overrides */
     /* Match sphinx_fe/SphinxTrain defaults exactly */
@@ -103,9 +105,10 @@ pstrain_fe_create(float samprate, int nfilt, int nfft,
                          "-ncep", ncep_str,
                          "-alpha", alpha_str,
                          "-lifter", lifter_str,
-                         "-transform", "dct",
+                         "-transform", transform,
                          "-dither", dither_str,
                          "-remove_dc", remove_dc_str,
+                         "-remove_noise", remove_noise_str,
                          "-frate", frate_str,
                          "-wlen", wlen_str,
                          NULL);
@@ -140,6 +143,10 @@ pstrain_fe_create_default(void)
         0.97f,     /* alpha */
         22,        /* lifter */
         TRUE,      /* dither */
-        TRUE       /* remove_dc */
+        TRUE,      /* remove_dc */
+        TRUE,      /* remove_noise */
+        "dct",    /* transform */
+        100,       /* frate */
+        0.025625f  /* wlen */
     );
 }

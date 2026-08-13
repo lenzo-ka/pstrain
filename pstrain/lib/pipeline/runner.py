@@ -751,7 +751,13 @@ def _kill_worker_pids(worker_pids: set[int], *, graceful: bool) -> None:
     if os.name == "posix":
         for pid in worker_pids:
             with suppress(ProcessLookupError):
-                os.killpg(pid, initial_signal)
+                try:
+                    os.killpg(pid, initial_signal)
+                except PermissionError:
+                    # A registered native helper can outlive its worker's process
+                    # group during cancellation. It is still our verified child,
+                    # so fall back to signalling that process directly.
+                    os.kill(pid, initial_signal)
     else:
         for pid in worker_pids:
             with suppress(ProcessLookupError):
@@ -764,7 +770,10 @@ def _kill_worker_pids(worker_pids: set[int], *, graceful: bool) -> None:
     for pid in worker_pids:
         with suppress(ProcessLookupError):
             if os.name == "posix":
-                os.killpg(pid, signal.SIGKILL)
+                try:
+                    os.killpg(pid, signal.SIGKILL)
+                except PermissionError:
+                    os.kill(pid, signal.SIGKILL)
             else:
                 os.kill(pid, signal.SIGKILL)
 
