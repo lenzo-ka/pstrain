@@ -151,6 +151,7 @@ mod_inv_restore_acc(model_inventory_t *minv,
 		    int mean_reest,
 		    int var_reest,
 		    int tmat_reest,
+		    int32 expected_pass2var,
 		    const uint32 *veclen
 );
 

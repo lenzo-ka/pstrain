@@ -61,6 +61,7 @@
 #include <s3/s3gau_io.h>
 #include <s3/s3mixw_io.h>
 #include <s3/s3tmat_io.h>
+#include <s3/s3acc_io.h>
 #include <s3/ts2cb.h>
 #include <s3/gauden.h>
 #include <s3/vector.h>
@@ -71,6 +72,7 @@
 /* The forced-alignment / utterance-HMM builders live alongside the
  * standalone bw binary; we link them through libpstrainc. */
 #include "next_utt_states.h"
+#include "accum.h"
 
 /* Forward declarations from bw code */
 extern int32 baum_welch_update(float64 *log_forw_prob,
@@ -121,9 +123,55 @@ struct pstrain_bw_context_s {
 
     /* Stats */
     float64 total_log_lik;
+    float64 last_log_lik;
     uint32 total_frames;
     uint32 total_utts;
 };
+
+#define BW_SHARD_STATE_MAGIC 0x42575331U
+
+typedef struct bw_shard_state_s {
+    uint32 magic;
+    uint32 pass2var;
+    uint32 mixw_reest;
+    uint32 tmat_reest;
+    uint32 mean_reest;
+    uint32 var_reest;
+    uint32 n_senones;
+    uint32 total_frames;
+    uint32 total_utts;
+    float64 total_log_lik;
+} bw_shard_state_t;
+
+static int
+read_shard_state(pstrain_bw_context_t *ctx, const char *dir,
+                 bw_shard_state_t *state, char *fallback)
+{
+    char path[4096];
+    FILE *fh;
+    size_t n_senones = ctx->mdef->n_tied_state;
+    snprintf(path, sizeof(path), "%s/pstrain_bw_state", dir);
+    fh = fopen(path, "rb");
+    if (fh == NULL || fread(state, sizeof(*state), 1, fh) != 1 ||
+        state->magic != BW_SHARD_STATE_MAGIC || state->pass2var != (uint32)ctx->pass2var ||
+        state->mixw_reest != (uint32)ctx->mixw_reest ||
+        state->tmat_reest != (uint32)ctx->tmat_reest ||
+        state->mean_reest != (uint32)ctx->mean_reest ||
+        state->var_reest != (uint32)ctx->var_reest ||
+        state->n_senones != n_senones ||
+        fread(fallback, 1, n_senones, fh) != n_senones) {
+        E_ERROR("Invalid or incompatible BW shard state in %s\n", path);
+        if (fh != NULL) fclose(fh);
+        return S3_ERROR;
+    }
+    if (fgetc(fh) != EOF) {
+        E_ERROR("Trailing data in BW shard state %s\n", path);
+        fclose(fh);
+        return S3_ERROR;
+    }
+    fclose(fh);
+    return S3_SUCCESS;
+}
 
 static void
 mark_fallback_senones(pstrain_bw_context_t *ctx, state_t *state_seq, uint32 n_state)
@@ -515,6 +563,98 @@ pstrain_bw_fallback_senone_active(pstrain_bw_context_t *ctx, uint32 senone)
 }
 
 int
+pstrain_bw_dump_accumulators(pstrain_bw_context_t *ctx, const char *accumdir)
+{
+    char path[4096];
+    FILE *fh;
+    bw_shard_state_t state;
+
+    if (ctx == NULL || accumdir == NULL ||
+        accum_dump(accumdir, ctx->inv, ctx->mixw_reest, ctx->tmat_reest,
+                   ctx->mean_reest, ctx->var_reest, ctx->pass2var, 0, 1) != S3_SUCCESS)
+        return S3_ERROR;
+    state.magic = BW_SHARD_STATE_MAGIC;
+    state.pass2var = ctx->pass2var;
+    state.mixw_reest = ctx->mixw_reest;
+    state.tmat_reest = ctx->tmat_reest;
+    state.mean_reest = ctx->mean_reest;
+    state.var_reest = ctx->var_reest;
+    state.n_senones = ctx->mdef->n_tied_state;
+    state.total_frames = ctx->total_frames;
+    state.total_utts = ctx->total_utts;
+    state.total_log_lik = ctx->total_log_lik;
+    snprintf(path, sizeof(path), "%s/pstrain_bw_state", accumdir);
+    fh = fopen(path, "wb");
+    if (fh == NULL) {
+        E_ERROR("Failed to write BW shard state %s\n", path);
+        return S3_ERROR;
+    }
+    if (fwrite(&state, sizeof(state), 1, fh) != 1 ||
+        fwrite(ctx->fallback_senone, 1, state.n_senones, fh) != state.n_senones) {
+        E_ERROR("Failed to write BW shard state %s\n", path);
+        fclose(fh);
+        return S3_ERROR;
+    }
+    if (fclose(fh) != 0) return S3_ERROR;
+    return S3_SUCCESS;
+}
+
+int
+pstrain_bw_merge_accumulators(pstrain_bw_context_t *ctx,
+                              const char *const *accumdirs,
+                              uint32 n_accumdirs)
+{
+    uint32 shard, i;
+    uint32 n_mixw = ctx->inv->n_mixw, n_feat = ctx->inv->n_feat;
+    uint32 n_density = ctx->inv->n_density;
+    uint32 n_tmat = ctx->inv->n_tmat, n_state_pm = ctx->inv->n_state_pm;
+    uint32 n_mgau = ctx->inv->gauden->n_mgau;
+    uint32 *veclen = ctx->inv->gauden->veclen;
+    int32 pass2var = ctx->pass2var;
+    char *fallback;
+
+    if (ctx == NULL || accumdirs == NULL || n_accumdirs == 0)
+        return S3_ERROR;
+    fallback = ckd_calloc(ctx->mdef->n_tied_state, sizeof(*fallback));
+    ctx->total_log_lik = 0.0;
+    ctx->total_frames = 0;
+    ctx->total_utts = 0;
+    memset(ctx->fallback_senone, 0, ctx->mdef->n_tied_state);
+
+    for (shard = 0; shard < n_accumdirs; ++shard) {
+        bw_shard_state_t state;
+        if (read_shard_state(ctx, accumdirs[shard], &state, fallback) != S3_SUCCESS)
+            goto error;
+        if (shard == 0) {
+            if (mod_inv_restore_acc(ctx->inv, accumdirs[shard], ctx->mixw_reest,
+                                    ctx->mean_reest, ctx->var_reest, ctx->tmat_reest,
+                                    ctx->pass2var, veclen) != S3_SUCCESS)
+                goto error;
+        } else {
+            if ((ctx->mixw_reest && rdacc_mixw(accumdirs[shard], &ctx->inv->mixw_acc,
+                                               &n_mixw, &n_feat, &n_density) != S3_SUCCESS) ||
+                (ctx->tmat_reest && rdacc_tmat(accumdirs[shard], &ctx->inv->tmat_acc,
+                                               &n_tmat, &n_state_pm) != S3_SUCCESS) ||
+                ((ctx->mean_reest || ctx->var_reest) &&
+                 rdacc_den(accumdirs[shard], &ctx->inv->gauden->macc,
+                           &ctx->inv->gauden->vacc, &pass2var, &ctx->inv->gauden->dnom,
+                           &n_mgau, &n_feat, &n_density, &veclen) != S3_SUCCESS))
+                goto error;
+        }
+        ctx->total_log_lik += state.total_log_lik;
+        ctx->total_frames += state.total_frames;
+        ctx->total_utts += state.total_utts;
+        for (i = 0; i < state.n_senones; ++i)
+            ctx->fallback_senone[i] |= fallback[i];
+    }
+    ckd_free(fallback);
+    return S3_SUCCESS;
+error:
+    ckd_free(fallback);
+    return S3_ERROR;
+}
+
+int
 pstrain_bw_process_utt_text(pstrain_bw_context_t *ctx,
                         const float *features,
                         uint32 n_frames,
@@ -605,6 +745,7 @@ pstrain_bw_process_utt_text(pstrain_bw_context_t *ctx,
     }
 
     ctx->total_log_lik += log_forw_prob;
+    ctx->last_log_lik = log_forw_prob;
     ctx->total_frames += n_frames;
     ctx->total_utts++;
 
@@ -727,6 +868,7 @@ pstrain_bw_process_utt_mfcc(pstrain_bw_context_t *ctx,
     }
 
     ctx->total_log_lik += log_forw_prob;
+    ctx->last_log_lik = log_forw_prob;
     ctx->total_frames += n_feat_frames;
     ctx->total_utts++;
 
@@ -812,6 +954,7 @@ pstrain_bw_process_utt(pstrain_bw_context_t *ctx,
 
     /* Update stats */
     ctx->total_log_lik += log_forw_prob;
+    ctx->last_log_lik = log_forw_prob;
     ctx->total_frames += n_frames;
     ctx->total_utts++;
 
@@ -1079,6 +1222,19 @@ pstrain_bw_save(pstrain_bw_context_t *ctx,
     }
 
     return 0;
+}
+
+void
+pstrain_bw_set_total_log_lik(pstrain_bw_context_t *ctx, float64 total_log_lik)
+{
+    if (ctx != NULL)
+        ctx->total_log_lik = total_log_lik;
+}
+
+float64
+pstrain_bw_last_log_lik(pstrain_bw_context_t *ctx)
+{
+    return ctx != NULL ? ctx->last_log_lik : 0.0;
 }
 
 void

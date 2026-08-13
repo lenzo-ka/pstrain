@@ -425,6 +425,7 @@ mod_inv_restore_acc(model_inventory_t *minv,
 		    int mean_reest,
 		    int var_reest,
 		    int tmat_reest,
+		    int32 expected_pass2var,
 		    const uint32 *veclen)
 {
     char fn[MAXPATHLEN+1];
@@ -509,6 +510,12 @@ mod_inv_restore_acc(model_inventory_t *minv,
 			  &n_density,
 			  &rd_veclen) != S3_SUCCESS) {
 	    return S3_ERROR;
+	}
+	if (pass2var != expected_pass2var) {
+	    E_ERROR("Checkpointed pass2var=%s inconsistent w/ trainer config=%s\n",
+	            pass2var ? "true" : "false",
+	            expected_pass2var ? "true" : "false");
+	    ret = S3_ERROR;
 	}
 	if (n_cb != minv->gauden->n_mgau) {
 	    E_ERROR("Checkpointed n_cb=%u inconsistent w/ trainer config=%u\n",

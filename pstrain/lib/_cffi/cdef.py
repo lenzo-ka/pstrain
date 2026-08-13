@@ -340,6 +340,12 @@ state_t *pstrain_bw_build_state_seq(pstrain_bw_context_t *ctx,
 void pstrain_bw_free_state_seq(state_t *state_seq, uint32 n_state);
 uint32 pstrain_bw_count_active_fallback_senones(pstrain_bw_context_t *ctx);
 int pstrain_bw_fallback_senone_active(pstrain_bw_context_t *ctx, uint32 senone);
+int pstrain_bw_dump_accumulators(pstrain_bw_context_t *ctx, const char *accumdir);
+int pstrain_bw_merge_accumulators(pstrain_bw_context_t *ctx,
+                              const char *const *accumdirs,
+                              uint32 n_accumdirs);
+void pstrain_bw_set_total_log_lik(pstrain_bw_context_t *ctx, float64 total_log_lik);
+float64 pstrain_bw_last_log_lik(pstrain_bw_context_t *ctx);
 int pstrain_bw_process_utt_text(pstrain_bw_context_t *ctx,
                             const float *features,
                             uint32 n_frames,

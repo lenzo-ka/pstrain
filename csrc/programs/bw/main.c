@@ -495,6 +495,7 @@ main_initialize(int argc,
 				    mean_reest,
 				    var_reest,
 				    tmat_reest,
+				    cmd_ln_int32("-2passvar"),
 				    feat_veclen) != S3_SUCCESS) {
 		E_FATAL("Unable to restore checkpoint information\n");
 	    }

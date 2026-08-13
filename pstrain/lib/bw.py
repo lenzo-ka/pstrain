@@ -92,17 +92,11 @@ class HMM:
         model_dir = Path(model_dir)
 
         # Use CFFI to read model files
-        means_raw, n_cb, n_density, veclen, _ = _pstrainc.read_gau(str(model_dir / "means"))
+        means, _, _, _, _ = _pstrainc.read_gau(str(model_dir / "means"))
         variances_raw, _, _, _, _ = _pstrainc.read_gau(str(model_dir / "variances"))
+        variances = variances_raw
 
-        # Reshape to (n_cb, n_density, veclen)
-        means = means_raw.reshape(n_cb, n_density, veclen)
-        variances = variances_raw.reshape(n_cb, n_density, veclen)
-
-        mixw_raw, n_mixw, n_feat_stream, n_density_mw = _pstrainc.read_mixw(
-            str(model_dir / "mixture_weights")
-        )
-        mixw = mixw_raw.reshape(n_mixw, n_density_mw)
+        mixw, _, _, _ = _pstrainc.read_mixw(str(model_dir / "mixture_weights"))
 
         tmat, n_tmat, n_state = _pstrainc.read_tmat(str(model_dir / "transition_matrices"))
 
@@ -480,3 +474,35 @@ class BWTrainer:
         if hasattr(self, "_proxy"):
             return bool(self._proxy.call("fallback_senone_active", senone))
         return bool(self._lib.pstrain_bw_fallback_senone_active(self._ctx, senone))
+
+    def dump_accumulators(self, accum_dir: Path) -> bool:
+        """Write tensor, accounting, and fallback state for one shard."""
+        accum_dir.mkdir(parents=True, exist_ok=True)
+        if hasattr(self, "_proxy"):
+            return bool(self._proxy.call("dump_accumulators", accum_dir))
+        return bool(self._lib.pstrain_bw_dump_accumulators(self._ctx, str(accum_dir).encode()) == 0)
+
+    def merge_accumulators(self, accum_dirs: list[Path]) -> bool:
+        """Merge shard dumps in caller-supplied canonical order."""
+        if not accum_dirs:
+            raise ValueError("at least one accumulator directory is required")
+        if hasattr(self, "_proxy"):
+            return bool(self._proxy.call("merge_accumulators", accum_dirs))
+        encoded = [self._ffi.new("char[]", str(path).encode()) for path in accum_dirs]
+        directories = self._ffi.new("char *[]", encoded)
+        return bool(
+            self._lib.pstrain_bw_merge_accumulators(self._ctx, directories, len(accum_dirs)) == 0
+        )
+
+    def set_total_log_lik(self, total_log_lik: float) -> None:
+        """Replace shard-grouped likelihood with a serial-position reduction."""
+        if hasattr(self, "_proxy"):
+            self._proxy.call("set_total_log_lik", total_log_lik)
+            return
+        self._lib.pstrain_bw_set_total_log_lik(self._ctx, total_log_lik)
+
+    def last_log_lik(self) -> float:
+        """Return the exact last accepted utterance likelihood contribution."""
+        if hasattr(self, "_proxy"):
+            return float(self._proxy.call("last_log_lik"))
+        return float(self._lib.pstrain_bw_last_log_lik(self._ctx))

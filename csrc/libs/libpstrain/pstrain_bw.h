@@ -128,6 +128,19 @@ uint32 pstrain_bw_count_active_fallback_senones(pstrain_bw_context_t *ctx);
 /** Whether a senone was activated as a primary CI fallback this pass. */
 int pstrain_bw_fallback_senone_active(pstrain_bw_context_t *ctx, uint32 senone);
 
+/** Dump all tensor accumulators and pass-wide scalar/semantic state. */
+int pstrain_bw_dump_accumulators(pstrain_bw_context_t *ctx, const char *accumdir);
+
+/** Restore and add shard dumps in the supplied (canonical) order. */
+int pstrain_bw_merge_accumulators(pstrain_bw_context_t *ctx,
+                                  const char *const *accumdirs,
+                                  uint32 n_accumdirs);
+
+/** Replace merged likelihood with a canonical serial-order reduction. */
+void pstrain_bw_set_total_log_lik(pstrain_bw_context_t *ctx, float64 total_log_lik);
+/** Exact contribution from the most recent successful utterance. */
+float64 pstrain_bw_last_log_lik(pstrain_bw_context_t *ctx);
+
 /**
  * Process utterance with transcript text
  *

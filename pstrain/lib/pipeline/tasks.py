@@ -397,6 +397,7 @@ def _make_bw_train_task(
             accept_arctic_a0587_pass=(
                 6 if ctx.train.accept_arctic_a0587_known_skip and out_model == "cd-1g" else None
             ),
+            jobs=ctx.runner.jobs,
         )
         if copy_mdef_from_src:
             shutil.copy(src_dir / "mdef", out_dir / "mdef")
@@ -468,6 +469,7 @@ def _make_split_and_train_task(
             max_skip_fraction=ctx.train.max_skip_fraction,
             retry_beam_factor=ctx.train.retry_beam_factor,
             first_pass_2passvar=first_pass_2passvar,
+            jobs=ctx.runner.jobs,
             exclusion_schedule=ctx.train.exclusion_schedule.get(out_model),
             accept_arctic_a0587_pass=(
                 1 if ctx.train.accept_arctic_a0587_known_skip and out_model == "cd-2g" else None

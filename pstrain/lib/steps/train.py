@@ -5,13 +5,18 @@ Orchestrates Baum-Welch training using the CFFI-wrapped BWTrainer.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import multiprocessing
 import os
 import shutil
+import tempfile
+import time
 import uuid
+from concurrent.futures import ProcessPoolExecutor
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -200,6 +205,9 @@ class TrainingIteration:
     retried_utts: int
     skipped_utts: int
     excluded_by_schedule: int = 0
+    fallback_senone_ids: tuple[int, ...] = ()
+    accumulation_wall_seconds: float = 0.0
+    worker_user_cpu_seconds: float = 0.0
 
 
 @dataclass
@@ -213,6 +221,211 @@ class TrainingResult:
     final_utts: int
     total_skipped: int = 0
     trajectory: tuple[TrainingIteration, ...] = ()
+
+
+@dataclass
+class _ShardResult:
+    index: int
+    accum_dir: Path
+    metadata: dict[str, object]
+
+
+_SHARD_SCHEMA = 1
+_SHARD_METADATA = "pstrain_bw_artifact.json"
+
+
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def _json_fingerprint(value: object) -> str:
+    return _sha256_bytes(
+        json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    )
+
+
+def _model_fingerprint(model_dir: Path) -> str:
+    digest = hashlib.sha256()
+    for name in ("mdef", "means", "variances", "mixture_weights", "transition_matrices"):
+        digest.update(name.encode())
+        with (model_dir / name).open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+    return digest.hexdigest()
+
+
+def _parameter_shapes(model_dir: Path) -> dict[str, list[int]]:
+    from pstrain.lib.bw import HMM
+
+    model = HMM.load(model_dir)
+    return {
+        "means": list(model.means.shape),
+        "variances": list(model.variances.shape),
+        "mixture_weights": list(model.mixw.shape),
+        "transition_matrices": list(model.tmat.shape),
+    }
+
+
+def _write_shard_metadata(directory: Path, metadata: dict[str, object]) -> None:
+    path = directory / _SHARD_METADATA
+    path.write_text(
+        json.dumps(metadata, sort_keys=True, indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _validate_shard_artifacts(
+    results: list[_ShardResult],
+    *,
+    expected_ids: list[str],
+    pass_number: int,
+    model_fingerprint: str,
+    config_fingerprint: str,
+    manifest_fingerprint: str,
+    parameter_shapes: dict[str, list[int]],
+) -> list[_ShardResult]:
+    """Reject incomplete, overlapping, stale, or incompatible shard collections."""
+    expected = set(expected_ids)
+    if len(expected) != len(expected_ids):
+        raise RuntimeError("BW manifest contains duplicate utterance identities")
+    expected_contract: dict[str, object] = {
+        "schema_version": _SHARD_SCHEMA,
+        "pass_number": pass_number,
+        "model_fingerprint": model_fingerprint,
+        "config_fingerprint": config_fingerprint,
+        "manifest_fingerprint": manifest_fingerprint,
+        "parameter_shapes": parameter_shapes,
+    }
+    ordered = sorted(results, key=lambda result: result.index)
+    indexes: set[int] = set()
+    covered: set[str] = set()
+    previous_end = 0
+    for result in ordered:
+        path = result.accum_dir / _SHARD_METADATA
+        if not path.is_file():
+            raise RuntimeError(f"missing BW shard metadata: {path}")
+        metadata = json.loads(path.read_text(encoding="utf-8"))
+        if metadata != result.metadata:
+            raise RuntimeError(f"BW shard metadata changed after worker completion: {path}")
+        for key, value in expected_contract.items():
+            if metadata.get(key) != value:
+                raise RuntimeError(f"incompatible BW shard {result.index}: {key}")
+        index = metadata.get("shard_index")
+        if not isinstance(index, int) or index != result.index or index in indexes:
+            raise RuntimeError(f"duplicate or invalid BW shard index: {index!r}")
+        indexes.add(index)
+        assigned = metadata.get("assigned_ids")
+        processed = metadata.get("processed_ids")
+        skipped = metadata.get("skipped")
+        contributions = metadata.get("log_lik_contributions")
+        span = metadata.get("serial_span")
+        if not isinstance(assigned, list) or not all(isinstance(x, str) for x in assigned):
+            raise RuntimeError(f"invalid assigned identities in BW shard {index}")
+        if len(assigned) != len(set(assigned)) or covered.intersection(assigned):
+            raise RuntimeError(f"overlapping BW shard coverage at shard {index}")
+        if not isinstance(processed, list) or not all(isinstance(x, str) for x in processed):
+            raise RuntimeError(f"invalid processed identities in BW shard {index}")
+        if not isinstance(skipped, list) or not all(
+            isinstance(x, dict) and isinstance(x.get("utterance"), str) for x in skipped
+        ):
+            raise RuntimeError(f"invalid skipped identities in BW shard {index}")
+        if (
+            not isinstance(contributions, list)
+            or len(contributions) != len(processed)
+            or not all(isinstance(value, float) for value in contributions)
+        ):
+            raise RuntimeError(f"invalid likelihood contributions in BW shard {index}")
+        skipped_ids = [item["utterance"] for item in skipped]
+        if set(processed).intersection(skipped_ids) or set(processed) | set(skipped_ids) != set(
+            assigned
+        ):
+            raise RuntimeError(f"BW shard {index} accounting is not exactly once")
+        if metadata.get("attempted_count") != len(assigned):
+            raise RuntimeError(f"BW shard {index} attempted count mismatch")
+        if metadata.get("accumulated_count") != len(processed):
+            raise RuntimeError(f"BW shard {index} accumulated count mismatch")
+        if not isinstance(span, list) or len(span) != 2 or span[0] != previous_end:
+            raise RuntimeError(f"BW shard {index} is not in serial utterance order")
+        if span[1] - span[0] != len(assigned) or assigned != expected_ids[span[0] : span[1]]:
+            raise RuntimeError(f"BW shard {index} serial span does not match manifest")
+        previous_end = span[1]
+        covered.update(assigned)
+    if covered != expected or previous_end != len(expected_ids):
+        missing = sorted(expected - covered)
+        extra = sorted(covered - expected)
+        raise RuntimeError(f"incomplete BW shard coverage: missing={missing}, extra={extra}")
+    return ordered
+
+
+def _run_bw_shard(
+    index: int,
+    entries: list[tuple[str, Path, str]],
+    accum_dir: Path,
+    model_dir: Path,
+    dictionary: Path,
+    filler_dict: Path | None,
+    config: BWConfig,
+    retry_beam_factor: float,
+    contract: dict[str, object],
+    serial_span: tuple[int, int],
+) -> _ShardResult:
+    """Accumulate one contiguous corpus shard in an isolated native session."""
+    from pstrain.lib import native_worker
+
+    # A process-pool shard is already a crash-isolated native process.  Mark it
+    # as such so contained CFFI calls execute here instead of recursively
+    # starting a second helper process (which can deadlock during spawn).
+    native_worker._inside_worker = True
+    trainer = BWTrainer(
+        model_dir / "mdef",
+        model_dir / "means",
+        model_dir / "variances",
+        model_dir / "mixture_weights",
+        model_dir / "transition_matrices",
+        config,
+    )
+    trainer.set_dict(dictionary, filler_dict)
+    processed: list[str] = []
+    retried: list[str] = []
+    failures: list[dict[str, str]] = []
+    log_lik_contributions: list[float] = []
+    for fileid, mfc_path, transcript in entries:
+        try:
+            mfcc = read_sphinx_mfc(mfc_path)
+            if mfcc.shape[1] != 13:
+                failures.append({"utterance": fileid, "reason": "feature_dimension"})
+                continue
+            if _process_with_final_state_retry(
+                trainer, mfcc, transcript, config.a_beam, retry_beam_factor, fileid
+            ):
+                if trainer._last_process_retried:
+                    retried.append(fileid)
+                processed.append(fileid)
+                log_lik_contributions.append(trainer.last_log_lik())
+            else:
+                failures.append({"utterance": fileid, "reason": "alignment_failure"})
+        except TerminalAlignmentError:
+            failures.append({"utterance": fileid, "reason": "terminal_alignment"})
+        except Exception:
+            logger.exception("Error processing %s in BW shard %d", fileid, index)
+            failures.append({"utterance": fileid, "reason": "exception"})
+    if not trainer.dump_accumulators(accum_dir):
+        raise RuntimeError(f"Failed to dump BW shard {index}")
+    metadata = {
+        **contract,
+        "shard_index": index,
+        "serial_span": list(serial_span),
+        "assigned_ids": [entry[0] for entry in entries],
+        "processed_ids": processed,
+        "retried_ids": retried,
+        "skipped": failures,
+        "attempted_count": len(entries),
+        "accumulated_count": len(processed),
+        "skipped_count": len(failures),
+        "log_lik_contributions": log_lik_contributions,
+    }
+    _write_shard_metadata(accum_dir, metadata)
+    return _ShardResult(index, accum_dir, metadata)
 
 
 def _config_for_iteration(
@@ -252,6 +465,8 @@ def run_bw_training(
     exclusion_schedule: dict[int | str, list[str]] | None = None,
     arctic_a0302_zero_codebook_band: tuple[int, int] | None = None,
     accept_arctic_a0587_pass: int | None = None,
+    jobs: int | None = 1,
+    shard_boundaries: tuple[int, ...] | None = None,
 ) -> TrainingResult:
     """Run Baum-Welch training iterations.
 
@@ -281,6 +496,11 @@ def run_bw_training(
             selects one-pass variance accumulation.
         exclusion_schedule: Experimental mapping of one-based pass numbers or
             ``"*"`` to utterance IDs that must not reach BW accumulation.
+        jobs: Independent BW accumulator shards. ``None`` uses CPU count minus two.
+            Zero is reserved for the inline serial-reference path used by parity gates.
+        shard_boundaries: Optional serial-position boundaries for parity experiments;
+            must contain ``jobs + 1`` nondecreasing offsets from zero through
+            the eligible utterance count.
 
     Returns:
         TrainingResult with training statistics
@@ -305,6 +525,8 @@ def run_bw_training(
     # Load fileids
     with train_fileids.open() as f:
         fileids = [line.strip() for line in f if line.strip()]
+    if len(fileids) != len(set(fileids)):
+        raise ValueError("training file-ID manifest contains duplicate utterance identities")
     logger.info("Training on %d utterances", len(fileids))
 
     # Create output directory
@@ -370,11 +592,182 @@ def run_bw_training(
             "exception": 0,
         }
         terminal_skips: list[dict[str, str]] = []
+        assigned_ids: list[str] = []
+        accumulated_ids: list[str] = []
         accepted_exceptions: list[dict[str, object]] = []
         excluded_fileids = set(exclusion_schedule.get("*", ()))
         excluded_fileids.update(exclusion_schedule.get(iteration, ()))
         excluded_fileids.update(exclusion_schedule.get(str(iteration), ()))
-        for fileid in fileids:
+        requested_jobs = max(1, (os.cpu_count() or 2) - 2) if jobs is None else jobs
+        if requested_jobs < 0:
+            raise ValueError("jobs must be a nonnegative integer or None")
+        shapes = _parameter_shapes(current_model)
+        start_times = os.times()
+        accumulation_started = time.perf_counter()
+        fileids_for_serial: list[str] = fileids if requested_jobs == 0 else []
+        if requested_jobs >= 1:
+            entries: list[tuple[str, Path, str]] = []
+            for fileid in fileids:
+                if fileid in excluded_fileids:
+                    logger.info(
+                        "Skipping %s on iteration %d: excluded_by_schedule", fileid, iteration
+                    )
+                    skipped += 1
+                    excluded += 1
+                    skip_reasons["excluded_by_schedule"] += 1
+                    terminal_skips.append({"utterance": fileid, "reason": "excluded_by_schedule"})
+                    continue
+                mfc_path = features_dir / f"{fileid}.mfc"
+                if not mfc_path.exists():
+                    logger.warning("Features not found: %s", mfc_path)
+                    skipped += 1
+                    skip_reasons["feature_not_found"] += 1
+                    terminal_skips.append({"utterance": fileid, "reason": "feature_not_found"})
+                    continue
+                if fileid not in transcripts:
+                    logger.warning("Transcript not found: %s", fileid)
+                    skipped += 1
+                    skip_reasons["transcript_not_found"] += 1
+                    terminal_skips.append({"utterance": fileid, "reason": "transcript_not_found"})
+                    continue
+                entries.append((fileid, mfc_path, f"<s> {transcripts[fileid]} </s>"))
+
+            worker_count = requested_jobs
+            if worker_count:
+                # Contiguous partitions preserve corpus order within every shard;
+                # numbered merge order is independent of worker completion order.
+                shard_size = (len(entries) + worker_count - 1) // worker_count if entries else 0
+                if shard_boundaries is not None and (
+                    len(shard_boundaries) != worker_count + 1
+                    or shard_boundaries[0] != 0
+                    or shard_boundaries[-1] != len(entries)
+                    or any(
+                        left > right
+                        for left, right in zip(shard_boundaries, shard_boundaries[1:], strict=False)
+                    )
+                ):
+                    raise ValueError(
+                        "shard_boundaries must be jobs + 1 nondecreasing serial offsets "
+                        "from zero through the eligible utterance count"
+                    )
+                with tempfile.TemporaryDirectory(prefix="pstrain-bw-shards-") as temp_root:
+                    root = Path(temp_root)
+                    futures = []
+                    context = multiprocessing.get_context("spawn")
+                    manifest_ids = [entry[0] for entry in entries]
+                    assigned_ids = manifest_ids
+                    model_fingerprint = _model_fingerprint(current_model)
+                    config_fingerprint = _json_fingerprint(asdict(iter_config))
+                    manifest_fingerprint = _json_fingerprint(manifest_ids)
+                    contract: dict[str, object] = {
+                        "schema_version": _SHARD_SCHEMA,
+                        "pass_number": iteration,
+                        "model_fingerprint": model_fingerprint,
+                        "config_fingerprint": config_fingerprint,
+                        "manifest_fingerprint": manifest_fingerprint,
+                        "parameter_shapes": shapes,
+                    }
+                    with ProcessPoolExecutor(
+                        max_workers=worker_count, mp_context=context
+                    ) as executor:
+                        for index in range(worker_count):
+                            if shard_boundaries is None:
+                                start = min(index * shard_size, len(entries))
+                                end = min((index + 1) * shard_size, len(entries))
+                            else:
+                                start, end = shard_boundaries[index : index + 2]
+                            shard_entries = entries[start:end]
+                            accum_dir = root / f"{index:06d}"
+                            futures.append(
+                                executor.submit(
+                                    _run_bw_shard,
+                                    index,
+                                    shard_entries,
+                                    accum_dir,
+                                    current_model,
+                                    dictionary,
+                                    filler_dict,
+                                    iter_config,
+                                    retry_beam_factor,
+                                    contract,
+                                    (start, end),
+                                )
+                            )
+                        shard_results = _validate_shard_artifacts(
+                            [future.result() for future in futures],
+                            expected_ids=manifest_ids,
+                            pass_number=iteration,
+                            model_fingerprint=model_fingerprint,
+                            config_fingerprint=config_fingerprint,
+                            manifest_fingerprint=manifest_fingerprint,
+                            parameter_shapes=shapes,
+                        )
+                    if not trainer.merge_accumulators(
+                        [result.accum_dir for result in shard_results]
+                    ):
+                        raise RuntimeError("Failed to merge BW accumulator shards")
+                    canonical_log_lik = 0.0
+                    for result in shard_results:
+                        contributions = result.metadata["log_lik_contributions"]
+                        assert isinstance(contributions, list)
+                        for contribution in contributions:
+                            canonical_log_lik += float(contribution)
+                    trainer.set_total_log_lik(canonical_log_lik)
+                    for result in shard_results:
+                        processed_ids = result.metadata["processed_ids"]
+                        retried_ids = result.metadata["retried_ids"]
+                        failures = result.metadata["skipped"]
+                        assert isinstance(processed_ids, list)
+                        assert isinstance(retried_ids, list)
+                        assert isinstance(failures, list)
+                        processed += len(processed_ids) - len(retried_ids)
+                        retried += len(retried_ids)
+                        for fileid in retried_ids:
+                            logger.warning(
+                                "Final state not reached for %s; retrying once in BW shard",
+                                fileid,
+                            )
+                        accumulated_ids.extend(str(item) for item in processed_ids)
+                        for failure in failures:
+                            assert isinstance(failure, dict)
+                            fileid = str(failure["utterance"])
+                            reason = str(failure["reason"])
+                            if reason == "terminal_alignment":
+                                if (
+                                    fileid == "arctic_a0587"
+                                    and iteration == accept_arctic_a0587_pass
+                                ):
+                                    reason = "alignment_failure"
+                                else:
+                                    occupancy = _accept_arctic_a0302_exception(
+                                        fileid=fileid,
+                                        model_dir=current_model,
+                                        band=arctic_a0302_zero_codebook_band,
+                                    )
+                                    if occupancy is None:
+                                        raise TerminalAlignmentError(
+                                            f"Final state not reached for {fileid} after retry"
+                                        )
+                                    reason = "accepted_exception_band"
+                                    assert arctic_a0302_zero_codebook_band is not None
+                                    accepted_exceptions.append(
+                                        {
+                                            "sentinel": fileid,
+                                            "quantity": "exact_zero_codebooks",
+                                            "value": occupancy,
+                                            "band": list(arctic_a0302_zero_codebook_band),
+                                        }
+                                    )
+                            skipped += 1
+                            key = (
+                                "alignment_failure"
+                                if reason in {"alignment_failure", "accepted_exception_band"}
+                                else reason
+                            )
+                            skip_reasons[key] += 1
+                            terminal_skips.append({"utterance": fileid, "reason": reason})
+
+        for fileid in fileids_for_serial:
             if fileid in excluded_fileids:
                 logger.info("Skipping %s on iteration %d: excluded_by_schedule", fileid, iteration)
                 skipped += 1
@@ -493,6 +886,18 @@ def run_bw_training(
 
         # Get statistics BEFORE normalization (normalize resets stats)
         stats = trainer.get_stats()
+        accumulation_wall_seconds = time.perf_counter() - accumulation_started
+        end_times = os.times()
+        worker_user_cpu_seconds = (
+            end_times.user - start_times.user
+            if requested_jobs == 0
+            else end_times.children_user - start_times.children_user
+        )
+        fallback_senone_ids = tuple(
+            senone
+            for senone in range(shapes["mixture_weights"][0])
+            if trainer.fallback_senone_active(senone)
+        )
         last_frames = stats.total_frames
         last_utts = stats.total_utts
         logger.info(
@@ -532,6 +937,9 @@ def run_bw_training(
                 retried_utts=retried,
                 skipped_utts=skipped,
                 excluded_by_schedule=excluded,
+                fallback_senone_ids=fallback_senone_ids,
+                accumulation_wall_seconds=accumulation_wall_seconds,
+                worker_user_cpu_seconds=worker_user_cpu_seconds,
             )
         )
         telemetry_row: dict[str, object] = {
@@ -550,6 +958,20 @@ def run_bw_training(
             "skip_reasons": skip_reasons,
             "terminal_skips": terminal_skips,
             "accepted_exceptions": accepted_exceptions,
+            "assigned_ids": assigned_ids,
+            "accumulated_ids": accumulated_ids,
+            "skipped_ids": [item["utterance"] for item in terminal_skips],
+        }
+        telemetry_row["fallback_senone_ids"] = list(fallback_senone_ids)
+        telemetry_row["parallelism"] = {
+            "accumulation_wall_seconds": accumulation_wall_seconds,
+            "worker_user_cpu_seconds": worker_user_cpu_seconds,
+            "user_cpu_per_wall": (
+                worker_user_cpu_seconds / accumulation_wall_seconds
+                if accumulation_wall_seconds
+                else 0.0
+            ),
+            "declared_workers": requested_jobs,
         }
         telemetry_rows.append(telemetry_row)
         logger.info(

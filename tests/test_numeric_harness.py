@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from pstrain.lib import _pstrainc
-from pstrain.lib.bw import BWConfig, BWTrainer
+from pstrain.lib.bw import HMM, BWConfig, BWTrainer
 from pstrain.lib.features import read_sphinx_mfc
 from pstrain.lib.pipeline import PipelineContext
 from pstrain.lib.pipeline.tasks import TARGETS
@@ -1068,4 +1068,113 @@ def test_seeded_bw_reruns_are_bit_identical(flat_project: PipelineContext, tmp_p
     ):
         assert (outputs[0] / filename).read_bytes() == (outputs[1] / filename).read_bytes(), (
             filename
+        )
+
+
+@requires_c_library
+def test_parallel_bw_matches_serial_across_shard_counts(
+    flat_project: PipelineContext, tmp_path: Path
+) -> None:
+    """Shard count changes grouping only; accounting stays exact and tensors stay close."""
+    fileids, transcription = write_golden_subset(flat_project)
+    mappings = {
+        "serial": (0, None),
+        "one-shard-artifact": (1, None),
+        "two-early": (2, (0, 1, 3)),
+        "two-late": (2, (0, 2, 3)),
+        "four-with-empty": (4, None),
+    }
+    runs = {}
+    for name, (jobs, boundaries) in mappings.items():
+        output = tmp_path / name
+        runs[name] = run_bw_training(
+            flat_project.model_dir("flat"),
+            output,
+            flat_project.features_dir,
+            fileids,
+            transcription,
+            flat_project.shared_dir / "dictionary.dict",
+            first_pass_2passvar=False,
+            filler_dict=flat_project.filler_dict,
+            n_iter=3,
+            jobs=jobs,
+            shard_boundaries=boundaries,
+            config=BWConfig(pass2var=True, unobserved_gaussian_policy="zero", a_beam=1e-200),
+        )
+    baseline = runs["serial"]
+    serial = HMM.load(tmp_path / "serial")
+    print(
+        json.dumps(
+            {
+                "mapping": "serial",
+                "passes": len(baseline.trajectory),
+                "wall_seconds": sum(row.accumulation_wall_seconds for row in baseline.trajectory),
+                "worker_user_cpu_seconds": sum(
+                    row.worker_user_cpu_seconds for row in baseline.trajectory
+                ),
+            },
+            sort_keys=True,
+        )
+    )
+    for name in ("one-shard-artifact", "two-early", "two-late", "four-with-empty"):
+        observed_run = runs[name]
+        assert observed_run.iterations == baseline.iterations
+        assert observed_run.converged == baseline.converged
+        assert len(observed_run.trajectory) == len(baseline.trajectory)
+        for expected_pass, observed in zip(
+            baseline.trajectory, observed_run.trajectory, strict=True
+        ):
+            assert (observed.frames, observed.input_utts, observed.processed_utts) == (
+                expected_pass.frames,
+                expected_pass.input_utts,
+                expected_pass.processed_utts,
+            )
+            assert (observed.retried_utts, observed.skipped_utts) == (
+                expected_pass.retried_utts,
+                expected_pass.skipped_utts,
+            )
+            assert observed.fallback_senone_ids == expected_pass.fallback_senone_ids
+            assert np.isfinite(observed.total_log_lik) == np.isfinite(expected_pass.total_log_lik)
+            log_lik_error = abs(observed.total_log_lik - expected_pass.total_log_lik)
+            assert log_lik_error <= 1e-2
+            assert log_lik_error / abs(expected_pass.total_log_lik) <= 1e-7
+            assert log_lik_error / expected_pass.frames <= 1e-5
+        parallel = HMM.load(tmp_path / name)
+        measured_errors = {}
+        for label, expected, actual, relative, absolute in (
+            ("means", serial.means, parallel.means, 5e-3, 1e-4),
+            ("variances", serial.variances, parallel.variances, 5e-3, 1e-3),
+            ("mixture_weights", serial.mixw, parallel.mixw, 1e-3, 1e-5),
+            ("transition_matrices", serial.tmat, parallel.tmat, 1e-3, 1e-5),
+        ):
+            assert np.array_equal(actual == 0, expected == 0)
+            assert np.array_equal(
+                np.any(actual != 0, axis=tuple(range(1, actual.ndim))),
+                np.any(expected != 0, axis=tuple(range(1, expected.ndim))),
+            )
+            tiny = np.abs(expected) < 1e-7
+            assert np.all(np.abs(actual[tiny] - expected[tiny]) <= 2e-7)
+            np.testing.assert_allclose(actual, expected, rtol=relative, atol=absolute)
+            measured_errors[label] = float(np.max(np.abs(actual - expected)))
+        print(
+            json.dumps(
+                {
+                    "mapping": name,
+                    "passes": len(observed_run.trajectory),
+                    "max_abs_by_shape": measured_errors,
+                    "max_log_lik_abs": max(
+                        abs(actual.total_log_lik - expected.total_log_lik)
+                        for actual, expected in zip(
+                            observed_run.trajectory, baseline.trajectory, strict=True
+                        )
+                    ),
+                    "wall_seconds": sum(
+                        row.accumulation_wall_seconds for row in observed_run.trajectory
+                    ),
+                    "worker_user_cpu_seconds": sum(
+                        row.worker_user_cpu_seconds for row in observed_run.trajectory
+                    ),
+                },
+                sort_keys=True,
+            )
         )
