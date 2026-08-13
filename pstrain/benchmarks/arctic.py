@@ -152,6 +152,18 @@ ARCHIVES = (
         "3f16dc3f3b97955ea22623efb33b444341013fc660677b2e170efdcc959fa7c6",
         1132,
     ),
+    Archive(
+        "awb",
+        "http://festvox.org/cmu_arctic/packed/cmu_us_awb_arctic.tar.bz2",
+        "d74a950c9739a65f7bfc4dfa6187f2730fa03de5b8eb3f2da97a51b74df64d3c",
+        1138,
+    ),
+    Archive(
+        "jmk",
+        "http://festvox.org/cmu_arctic/packed/cmu_us_jmk_arctic.tar.bz2",
+        "3a37c0e1dfc91e734fdbc88b562d9e2ebca621772402cdc693bbc9b09b211d73",
+        1132,
+    ),
 )
 
 PIN_CONFIGS: dict[str, dict[str, Any]] = {
