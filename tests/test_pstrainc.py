@@ -431,7 +431,22 @@ def test_pstrain_fe_create_default() -> None:
     ffi, lib = _pstrainc._init()
 
     fe = lib.pstrain_fe_create_default()
-    explicit_fe = lib.pstrain_fe_create(16000.0, 25, 512, 130.0, 6800.0, 13, 0.97, 22, True, True)
+    explicit_fe = lib.pstrain_fe_create(
+        16000.0,
+        25,
+        512,
+        130.0,
+        6800.0,
+        13,
+        0.97,
+        22,
+        True,
+        True,
+        True,
+        b"dct",
+        100,
+        0.025625,
+    )
     assert fe != _pstrainc.get_ffi().NULL
     assert explicit_fe != ffi.NULL
 
@@ -478,6 +493,10 @@ def test_pstrain_fe_create_custom() -> None:
         22,  # lifter
         True,  # dither
         True,  # remove_dc
+        True,  # remove_noise
+        b"dct",  # transform
+        100,  # frate
+        0.025625,  # wlen
     )
     assert fe != _pstrainc.get_ffi().NULL
 
@@ -503,6 +522,10 @@ def test_pstrain_fe_create_8khz() -> None:
         22,  # lifter
         True,  # dither
         True,  # remove_dc
+        True,  # remove_noise
+        b"dct",  # transform
+        100,  # frate
+        0.025625,  # wlen
     )
     assert fe != _pstrainc.get_ffi().NULL
 

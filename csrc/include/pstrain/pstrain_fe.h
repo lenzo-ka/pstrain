@@ -29,8 +29,9 @@
  * @return Initialized fe_t*, or NULL on failure
  */
 fe_t *pstrain_fe_create(float samprate, int nfilt, int nfft,
-                    float lowerf, float upperf, int ncep,
-                    float alpha, int lifter, int dither, int remove_dc);
+                        float lowerf, float upperf, int ncep,
+                        float alpha, int lifter, int dither, int remove_dc,
+                        int remove_noise, const char *transform, int frate, float wlen);
 
 /**
  * Create a front-end with default parameters for 16kHz audio.

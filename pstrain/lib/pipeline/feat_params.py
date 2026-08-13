@@ -10,7 +10,6 @@ from pstrain.lib.pipeline.context import FeatParams
 def _validate_honored_values(feat: FeatParams) -> None:
     """Reject settings that the native training engine hardcodes."""
     honored = {
-        "transform": "dct",
         "feat_type": "1s_c_d_dd",
         "agc": "none",
         "varnorm": "no",
@@ -37,18 +36,21 @@ def feat_params_lines(feat: FeatParams) -> list[str]:
         f"-alpha {feat.alpha}\n",
         f"-dither {'yes' if feat.dither else 'no'}\n",
         f"-remove_dc {'yes' if feat.remove_dc else 'no'}\n",
+        f"-remove_noise {'yes' if feat.remove_noise else 'no'}\n",
+        f"-frate {feat.frate}\n",
+        f"-wlen {feat.wlen}\n",
         f"-feat {feat.feat_type}\n",
         f"-transform {feat.transform}\n",
         f"-lifter {feat.lifter}\n",
         f"-agc {feat.agc}\n",
         f"-cmn {feat.cmn}\n",
+        f"-cmninit {feat.cmninit}\n",
         f"-varnorm {feat.varnorm}\n",
         # Invariants of pstrain's extraction path: unit_area/round_filters are the
         # sphinxbase fe defaults it never overrides. Writing them explicitly
         # prevents decoder-version defaults drifting from the training front end.
         "-unit_area yes\n",
         "-round_filters yes\n",
-        "-remove_noise yes\n",
     ]
 
 

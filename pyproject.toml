@@ -165,6 +165,13 @@ disallow_untyped_defs = true
 strict = true
 plugins = ["pydantic.mypy"]
 
+[[tool.mypy.overrides]]
+# Runtime dependencies may be absent, untyped, or covered by mypy's bundled
+# stubs depending on the environment. Keep that variability local to the two
+# modules that deliberately import them.
+module = ["pstrain.lib._cffi.core", "pstrain.benchmarks.arctic"]
+disable_error_code = ["import-untyped"]
+
 [tool.pydantic-mypy]
 init_forbid_extra = true
 init_typed = true

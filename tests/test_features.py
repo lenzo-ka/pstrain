@@ -63,6 +63,10 @@ class TestFEParams:
         assert cfg.lifter == 22
         assert cfg.dither is True
         assert cfg.remove_dc is True
+        assert cfg.remove_noise is True
+        assert cfg.transform == "dct"
+        assert cfg.frate == 100
+        assert cfg.wlen == pytest.approx(0.025625)
 
     def test_custom_values(self) -> None:
         """Test custom configuration values."""
@@ -151,6 +155,31 @@ class TestFeatureExtractor:
 
         assert with_dc_removal.shape == without_dc_removal.shape
         assert np.count_nonzero(with_dc_removal != without_dc_removal) > 0
+
+    @pytest.mark.parametrize(
+        ("override", "shape_changes"),
+        [
+            ({"remove_noise": False}, False),
+            ({"transform": "legacy"}, False),
+            ({"frate": 80}, True),
+            ({"wlen": 0.02}, False),
+        ],
+    )
+    def test_new_front_end_options_change_produced_features(
+        self, sample_audio_path: Path, override: dict[str, object], shape_changes: bool
+    ) -> None:
+        """Every newly exposed non-default must alter native FE output."""
+        audio = _read_wav(sample_audio_path)
+        with FeatureExtractor(dither=False) as baseline:
+            expected = baseline.process_audio(audio)
+        with FeatureExtractor(dither=False, **override) as configured:
+            actual = configured.process_audio(audio)
+
+        if shape_changes:
+            assert actual.shape[0] != expected.shape[0]
+        else:
+            assert actual.shape == expected.shape
+            assert np.count_nonzero(actual != expected) > 0
 
 
 class TestReadWriteSphinxMfc:
