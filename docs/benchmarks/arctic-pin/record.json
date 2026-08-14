@@ -503,6 +503,14 @@
               "value": false
             },
             {
+              "setting": "training.optional_final_silence",
+              "shipped_default": true,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": false
+            },
+            {
               "setting": "training.tied.convergence_ratio",
               "shipped_default": 0.001,
               "source": {
@@ -17592,6 +17600,14 @@
               "value": false
             },
             {
+              "setting": "training.optional_final_silence",
+              "shipped_default": true,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": false
+            },
+            {
               "setting": "training.tied.convergence_ratio",
               "shipped_default": 0.001,
               "source": {
@@ -17976,6 +17992,14 @@
                 4548,
                 4623
               ]
+            },
+            {
+              "setting": "training.optional_final_silence",
+              "shipped_default": true,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": false
             },
             {
               "setting": "training.tree_directional_questions",
@@ -35070,6 +35094,14 @@
                 4548,
                 4623
               ]
+            },
+            {
+              "setting": "training.optional_final_silence",
+              "shipped_default": true,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": false
             },
             {
               "setting": "training.tree_directional_questions",
