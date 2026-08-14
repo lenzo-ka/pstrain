@@ -126,7 +126,11 @@ class CompareCommand(Command):
                 print(f"  {file_b}")
                 if isinstance(result, ModelCompareResult):
                     print(result.summary())
-                    return CommandResult.ok() if result.all_match else CommandResult.fail("")
+                    return (
+                        CommandResult.ok()
+                        if result.all_compared_components_match
+                        else CommandResult.fail("")
+                    )
                 print(f"Result: {result.summary()}")
                 return CommandResult.ok() if result.match else CommandResult.fail("")
             except ValueError as e:
@@ -166,7 +170,11 @@ class CompareCommand(Command):
             elif compare_type == "model":
                 model_result = compare_models(file_a, file_b, rtol, atol)
                 print(model_result.summary())
-                return CommandResult.ok() if model_result.all_match else CommandResult.fail("")
+                return (
+                    CommandResult.ok()
+                    if model_result.all_compared_components_match
+                    else CommandResult.fail("")
+                )
             else:
                 return CommandResult.fail(f"Unknown type: {compare_type}")
 

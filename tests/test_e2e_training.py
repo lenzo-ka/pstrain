@@ -60,7 +60,9 @@ def _mdef_senone_assignments(path: Path) -> tuple[list[int], list[int]]:
 
 
 @requires_c_library
-def test_build_ci_1g_produces_finite_model(tmp_path: Path) -> None:
+def test_build_ci_1g_produces_finite_model(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     """features → flat → ci-1g yields a finite, converged CI model."""
     from pstrain.lib.pipeline import PipelineContext
     from pstrain.lib.pipeline.tasks import build_pipeline
@@ -78,8 +80,14 @@ def test_build_ci_1g_produces_finite_model(tmp_path: Path) -> None:
     )
 
     ctx = PipelineContext.from_config(project_dir)
-    rc = build_pipeline(ctx).run("ci-1g", jobs=2)
+    with caplog.at_level("WARNING"):
+        rc = build_pipeline(ctx).run("ci-1g", jobs=2)
     assert rc == 0, "pipeline run of ci-1g failed"
+    assert "multipron_training=true" in caplog.text
+    assert "fallback_senone" in caplog.text
+    execution = ctx.provenance_document("training")["execution"]
+    assert execution["requested_jobs"] == 2
+    assert execution["bw_shard_count"] == 1
 
     model_dir = ctx.model_dir("ci-1g")
     for name in ("mdef", "means", "variances", "mixture_weights", "transition_matrices"):

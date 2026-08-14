@@ -62,9 +62,11 @@
   are local transient outputs and are deleted before every pass.
 - **[inference]** Model comparison now intentionally reports the two `provenance.json` files as
   different when host or architecture differs, even if parameter files match. Consumers must inspect
-  the component result rather than treating `all_match` as parameter-only equality.
+  the component result rather than treating `all_compared_components_match` as parameter-only
+  equality.
 - **[inference]** This is a problem for deliberate second-machine replication if the goal is
-  cross-host task reuse or an `all_match` comparison based only on model content. It does not prevent
+  cross-host task reuse or an `all_compared_components_match` comparison based only on model
+  content. It does not prevent
   training or per-component comparison. No fix was made because separating execution metadata from
   the stage fingerprint changes broader provenance and invalidation semantics beyond this contained
   shard-count correction.
