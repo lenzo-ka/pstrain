@@ -120,4 +120,10 @@ den_terms(float64 **d_term,
 	  uint32 n_feat,
 	  uint32 n_top);
 
+float64
+backward_initial_ci_posterior(float64 prior_beta,
+			      float64 output_prob,
+			      float64 recip_final_alpha,
+			      float64 entry_weight);
+
 #endif /* BACKWARD_H */
