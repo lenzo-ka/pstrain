@@ -730,26 +730,6 @@ build_state_dag(void)
     return 0;
 }
 
-int32
-align_has_boundary_bypasses(int32 *initial, int32 *final)
-{
-    plink_t *link;
-
-    if (initial == NULL || final == NULL)
-        return -1;
-    *initial = 0;
-    *final = 0;
-    for (link = phead.succlist; link; link = link->next) {
-        if (link->node->wid != dict->startwid)
-            *initial = 1;
-    }
-    for (link = ptail.predlist; link; link = link->next) {
-        if (link->node->wid != dict->finishwid)
-            *final = 1;
-    }
-    return 0;
-}
-
 
 static void
 destroy_state_dag(void)
@@ -836,12 +816,11 @@ dump_sent_hmm(void)
  * Return 0 if successful, \<0 if any error (eg, OOV word encountered).
  */
 int32
-align_build_sent_hmm(char *wordstr, int insert_sil, int optional_boundary_silence)
+align_build_sent_hmm(char *wordstr, int insert_sil)
 {
     s3wid_t w, nextw;
     int32 k, oov;
-    pnode_t *word_end, *node, *start_end, *pre_finish_end;
-    plink_t *link;
+    pnode_t *word_end, *node;
     char *wd, delim, *wdcopy = NULL;
 
     /* Initialize dummy head and tail entries of sent hmm */
@@ -870,30 +849,6 @@ align_build_sent_hmm(char *wordstr, int insert_sil, int optional_boundary_silenc
     n_pnode = 0;
     pnode_list = NULL;
     oov = 0;
-
-    /* Callers may supply the same explicit sentence markers consumed by BW.
-     * The aligner also supplies its own start/finish words, so do not leave a
-     * second mandatory pair inside the optional outer pair. */
-    if (optional_boundary_silence) {
-        size_t len;
-        while (*wordstr == ' ' || *wordstr == '\t')
-            ++wordstr;
-        if (strncmp(wordstr, "<s>", 3) == 0 &&
-            (wordstr[3] == '\0' || wordstr[3] == ' ' || wordstr[3] == '\t')) {
-            wordstr += 3;
-            while (*wordstr == ' ' || *wordstr == '\t')
-                ++wordstr;
-        }
-        len = strlen(wordstr);
-        while (len > 0 && (wordstr[len - 1] == ' ' || wordstr[len - 1] == '\t'))
-            wordstr[--len] = '\0';
-        if (len >= 4 && strcmp(wordstr + len - 4, "</s>") == 0) {
-            len -= 4;
-            wordstr[len] = '\0';
-            while (len > 0 && (wordstr[len - 1] == ' ' || wordstr[len - 1] == '\t'))
-                wordstr[--len] = '\0';
-        }
-    }
 
     /* State-level DAG initialization should be here in case the build is aborted */
     shead.pnode = &phead;
@@ -927,7 +882,6 @@ align_build_sent_hmm(char *wordstr, int insert_sil, int optional_boundary_silenc
     word_end =
         append_transcript_word(dict->startwid, &phead, nextw, 0,
                                insert_sil);
-    start_end = word_end;
 
     /* Append each word in transcription to partial sent HMM created so far */
     while (k >= 0) {
@@ -960,24 +914,11 @@ align_build_sent_hmm(char *wordstr, int insert_sil, int optional_boundary_silenc
         return -1;
 
     /* Append phone HMMs for </s> at the end; link to tail node */
-    pre_finish_end = word_end;
     word_end =
         append_transcript_word(dict->finishwid, word_end, BAD_S3WID,
                                insert_sil, 0);
     for (node = word_end; node; node = node->next)
         link_pnodes(node, &ptail);
-
-    /* PSTRAIN DIVERGENCE: upstream SphinxTrain requires the <s> and </s>
-     * filler-dictionary SIL HMMs.  Permit epsilon bypasses so speech frames
-     * are not forced into boundary silence when the recording has none. */
-    if (optional_boundary_silence) {
-        for (node = start_end; node; node = node->next) {
-            for (link = node->succlist; link; link = link->next)
-                link_pnodes(&phead, link->node);
-        }
-        for (node = pre_finish_end; node; node = node->next)
-            link_pnodes(node, &ptail);
-    }
 
     /* Build state-level DAG from the phone-level one */
     build_state_dag();

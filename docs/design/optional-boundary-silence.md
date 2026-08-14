@@ -14,13 +14,13 @@ boundary silence otherwise contributes speech frames to `SIL` merely to meet
 the HMM's minimum duration. Those posteriors are accumulated into the silence
 model on every Baum-Welch pass.
 
-## Two graph paths
+## Graph ownership
 
-The forced aligner retains the `<s>` and `</s>` alternatives and adds arcs from
-its dummy head past `<s>` and from the last transcript word directly to its
-dummy tail. This is decode-affecting: a sentence path may now enter the first
-spoken word or exit after the last spoken word without traversing a boundary
-`SIL` HMM.
+The forced aligner's `align_build_sent_hmm()` separately adds mandatory start
+and finish words. A separately gated bypass prototype made every one of the
+1,132 measured SLT alignments fail, so that graph is deliberately unchanged.
+This divergence belongs only to the training state sequence, where posterior
+accumulation creates the contamination being corrected.
 
 The Baum-Welch state-sequence engine has one hard-wired emitting entry state
 and one hard-wired non-emitting terminal state. It cannot express an epsilon
@@ -32,6 +32,9 @@ optional silence behavior is unchanged.
 
 ## Scope
 
-This divergence changes alignment search and the frames eligible for `SIL`
-accumulation. It does not manufacture, generate, score, or exclude frames. It
-does not change dither, scoring, evaluation, beams, or any other default.
+This divergence is decode-affecting within BW's training alignment: its
+utterance graph now permits the first spoken HMM as its entry and the last
+spoken HMM as its exit, which the upstream graph does not. It changes the
+frames eligible for `SIL` accumulation. It does not manufacture, generate,
+score, or exclude frames and does not change dither, scoring, evaluation,
+beams, or any other default.

@@ -150,10 +150,6 @@ static arg_t defn[] = {
      ARG_INT32,
      "1",
      "Whether to insert optional silences and fillers between words."},
-    {"-optional_boundary_silence",
-     ARG_BOOLEAN,
-     "yes",
-     "Permit zero-frame bypasses around the initial and final silence HMMs."},
     fast_GMM_computation_command_line_macro(),
     {NULL, ARG_INT32, NULL, NULL}
 };
@@ -711,8 +707,7 @@ align_utt_capture(char *sent,
         return -1;
     }
 
-    if (align_build_sent_hmm(sent, cmd_ln_int32_r(kbc->config, "-insert_sil"),
-                            cmd_ln_boolean_r(kbc->config, "-optional_boundary_silence")) != 0) {
+    if (align_build_sent_hmm(sent, cmd_ln_int32_r(kbc->config, "-insert_sil")) != 0) {
         align_destroy_sent_hmm();
         E_ERROR("No sentence HMM; no alignment for %s\n", uttid);
         return -2;
@@ -802,8 +797,7 @@ align_utt(char *sent,           /* In: Reference transcript */
     ptmr_start(timers + tmr_utt);
 
 
-    if (align_build_sent_hmm(sent, cmd_ln_int32_r(kbc->config, "-insert_sil"),
-                            cmd_ln_boolean_r(kbc->config, "-optional_boundary_silence")) != 0) {
+    if (align_build_sent_hmm(sent, cmd_ln_int32_r(kbc->config, "-insert_sil")) != 0) {
         align_destroy_sent_hmm();
         ptmr_stop(timers + tmr_utt);
 

@@ -14,7 +14,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.meta_path = [finder for finder in sys.meta_path if "_editable" not in type(finder).__module__]
 
 from pstrain.lib import _pstrainc
-from pstrain.lib.alignment import Aligner
 from pstrain.lib.bw import BWConfig, BWTrainer
 from pstrain.lib.features import read_sphinx_mfc
 
@@ -29,41 +28,6 @@ def transcripts(path: Path) -> dict[str, str]:
             fileid, text = raw.split(maxsplit=1)
             result[fileid] = f"<s> {text} </s>"
     return result
-
-
-def phone_signature(result: object) -> tuple[tuple[str, int, int], ...]:
-    return tuple((seg.name, seg.start_frame, seg.end_frame) for seg in result.phones)
-
-
-def align_pass(
-    model: Path,
-    dictionary: Path,
-    filler: Path,
-    audio: Path,
-    refs: dict[str, str],
-    enabled: bool,
-) -> tuple[dict[str, tuple[tuple[str, int, int], ...]], dict[str, str], int]:
-    aligned = {}
-    failed = {}
-    sil_frames = 0
-    with Aligner(
-        model,
-        dictionary,
-        filler_dict=filler,
-        optional_boundary_silence=enabled,
-        include_phones=True,
-    ) as aligner:
-        for fileid, text in refs.items():
-            try:
-                result = aligner.align_audio(audio / f"{fileid}.wav", text, fileid)
-            except Exception as error:  # measurement records every failure verbatim
-                failed[fileid] = str(error)
-                continue
-            aligned[fileid] = phone_signature(result)
-            sil_frames += sum(
-                seg.end_frame - seg.start_frame + 1 for seg in result.phones if seg.name == "SIL"
-            )
-    return aligned, failed, sil_frames
 
 
 def sil_senones(mdef: Path) -> list[int]:
@@ -126,13 +90,6 @@ def main() -> None:
     dictionary = project / "shared/dictionary.dict"
     filler = project / "shared/filler.dict"
 
-    off_align, off_failed, off_sil = align_pass(
-        model, dictionary, filler, project / "audio", refs, False
-    )
-    on_align, on_failed, on_sil = align_pass(
-        model, dictionary, filler, project / "audio", refs, True
-    )
-    common = off_align.keys() & on_align.keys()
     off_bw, off_bw_failed = bw_pass(
         model,
         dictionary,
@@ -153,13 +110,6 @@ def main() -> None:
     )
     payload = {
         "utterances": len(refs),
-        "alignments_changed": sum(off_align[key] != on_align[key] for key in common),
-        "align_off_failures": off_failed,
-        "align_on_failures": on_failed,
-        "align_regressions": sorted(on_failed.keys() - off_failed.keys()),
-        "align_recoveries": sorted(off_failed.keys() - on_failed.keys()),
-        "align_sil_frames_off": off_sil,
-        "align_sil_frames_on": on_sil,
         "bw_sil_occupancy_off": off_bw,
         "bw_sil_occupancy_on": on_bw,
         "bw_failures_off": off_bw_failed,

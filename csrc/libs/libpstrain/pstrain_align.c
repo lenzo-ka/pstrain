@@ -104,7 +104,6 @@ pstrain_align_config_default(pstrain_align_config_t *config)
     if (config == NULL) return;
     config->beam = 1e-64;
     config->insert_sil = 1;
-    config->optional_boundary_silence = 1;
     config->compute_phones = 1;
     config->compute_states = 0;
     config->feat_type = "1s_c_d_dd";
@@ -137,13 +136,10 @@ build_config(const char *mdef_path,
 {
     char beam_str[64];
     char insert_sil_str[16];
-    char optional_boundary_silence_str[8];
     char frate_str[16];
     char lts_str[8];
     snprintf(beam_str, sizeof(beam_str), "%g", cfg->beam);
     snprintf(insert_sil_str, sizeof(insert_sil_str), "%d", cfg->insert_sil);
-    snprintf(optional_boundary_silence_str, sizeof(optional_boundary_silence_str), "%s",
-             cfg->optional_boundary_silence ? "yes" : "no");
     snprintf(frate_str, sizeof(frate_str), "%d", cfg->frate);
     snprintf(lts_str, sizeof(lts_str), "%s", cfg->lts_mismatch ? "yes" : "no");
 
@@ -163,7 +159,6 @@ build_config(const char *mdef_path,
         "-varnorm", cfg->varnorm ? "yes" : "no",
         "-beam", beam_str,
         "-insert_sil", insert_sil_str,
-        "-optional_boundary_silence", optional_boundary_silence_str,
         "-lts_mismatch", lts_str,
         "-insent", "<unused>",
         NULL);

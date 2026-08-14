@@ -88,22 +88,3 @@ add_test(
     ${BW_FIXTURE}/dictionary.dict
     ${BW_FIXTURE}/filler.dict
 )
-
-add_executable(test_align_boundary_silence test_align_boundary_silence.c)
-target_link_libraries(test_align_boundary_silence pstrainc)
-target_include_directories(test_align_boundary_silence
-  PRIVATE ${CMAKE_BINARY_DIR}
-  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../programs/sphinx3_align
-)
-
-add_test(
-  NAME align_boundary_silence
-  COMMAND test_align_boundary_silence
-    ${BW_FIXTURE}/model/mdef
-    ${BW_FIXTURE}/model/means
-    ${BW_FIXTURE}/model/variances
-    ${BW_FIXTURE}/model/mixture_weights
-    ${BW_FIXTURE}/model/transition_matrices
-    ${BW_FIXTURE}/dictionary.dict
-    ${BW_FIXTURE}/filler.dict
-)

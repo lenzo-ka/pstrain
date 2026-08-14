@@ -695,7 +695,6 @@ int pstrain_map_adapt(const char *meanfn,
 typedef struct pstrain_align_config_s {
     double  beam;
     int     insert_sil;
-    int     optional_boundary_silence;
     int     compute_phones;
     int     compute_states;
     const char *feat_type;
