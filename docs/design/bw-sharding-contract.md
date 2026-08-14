@@ -1,30 +1,44 @@
 # Baum-Welch sharding contract
 
 Non-multipron Baum-Welch training partitions the canonical manifest into contiguous ranges and
-reduces shard artifacts in ascending shard ID through the vendored accumulator reducers. The
-contract is:
+reduces shard artifacts in ascending shard ID through the vendored accumulator reducers.
 
-1. Repeating a run with the same manifest and shard count produces byte-identical accumulator
-   artifacts and model files. Ascending shard-ID reduction is deterministic by construction; this
-   gate detects unstable ordering, races, and uninitialized bytes, but does not independently test
-   arbitrary completion-order permutations.
-2. Assigned, processed, retried, and skipped utterance identities, accepted frame counts, and
-   per-pass stop decisions are exactly partition-independent.
-3. Floating parameters are not claimed equal across shard counts. Binary32 partial-sum regrouping
-   changes the pass-one seed, and multi-pass re-estimation amplifies that difference. No tolerance
-   is offered for cross-count parameter comparisons.
-4. Effective BW shard count is an experimental variable recorded in training provenance beside the
-   requested job count, host, and architecture. Model-directory comparison includes
-   `provenance.json`, so a requested/effective shard mismatch is visible. A run comparison that does
-   not pin the effective count is invalid: downstream tree construction can amplify flat-direction
-   parameter differences into different senone compositions.
-5. Multipron training requested with more than one shard falls back loudly to one shard and logs
-   `fallback_senone` as the reason.
+<!-- BEGIN GENERATED GATE SCOPE -->
+## Generated gate scope
 
-The cross-count discrete-state gate uses the one-shard reducer path. A separate gate compares that
-path's final model files and top-level `gauden_counts` byte-for-byte with the established pre-sharding
-in-process accumulation path. Together they expose a defect shared by all reducer shard counts, but
-they do not certify upstream mathematical correctness.
+This section is generated from `@contract_scope` declarations on the named test gates.
+
+1. At exactly `2` shards and 3 passes, `tests/test_numeric_harness.py::test_seeded_bw_shards_are_reproducible_and_discrete_state_is_partition_independent` repeats the same seeded manifest twice. It compares produced model files `means`, `variances`, `mixture_weights`, and `transition_matrices`, the copied input `mdef`, and per-shard files `artifact.json`, `gauden_counts`, `mixw_counts`, and `tmat_counts` byte-for-byte. The scope is the architecture and operating system executing the test; it does not compare across architectures or operating systems.
+
+2. Across shard counts `1` and `2`, `tests/test_numeric_harness.py::test_seeded_bw_shards_are_reproducible_and_discrete_state_is_partition_independent` compares `assigned_ids`, `processed_ids`, `retried_ids`, `skipped`, `total_frames`, and `stop_decision` for exactly 3 passes on the same seeded manifest. It makes no cross-count floating-parameter comparison.
+
+3. At exactly `1` shard and 3 passes, `tests/test_numeric_harness.py::test_one_shard_reducer_matches_established_in_process_bw` compares the reducer path with the in-process reference. It compares files `gauden_counts`, `mdef`, `means`, `mixture_weights`, `transition_matrices`, and `variances` byte-for-byte and telemetry fields `total_frames` and `stop_decision` value-for-value.
+
+4. `tests/test_bw_sharding.py::test_model_comparison_surfaces_effective_bw_shard_count` compares model directories whose `provenance.json` records effective shard counts `1` and `2` and requires the comparison to report that file as different.
+
+5. For a request of `4` shards, `tests/test_bw_sharding.py::test_multipron_multiple_shards_falls_back_loudly` requires multipron training to select `1` effective shard and emit reason `fallback_senone`; it also requires non-multipron training to retain the request.
+
+6. `tests/test_bw_sharding.py::test_artifacts_reject_missing_or_stale_payload` exercises rejection of `missing metadata` and `stale accumulator payload` in the shard-artifact validator. These are unit-level mutations, not externally supplied production artifacts.
+
+<!-- END GENERATED GATE SCOPE -->
+
+## Hand-written limitations and interpretation
+
+The reproducibility gate detects unstable ordering, races, and uninitialized bytes, but does not
+independently test arbitrary completion-order permutations. Floating parameters are not claimed
+equal across shard counts. Binary32 partial-sum regrouping changes the pass-one seed, and multi-pass
+re-estimation amplifies that difference. No tolerance is offered for cross-count parameter
+comparisons.
+
+Effective BW shard count is an experimental variable recorded in training provenance beside the
+requested job count, host, and architecture. A run comparison that does not pin the effective count
+is invalid: downstream tree construction can amplify flat-direction parameter differences into
+different senone compositions.
+
+The cross-count discrete-state gate uses the one-shard reducer path. Together with the separate
+in-process comparison it exposes a defect shared by all reducer shard counts, but neither gate
+certifies upstream mathematical correctness. Defects present in the serial reference remain
+invisible.
 
 The assigned/outcomes/coverage reconciliation in `_validate_shard_artifacts` is the active runtime
 guard: it checks the real shard results for complete, unique manifest coverage and consistent

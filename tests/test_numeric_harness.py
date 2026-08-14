@@ -14,6 +14,7 @@ import pytest
 
 from pstrain.lib import _pstrainc
 from pstrain.lib.bw import BWConfig, BWTrainer
+from pstrain.lib.contract_docs import contract_scope
 from pstrain.lib.features import read_sphinx_mfc
 from pstrain.lib.pipeline import PipelineContext
 from pstrain.lib.pipeline.tasks import TARGETS
@@ -1085,6 +1086,29 @@ def test_bw_discrete_contract_negative_control_rejects_dropped_identity() -> Non
 
 
 @requires_c_library
+@contract_scope(
+    order=1,
+    kind="fixed-count-reproducibility",
+    shard_counts=(2,),
+    passes=3,
+    produced_files=("means", "variances", "mixture_weights", "transition_matrices"),
+    copied_files=("mdef",),
+    accumulator_files=("artifact.json", "gauden_counts", "mixw_counts", "tmat_counts"),
+)
+@contract_scope(
+    order=2,
+    kind="cross-count-discrete-state",
+    shard_counts=(1, 2),
+    passes=3,
+    fields=(
+        "assigned_ids",
+        "processed_ids",
+        "retried_ids",
+        "skipped",
+        "total_frames",
+        "stop_decision",
+    ),
+)
 def test_seeded_bw_shards_are_reproducible_and_discrete_state_is_partition_independent(
     flat_project: PipelineContext, tmp_path: Path
 ) -> None:
@@ -1134,6 +1158,21 @@ def test_seeded_bw_shards_are_reproducible_and_discrete_state_is_partition_indep
 
 
 @requires_c_library
+@contract_scope(
+    order=3,
+    kind="one-shard-reference",
+    shard_counts=(1,),
+    passes=3,
+    files=(
+        "gauden_counts",
+        "mdef",
+        "means",
+        "mixture_weights",
+        "transition_matrices",
+        "variances",
+    ),
+    fields=("total_frames", "stop_decision"),
+)
 def test_one_shard_reducer_matches_established_in_process_bw(
     flat_project: PipelineContext, tmp_path: Path
 ) -> None:

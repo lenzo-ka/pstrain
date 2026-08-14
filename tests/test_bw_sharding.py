@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from pstrain.lib.compare import compare_models
+from pstrain.lib.contract_docs import contract_scope
 from pstrain.lib.steps.train import (
     _ACCUMULATOR_FILES,
     _effective_bw_shard_count,
@@ -20,6 +21,12 @@ from pstrain.lib.steps.train import (
 )
 
 
+@contract_scope(
+    order=4,
+    kind="provenance-comparison",
+    file=("provenance.json",),
+    shard_counts=(1, 2),
+)
 def test_model_comparison_surfaces_effective_bw_shard_count(tmp_path: Path) -> None:
     one = tmp_path / "one"
     two = tmp_path / "two"
@@ -39,6 +46,13 @@ def test_model_comparison_surfaces_effective_bw_shard_count(tmp_path: Path) -> N
     assert "provenance.json: DIFFER (text)" in result.summary()
 
 
+@contract_scope(
+    order=5,
+    kind="multipron-fallback",
+    requested_shards=(4,),
+    effective_shards=(1,),
+    reason=("fallback_senone",),
+)
 def test_multipron_multiple_shards_falls_back_loudly(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -104,6 +118,11 @@ def _validate(directories: list[Path], common: dict[str, Any]) -> None:
             "payload digest mismatch",
         ),
     ],
+)
+@contract_scope(
+    order=6,
+    kind="artifact-validation",
+    mutations=("missing metadata", "stale accumulator payload"),
 )
 def test_artifacts_reject_missing_or_stale_payload(
     tmp_path: Path, mutation: Callable[[list[Path]], object], match: str
