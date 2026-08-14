@@ -92,12 +92,14 @@ class HMM:
         model_dir = Path(model_dir)
 
         # Use CFFI to read model files
-        means_raw, n_cb, n_density, veclen, _ = _pstrainc.read_gau(str(model_dir / "means"))
+        means_raw, n_cb, n_feat, n_density, veclens = _pstrainc.read_gau(str(model_dir / "means"))
         variances_raw, _, _, _, _ = _pstrainc.read_gau(str(model_dir / "variances"))
 
+        if n_feat != 1:
+            raise ValueError("HMM.load currently requires a single feature stream")
         # Reshape to (n_cb, n_density, veclen)
-        means = means_raw.reshape(n_cb, n_density, veclen)
-        variances = variances_raw.reshape(n_cb, n_density, veclen)
+        means = means_raw.reshape(n_cb, n_density, veclens[0])
+        variances = variances_raw.reshape(n_cb, n_density, veclens[0])
 
         mixw_raw, n_mixw, n_feat_stream, n_density_mw = _pstrainc.read_mixw(
             str(model_dir / "mixture_weights")
@@ -378,6 +380,31 @@ class BWTrainer:
         if hasattr(self, "_proxy"):
             return bool(self._proxy.call("normalize"))
         return bool(self._lib.pstrain_bw_normalize(self._ctx) == 0)
+
+    def dump_accumulators(self, accum_dir: Path) -> None:
+        """Write mergeable upstream-format accumulators for this session."""
+        if self.config.multipron:
+            raise RuntimeError("BW sharding is unavailable when multipron_training=true")
+        if hasattr(self, "_proxy"):
+            self._proxy.call("dump_accumulators", accum_dir)
+            return
+        accum_dir.mkdir(parents=True, exist_ok=False)
+        if self._lib.pstrain_bw_dump_accum(self._ctx, str(accum_dir).encode()) != 0:
+            raise RuntimeError(f"Failed to dump BW accumulators to {accum_dir}")
+
+    def restore_accumulators(self, accum_dirs: list[Path]) -> None:
+        """Merge accumulator directories through vendored norm's rdacc primitives."""
+        if self.config.multipron:
+            raise RuntimeError("BW sharding is unavailable when multipron_training=true")
+        if not accum_dirs:
+            raise ValueError("At least one accumulator directory is required")
+        if hasattr(self, "_proxy"):
+            self._proxy.call("restore_accumulators", accum_dirs)
+            return
+        encoded = [self._ffi.new("char[]", str(path).encode()) for path in accum_dirs]
+        c_dirs = self._ffi.new("char *[]", encoded)
+        if self._lib.pstrain_bw_restore_accumdirs(self._ctx, c_dirs, len(encoded)) != 0:
+            raise RuntimeError("Failed to merge BW accumulator directories")
 
     def save(
         self,
