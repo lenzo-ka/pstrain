@@ -345,6 +345,12 @@ def engine_identity(dictionary: Path | None = None) -> dict[str, str]:
     identity["pocketsphinx_version"] = pocketsphinx_version()
     native = get_lib_path()
     identity["native_library_sha256"] = sha256(native) if native is not None else "absent"
+    if native is not None:
+        from pstrain.lib._cffi.core import get_ffi, get_lib
+
+        identity["fp_contract"] = (
+            get_ffi().string(get_lib().pstrain_fp_contract_policy()).decode("ascii")
+        )
     try:
         describe = subprocess.run(
             ["git", "describe", "--always", "--dirty"],

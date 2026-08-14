@@ -117,10 +117,17 @@ class InfoCommand(Command):
         """Gather all system information."""
         lib_available = self._check_lib_available()
 
+        fp_contract = None
+        if lib_available:
+            from pstrain.lib._cffi.core import get_ffi, get_lib
+
+            fp_contract = get_ffi().string(get_lib().pstrain_fp_contract_policy()).decode("ascii")
+
         return {
             "pstrain": {
                 "version": __version__,
                 "lib_available": lib_available,
+                "fp_contract": fp_contract,
             },
             "paths": {
                 "bin_dir": str(paths.bin_dir) if paths.bin_dir else None,
@@ -162,6 +169,8 @@ class InfoCommand(Command):
         print(
             f"  C library:     {'available' if info['pstrain']['lib_available'] else 'not found'}"
         )
+        if info["pstrain"]["fp_contract"] is not None:
+            print(f"  FP contraction:   {info['pstrain']['fp_contract']}")
         print()
 
         print("Paths:")

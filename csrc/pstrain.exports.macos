@@ -76,6 +76,7 @@ _pstrain_mdef_gen_untied
 _pstrain_norm_gau
 _pstrain_param_cnt
 _pstrain_pocketsphinx_version
+_pstrain_fp_contract_policy
 _pstrain_prune_tree
 _pstrain_read_pset
 _pstrain_session_probe_is_set

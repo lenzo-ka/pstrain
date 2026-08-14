@@ -4,6 +4,12 @@
 #include <sphinxbase/fe.h>
 #include <sphinxbase/logmath.h>
 
+#ifndef PSTRAIN_FP_CONTRACT_POLICY
+#error "PSTRAIN_FP_CONTRACT_POLICY must be declared by the build"
+#endif
+
+const char *pstrain_fp_contract_policy(void) { return PSTRAIN_FP_CONTRACT_POLICY; }
+
 void pstrain_cffi_ckd_free(void *ptr) { ckd_free(ptr); }
 void pstrain_cffi_ckd_free_3d(void *ptr) { ckd_free_3d(ptr); }
 

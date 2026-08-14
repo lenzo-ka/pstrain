@@ -59,6 +59,15 @@ def test_pstrainc_bindings() -> None:
 
 
 @pytest.mark.skipif(not _lib_exists(), reason="C library not built")
+def test_native_build_declares_fp_contraction_policy() -> None:
+    """The loaded native artifact reports its declared arithmetic policy."""
+    from pstrain.lib._pstrainc import get_ffi, get_lib
+
+    policy = get_ffi().string(get_lib().pstrain_fp_contract_policy()).decode("ascii")
+    assert policy == "off"
+
+
+@pytest.mark.skipif(not _lib_exists(), reason="C library not built")
 def test_lib_singleton() -> None:
     """Test that get_lib returns the same instance."""
     from pstrain.lib._pstrainc import get_lib

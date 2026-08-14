@@ -30,7 +30,7 @@ import json
 from dataclasses import asdict, dataclass, field
 from functools import cache
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Self, cast
 
 from pstrain import __version__
 from pstrain.lib.config.models import Profile, TrainingScheduleConfig
@@ -56,7 +56,17 @@ def _native_library_identity() -> dict[str, str]:
         return {"state": "absent"}
     resolved = lib_path.resolve()
     stat = resolved.stat()
-    return {"sha256": _sha256_file(resolved, stat.st_size, stat.st_mtime_ns)}
+    return {
+        "sha256": _sha256_file(resolved, stat.st_size, stat.st_mtime_ns),
+        "fp_contract": _fp_contract_policy(),
+    }
+
+
+def _fp_contract_policy() -> str:
+    """Return the contraction policy declared by the loaded native build."""
+    from pstrain.lib._cffi.core import get_ffi, get_lib
+
+    return cast(str, get_ffi().string(get_lib().pstrain_fp_contract_policy()).decode("ascii"))
 
 
 @dataclass(frozen=True)
