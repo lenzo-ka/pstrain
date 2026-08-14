@@ -63,10 +63,12 @@ state_t *next_utt_states(uint32 *n_state,
 			 lexicon_t *lex,
 			 model_inventory_t *inv,
 			 model_def_t *mdef,
-			 char *trans
+			 char *trans,
+			 int optional_boundary_silence
 			 )
 {
     char **word;
+    char **all_word;
     char *utterance;
     uint32 n_word;
     uint32 n_phone;
@@ -79,7 +81,19 @@ state_t *next_utt_states(uint32 *n_state,
     utterance = ckd_salloc(trans);
     n_word = str2words(utterance, NULL, 0);
     word = ckd_calloc(n_word, sizeof(char*));
+    all_word = word;
     str2words(utterance, word, n_word);
+
+    /* PSTRAIN DIVERGENCE: upstream makes transcript <s>/</s> SIL HMMs
+     * mandatory.  The historical linear state sequence has no epsilon entry
+     * node, so its exact zero-frame bypass is represented by omitting only
+     * those explicit boundary words. */
+    if (optional_boundary_silence && n_word > 0 && strcmp(word[0], "<s>") == 0) {
+        ++word;
+        --n_word;
+    }
+    if (optional_boundary_silence && n_word > 0 && strcmp(word[n_word - 1], "</s>") == 0)
+        --n_word;
 
     phone = mk_phone_list(&btw_mark, &n_phone, word, n_word, lex);
 
@@ -110,7 +124,7 @@ state_t *next_utt_states(uint32 *n_state,
 
     ckd_free(phone);
     ckd_free(btw_mark);
-    ckd_free(word);
+    ckd_free(all_word);
     ckd_free(utterance);
 
     return state_seq;
@@ -120,7 +134,8 @@ state_t *next_utt_states_graph(uint32 *n_state,
 			       lexicon_t *lex,
 			       model_inventory_t *inv,
 			       model_def_t *mdef,
-			       char *trans
+			       char *trans,
+			       int optional_boundary_silence
 			       )
 {
     char *utterance;
@@ -142,8 +157,20 @@ state_t *next_utt_states_graph(uint32 *n_state,
     word = ckd_calloc(n_word, sizeof(char *));
     str2words(utterance, word, n_word);
 
-    graph = mk_phone_graph(word, n_word, lex, /*multipron=*/ 1);
-    ckd_free(word);
+    /* See the linear builder above: the graph-state engine also has one
+     * hard-wired entry and exit, so omission is its exact boundary bypass. */
+    {
+        char **all_word = word;
+        if (optional_boundary_silence && n_word > 0 && strcmp(word[0], "<s>") == 0) {
+            ++word;
+            --n_word;
+        }
+        if (optional_boundary_silence && n_word > 0 && strcmp(word[n_word - 1], "</s>") == 0)
+            --n_word;
+
+        graph = mk_phone_graph(word, n_word, lex, /*multipron=*/ 1);
+        ckd_free(all_word);
+    }
     ckd_free(utterance);
     if (graph == NULL) {
 	/* mk_phone_graph has already logged the offending word. */

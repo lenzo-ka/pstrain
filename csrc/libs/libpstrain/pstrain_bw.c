@@ -121,6 +121,7 @@ struct pstrain_bw_context_s {
     float32 ***raw_mixw; /* Upstream-format mixture occupancy accumulators. */
     float32 ***raw_tmat; /* Upstream-format transition accumulators. */
     int32 multipron; /* Multi-pron training: build wide utterance graphs */
+    int32 optional_boundary_silence;
     char *fallback_senone; /* CI senones used as primary models this pass */
 
     /* Stats */
@@ -179,6 +180,7 @@ pstrain_bw_init(const char *mdef_path,
     ctx->var_reest = config->var_reest;
     ctx->pass2var = config->pass2var;
     ctx->unobserved_gaussian_policy = config->unobserved_gaussian_policy;
+    ctx->optional_boundary_silence = config->optional_boundary_silence;
     ctx->multipron = 1;  /* On by default; disable via pstrain_bw_set_multipron(ctx, 0). */
 
     /* Initialize cmd_ln with default values - required for gauden_alloc_acc etc.
@@ -434,7 +436,8 @@ build_utt_state_seq(pstrain_bw_context_t *ctx,
                                ctx->lex,
                                ctx->inv,
                                ctx->mdef,
-                               trans_copy);
+                               trans_copy,
+                               ctx->optional_boundary_silence);
     }
 
     *needs_free = 1;
@@ -442,7 +445,8 @@ build_utt_state_seq(pstrain_bw_context_t *ctx,
                                  ctx->lex,
                                  ctx->inv,
                                  ctx->mdef,
-                                 trans_copy);
+                                 trans_copy,
+                                 ctx->optional_boundary_silence);
 }
 
 /* Copy the historical linear builder's static state graph into the same

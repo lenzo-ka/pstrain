@@ -130,6 +130,10 @@ class TrainingConfig(StrictModel):
     multipron_training: Annotated[
         bool, Field(description="Sum posteriors over pronunciation variants")
     ] = True
+    optional_boundary_silence: Annotated[
+        bool,
+        Field(description="Permit initial and final transcript silence to consume zero frames"),
+    ] = True
     untied_inventory: Annotated[
         Literal["all-triphone", "transcript-reachable", "linear"],
         Field(description="Untied-model phone inventory policy"),

@@ -623,6 +623,7 @@ main_reestimate(model_inventory_t *inv,
     int32 pass2var;
     int32 var_is_full;
     int32 multipron;
+    int32 optional_boundary_silence;
 
     uint32 n_utt;
 
@@ -665,6 +666,7 @@ main_reestimate(model_inventory_t *inv,
     pass2var = cmd_ln_int32("-2passvar");
     var_is_full = cmd_ln_int32("-fullvar");
     multipron = cmd_ln_int32("-multipron");
+    optional_boundary_silence = cmd_ln_int32("-optional_boundary_silence");
     pdumpdir = cmd_ln_str("-pdumpdir");
     in_veclen = cmd_ln_int32("-ceplen");
 
@@ -799,9 +801,11 @@ main_reestimate(model_inventory_t *inv,
 	 * linear builder returns a pointer into static buffers inside
 	 * state_seq_make() and must NOT be freed. */
 	if (multipron)
-	    state_seq = next_utt_states_graph(&n_state, lex, inv, mdef, trans);
+	    state_seq = next_utt_states_graph(&n_state, lex, inv, mdef, trans,
+	                                      optional_boundary_silence);
 	else
-	    state_seq = next_utt_states(&n_state, lex, inv, mdef, trans);
+	    state_seq = next_utt_states(&n_state, lex, inv, mdef, trans,
+	                                optional_boundary_silence);
 	printf(" %5u", n_state);
 
 	if (state_seq == NULL) {
@@ -1461,7 +1465,7 @@ mmi_ci_train(model_inventory_t *inv,
       arc_f[k] = f[k+lat->arc[n].sf-1];
 
     /* make state list */
-    state_seq = next_utt_states(&n_state, lex, inv, mdef, lat->arc[n].word);
+    state_seq = next_utt_states(&n_state, lex, inv, mdef, lat->arc[n].word, 0);
 
     /* viterbi compuation to get the acoustic score for a word hypothesis */
     if (mmi_viterbi_run(&log_lik,
@@ -1496,7 +1500,7 @@ mmi_ci_train(model_inventory_t *inv,
 	arc_f[k] = f[k+lat->arc[n].sf-1];
 
       /* make state list */
-      state_seq = next_utt_states(&n_state, lex, inv, mdef, lat->arc[n].word);
+      state_seq = next_utt_states(&n_state, lex, inv, mdef, lat->arc[n].word, 0);
 
       /* viterbi update model parameters */
       if (mmi_viterbi_update(arc_f, n_word_obs,

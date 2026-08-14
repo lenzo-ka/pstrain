@@ -76,6 +76,7 @@ class Aligner:
         filler_dict: Path | str | None = None,
         beam: float = _DEFAULT_BEAM,
         insert_sil: bool = True,
+        optional_boundary_silence: bool = True,
         include_phones: bool = True,
         include_states: bool = False,
         cmn: str = _DEFAULT_CMN,
@@ -112,6 +113,7 @@ class Aligner:
                     "filler_dict": filler_dict,
                     "beam": beam,
                     "insert_sil": insert_sil,
+                    "optional_boundary_silence": optional_boundary_silence,
                     "include_phones": include_phones,
                     "include_states": include_states,
                     "cmn": cmn,
@@ -139,6 +141,7 @@ class Aligner:
         lib.pstrain_align_config_default(cfg)
         cfg.beam = float(beam)
         cfg.insert_sil = 1 if insert_sil else 0
+        cfg.optional_boundary_silence = 1 if optional_boundary_silence else 0
         cfg.compute_phones = 1 if include_phones else 0
         cfg.compute_states = 1 if include_states else 0
         cfg.varnorm = 1 if varnorm else 0

@@ -541,6 +541,11 @@ If yo want to do parallel training for N machines. Run N trainers with \n\
 	  "(next_utt_states), which silently picks the first lexicon variant. "
 	  "Default no for parity with prior behavior." },
 
+	{ "-optional_boundary_silence",
+	  ARG_BOOLEAN,
+	  "yes",
+	  "Omit transcript <s> and </s> SIL HMMs so they consume zero frames." },
+
 	{ "-mmie_type",
 	  ARG_STRING,
 	  "rand",

@@ -24,6 +24,7 @@ extern "C" {
 typedef struct pstrain_align_config_s {
     double  beam;            /**< Main pruning beam.        Default 1e-64. */
     int     insert_sil;      /**< Insert optional silences. Default 1.    */
+    int     optional_boundary_silence; /**< Permit boundary SIL bypasses. Default 1. */
     int     compute_phones;  /**< Return phone segments.    Default 1.    */
     int     compute_states;  /**< Return state segments.    Default 0.    */
     const char *feat_type;   /**< Feature stream spec.   Default "1s_c_d_dd". */
