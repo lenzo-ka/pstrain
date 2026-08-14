@@ -25,20 +25,24 @@ pytestmark = requires_c_library
         ("samprate", 22050, "samprate", 22050),
     ],
 )
-def test_nondefault_feature_config_reaches_live_decoder(
+def test_complete_feat_params_reaches_live_decoder(
     tmp_path: Path, field: str, value: object, native_name: str, expected: object
 ) -> None:
-    """Each profile value differs from the engine default if its assignment is deleted."""
+    """The complete trained record wins over a conflicting active profile."""
     fixture = Path(__file__).parent / "fixtures" / "multipron_final_state"
     model = tmp_path / "model"
     shutil.copytree(fixture / "model", model)
     feat_params = model / "feat.params"
     feat_params.write_text(
         "\n".join(
-            line
+            (
+                f"-{native_name} {value}"
+                if line.startswith(f"-{native_name} ")
+                else "-nfft 1024"
+                if native_name == "samprate" and line.startswith("-nfft ")
+                else line
+            )
             for line in feat_params.read_text().splitlines()
-            if not line.startswith(f"-{native_name} ")
-            and not (native_name == "samprate" and line.startswith("-nfft "))
         )
         + "\n"
     )
@@ -46,7 +50,7 @@ def test_nondefault_feature_config_reaches_live_decoder(
         model,
         fixture / "dictionary.dict",
         fixture / "filler.dict",
-        feature_config=FeatureConfig(**{field: value}),
+        feature_config=FeatureConfig(),
     )
     try:
         name = native_name.encode()
@@ -62,25 +66,20 @@ def test_nondefault_feature_config_reaches_live_decoder(
 
 
 @pytest.mark.parametrize("remove_noise", [False, True])
-def test_remove_noise_reaches_live_decoder_when_feat_params_omits_it(
+def test_remove_noise_in_complete_feat_params_wins_over_profile(
     tmp_path: Path, remove_noise: bool
 ) -> None:
-    """Gate conditional profile routing, with an intentionally asymmetric oracle.
-
-    With ``-remove_noise`` omitted from an otherwise present ``feat.params``, the
-    True arm redlines a deleted native assignment because PocketSphinx defaults
-    to false.  The False arm agrees with that default even without the assignment;
-    it instead guards against an always-true or inverted assignment.
-    """
+    """Both boolean values in the trained record override a conflicting profile."""
     fixture = Path(__file__).parent / "fixtures" / "multipron_final_state"
     model = tmp_path / "model"
     shutil.copytree(fixture / "model", model)
     feat_params = model / "feat.params"
     feat_params.write_text(
         "\n".join(
-            line
+            f"-remove_noise {'yes' if remove_noise else 'no'}"
+            if line.startswith("-remove_noise ")
+            else line
             for line in feat_params.read_text().splitlines()
-            if not line.startswith("-remove_noise ")
         )
         + "\n"
     )
@@ -88,7 +87,7 @@ def test_remove_noise_reaches_live_decoder_when_feat_params_omits_it(
         model,
         fixture / "dictionary.dict",
         fixture / "filler.dict",
-        feature_config=FeatureConfig(remove_noise=remove_noise),
+        feature_config=FeatureConfig(remove_noise=not remove_noise),
     )
     try:
         actual = decoder._lib.pstrain_decoder_config_int(decoder._decoder, b"remove_noise")
