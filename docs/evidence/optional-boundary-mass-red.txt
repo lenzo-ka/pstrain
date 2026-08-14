@@ -1,0 +1,18 @@
+Optional boundary mass gate, before normalization
+Date: 2026-08-14
+
+Command:
+  cmake --build build --target test_bw_state_seq_build -j2
+  ctest --test-dir build -R '^bw_state_seq_build$' --output-on-failure
+
+Result: FAIL (ctest exit 8)
+
+First numeric failure:
+  FAIL: retained initial SIL path receives half the entry mass
+        (csrc/tests/test_bw_state_seq_build.c:60)
+
+Observed source behavior:
+  next_utt_states_initial_tprob(states, 0) returned 1.0 while the gate
+  requires 0.5, so the virtual-start mass is not split between retained
+  and bypass alternatives. The failing assertion precedes the exit-mass
+  assertion; the fixed run must exercise both.

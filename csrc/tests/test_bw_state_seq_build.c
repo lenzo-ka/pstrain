@@ -51,22 +51,26 @@ exercise_boundary_mode(pstrain_bw_context_t *ctx, int multipron,
     states = pstrain_bw_build_state_seq(ctx, "<s> a and </s>", &n_state);
     CHECK(states != NULL, "boundary sequence builds");
     CHECK(n_state > 1, "boundary sequence has states");
-    if (multipron && optional_boundary_silence) {
-        float32 bypass_entry_mass = 0.0f;
+    if (optional_boundary_silence) {
+        float32 bypass_entry_mass = 0.0f, total_entry_mass;
         uint32 bypass_entries = 0, i;
 
-        CHECK(fabs(next_utt_states_initial_tprob(states, 0) - 1.0f) < 1e-6,
-              "retained initial SIL path has unit entry weight");
+        CHECK(fabs(next_utt_states_initial_tprob(states, 0) - 0.5f) < 1e-6,
+              "retained initial SIL path receives half the entry mass");
         for (i = 1; i < n_state; ++i) {
             if (!(states[i].flags & STATE_FLAG_INITIAL))
                 continue;
             ++bypass_entries;
             bypass_entry_mass += next_utt_states_initial_tprob(states, i);
         }
-        CHECK(bypass_entries >= 2,
-              "fixture first word exposes multiple pronunciation entries");
-        CHECK(fabs(bypass_entry_mass - 1.0f) < 1e-6,
-              "multipron bypass entry alternatives preserve unit fan-out mass");
+        CHECK(bypass_entries >= (multipron ? 2U : 1U),
+              "fixture exposes the expected bypass entries");
+        CHECK(fabs(bypass_entry_mass - 0.5f) < 1e-6,
+              "multipron bypass entries share half the entry mass");
+        total_entry_mass = next_utt_states_initial_tprob(states, 0)
+            + bypass_entry_mass;
+        CHECK(fabs(total_entry_mass - 1.0f) < 1e-6,
+              "all virtual-start alternatives have total mass one");
     }
     *n_state_out = n_state;
     *n_initial = 0;
@@ -74,6 +78,17 @@ exercise_boundary_mode(pstrain_bw_context_t *ctx, int multipron,
         if (states[i].flags & STATE_FLAG_INITIAL)
             ++*n_initial;
     *final_priors = states[n_state - 1].n_prior;
+    if (optional_boundary_silence) {
+        uint32 i, j;
+        for (i = 0; i < states[n_state - 1].n_prior; ++i) {
+            uint32 pred = states[n_state - 1].prior_state[i];
+            float32 total_exit_mass = 0.0f;
+            for (j = 0; j < states[pred].n_next; ++j)
+                total_exit_mass += states[pred].next_tprob[j];
+            CHECK(fabs(total_exit_mass - 1.0f) < 1e-6,
+                  "each optional final-boundary predecessor has total exit mass one");
+        }
+    }
     pstrain_bw_free_state_seq(states, n_state);
     return 0;
 }
