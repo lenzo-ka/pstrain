@@ -27,12 +27,14 @@ from pstrain.benchmarks.arctic import (
     benchmark_conditions,
     bootstrap_ci,
     compare_results,
+    configuration_provenance,
     extract_archive,
     fetch_archive,
     load_transcripts,
     main,
     make_record,
     paired_delta_ci,
+    render_configuration_provenance,
     resolve_data_dir,
     sha256,
     training_corpus_identity,
@@ -237,6 +239,32 @@ def test_pin_configs_resolve_ratified_conditions(tmp_path: Path) -> None:
         "fwdflatbeam",
         "fwdflatwbeam",
     }
+
+
+def test_configuration_provenance_renders_default_and_non_default_cells() -> None:
+    shipped = Profile()
+    default = configuration_provenance(shipped, source_kind="shipped defaults")
+    non_default = configuration_provenance(
+        Profile(training={"tree_directional_questions": False}),
+        source_kind="explicit overrides",
+        override_reason="isolate directional-question behavior",
+    )
+
+    assert default["diff_from_shipped_defaults"] == []
+    assert render_configuration_provenance(default) == (
+        "Source: shipped defaults\n\nDiff from shipped schema defaults: (empty)"
+    )
+    assert non_default["diff_from_shipped_defaults"] == [
+        {
+            "setting": "training.tree_directional_questions",
+            "shipped_default": True,
+            "value": False,
+        }
+    ]
+    rendered = render_configuration_provenance(non_default)
+    assert "Source: explicit overrides" in rendered
+    assert "Reason: isolate directional-question behavior" in rendered
+    assert "| `training.tree_directional_questions` | `true` | `false` |" in rendered
 
 
 def _cell(errors: tuple[int, ...], *, recorded: bool) -> dict[str, object]:
