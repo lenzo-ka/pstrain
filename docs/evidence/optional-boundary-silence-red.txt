@@ -1,0 +1,23 @@
+Optional boundary silence gate: demonstrated red history
+=========================================================
+
+Baseline: origin/main at 97329d6
+Test overlay: csrc/tests/test_bw_state_seq_build.c from the feature branch
+Command:
+
+  cmake --build /tmp/optsil-red-20260814/build --target test_bw_state_seq_build -j8
+
+Relevant output:
+
+  test_bw_state_seq_build.c:88:11: error: 'pstrain_bw_config_t' has no member named 'optional_boundary_silence'
+     88 |     config.optional_boundary_silence = 1;
+        |           ^
+  gmake[3]: *** [csrc/tests/CMakeFiles/test_bw_state_seq_build.dir/build.make:76: csrc/tests/CMakeFiles/test_bw_state_seq_build.dir/test_bw_state_seq_build.c.o] Error 1
+  gmake[2]: *** [CMakeFiles/Makefile2:791: csrc/tests/CMakeFiles/test_bw_state_seq_build.dir/all] Error 2
+  gmake[1]: *** [CMakeFiles/Makefile2:798: csrc/tests/CMakeFiles/test_bw_state_seq_build.dir/rule] Error 2
+  gmake: *** [Makefile:472: test_bw_state_seq_build] Error 2
+
+The baseline cannot compile the gate because neither the schema-plumbed native
+option nor the bypass implementation exists there. On the feature branch the
+same test compiles and exercises both enabled and disabled positions in both
+the linear and multipron state-sequence builders.

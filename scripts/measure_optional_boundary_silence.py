@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure optional-boundary alignment and BW SIL occupancy on one corpus."""
+"""Measure optional-boundary BW SIL occupancy on one corpus."""
 
 from __future__ import annotations
 
