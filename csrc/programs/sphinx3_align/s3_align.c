@@ -871,6 +871,30 @@ align_build_sent_hmm(char *wordstr, int insert_sil, int optional_boundary_silenc
     pnode_list = NULL;
     oov = 0;
 
+    /* Callers may supply the same explicit sentence markers consumed by BW.
+     * The aligner also supplies its own start/finish words, so do not leave a
+     * second mandatory pair inside the optional outer pair. */
+    if (optional_boundary_silence) {
+        size_t len;
+        while (*wordstr == ' ' || *wordstr == '\t')
+            ++wordstr;
+        if (strncmp(wordstr, "<s>", 3) == 0 &&
+            (wordstr[3] == '\0' || wordstr[3] == ' ' || wordstr[3] == '\t')) {
+            wordstr += 3;
+            while (*wordstr == ' ' || *wordstr == '\t')
+                ++wordstr;
+        }
+        len = strlen(wordstr);
+        while (len > 0 && (wordstr[len - 1] == ' ' || wordstr[len - 1] == '\t'))
+            wordstr[--len] = '\0';
+        if (len >= 4 && strcmp(wordstr + len - 4, "</s>") == 0) {
+            len -= 4;
+            wordstr[len] = '\0';
+            while (len > 0 && (wordstr[len - 1] == ' ' || wordstr[len - 1] == '\t'))
+                wordstr[--len] = '\0';
+        }
+    }
+
     /* State-level DAG initialization should be here in case the build is aborted */
     shead.pnode = &phead;
     shead.succlist = NULL;

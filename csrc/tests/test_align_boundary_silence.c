@@ -21,7 +21,8 @@ main(int argc, char *argv[])
     pstrain_align_config_t config;
     pstrain_align_context_t *ctx;
     int32 initial, final;
-    char transcript[] = "a and";
+    char transcript_off[] = "<s> a and </s>";
+    char transcript_on[] = "<s> a and </s>";
 
     CHECK(argc == 8, "expected model and dictionary fixture paths");
     pstrain_align_config_default(&config);
@@ -30,12 +31,12 @@ main(int argc, char *argv[])
                              argv[6], argv[7], &config);
     CHECK(ctx != NULL, "initialize aligner fixture");
 
-    CHECK(align_build_sent_hmm(transcript, 1, 0) == 0, "build off-mode DAG");
+    CHECK(align_build_sent_hmm(transcript_off, 1, 0) == 0, "build off-mode DAG");
     CHECK(align_has_boundary_bypasses(&initial, &final) == 0, "inspect off-mode DAG");
     CHECK(!initial && !final, "off mode requires both boundary HMMs");
     align_destroy_sent_hmm();
 
-    CHECK(align_build_sent_hmm(transcript, 1, 1) == 0, "build on-mode DAG");
+    CHECK(align_build_sent_hmm(transcript_on, 1, 1) == 0, "build on-mode DAG");
     CHECK(align_has_boundary_bypasses(&initial, &final) == 0, "inspect on-mode DAG");
     CHECK(initial && final, "on mode permits both boundary bypasses");
     align_destroy_sent_hmm();
