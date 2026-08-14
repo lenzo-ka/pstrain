@@ -20,7 +20,7 @@ import pytest
 import yaml
 
 from pstrain.lib.pipeline import PipelineContext
-from pstrain.lib.pipeline.context import DEFAULT_CONFIGS, FeatParams, SplitParams
+from pstrain.lib.pipeline.context import DEFAULT_CONFIGS, FeatParams, RunnerParams, SplitParams
 from pstrain.lib.pipeline.tasks import DEFAULT_TARGET, TARGETS, build_pipeline
 from tests.clib import C_LIBRARY_AVAILABLE
 
@@ -311,6 +311,23 @@ def test_stage_fingerprints_cover_only_effective_relevant_values(empty_project: 
 
     document = base.provenance_document("training")
     assert document["fingerprint"] in base.provenance_path("training").name
+
+
+def test_training_provenance_declares_bw_shard_count_host_and_architecture(
+    empty_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Make shard count visible; this does not compare cross-count model parameters."""
+    monkeypatch.setattr("pstrain.lib.pipeline.context.socket.gethostname", lambda: "training-host")
+    monkeypatch.setattr("pstrain.lib.pipeline.context.platform.machine", lambda: "test-arch")
+    ctx = replace(PipelineContext.from_config(empty_project), runner=RunnerParams(jobs=3))
+
+    execution = ctx.provenance_document("training")["execution"]
+
+    assert execution == {
+        "host": "training-host",
+        "architecture": "test-arch",
+        "bw_shard_count": 3,
+    }
 
 
 def test_exclusion_schedule_config_and_provenance_are_verbatim(empty_project: Path) -> None:

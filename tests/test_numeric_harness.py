@@ -1040,13 +1040,31 @@ def test_tied_assignments_match_independent_tree_walk(full_project: PipelineCont
     assert checked >= 60
 
 
+def _bw_contract_state(pass_row: dict[str, Any]) -> dict[str, object]:
+    shards = pass_row["shards"]
+    return {
+        "total_frames": pass_row["total_frames"],
+        "stop_decision": pass_row["stop_decision"],
+        "assigned_ids": [item for shard in shards for item in shard["assigned_ids"]],
+        "processed_ids": [item for shard in shards for item in shard["processed_ids"]],
+        "retried_ids": [item for shard in shards for item in shard["retried_ids"]],
+        "skipped": [item for shard in shards for item in shard["skipped"]],
+    }
+
+
+def _file_bytes(root: Path, relative: str) -> bytes:
+    return (root / relative).read_bytes()
+
+
 @requires_c_library
-def test_seeded_bw_reruns_are_bit_identical(flat_project: PipelineContext, tmp_path: Path) -> None:
-    """PP5 groundwork: the recorded seed produces bit-identical exercised outputs."""
+def test_seeded_bw_shards_are_reproducible_and_discrete_state_is_partition_independent(
+    flat_project: PipelineContext, tmp_path: Path
+) -> None:
+    """Certify our one-shard serial reference; defects shared with it remain invisible."""
     assert flat_project.split.seed == SEED
     fileids, transcription = write_golden_subset(flat_project)
-    outputs = [tmp_path / "one", tmp_path / "two"]
-    for output in outputs:
+    outputs = [tmp_path / "one", tmp_path / "two-a", tmp_path / "two-b"]
+    for output, n_shards in zip(outputs, (1, 2, 2), strict=True):
         run_bw_training(
             flat_project.model_dir("flat"),
             output,
@@ -1056,16 +1074,32 @@ def test_seeded_bw_reruns_are_bit_identical(flat_project: PipelineContext, tmp_p
             flat_project.shared_dir / "dictionary.dict",
             first_pass_2passvar=False,
             filler_dict=flat_project.filler_dict,
-            n_iter=1,
-            config=BWConfig(pass2var=True, unobserved_gaussian_policy="zero", a_beam=1e-200),
+            n_iter=3,
+            convergence_ratio=float("-inf"),
+            config=BWConfig(
+                pass2var=True,
+                unobserved_gaussian_policy="zero",
+                a_beam=1e-200,
+                multipron=False,
+            ),
+            multipron=False,
+            n_shards=n_shards,
         )
-    for filename in (
-        "means",
-        "variances",
-        "mixture_weights",
-        "transition_matrices",
-        "gauden_counts",
+
+    model_files = ("mdef", "means", "variances", "mixture_weights", "transition_matrices")
+    for name in model_files:
+        assert _file_bytes(outputs[1], name) == _file_bytes(outputs[2], name)
+    for pass_number in range(1, 4):
+        for shard_number in range(2):
+            relative = f".bw-accum/pass-{pass_number:02d}/shard-{shard_number:05d}"
+            for name in ("artifact.json", "gauden_counts", "mixw_counts", "tmat_counts"):
+                assert _file_bytes(outputs[1], f"{relative}/{name}") == _file_bytes(
+                    outputs[2], f"{relative}/{name}"
+                )
+
+    telemetry = [json.loads((output / "bw_telemetry.json").read_text()) for output in outputs]
+    assert all(len(item["passes"]) == 3 for item in telemetry)
+    for serial_pass, sharded_pass in zip(
+        telemetry[0]["passes"], telemetry[1]["passes"], strict=True
     ):
-        assert (outputs[0] / filename).read_bytes() == (outputs[1] / filename).read_bytes(), (
-            filename
-        )
+        assert _bw_contract_state(serial_pass) == _bw_contract_state(sharded_pass)

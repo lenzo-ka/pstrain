@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import platform
+import socket
 from dataclasses import asdict, dataclass, field
 from functools import cache
 from pathlib import Path
@@ -425,6 +427,11 @@ class PipelineContext:
                 features=asdict(self.feat),
                 training=asdict(self.train),
                 split=asdict(self.split),
+                execution={
+                    "host": socket.gethostname(),
+                    "architecture": platform.machine(),
+                    "bw_shard_count": self.runner.jobs or 1,
+                },
             )
         else:
             raise ValueError(f"unknown provenance stage: {stage!r}")
