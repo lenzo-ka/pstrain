@@ -46,7 +46,7 @@ _inside_worker = False
 P = ParamSpec("P")
 R = TypeVar("R")
 
-#: The ``contained-3`` set: the only native operations routed through the helper.
+#: Worker protocol operations accepted from containment wrappers and proxies.
 GUARDED_OPERATIONS = frozenset(
     {
         "prune_tree",

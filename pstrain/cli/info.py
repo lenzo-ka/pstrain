@@ -120,9 +120,9 @@ class InfoCommand(Command):
 
         fp_contract = None
         if lib_available:
-            from pstrain.lib._cffi.core import get_ffi, get_lib
+            from pstrain.lib.runtime import fp_contract_policy
 
-            fp_contract = get_ffi().string(get_lib().pstrain_fp_contract_policy()).decode("ascii")
+            fp_contract = fp_contract_policy()
 
         from pstrain.lib.commands import PSTRAIN_BINARIES, resolve_binary
 
