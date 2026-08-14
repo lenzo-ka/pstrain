@@ -151,8 +151,10 @@ def read_model_arrays(model_dir: Path) -> dict[str, np.ndarray[Any, Any]]:
     return {
         "means": _pstrainc.read_gau(str(model_dir / "means"))[0],
         "variances": _pstrainc.read_gau(str(model_dir / "variances"))[0],
-        "mixture_weights": _pstrainc.read_mixw(str(model_dir / "mixture_weights"))[0],
-        "transition_matrices": _pstrainc.read_tmat(str(model_dir / "transition_matrices"))[0],
+        "mixture_weights": _pstrainc.read_mixw_counts(str(model_dir / "mixture_weights"))[0],
+        "transition_matrices": _pstrainc.read_tmat_counts(str(model_dir / "transition_matrices"))[
+            0
+        ],
     }
 
 

@@ -308,15 +308,15 @@ def validate_file_type(
                 return True, f"Valid gaussians: {data.shape}"
 
             if expected == FileType.MIXTURE_WEIGHTS:
-                from pstrain.lib._cffi import read_mixw
+                from pstrain.lib._cffi import read_mixw_counts
 
-                data, n_mixw, n_feat, n_density = read_mixw(str(path))
+                data, n_mixw, n_feat, n_density = read_mixw_counts(str(path))
                 return True, f"Valid mixw: {data.shape}"
 
             if expected == FileType.TRANSITION_MATRICES:
-                from pstrain.lib._cffi import read_tmat
+                from pstrain.lib._cffi import read_tmat_counts
 
-                data, n_tmat, n_state = read_tmat(str(path))
+                data, n_tmat, n_state = read_tmat_counts(str(path))
                 return True, f"Valid tmat: {data.shape}"
 
             if expected == FileType.MODEL:

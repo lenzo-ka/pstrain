@@ -181,8 +181,8 @@ def test_native_failed_pass_then_retry_matches_clean_wide_beam_model(
     readers = {
         "means": _pstrainc.read_gau,
         "variances": _pstrainc.read_gau,
-        "mixture_weights": _pstrainc.read_mixw,
-        "transition_matrices": _pstrainc.read_tmat,
+        "mixture_weights": _pstrainc.read_mixw_counts,
+        "transition_matrices": _pstrainc.read_tmat_counts,
     }
     for filename, reader in readers.items():
         retried_values = reader(str(retried / filename))[0]

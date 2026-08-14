@@ -69,7 +69,7 @@ def format_mixw(
     Returns:
         Formatted string representation.
     """
-    mixw, n_mixw, n_feat, n_density = _pstrainc.read_mixw(str(mixw_path))
+    mixw, n_mixw, n_feat, n_density = _pstrainc.read_mixw_counts(str(mixw_path))
 
     lines = []
     lines.append(f"mixw {n_mixw} {n_feat} {n_density}")
@@ -107,7 +107,7 @@ def format_tmat(
     Returns:
         Formatted string representation.
     """
-    tmat, n_tmat, n_state = _pstrainc.read_tmat(str(tmat_path))
+    tmat, n_tmat, n_state = _pstrainc.read_tmat_counts(str(tmat_path))
 
     lines = []
     lines.append(f"tmat {n_tmat} {n_state}")

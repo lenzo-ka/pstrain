@@ -111,7 +111,7 @@ class TestSplitGaussians:
         )
 
         # Read back and verify dimensions
-        new_mixw, n_mixw, n_feat, n_density = _pstrainc.read_mixw(
+        new_mixw, n_mixw, n_feat, n_density = _pstrainc.read_mixw_counts(
             str(output_dir / "mixture_weights")
         )
 
@@ -142,7 +142,7 @@ class TestSplitGaussians:
         orig_sums = mc["mixw"].sum(axis=2)
 
         # New weights should also sum to 1 per state
-        new_mixw, _, _, _ = _pstrainc.read_mixw(str(output_dir / "mixture_weights"))
+        new_mixw, _, _, _ = _pstrainc.read_mixw_counts(str(output_dir / "mixture_weights"))
         new_sums = new_mixw.sum(axis=2)
 
         np.testing.assert_allclose(new_sums, orig_sums, rtol=1e-5)
@@ -229,7 +229,7 @@ class TestDoubleGaussians:
         )
 
         # Verify files updated
-        new_mixw, _, _, n_density = _pstrainc.read_mixw(str(result["mixture_weights"]))
+        new_mixw, _, _, n_density = _pstrainc.read_mixw_counts(str(result["mixture_weights"]))
         assert n_density == 2
 
     def test_double_gaussians_to_new_dir(
@@ -251,11 +251,13 @@ class TestDoubleGaussians:
         assert (output_dir / "mixture_weights").exists()
 
         # Original still has 1 density
-        orig_mixw, _, _, n_density = _pstrainc.read_mixw(str(mc["model_dir"] / "mixture_weights"))
+        orig_mixw, _, _, n_density = _pstrainc.read_mixw_counts(
+            str(mc["model_dir"] / "mixture_weights")
+        )
         assert n_density == 1
 
         # New has 2 densities
-        new_mixw, _, _, n_density = _pstrainc.read_mixw(str(result["mixture_weights"]))
+        new_mixw, _, _, n_density = _pstrainc.read_mixw_counts(str(result["mixture_weights"]))
         assert n_density == 2
 
 

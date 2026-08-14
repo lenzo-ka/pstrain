@@ -184,7 +184,7 @@ def test_mixw_roundtrip() -> None:
         assert ret == 0, f"write_mixw failed with return code {ret}"
 
         # Read back using Python wrapper -> C function
-        result, n_mixw, n_feat, n_density = _pstrainc.read_mixw(tmpfile)
+        result, n_mixw, n_feat, n_density = _pstrainc.read_mixw_counts(tmpfile)
 
         # Verify dimensions
         assert n_mixw == 10
@@ -217,7 +217,7 @@ def test_tmat_roundtrip() -> None:
         ret = _pstrainc.write_tmat(tmpfile, original)
         assert ret == 0, f"write_tmat failed with return code {ret}"
 
-        result, out_n_tmat, out_n_state = _pstrainc.read_tmat(tmpfile)
+        result, out_n_tmat, out_n_state = _pstrainc.read_tmat_counts(tmpfile)
 
         assert out_n_tmat == n_tmat
         assert out_n_state == n_state
@@ -228,6 +228,36 @@ def test_tmat_roundtrip() -> None:
         assert np.allclose(original[:, :-1, :], result, rtol=1e-5)
     finally:
         Path(tmpfile).unlink(missing_ok=True)
+
+
+def _assert_probability_rows(values: np.ndarray) -> None:
+    occupied = values.sum(axis=-1) > 0
+    np.testing.assert_allclose(values.sum(axis=-1)[occupied], np.float32(1.0), rtol=1e-6, atol=1e-6)
+
+
+def test_probability_readers_normalize_raw_artifacts(tmp_path: Path) -> None:
+    """Stored rows remain counts; default readers make them probabilities."""
+    mixw_path = tmp_path / "mixture_weights"
+    tmat_path = tmp_path / "transition_matrices"
+    mixw_counts = np.array([[[3.0, 11.0]], [[5.0, 17.0]]], dtype=np.float32)
+    tmat_counts = np.array([[[12.0, 4.0, 0.0], [0.0, 9.0, 3.0], [0.0, 0.0, 0.0]]], dtype=np.float32)
+    assert _pstrainc.write_mixw(str(mixw_path), mixw_counts) == 0
+    assert _pstrainc.write_tmat(str(tmat_path), tmat_counts) == 0
+
+    stored_mixw = _pstrainc.read_mixw_counts(str(mixw_path))[0]
+    stored_tmat = _pstrainc.read_tmat_counts(str(tmat_path))[0]
+    assert np.all(stored_mixw.sum(axis=-1) > np.float32(1.0))
+    assert np.all(stored_tmat.sum(axis=-1) > np.float32(1.0))
+
+    _assert_probability_rows(_pstrainc.read_mixw(str(mixw_path))[0])
+    _assert_probability_rows(_pstrainc.read_tmat(str(tmat_path))[0])
+
+    # Negative control: these assertions go red for a reader that exposes the
+    # serialized counts directly.  Keep this proof beside the positive gate.
+    with pytest.raises(AssertionError):
+        _assert_probability_rows(stored_mixw)
+    with pytest.raises(AssertionError):
+        _assert_probability_rows(stored_tmat)
 
 
 def test_gau_roundtrip() -> None:

@@ -92,7 +92,7 @@ def test_build_ci_1g_produces_finite_model(tmp_path: Path) -> None:
 
     means = _pstrainc.read_gau(str(model_dir / "means"))[0]
     variances = _pstrainc.read_gau(str(model_dir / "variances"))[0]
-    mixw = _pstrainc.read_mixw(str(model_dir / "mixture_weights"))[0]
+    mixw = _pstrainc.read_mixw_counts(str(model_dir / "mixture_weights"))[0]
 
     assert np.isfinite(means).all(), "non-finite values in means"
     assert np.isfinite(variances).all(), "non-finite values in variances"
@@ -271,8 +271,10 @@ def test_build_cd_8g_produces_genuine_tied_model(tmp_path: Path) -> None:
     means, n_mgau, n_feat, n_density, veclen = _pstrainc.read_gau(str(model_dir / "means"))
     ci_means_info = _pstrainc.read_gau(str(ctx.model_dir("ci-1g") / "means"))
     variances = _pstrainc.read_gau(str(model_dir / "variances"))[0]
-    mixw, n_mixw, mixw_feat, mixw_density = _pstrainc.read_mixw(str(model_dir / "mixture_weights"))
-    transition_matrices, n_tmat, n_state = _pstrainc.read_tmat(
+    mixw, n_mixw, mixw_feat, mixw_density = _pstrainc.read_mixw_counts(
+        str(model_dir / "mixture_weights")
+    )
+    transition_matrices, n_tmat, n_state = _pstrainc.read_tmat_counts(
         str(model_dir / "transition_matrices")
     )[:3]
 
