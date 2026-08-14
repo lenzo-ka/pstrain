@@ -18,8 +18,12 @@ from pstrain.lib.features import read_sphinx_mfc
 def transcripts(path: Path) -> dict[str, str]:
     result = {}
     for raw in path.read_text().splitlines():
-        text, fileid = raw.rsplit("(", 1)
-        result[fileid.rstrip(") ")] = text.strip()
+        if "(" in raw:
+            text, fileid = raw.rsplit("(", 1)
+            result[fileid.rstrip(") ")] = text.strip()
+        else:
+            fileid, text = raw.split(maxsplit=1)
+            result[fileid] = f"<s> {text} </s>"
     return result
 
 
