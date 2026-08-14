@@ -27,13 +27,17 @@ from pstrain.benchmarks.arctic import (
     benchmark_conditions,
     bootstrap_ci,
     compare_results,
+    configuration_provenance,
     extract_archive,
     fetch_archive,
     load_transcripts,
     main,
     make_record,
     paired_delta_ci,
+    render_configuration_provenance,
     resolve_data_dir,
+    resolved_configuration_provenance,
+    run,
     sha256,
     training_corpus_identity,
     validate_record,
@@ -239,6 +243,120 @@ def test_pin_configs_resolve_ratified_conditions(tmp_path: Path) -> None:
     }
 
 
+def test_configuration_provenance_renders_default_and_non_default_cells() -> None:
+    shipped = Profile()
+    default = configuration_provenance(shipped, source_kind="shipped defaults")
+    non_default = configuration_provenance(
+        Profile(training={"tree_directional_questions": False}),
+        source_kind="explicit overrides",
+        override_reason="isolate directional-question behavior",
+    )
+
+    assert default["diff_from_shipped_defaults"] == []
+    assert render_configuration_provenance(default) == (
+        "Source: shipped defaults\n\nDiff from shipped schema defaults: (empty)"
+    )
+    assert non_default["diff_from_shipped_defaults"] == [
+        {
+            "setting": "training.tree_directional_questions",
+            "shipped_default": True,
+            "value": False,
+        }
+    ]
+    rendered = render_configuration_provenance(non_default)
+    assert "Source: explicit overrides" in rendered
+    assert "Reason: isolate directional-question behavior" in rendered
+    assert "| `training.tree_directional_questions` | `true` | `false` |" in rendered
+
+
+def test_cell_provenance_includes_resolved_cli_override(tmp_path: Path) -> None:
+    project = tmp_path / "benchmark-project"
+    write_project(project, tmp_path / "corpus", DATA_DIR / "cmu_arctic_slt.dict")
+    resolved = resolve_config(
+        project,
+        profile_name="off",
+        user_config_path=tmp_path / "absent-user.yaml",
+        cli_overrides={"runner": {"jobs": 3}},
+    )
+
+    provenance = resolved_configuration_provenance(resolved.benchmark_document())
+    jobs = next(
+        row for row in provenance["diff_from_shipped_defaults"] if row["setting"] == "runner.jobs"
+    )
+    assert jobs["value"] == resolved.profile.runner.jobs == 3
+    assert jobs["source"]["kind"] == resolved.fields["runner.jobs"].winner.source_kind == "cli"
+
+
+def test_emitted_record_uses_child_resolved_cli_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    dictionary = tmp_path / "dictionary.dict"
+    lm = tmp_path / "language-model.lm"
+    dictionary.write_text("WORD W ER D\n")
+    lm.write_text("language model\n")
+    monkeypatch.setattr("pstrain.benchmarks.arctic.ARCHIVES", ())
+    monkeypatch.setattr("pstrain.benchmarks.arctic.band_resources", lambda _band: (dictionary, lm))
+    monkeypatch.setattr("pstrain.benchmarks.arctic.authenticate_pin_resources", lambda *_args: None)
+    monkeypatch.setattr("pstrain.benchmarks.arctic.training_corpus_identity", lambda: {})
+    monkeypatch.setattr("pstrain.benchmarks.arctic.audit_monotonicity", lambda _project: [])
+    monkeypatch.setattr(
+        "pstrain.benchmarks.arctic.score_model", lambda *_args: _cell((1,), recorded=False)
+    )
+    monkeypatch.setattr("pstrain.benchmarks.arctic.engine_identity", lambda _dictionary: {})
+
+    def surface_resolved(command: list[str], **_kwargs: object) -> None:
+        project = Path(command[command.index("--project-dir") + 1])
+        mode = command[command.index("--config") + 1]
+        jobs = int(command[command.index("--jobs") + 1])
+        output = Path(command[command.index("--resolved-config-output") + 1])
+        resolved = resolve_config(
+            project,
+            profile_name=mode,
+            user_config_path=tmp_path / "absent-user.yaml",
+            cli_overrides={"runner": {"jobs": jobs}},
+        )
+        output.write_text(json.dumps(resolved.benchmark_document()))
+
+    monkeypatch.setattr("pstrain.benchmarks.arctic._run_trusted_child", surface_resolved)
+    emitted = tmp_path / "record.json"
+    run(tmp_path / "work", None, 3, emit_record=emitted)
+    record = json.loads(emitted.read_text())
+
+    for mode in ("off", "on"):
+        assert record["conditions"]["pin_conditions"][mode]["runner"]["jobs"] == 3
+        for dataset in ("slt55", "big"):
+            rows = record["results"][mode][dataset]["configuration_provenance"][
+                "diff_from_shipped_defaults"
+            ]
+            jobs = next(row for row in rows if row["setting"] == "runner.jobs")
+            assert jobs == {
+                "setting": "runner.jobs",
+                "shipped_default": None,
+                "value": 3,
+                "source": {"kind": "cli"},
+            }
+
+
+def test_record_rejects_provenance_that_disagrees_with_conditions() -> None:
+    actual, _record = _comparison_documents()
+    actual["conditions"] = benchmark_conditions()
+    for mode in ("off", "on"):
+        document = {
+            "profile": actual["conditions"]["pin_conditions"][mode],
+            "profile_name": mode,
+            "field_source_kinds": actual["conditions"]["pin_condition_source_kinds"][mode],
+        }
+        provenance = resolved_configuration_provenance(document)
+        for dataset in ("slt55", "big"):
+            actual["results"][mode][dataset]["configuration_provenance"] = provenance
+    record = make_record(actual)
+    record["results"]["off"]["slt55"]["configuration_provenance"][
+        "diff_from_shipped_defaults"
+    ].pop()
+    with pytest.raises(RuntimeError, match="provenance/conditions consistency"):
+        validate_record(record)
+
+
 def _cell(errors: tuple[int, ...], *, recorded: bool) -> dict[str, object]:
     rows = [[f"voice/u{index}", 10, error] for index, error in enumerate(errors)]
     total_errors = sum(errors)
@@ -250,6 +368,9 @@ def _cell(errors: tuple[int, ...], *, recorded: bool) -> dict[str, object]:
         "decoded": len(errors),
         "oov_tokens": 0,
         "known_skips": [],
+        "configuration_provenance": configuration_provenance(
+            Profile(), source_kind="shipped defaults"
+        ),
     }
     if recorded:
         cell["utterance_rows"] = rows
@@ -492,7 +613,7 @@ def test_on_mode_manifest_entry_passes_once_and_is_mandatorily_reported(
         compare_results(actual, record)
 
 
-def test_a0302_band_declaration_passes_without_becoming_a_known_skip(tmp_path: Path) -> None:
+def test_a0302_band_declaration_passes_and_reports_adjudicated_skip(tmp_path: Path) -> None:
     project = tmp_path / "on"
     _write_skip_telemetry(
         project,
@@ -502,7 +623,8 @@ def test_a0302_band_declaration_passes_without_becoming_a_known_skip(tmp_path: P
         pass_numbers=tuple(range(3, 11)),
         occupancy=4600,
     )
-    assert audit_monotonicity(project) == []
+    matching_entry = next(item for item in KNOWN_SKIPS if item["utterance"] == "arctic_a0302")
+    assert audit_monotonicity(project) == [matching_entry]
 
 
 def test_on_mode_reports_multiple_manifest_entries(tmp_path: Path) -> None:

@@ -85,6 +85,24 @@
         "utterance": "arctic_a0587"
       },
       {
+        "adjudication": "retained after history and artifact inspection: commit 72f62a9 changed this terminal alignment failure into an accepted occupancy-band exception that still records a skip and continues without the utterance update; commit 17eb3d7 tightened the band to the measured pin occupancy",
+        "mechanism": "terminal alignment failure after permitted retry in the multipron posture; accepted only when exact-zero-codebook occupancy is inside the declared band, then recorded as a skip while training continues without this utterance update",
+        "mode": "on",
+        "passes": [
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10
+        ],
+        "recorded-in": "on-mode parity anchor",
+        "stage": "cd-untied",
+        "utterance": "arctic_a0302"
+      },
+      {
         "mechanism": "beam failure on a known-hard utterance after permitted retry in the multipron posture \u2014 the recorded on-mode remainder class (V7-era: a0302/b0486; set shifted with the reachable inventory: b0320 now trains); deep diagnosis deferred per banked Q6, tracked as an open item",
         "mode": "on",
         "pass": 6,
@@ -93,6 +111,126 @@
         "utterance": "arctic_a0587"
       }
     ],
+    "pin_condition_source_kinds": {
+      "off": {
+        "description": "project-profile",
+        "features.agc": "project-profile",
+        "features.alpha": "project-profile",
+        "features.cmn": "project-profile",
+        "features.cmninit": "project-profile",
+        "features.dither": "project-profile",
+        "features.feat_type": "project-profile",
+        "features.frate": "project-profile",
+        "features.lifter": "project-profile",
+        "features.lowerf": "project-profile",
+        "features.ncep": "project-profile",
+        "features.nfft": "project-profile",
+        "features.nfilt": "project-profile",
+        "features.remove_dc": "project-profile",
+        "features.remove_noise": "project-profile",
+        "features.samprate": "project-profile",
+        "features.transform": "project-profile",
+        "features.upperf": "project-profile",
+        "features.varnorm": "project-profile",
+        "features.wlen": "project-profile",
+        "runner.jobs": "project-profile",
+        "runner.nice": "project-profile",
+        "split.seed": "project-profile",
+        "split.test_count": "project-profile",
+        "split.train_ratio": "project-profile",
+        "training.a_beam": "project-profile",
+        "training.accept_arctic_a0587_known_skip": "project-profile",
+        "training.arctic_a0302_zero_codebook_band": "project-profile",
+        "training.b_beam": "project-profile",
+        "training.ci.convergence_ratio": "project-profile",
+        "training.ci.max_iterations": "project-profile",
+        "training.ci.min_iterations": "project-profile",
+        "training.exclusion_schedule": "project-profile",
+        "training.max_skip_fraction": "project-profile",
+        "training.multipron_training": "project-profile",
+        "training.n_senones": "project-profile",
+        "training.n_state": "project-profile",
+        "training.question_niter": "project-profile",
+        "training.question_npermute": "project-profile",
+        "training.question_quests_per_state": "project-profile",
+        "training.retry_beam_factor": "project-profile",
+        "training.tied.convergence_ratio": "project-profile",
+        "training.tied.max_iterations": "project-profile",
+        "training.tied.min_iterations": "project-profile",
+        "training.tree_csplitmax": "project-profile",
+        "training.tree_csplitthr": "project-profile",
+        "training.tree_directional_questions": "project-profile",
+        "training.tree_intermediate_dumps": "project-profile",
+        "training.tree_mwfloor": "project-profile",
+        "training.tree_rotate_state_weights": "project-profile",
+        "training.tree_ssplitmax": "project-profile",
+        "training.tree_ssplitthr": "project-profile",
+        "training.tree_state_weights": "project-profile",
+        "training.untied.convergence_ratio": "project-profile",
+        "training.untied.max_iterations": "project-profile",
+        "training.untied.min_iterations": "project-profile",
+        "training.untied_inventory": "project-profile"
+      },
+      "on": {
+        "description": "project-profile",
+        "features.agc": "project-profile",
+        "features.alpha": "project-profile",
+        "features.cmn": "project-profile",
+        "features.cmninit": "project-profile",
+        "features.dither": "project-profile",
+        "features.feat_type": "project-profile",
+        "features.frate": "project-profile",
+        "features.lifter": "project-profile",
+        "features.lowerf": "project-profile",
+        "features.ncep": "project-profile",
+        "features.nfft": "project-profile",
+        "features.nfilt": "project-profile",
+        "features.remove_dc": "project-profile",
+        "features.remove_noise": "project-profile",
+        "features.samprate": "project-profile",
+        "features.transform": "project-profile",
+        "features.upperf": "project-profile",
+        "features.varnorm": "project-profile",
+        "features.wlen": "project-profile",
+        "runner.jobs": "project-profile",
+        "runner.nice": "project-profile",
+        "split.seed": "project-profile",
+        "split.test_count": "project-profile",
+        "split.train_ratio": "project-profile",
+        "training.a_beam": "project-profile",
+        "training.accept_arctic_a0587_known_skip": "project-profile",
+        "training.arctic_a0302_zero_codebook_band": "project-profile",
+        "training.b_beam": "project-profile",
+        "training.ci.convergence_ratio": "project-profile",
+        "training.ci.max_iterations": "project-profile",
+        "training.ci.min_iterations": "project-profile",
+        "training.exclusion_schedule": "project-profile",
+        "training.max_skip_fraction": "project-profile",
+        "training.multipron_training": "project-profile",
+        "training.n_senones": "project-profile",
+        "training.n_state": "project-profile",
+        "training.question_niter": "project-profile",
+        "training.question_npermute": "project-profile",
+        "training.question_quests_per_state": "project-profile",
+        "training.retry_beam_factor": "project-profile",
+        "training.tied.convergence_ratio": "project-profile",
+        "training.tied.max_iterations": "project-profile",
+        "training.tied.min_iterations": "project-profile",
+        "training.tree_csplitmax": "project-profile",
+        "training.tree_csplitthr": "project-profile",
+        "training.tree_directional_questions": "project-profile",
+        "training.tree_intermediate_dumps": "project-profile",
+        "training.tree_mwfloor": "project-profile",
+        "training.tree_rotate_state_weights": "project-profile",
+        "training.tree_ssplitmax": "project-profile",
+        "training.tree_ssplitthr": "project-profile",
+        "training.tree_state_weights": "project-profile",
+        "training.untied.convergence_ratio": "project-profile",
+        "training.untied.max_iterations": "project-profile",
+        "training.untied.min_iterations": "project-profile",
+        "training.untied_inventory": "project-profile"
+      }
+    },
     "pin_conditions": {
       "off": {
         "description": "BM1 multipron off pin",
@@ -117,9 +255,14 @@
           "varnorm": "no",
           "wlen": 0.025625
         },
+        "runner": {
+          "jobs": null,
+          "nice": 5
+        },
         "split": {
           "seed": 42,
-          "test_count": 0
+          "test_count": 0,
+          "train_ratio": null
         },
         "training": {
           "a_beam": 1e-90,
@@ -189,9 +332,14 @@
           "varnorm": "no",
           "wlen": 0.025625
         },
+        "runner": {
+          "jobs": null,
+          "nice": 5
+        },
         "split": {
           "seed": 42,
-          "test_count": 0
+          "test_count": 0,
+          "train_ratio": null
         },
         "training": {
           "a_beam": 1e-90,
@@ -315,6 +463,86 @@
           77.26864474026235
         ],
         "cer": null,
+        "configuration_provenance": {
+          "diff_from_shipped_defaults": [
+            {
+              "setting": "split.test_count",
+              "shipped_default": null,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": 0
+            },
+            {
+              "setting": "training.accept_arctic_a0587_known_skip",
+              "shipped_default": false,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": true
+            },
+            {
+              "setting": "training.ci.convergence_ratio",
+              "shipped_default": 0.001,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": 0.1
+            },
+            {
+              "setting": "training.multipron_training",
+              "shipped_default": true,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": false
+            },
+            {
+              "setting": "training.tied.convergence_ratio",
+              "shipped_default": 0.001,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": 0.1
+            },
+            {
+              "setting": "training.tree_directional_questions",
+              "shipped_default": true,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": false
+            },
+            {
+              "setting": "training.tree_rotate_state_weights",
+              "shipped_default": true,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": false
+            },
+            {
+              "setting": "training.untied.convergence_ratio",
+              "shipped_default": 0.001,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": 0.1
+            },
+            {
+              "setting": "training.untied_inventory",
+              "shipped_default": "all-triphone",
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": "linear"
+            }
+          ],
+          "source": {
+            "kind": "named benchmark profile",
+            "name": "off"
+          }
+        },
         "decoded": 3395,
         "deletions": 2786,
         "errors": 22978,
@@ -17324,6 +17552,86 @@
           33.68426628010703
         ],
         "cer": null,
+        "configuration_provenance": {
+          "diff_from_shipped_defaults": [
+            {
+              "setting": "split.test_count",
+              "shipped_default": null,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": 0
+            },
+            {
+              "setting": "training.accept_arctic_a0587_known_skip",
+              "shipped_default": false,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": true
+            },
+            {
+              "setting": "training.ci.convergence_ratio",
+              "shipped_default": 0.001,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": 0.1
+            },
+            {
+              "setting": "training.multipron_training",
+              "shipped_default": true,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": false
+            },
+            {
+              "setting": "training.tied.convergence_ratio",
+              "shipped_default": 0.001,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": 0.1
+            },
+            {
+              "setting": "training.tree_directional_questions",
+              "shipped_default": true,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": false
+            },
+            {
+              "setting": "training.tree_rotate_state_weights",
+              "shipped_default": true,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": false
+            },
+            {
+              "setting": "training.untied.convergence_ratio",
+              "shipped_default": 0.001,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": 0.1
+            },
+            {
+              "setting": "training.untied_inventory",
+              "shipped_default": "all-triphone",
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": "linear"
+            }
+          ],
+          "source": {
+            "kind": "named benchmark profile",
+            "name": "off"
+          }
+        },
         "decoded": 55,
         "deletions": 27,
         "errors": 148,
@@ -17635,6 +17943,73 @@
           76.83537786393845
         ],
         "cer": null,
+        "configuration_provenance": {
+          "diff_from_shipped_defaults": [
+            {
+              "setting": "split.test_count",
+              "shipped_default": null,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": 0
+            },
+            {
+              "setting": "training.accept_arctic_a0587_known_skip",
+              "shipped_default": false,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": true
+            },
+            {
+              "setting": "training.arctic_a0302_zero_codebook_band",
+              "shipped_default": null,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": [
+                4548,
+                4623
+              ]
+            },
+            {
+              "setting": "training.tree_directional_questions",
+              "shipped_default": true,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": false
+            },
+            {
+              "setting": "training.tree_rotate_state_weights",
+              "shipped_default": true,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": false
+            },
+            {
+              "setting": "training.untied.max_iterations",
+              "shipped_default": 6,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": 10
+            },
+            {
+              "setting": "training.untied_inventory",
+              "shipped_default": "all-triphone",
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": "transcript-reachable"
+            }
+          ],
+          "source": {
+            "kind": "named benchmark profile",
+            "name": "on"
+          }
+        },
         "decoded": 3395,
         "deletions": 2917,
         "errors": 22851,
@@ -17642,6 +18017,24 @@
         "hyp_words": 28773,
         "insertions": 1708,
         "known_skips": [
+          {
+            "adjudication": "retained after history and artifact inspection: commit 72f62a9 changed this terminal alignment failure into an accepted occupancy-band exception that still records a skip and continues without the utterance update; commit 17eb3d7 tightened the band to the measured pin occupancy",
+            "mechanism": "terminal alignment failure after permitted retry in the multipron posture; accepted only when exact-zero-codebook occupancy is inside the declared band, then recorded as a skip while training continues without this utterance update",
+            "mode": "on",
+            "passes": [
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10
+            ],
+            "recorded-in": "on-mode parity anchor",
+            "stage": "cd-untied",
+            "utterance": "arctic_a0302"
+          },
           {
             "mechanism": "beam failure on a known-hard utterance after permitted retry in the multipron posture \u2014 the recorded on-mode remainder class (V7-era: a0302/b0486; set shifted with the reachable inventory: b0320 now trains); deep diagnosis deferred per banked Q6, tracked as an open item",
             "mode": "on",
@@ -34644,6 +35037,73 @@
           34.95145631067961
         ],
         "cer": null,
+        "configuration_provenance": {
+          "diff_from_shipped_defaults": [
+            {
+              "setting": "split.test_count",
+              "shipped_default": null,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": 0
+            },
+            {
+              "setting": "training.accept_arctic_a0587_known_skip",
+              "shipped_default": false,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": true
+            },
+            {
+              "setting": "training.arctic_a0302_zero_codebook_band",
+              "shipped_default": null,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": [
+                4548,
+                4623
+              ]
+            },
+            {
+              "setting": "training.tree_directional_questions",
+              "shipped_default": true,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": false
+            },
+            {
+              "setting": "training.tree_rotate_state_weights",
+              "shipped_default": true,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": false
+            },
+            {
+              "setting": "training.untied.max_iterations",
+              "shipped_default": 6,
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": 10
+            },
+            {
+              "setting": "training.untied_inventory",
+              "shipped_default": "all-triphone",
+              "source": {
+                "kind": "project-profile"
+              },
+              "value": "transcript-reachable"
+            }
+          ],
+          "source": {
+            "kind": "named benchmark profile",
+            "name": "on"
+          }
+        },
         "decoded": 55,
         "deletions": 31,
         "errors": 154,
@@ -34651,6 +35111,24 @@
         "hyp_words": 491,
         "insertions": 9,
         "known_skips": [
+          {
+            "adjudication": "retained after history and artifact inspection: commit 72f62a9 changed this terminal alignment failure into an accepted occupancy-band exception that still records a skip and continues without the utterance update; commit 17eb3d7 tightened the band to the measured pin occupancy",
+            "mechanism": "terminal alignment failure after permitted retry in the multipron posture; accepted only when exact-zero-codebook occupancy is inside the declared band, then recorded as a skip while training continues without this utterance update",
+            "mode": "on",
+            "passes": [
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10
+            ],
+            "recorded-in": "on-mode parity anchor",
+            "stage": "cd-untied",
+            "utterance": "arctic_a0302"
+          },
           {
             "mechanism": "beam failure on a known-hard utterance after permitted retry in the multipron posture \u2014 the recorded on-mode remainder class (V7-era: a0302/b0486; set shifted with the reachable inventory: b0320 now trains); deep diagnosis deferred per banked Q6, tracked as an open item",
             "mode": "on",
@@ -34948,5 +35426,5 @@
       }
     }
   },
-  "schema_version": 3
+  "schema_version": 4
 }

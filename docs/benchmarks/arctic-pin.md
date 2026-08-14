@@ -38,6 +38,35 @@ when the acoustic-model bytes are identical.
 | Decoder | `beam=pbeam=lpbeam=lponlybeam=fwdflatbeam=1e-80`; `wbeam=fwdflatwbeam=1e-40`; `pl_window=5`, `lw=10`, `wip=0.2` |
 | Bootstrap | Matched-pair percentile, 100,000 resamples, seed 7; big cells speaker-stratified |
 
+### Configuration provenance by result cell
+
+Both `off/slt55` and `off/big` come from the named benchmark profile `off`;
+both `on/slt55` and `on/big` come from the named benchmark profile `on`. There
+are no run-time overrides. These are the complete differences from the shipped
+schema defaults; an unlisted setting equals its shipped default. The record's
+conditions and each cell's provenance come from the same resolved build-child
+snapshot, and validation rejects disagreement between them. The off profile has
+9 differences and the on profile has 7.
+
+| Cells | Setting | Shipped default | Cell value | Winning source kind |
+|---|---|---:|---:|---|
+| off/slt55, off/big | `split.test_count` | `null` | `0` | `project-profile` |
+| off/slt55, off/big | `training.accept_arctic_a0587_known_skip` | `false` | `true` | `project-profile` |
+| off/slt55, off/big | `training.ci.convergence_ratio` | `0.001` | `0.1` | `project-profile` |
+| off/slt55, off/big | `training.multipron_training` | `true` | `false` | `project-profile` |
+| off/slt55, off/big | `training.tied.convergence_ratio` | `0.001` | `0.1` | `project-profile` |
+| off/slt55, off/big | `training.tree_directional_questions` | `true` | `false` | `project-profile` |
+| off/slt55, off/big | `training.tree_rotate_state_weights` | `true` | `false` | `project-profile` |
+| off/slt55, off/big | `training.untied.convergence_ratio` | `0.001` | `0.1` | `project-profile` |
+| off/slt55, off/big | `training.untied_inventory` | `"all-triphone"` | `"linear"` | `project-profile` |
+| on/slt55, on/big | `split.test_count` | `null` | `0` | `project-profile` |
+| on/slt55, on/big | `training.accept_arctic_a0587_known_skip` | `false` | `true` | `project-profile` |
+| on/slt55, on/big | `training.arctic_a0302_zero_codebook_band` | `null` | `[4548,4623]` | `project-profile` |
+| on/slt55, on/big | `training.tree_directional_questions` | `true` | `false` | `project-profile` |
+| on/slt55, on/big | `training.tree_rotate_state_weights` | `true` | `false` | `project-profile` |
+| on/slt55, on/big | `training.untied.max_iterations` | `6` | `10` | `project-profile` |
+| on/slt55, on/big | `training.untied_inventory` | `"all-triphone"` | `"transcript-reachable"` | `project-profile` |
+
 The corpus archive identities are BDL
 `26b91aaf48b2799b2956792b4632c2f926cd0542f402b5452d5adecb60942904`,
 CLB `3f16dc3f3b97955ea22623efb33b444341013fc660677b2e170efdcc959fa7c6`,
@@ -110,12 +139,8 @@ These are documented training-set composition facts, not decode failures:
 | Mode | Utterance | Stage and pass | Mechanism |
 |---|---|---|---|
 | off | `arctic_a0587` | `cd-2g`, pass 1 | Beam failure on a hard utterance after the permitted retry; mirrored upstream, whose preserved build ignores it at CI passes 5–6. |
+| on | `arctic_a0302` | `cd-untied`, passes 3–10 | Terminal alignment failure after the permitted retry. Commit `72f62a9` made this an accepted occupancy-band exception, which still records a skip and continues without this utterance update; `17eb3d7` tightened the band to the measured pin occupancy. |
 | on | `arctic_a0587` | `cd-1g`, pass 6 | Beam failure on a known-hard utterance after the permitted retry in the multipron posture; part of the same recorded on-mode remainder mechanism. |
-
-`arctic_a0302` at on-mode `cd-untied` passes 3–10 is no longer a known skip. The
-landed accepted-exception policy authenticates the governing exact-zero mean-and-variance
-codebook occupancy against the inclusive band `[4548, 4623]`; values on either side halt
-training. This intentional replacement was measured and ratified on 2026-08-12.
 
 ## Condition contract maintenance
 
