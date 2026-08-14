@@ -135,8 +135,8 @@ def write_gau(filename: str, gau: npt.NDArray[np.float32]) -> int:
 
 
 @contained
-def read_mixw(filename: str) -> tuple[npt.NDArray[np.float32], int, int, int]:
-    """Read mixture weights from S3 format file.
+def read_mixw_counts(filename: str) -> tuple[npt.NDArray[np.float32], int, int, int]:
+    """Read stored mixture-weight values without normalization.
 
     Args:
         filename: Input file path
@@ -177,8 +177,8 @@ def read_mixw(filename: str) -> tuple[npt.NDArray[np.float32], int, int, int]:
 
 
 @contained
-def read_tmat(filename: str) -> tuple[npt.NDArray[np.float32], int, int]:
-    """Read transition matrices from S3 format file.
+def read_tmat_counts(filename: str) -> tuple[npt.NDArray[np.float32], int, int]:
+    """Read stored transition-matrix values without normalization.
 
     Args:
         filename: Input file path
@@ -214,6 +214,24 @@ def read_tmat(filename: str) -> tuple[npt.NDArray[np.float32], int, int]:
     lib.pstrain_cffi_ckd_free_3d(out_tmat[0])
 
     return tmat, n_tmat, n_state
+
+
+def _normalize_rows(values: npt.NDArray[np.float32]) -> npt.NDArray[np.float32]:
+    """Return probability rows while preserving all-zero rows."""
+    totals = values.sum(axis=-1, keepdims=True)
+    return np.divide(values, totals, out=np.zeros_like(values), where=totals != 0)
+
+
+def read_mixw(filename: str) -> tuple[npt.NDArray[np.float32], int, int, int]:
+    """Read mixture weights as probabilities, normalizing occupied rows."""
+    values, n_mixw, n_feat, n_density = read_mixw_counts(filename)
+    return _normalize_rows(values), n_mixw, n_feat, n_density
+
+
+def read_tmat(filename: str) -> tuple[npt.NDArray[np.float32], int, int]:
+    """Read transition matrices as probabilities, normalizing occupied rows."""
+    values, n_tmat, n_state = read_tmat_counts(filename)
+    return _normalize_rows(values), n_tmat, n_state
 
 
 @contained

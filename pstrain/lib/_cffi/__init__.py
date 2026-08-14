@@ -11,7 +11,7 @@ Submodules:
 
 Usage:
     from pstrain.lib._cffi import get_ffi, get_lib, path_or_null
-    from pstrain.lib._cffi.io import read_mixw, write_mixw
+    from pstrain.lib._cffi.io import read_mixw, read_mixw_counts, write_mixw
 """
 
 from pstrain.lib._cffi.core import get_ffi, get_lib, path_or_null
@@ -19,7 +19,9 @@ from pstrain.lib._cffi.io import (
     read_dnom,
     read_gau,
     read_mixw,
+    read_mixw_counts,
     read_tmat,
+    read_tmat_counts,
     write_dnom,
     write_gau,
     write_mixw,
@@ -34,8 +36,10 @@ __all__ = [
     "path_or_null",
     # I/O
     "read_mixw",
+    "read_mixw_counts",
     "write_mixw",
     "read_tmat",
+    "read_tmat_counts",
     "write_tmat",
     "read_gau",
     "write_gau",

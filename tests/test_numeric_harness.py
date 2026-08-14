@@ -128,14 +128,14 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
     veclen = veclens[0]
     prior_means = prior_means_raw.reshape(n_cb, n_density, veclen)
     prior_vars = _pstrainc.read_gau(str(model / "variances"))[0].reshape(n_cb, n_density, veclen)
-    prior_tmat = _pstrainc.read_tmat(str(model / "transition_matrices"))[0]
+    prior_tmat = _pstrainc.read_tmat_counts(str(model / "transition_matrices"))[0]
     # Split the one-density flat model into two identical densities so top-N
     # pruning leaves genuine zero-posterior cells in otherwise active senones.
     prior_means = np.repeat(prior_means, 2, axis=1)
     prior_vars = np.repeat(prior_vars, 2, axis=1)
     n_density = 2
     _pstrainc.write_gau(str(model / "means"), prior_means)
-    mixw = _pstrainc.read_mixw(str(model / "mixture_weights"))[0]
+    mixw = _pstrainc.read_mixw_counts(str(model / "mixture_weights"))[0]
     mixw = np.repeat(mixw.reshape(-1, 1, 1), n_density, axis=2)
     # Raw upstream norm output contains occupancy counts, not probabilities.
     # Give every row a distinct, non-unit sum so a runtime-normalized copy is
@@ -189,10 +189,10 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
         untouched_dir / "transition_matrices",
     )
     np.testing.assert_array_equal(
-        _pstrainc.read_mixw(str(untouched_dir / "mixture_weights"))[0], mixw
+        _pstrainc.read_mixw_counts(str(untouched_dir / "mixture_weights"))[0], mixw
     )
     np.testing.assert_array_equal(
-        _pstrainc.read_tmat(str(untouched_dir / "transition_matrices"))[0], prior_tmat
+        _pstrainc.read_tmat_counts(str(untouched_dir / "transition_matrices"))[0], prior_tmat
     )
 
     features = np.full((60, 39), 0.25, dtype=np.float32)
@@ -224,8 +224,8 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
         accum_dir = tmp_path / f"{policy}-accum"
         trainer.dump_accumulators(accum_dir)
         accumulators[policy] = {
-            "mixture_weights": _pstrainc.read_mixw(str(accum_dir / "mixw_counts"))[0],
-            "transition_matrices": _pstrainc.read_tmat(str(accum_dir / "tmat_counts"))[0],
+            "mixture_weights": _pstrainc.read_mixw_counts(str(accum_dir / "mixw_counts"))[0],
+            "transition_matrices": _pstrainc.read_tmat_counts(str(accum_dir / "tmat_counts"))[0],
         }
         assert trainer.normalize()
         out = tmp_path / policy
@@ -269,10 +269,10 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
         disabled_dir / "transition_matrices",
     )
     np.testing.assert_array_equal(
-        _pstrainc.read_mixw(str(disabled_dir / "mixture_weights"))[0], mixw
+        _pstrainc.read_mixw_counts(str(disabled_dir / "mixture_weights"))[0], mixw
     )
     np.testing.assert_array_equal(
-        _pstrainc.read_tmat(str(disabled_dir / "transition_matrices"))[0], prior_tmat
+        _pstrainc.read_tmat_counts(str(disabled_dir / "transition_matrices"))[0], prior_tmat
     )
 
     occupied = np.any(outputs["zero"]["means"] != 0.0, axis=-1)
@@ -369,7 +369,7 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
         reloaded_dir / "mixture_weights",
         reloaded_dir / "transition_matrices",
     )
-    reloaded_mixw = _pstrainc.read_mixw(str(reloaded_dir / "mixture_weights"))[0]
+    reloaded_mixw = _pstrainc.read_mixw_counts(str(reloaded_dir / "mixture_weights"))[0]
     assert np.count_nonzero(reloaded_mixw[mixw_empty]) == 0
 
 
@@ -647,7 +647,7 @@ def test_updates_and_split_schedule_preserve_invariants(full_project: PipelineCo
 
     for density in (1, 2, 4, 8):
         model = full_project.model_dir(f"cd-{density}g")
-        mixw, n_mixw, _, actual_density = _pstrainc.read_mixw(str(model / "mixture_weights"))
+        mixw, n_mixw, _, actual_density = _pstrainc.read_mixw_counts(str(model / "mixture_weights"))
         assert actual_density == density
         if senones is None:
             senones = n_mixw
@@ -962,7 +962,7 @@ def test_withheld_context_uses_live_ci_fallback_across_passes(
         )
     )
     assert fallback_senones.size
-    fallback_raw_mixw = _pstrainc.read_mixw(str(initial / "mixture_weights"))[0]
+    fallback_raw_mixw = _pstrainc.read_mixw_counts(str(initial / "mixture_weights"))[0]
     fallback_scale = (
         np.float32(29.0) + np.arange(fallback_raw_mixw.shape[0], dtype=np.float32)[:, None, None]
     )

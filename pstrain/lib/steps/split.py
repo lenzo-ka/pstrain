@@ -41,7 +41,7 @@ def create_uniform_counts(
         count_per_gaussian: Count value per Gaussian (default 1000)
     """
     # Read mixture weights to get dimensions
-    mixw_raw, n_mixw, n_feat, n_density = _pstrainc.read_mixw(str(mixw_path))
+    mixw_raw, n_mixw, n_feat, n_density = _pstrainc.read_mixw_counts(str(mixw_path))
 
     # Create uniform counts: (n_cb, n_feat, n_density)
     # For CI models, n_cb = n_mixw (one codebook per senone)

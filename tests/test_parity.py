@@ -163,14 +163,14 @@ class TestMixwParity:
     def test_read_write_roundtrip(self, test_data_dir: Path) -> None:
         """Test that read/write cycle preserves data."""
         mixw_path = test_data_dir / "mixture_weights"
-        mixw, n_mixw, n_feat, n_density = _pstrainc.read_mixw(str(mixw_path))
+        mixw, n_mixw, n_feat, n_density = _pstrainc.read_mixw_counts(str(mixw_path))
 
         # Write to new location
         out_path = test_data_dir / "mixw_copy"
         _pstrainc.write_mixw(str(out_path), mixw)
 
         # Read back
-        mixw2, n_mixw2, n_feat2, n_density2 = _pstrainc.read_mixw(str(out_path))
+        mixw2, n_mixw2, n_feat2, n_density2 = _pstrainc.read_mixw_counts(str(out_path))
 
         assert n_mixw == n_mixw2
         assert n_feat == n_feat2
@@ -190,7 +190,7 @@ class TestTmatParity:
         tmat_path = test_data_dir / "transition_matrices"
 
         # Read existing file
-        tmat, n_tmat, n_state = _pstrainc.read_tmat(str(tmat_path))
+        tmat, n_tmat, n_state = _pstrainc.read_tmat_counts(str(tmat_path))
 
         # Basic sanity checks
         assert n_tmat == 5

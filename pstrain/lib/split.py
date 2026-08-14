@@ -94,7 +94,7 @@ def double_gaussians(
     out_mixw = output_dir / "mixture_weights"
 
     # Read current n_density to double it
-    _, _, _, n_density = _pstrainc.read_mixw(str(in_mixw))
+    _, _, _, n_density = _pstrainc.read_mixw_counts(str(in_mixw))
 
     split_gaussians(
         in_mean_path=in_mean,

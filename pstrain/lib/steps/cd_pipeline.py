@@ -161,7 +161,7 @@ def run_init_cd_untied(
     # Read CI model parameters
     ci_means, n_ci_mgau, n_feat, n_density, veclen = _pstrainc.read_gau(str(ci_model_dir / "means"))
     ci_vars, _, _, _, _ = _pstrainc.read_gau(str(ci_model_dir / "variances"))
-    ci_mixw_raw, n_mixw, _, _ = _pstrainc.read_mixw(str(ci_model_dir / "mixture_weights"))
+    ci_mixw_raw, n_mixw, _, _ = _pstrainc.read_mixw_counts(str(ci_model_dir / "mixture_weights"))
     ci_mixw = ci_mixw_raw.reshape(n_mixw, n_feat, n_density)
 
     # Parse untied mdef to get number of tied states and mapping

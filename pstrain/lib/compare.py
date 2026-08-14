@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
-from pstrain.lib._cffi import read_gau, read_mixw, read_tmat
+from pstrain.lib._cffi import read_gau, read_mixw_counts, read_tmat_counts
 from pstrain.lib.features import read_sphinx_mfc
 from pstrain.lib.filetypes import FileType, detect_file_type
 from pstrain.lib.model import MODEL_FILES_ALL, MODEL_FILES_REQUIRED
@@ -274,8 +274,8 @@ def compare_mixw(
     Returns:
         CompareResult with comparison details
     """
-    mixw_a, _, _, _ = read_mixw(str(file_a))
-    mixw_b, _, _, _ = read_mixw(str(file_b))
+    mixw_a, _, _, _ = read_mixw_counts(str(file_a))
+    mixw_b, _, _, _ = read_mixw_counts(str(file_b))
     return _compare_arrays(mixw_a, mixw_b, rtol, atol)
 
 
@@ -374,8 +374,8 @@ def compare_tmat(
     Returns:
         CompareResult with comparison details
     """
-    tmat_a, _, _ = read_tmat(str(file_a))
-    tmat_b, _, _ = read_tmat(str(file_b))
+    tmat_a, _, _ = read_tmat_counts(str(file_a))
+    tmat_b, _, _ = read_tmat_counts(str(file_b))
     return _compare_arrays(tmat_a, tmat_b, rtol, atol)
 
 
@@ -501,14 +501,14 @@ def print_stats(file_path: Path) -> None:
             print(f"WARNING: {stats.ones_pct:.0f}% ones (default variance?)")
 
     elif file_type == FileType.MIXTURE_WEIGHTS:
-        data, n_mixw, n_feat, n_density = read_mixw(str(file_path))
+        data, n_mixw, n_feat, n_density = read_mixw_counts(str(file_path))
         stats = array_stats(data)
         print(f"Shape: {n_mixw} states x {n_feat} features x {n_density} densities")
         print(f"Range: [{stats.min:.4f}, {stats.max:.4f}]")
         print(f"Mean: {stats.mean:.4f}, Std: {stats.std:.4f}")
 
     elif file_type == FileType.TRANSITION_MATRICES:
-        data, n_tmat, n_state = read_tmat(str(file_path))
+        data, n_tmat, n_state = read_tmat_counts(str(file_path))
         stats = array_stats(data)
         print(f"Shape: {n_tmat} matrices x {n_state} states x {n_state} states")
         print(f"Range: [{stats.min:.4f}, {stats.max:.4f}]")
@@ -1013,7 +1013,7 @@ def load_senones(
 
     # Read mixture weights if provided
     if mixw_path and Path(mixw_path).exists():
-        mixw, _, _, n_density_mw = read_mixw(str(mixw_path))
+        mixw, _, _, n_density_mw = read_mixw_counts(str(mixw_path))
     else:
         # Uniform weights
         mixw = (np.ones((n_mgau, n_feat, n_density), dtype=np.float32) / n_density).astype(

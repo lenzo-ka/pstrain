@@ -116,7 +116,7 @@ class TestCreateTransitionMatrices:
             assert tmat_path.stat().st_size > 0
 
             # Read back via CFFI
-            tmat, n_tmat, n_state = _pstrainc.read_tmat(str(tmat_path))
+            tmat, n_tmat, n_state = _pstrainc.read_tmat_counts(str(tmat_path))
             assert n_tmat == len(phones)  # one tmat per phone
             assert n_state == 4  # 3 emitting + 1 exit
 
@@ -138,7 +138,7 @@ class TestCreateMixtureWeights:
             assert mixw_path.exists()
 
             # Read back via CFFI
-            mixw, out_n_mixw, out_n_feat, out_n_density = _pstrainc.read_mixw(str(mixw_path))
+            mixw, out_n_mixw, out_n_feat, out_n_density = _pstrainc.read_mixw_counts(str(mixw_path))
             assert out_n_mixw == n_tied_state
             assert out_n_density == n_density
 
@@ -154,7 +154,7 @@ class TestCreateMixtureWeights:
             )
 
             # Read back
-            mixw, _, _, _ = _pstrainc.read_mixw(str(mixw_path))
+            mixw, _, _, _ = _pstrainc.read_mixw_counts(str(mixw_path))
 
             # Check uniform
             import numpy as np
@@ -193,13 +193,15 @@ class TestInitFlatModel:
             init_flat_model(phones, output_dir, n_density=1)
 
             # Read back using CFFI
-            mixw, n_mixw, n_feat, n_density = _pstrainc.read_mixw(
+            mixw, n_mixw, n_feat, n_density = _pstrainc.read_mixw_counts(
                 str(output_dir / "mixture_weights")
             )
             assert n_mixw > 0
             assert n_density == 1
 
-            tmat, n_tmat, n_state = _pstrainc.read_tmat(str(output_dir / "transition_matrices"))
+            tmat, n_tmat, n_state = _pstrainc.read_tmat_counts(
+                str(output_dir / "transition_matrices")
+            )
             assert n_tmat > 0
             assert n_state > 0
 
@@ -211,7 +213,7 @@ class TestInitFlatModel:
 
                 init_flat_model(phones, subdir, n_density=n_density)
 
-                mixw, n_mixw, n_feat_out, out_density = _pstrainc.read_mixw(
+                mixw, n_mixw, n_feat_out, out_density = _pstrainc.read_mixw_counts(
                     str(subdir / "mixture_weights")
                 )
                 assert out_density == n_density
