@@ -30,9 +30,9 @@ from tests.numeric_harness import (
     golden_payload,
     read_model_arrays,
     sha256,
-    strict_golden_enabled,
     train_golden,
     write_golden_subset,
+    x86_64_strict_golden_enabled,
 )
 
 _CHECKPOINT_MODEL_FILES = {
@@ -398,7 +398,7 @@ def test_feature_frames_finiteness_and_golden_checksum(flat_project: PipelineCon
     ]
     tolerance = json.loads(GOLDEN.read_text())["feature_tolerance"]
     np.testing.assert_allclose(observed, reference, **tolerance)
-    if strict_golden_enabled():
+    if x86_64_strict_golden_enabled():
         assert sha256(anchor) == expected["sha256"]
 
 
@@ -416,7 +416,9 @@ def test_bw_golden_trajectory_and_accounting(
     )
     result = train_golden(pinned, output_dir)
     actual = golden_payload(pinned, result)
-    tolerance = expected["strict_tolerance" if strict_golden_enabled() else "portable_tolerance"]
+    tolerance = expected[
+        "strict_tolerance" if x86_64_strict_golden_enabled() else "portable_tolerance"
+    ]
     assert len(actual["trajectory"]) == len(expected["trajectory"]) == 3
     for observed, golden in zip(actual["trajectory"], expected["trajectory"], strict=True):
         for key in (

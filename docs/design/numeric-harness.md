@@ -35,12 +35,13 @@ movement. At the first-pass total near -167,937, the allowed error is about
 0.168 log units, so the approximately 100-log-unit E1 regression is roughly
 595 times larger than the catch envelope.
 
-Set `PSTRAIN_GOLDEN_STRICT=1` for the strict developer/regeneration tier. It
+Set `PSTRAIN_GOLDEN_X86_64_STRICT=1` on x86_64 for the regeneration-reference tier. It
 adds the exact feature SHA-256 and uses `rtol=1e-12, atol=1e-8` for trajectory
-values. Strict failures may reflect architecture or toolchain differences;
+values. Reference-tier failures may reflect toolchain differences;
 portable failures require investigation.
 
-The Ubuntu Python 3.11 CI lane and `make test` enable this strict tier. A tolerance wider than the
+The x86_64 Ubuntu Python 3.11 CI lane enables this reference tier; `make test` remains portable on
+other developer architectures. A tolerance wider than the
 effect a golden is meant to pin does not pin that effect: the portable
 trajectory tolerance is roughly three orders wider than the contraction
 delta, so it remains a portability/regression envelope and is not evidence
