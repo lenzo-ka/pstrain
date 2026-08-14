@@ -24,6 +24,7 @@ __all__ = [
     "CommandBuilder",
     "PSTRAIN_BINARIES",
     "find_binary",
+    "resolve_binary",
 ]
 
 
@@ -131,6 +132,17 @@ def find_binary(name: str, search_paths: list[Path] | None = None) -> Path | Non
     return None
 
 
+def resolve_binary(name: str, bin_dir: Path | None = None) -> Path | None:
+    """Resolve a program exactly as :class:`CommandBuilder` will execute it."""
+    if bin_dir is None:
+        bin_dir = get_bin_dir()
+    if bin_dir is not None:
+        candidate = bin_dir / name
+        if candidate.is_file():
+            return candidate.resolve()
+    return find_binary(name)
+
+
 @dataclass
 class CommandBuilder:
     """Builder for pstrain C program commands.
@@ -147,10 +159,9 @@ class CommandBuilder:
 
     def _get_binary(self, name: str) -> str:
         """Get full path to binary."""
-        if self.bin_dir:
-            candidate = self.bin_dir / name
-            if candidate.exists():
-                return str(candidate)
+        resolved = resolve_binary(name, self.bin_dir)
+        if resolved is not None:
+            return str(resolved)
         # Fall back to PATH lookup
         return name
 

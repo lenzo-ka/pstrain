@@ -7,6 +7,7 @@ Similar to `python-config --prefix` or `pkg-config --variable`.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import platform
 import sys
 from typing import Any
@@ -123,11 +124,24 @@ class InfoCommand(Command):
 
             fp_contract = get_ffi().string(get_lib().pstrain_fp_contract_policy()).decode("ascii")
 
+        from pstrain.lib.commands import PSTRAIN_BINARIES, resolve_binary
+
+        native_programs: dict[str, dict[str, str]] = {}
+        for name in PSTRAIN_BINARIES.values():
+            program = resolve_binary(name)
+            if program is None:
+                native_programs[name] = {"state": "absent"}
+            else:
+                with program.open("rb") as handle:
+                    digest = hashlib.file_digest(handle, "sha256").hexdigest()
+                native_programs[name] = {"path": str(program), "sha256": digest}
+
         return {
             "pstrain": {
                 "version": __version__,
                 "lib_available": lib_available,
-                "fp_contract": fp_contract,
+                "fp_contract_declared": fp_contract,
+                "native_programs": native_programs,
             },
             "paths": {
                 "bin_dir": str(paths.bin_dir) if paths.bin_dir else None,
@@ -169,8 +183,10 @@ class InfoCommand(Command):
         print(
             f"  C library:     {'available' if info['pstrain']['lib_available'] else 'not found'}"
         )
-        if info["pstrain"]["fp_contract"] is not None:
-            print(f"  FP contraction:   {info['pstrain']['fp_contract']}")
+        if info["pstrain"]["fp_contract_declared"] is not None:
+            print(
+                f"  C library FP contraction (declared): {info['pstrain']['fp_contract_declared']}"
+            )
         print()
 
         print("Paths:")
@@ -181,6 +197,14 @@ class InfoCommand(Command):
         print(f"  data_dir:      {paths['data_dir']}")
         if paths["project_root"]:
             print(f"  project_root:  {paths['project_root']} (development)")
+        print()
+
+        print("Resolved native programs (exact artifacts):")
+        for name, identity in info["pstrain"]["native_programs"].items():
+            if identity.get("state") == "absent":
+                print(f"  {name}: absent")
+            else:
+                print(f"  {name}: {identity['path']} (sha256 {identity['sha256']})")
         print()
 
         print("Python:")

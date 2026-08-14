@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, Self, cast
 
 from pstrain import __version__
+from pstrain.lib.commands import PSTRAIN_BINARIES, resolve_binary
 from pstrain.lib.config.models import Profile, TrainingScheduleConfig
 from pstrain.lib.config.resolver import ResolvedConfig, resolve_config
 from pstrain.lib.paths import get_lib_path
@@ -58,7 +59,7 @@ def _native_library_identity() -> dict[str, str]:
     stat = resolved.stat()
     return {
         "sha256": _sha256_file(resolved, stat.st_size, stat.st_mtime_ns),
-        "fp_contract": _fp_contract_policy(),
+        "fp_contract_declared": _fp_contract_policy(),
     }
 
 
@@ -67,6 +68,29 @@ def _fp_contract_policy() -> str:
     from pstrain.lib._cffi.core import get_ffi, get_lib
 
     return cast(str, get_ffi().string(get_lib().pstrain_fp_contract_policy()).decode("ascii"))
+
+
+def _native_program_identities(
+    stage: str, *, include_paths: bool = False
+) -> dict[str, dict[str, str]]:
+    """Identify the resolved standalone programs that can govern a stage."""
+    names = {
+        "features": ("sphinx_fe",),
+        "split": (),
+        "training": tuple(PSTRAIN_BINARIES),
+    }[stage]
+    identities: dict[str, dict[str, str]] = {}
+    for name in names:
+        path = resolve_binary(name)
+        if path is None:
+            identities[name] = {"state": "absent"}
+            continue
+        stat = path.stat()
+        identity = {"sha256": _sha256_file(path, stat.st_size, stat.st_mtime_ns)}
+        if include_paths:
+            identity["path"] = str(path)
+        identities[name] = identity
+    return identities
 
 
 @dataclass(frozen=True)
@@ -420,6 +444,7 @@ class PipelineContext:
             "stage": stage,
             "tool_version": __version__,
             "native_library": _native_library_identity(),
+            "native_programs": _native_program_identities(stage),
             "config_version": self.resolved_config.config_version if self.resolved_config else 1,
         }
         if self.resolved_config:
@@ -469,6 +494,7 @@ class PipelineContext:
                 **payload["native_library"],
                 "path": str(lib_path.resolve()),
             }
+        document["native_programs"] = _native_program_identities(stage, include_paths=True)
         return document
 
     @property

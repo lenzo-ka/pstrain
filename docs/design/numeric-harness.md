@@ -39,6 +39,12 @@ adds the exact feature SHA-256 and uses `rtol=1e-12, atol=1e-8` for trajectory
 values. Strict failures may reflect architecture or toolchain differences;
 portable failures require investigation.
 
+The Linux CI lane always enables this strict tier. A tolerance wider than the
+effect a golden is meant to pin does not pin that effect: the portable
+trajectory tolerance is roughly three orders wider than the contraction
+delta, so it remains a portability/regression envelope and is not evidence
+that the contraction-specific values are unchanged.
+
 Regenerate from the repository root with:
 
 ```console

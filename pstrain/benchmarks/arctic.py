@@ -348,8 +348,15 @@ def engine_identity(dictionary: Path | None = None) -> dict[str, str]:
     if native is not None:
         from pstrain.lib._cffi.core import get_ffi, get_lib
 
-        identity["fp_contract"] = (
+        identity["native_library_fp_contract_declared"] = (
             get_ffi().string(get_lib().pstrain_fp_contract_policy()).decode("ascii")
+        )
+    from pstrain.lib.commands import PSTRAIN_BINARIES, resolve_binary
+
+    for name in PSTRAIN_BINARIES.values():
+        program = resolve_binary(name)
+        identity[f"native_program_{name}_sha256"] = (
+            sha256(program) if program is not None else "absent"
         )
     try:
         describe = subprocess.run(

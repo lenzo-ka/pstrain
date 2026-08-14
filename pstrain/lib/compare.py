@@ -662,7 +662,7 @@ class ModelCompareResult:
 
 def _discover_model_files(model_dir: Path) -> set[str]:
     """Discover all model-related files in a directory."""
-    known_files = set(MODEL_FILES_ALL) | {"README", "topo"}
+    known_files = set(MODEL_FILES_ALL) | {"README", "topo", "provenance.json"}
     found = set()
     for f in model_dir.iterdir():
         if f.is_file() and (f.name in known_files or f.suffix in (".mfc", ".dict")):
@@ -677,6 +677,27 @@ def _compare_text_file(file_a: Path, file_b: Path) -> bool:
         text_b = file_b.read_text().rstrip()
         return text_a == text_b
     except Exception:
+        return False
+
+
+def _compare_provenance_file(file_a: Path, file_b: Path) -> bool:
+    """Compare effective provenance while ignoring diagnostic filesystem paths."""
+
+    def normalized(path: Path) -> Any:
+        value = json.loads(path.read_text())
+
+        def without_paths(item: Any) -> Any:
+            if isinstance(item, dict):
+                return {key: without_paths(val) for key, val in item.items() if key != "path"}
+            if isinstance(item, list):
+                return [without_paths(val) for val in item]
+            return item
+
+        return without_paths(value)
+
+    try:
+        return bool(normalized(file_a) == normalized(file_b))
+    except (OSError, ValueError, TypeError):
         return False
 
 
@@ -713,7 +734,7 @@ def compare_models(
     components: dict[str, ComponentCompare] = {}
 
     # Text files (exact match)
-    text_files = {"mdef", "feat.params", "noisedict", "README", "topo"}
+    text_files = {"mdef", "feat.params", "noisedict", "README", "topo", "provenance.json"}
 
     # Binary parameter files (numeric comparison)
     gau_files = {"means", "variances"}
@@ -736,7 +757,11 @@ def compare_models(
         file_b = dir_b / filename
 
         if filename in text_files:
-            text_match = _compare_text_file(file_a, file_b)
+            text_match = (
+                _compare_provenance_file(file_a, file_b)
+                if filename == "provenance.json"
+                else _compare_text_file(file_a, file_b)
+            )
             components[filename] = ComponentCompare(
                 name=filename,
                 exists_a=True,

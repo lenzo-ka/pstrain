@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from pstrain.lib.commands import PSTRAIN_BINARIES, Command, CommandBuilder
+from pstrain.lib.commands import PSTRAIN_BINARIES, Command, CommandBuilder, resolve_binary
 
 
 class TestCommand:
@@ -142,6 +142,15 @@ class TestCommandBuilder:
         cmd = builder.sphinx_fe(tmp_path / "in.wav", tmp_path / "out.mfc")
 
         assert str(bin_dir / "sphinx_fe") in cmd.to_shell()
+
+    def test_resolution_and_execution_use_same_binary(self, tmp_path: Path) -> None:
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        binary = bin_dir / "bw"
+        binary.touch()
+
+        assert resolve_binary("bw", bin_dir) == binary.resolve()
+        assert CommandBuilder(bin_dir=bin_dir)._get_binary("bw") == str(binary.resolve())
 
 
 class TestBinaryRegistry:

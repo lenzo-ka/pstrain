@@ -542,7 +542,9 @@ def test_worker_niceness_is_observable_in_pool_task(tmp_path: Path) -> None:
     observed = int(output.read_text())
     if observed == baseline:
         pytest.skip("setpriority is forbidden by this test environment")
-    assert observed == baseline + 5
+    # Nice values saturate at the POSIX maximum. The test runner itself may
+    # already have inherited a positive nice value from its environment.
+    assert observed == min(19, baseline + 5)
 
 
 def test_programmatic_cancel_aborts_active_fanout_and_records_timing_status(

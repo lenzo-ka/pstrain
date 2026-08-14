@@ -362,12 +362,12 @@ def test_native_library_identity_is_content_based_not_path_based(
     assert first_path == second_path
     assert ctx.provenance_payload("training")["native_library"] == {
         "sha256": hashlib.sha256(library_bytes).hexdigest(),
-        "fp_contract": "off",
+        "fp_contract_declared": "off",
     }
     assert ctx.provenance_document("training")["native_library"] == {
         "path": str(second_lib.resolve()),
         "sha256": hashlib.sha256(library_bytes).hexdigest(),
-        "fp_contract": "off",
+        "fp_contract_declared": "off",
     }
 
 
