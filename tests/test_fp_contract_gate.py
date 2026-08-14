@@ -1,0 +1,51 @@
+"""Re-runnable negative control for the emitted-code contraction gate."""
+
+from __future__ import annotations
+
+import platform
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+
+def test_contraction_enabled_build_makes_gate_red(tmp_path: Path) -> None:
+    """A contraction-enabled native artifact must make the shipped gate fail."""
+    machine = platform.machine().lower()
+    if machine not in {"x86_64", "amd64", "arm64", "aarch64"}:
+        pytest.skip(f"negative control has no compiler flags for {machine}")
+    compiler = shutil.which("cc")
+    if compiler is None:
+        pytest.skip("negative control requires a C compiler")
+
+    source = tmp_path / "fused.c"
+    source.write_text(
+        "#include <stdio.h>\n"
+        "__attribute__((noinline)) double fused(double a, double b, double c) "
+        "{ return a * b + c; }\n"
+        "int main(void) { volatile double a=2, b=3, c=4; "
+        'printf("%f\\n", fused(a,b,c)); return 0; }\n'
+    )
+    artifact = tmp_path / "fused"
+    flags = ["-O3", "-ffp-contract=fast"]
+    if machine in {"x86_64", "amd64"}:
+        flags.append("-mfma")
+    subprocess.run([compiler, *flags, str(source), "-o", str(artifact)], check=True)
+
+    build = tmp_path / "build"
+    (build / "bin").mkdir(parents=True)
+    (build / "lib").mkdir()
+    for name in ("bw", "norm", "sphinx_fe"):
+        shutil.copy2(artifact, build / "bin" / name)
+    shutil.copy2(artifact, build / "lib" / "libpstrainc.so")
+
+    result = subprocess.run(
+        [sys.executable, "scripts/check_fp_contract.py", str(build)],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "FP contraction gate failed; fused instructions found" in result.stderr

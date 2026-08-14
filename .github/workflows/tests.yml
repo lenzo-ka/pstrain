@@ -42,6 +42,9 @@ jobs:
         # set (the previous failure mode: no add_test() anywhere).
         run: ctest --test-dir build --output-on-failure --no-tests=error
 
+      - name: Verify emitted floating-point contraction policy
+        run: python scripts/check_fp_contract.py build
+
   # Linux-only sanitizer coverage. AppleClang is excluded because ASan hangs
   # before main on macOS in this project.
   c-tests-sanitizers:
@@ -94,6 +97,9 @@ jobs:
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_CLI=ON
           cmake --build build
 
+      - name: Verify emitted floating-point contraction policy
+        run: python scripts/check_fp_contract.py build
+
       - name: Install package (editable)
         run: pip install -e ".[dev]"
 
@@ -103,6 +109,7 @@ jobs:
         # entire CFFI/parity tier is quietly skipped.
         env:
           PSTRAIN_REQUIRE_CLIB: "1"
+          PSTRAIN_GOLDEN_STRICT: ${{ matrix.python == '3.11' && matrix.os == 'ubuntu-latest' && '1' || '0' }}
         run: pytest -v --cov=pstrain --cov-report=xml
 
       - name: Verify canonical config consumers and generated reference

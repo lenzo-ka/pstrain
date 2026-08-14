@@ -106,6 +106,7 @@ const char *pstrain_decoder_config_str(pstrain_decoder_t *decoder, const char *n
 long pstrain_decoder_config_int(pstrain_decoder_t *decoder, const char *name);
 void pstrain_decoder_free(pstrain_decoder_t *decoder);
 const char *pstrain_pocketsphinx_version(void);
+const char *pstrain_fp_contract_policy(void);
 
 // Enum types (must come before functions that use them)
 typedef enum { CMN_NONE, CMN_LIVE, CMN_BATCH } cmn_type_t;

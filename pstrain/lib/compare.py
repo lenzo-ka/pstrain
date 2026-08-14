@@ -526,10 +526,13 @@ class ComponentCompare:
     exists_b: bool
     result: CompareResult | None = None
     text_match: bool | None = None  # For text files
+    status: str | None = None
 
     @property
     def match(self) -> bool:
         """Return True if component matches."""
+        if self.status is not None:
+            return False
         if not self.exists_a and not self.exists_b:
             return True  # Both missing = match
         if self.exists_a != self.exists_b:
@@ -542,6 +545,10 @@ class ComponentCompare:
 
     def summary(self) -> str:
         """Return human-readable summary."""
+        if self.status is not None:
+            if self.text_match is False:
+                return f"DIFFER (text); {self.status}"
+            return self.status
         if not self.exists_a and not self.exists_b:
             return "not present in either"
         if not self.exists_a:
@@ -563,6 +570,7 @@ class ComponentCompare:
             "match": self.match,
             "result": self.result.to_dict() if self.result else None,
             "text_match": self.text_match,
+            "status": self.status,
         }
 
 
@@ -680,6 +688,37 @@ def _compare_text_file(file_a: Path, file_b: Path) -> bool:
         return False
 
 
+def _compare_provenance_file(file_a: Path, file_b: Path) -> bool:
+    """Compare effective provenance while ignoring diagnostic filesystem paths."""
+
+    def normalized(path: Path) -> Any:
+        value = json.loads(path.read_text())
+
+        def without_paths(item: Any) -> Any:
+            if isinstance(item, dict):
+                return {key: without_paths(val) for key, val in item.items() if key != "path"}
+            if isinstance(item, list):
+                return [without_paths(val) for val in item]
+            return item
+
+        return without_paths(value)
+
+    try:
+        return bool(normalized(file_a) == normalized(file_b))
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def _fp_contract_declaration(path: Path) -> str | None:
+    """Read the declared native FP-contraction policy from model provenance."""
+    try:
+        value = json.loads(path.read_text())
+        declaration = value["native_library"]["fp_contract_declared"]
+        return declaration if isinstance(declaration, str) else None
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+
+
 def compare_models(
     dir_a: Path,
     dir_b: Path,
@@ -708,7 +747,9 @@ def compare_models(
     # Discover files in both directories
     files_a = _discover_model_files(dir_a)
     files_b = _discover_model_files(dir_b)
-    all_files = files_a | files_b
+    # Provenance is always represented so two absent declarations surface as
+    # unknown comparability instead of disappearing from the comparison.
+    all_files = files_a | files_b | {"provenance.json"}
 
     components: dict[str, ComponentCompare] = {}
 
@@ -731,6 +772,26 @@ def compare_models(
         exists_a = filename in files_a
         exists_b = filename in files_b
 
+        if filename == "provenance.json":
+            declaration_a = _fp_contract_declaration(dir_a / filename) if exists_a else None
+            declaration_b = _fp_contract_declaration(dir_b / filename) if exists_b else None
+            if declaration_a is None and declaration_b is None:
+                components[filename] = ComponentCompare(
+                    name=filename,
+                    exists_a=exists_a,
+                    exists_b=exists_b,
+                    text_match=(
+                        _compare_provenance_file(dir_a / filename, dir_b / filename)
+                        if exists_a and exists_b
+                        else None
+                    ),
+                    status=(
+                        "contraction policy undeclared for both models; "
+                        "comparability cannot be established"
+                    ),
+                )
+                continue
+
         if not exists_a or not exists_b:
             components[filename] = ComponentCompare(
                 name=filename,
@@ -743,7 +804,11 @@ def compare_models(
         file_b = dir_b / filename
 
         if filename in text_files:
-            text_match = _compare_text_file(file_a, file_b)
+            text_match = (
+                _compare_provenance_file(file_a, file_b)
+                if filename == "provenance.json"
+                else _compare_text_file(file_a, file_b)
+            )
             components[filename] = ComponentCompare(
                 name=filename,
                 exists_a=True,

@@ -80,6 +80,7 @@
     pstrain_norm_gau;
     pstrain_param_cnt;
     pstrain_pocketsphinx_version;
+    pstrain_fp_contract_policy;
     pstrain_prune_tree;
     pstrain_read_pset;
     pstrain_session_probe_is_set;

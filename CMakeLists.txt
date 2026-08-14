@@ -15,6 +15,7 @@ include(CMakePrintHelpers)
 include(CheckTypeSize)
 include(CheckSymbolExists)
 include(CheckIncludeFile)
+include(CheckCCompilerFlag)
 include(TestBigEndian)
 include(GNUInstallDirs)
 include(FetchContent)
@@ -43,6 +44,24 @@ CHECK_INCLUDE_FILE(errno.h HAVE_ERRNO_H)
 if(MSVC)
   add_compile_options(/W3)
 else()
+  # Contraction must not inherit a compiler or architecture default.  FMA
+  # availability differs across architectures, so "off" can support a
+  # cross-architecture comparison; "fast" is reproducible only together with
+  # a fixed compiler version and -march target.
+  set(PSTRAIN_FP_CONTRACT_POLICY "off" CACHE INTERNAL
+      "Declared floating-point contraction policy for native targets")
+  check_c_compiler_flag("-ffp-contract=${PSTRAIN_FP_CONTRACT_POLICY}"
+    PSTRAIN_COMPILER_SUPPORTS_FP_CONTRACT)
+  if(NOT PSTRAIN_COMPILER_SUPPORTS_FP_CONTRACT)
+    message(FATAL_ERROR
+      "${CMAKE_C_COMPILER_ID} ${CMAKE_C_COMPILER_VERSION} does not support the declared "
+      "floating-point contraction policy: ${PSTRAIN_FP_CONTRACT_POLICY}")
+  endif()
+  add_compile_options("-ffp-contract=${PSTRAIN_FP_CONTRACT_POLICY}")
+  add_compile_definitions(
+    PSTRAIN_FP_CONTRACT_POLICY="${PSTRAIN_FP_CONTRACT_POLICY}")
+  message(STATUS
+    "Floating-point contraction policy: ${PSTRAIN_FP_CONTRACT_POLICY} (declared)")
   add_compile_options(-Wall -Wextra)
   add_compile_options(
     -Wno-sign-compare

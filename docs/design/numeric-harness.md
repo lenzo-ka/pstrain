@@ -15,7 +15,10 @@ seconds on a development machine and remains in the normal test suite.
 ## Golden trajectory
 
 `tests/golden/numeric_bw.json` records three fixed CI Baum-Welch passes. The
-first pass uses one-pass variance accumulation, matching upstream
+values are conditional on the build's declared floating-point contraction
+policy (`off`). Like the rest of this golden, they certify self-conformance to
+pstrain's output at regeneration time, not independent numerical correctness.
+The first pass uses one-pass variance accumulation, matching upstream
 `20.ci_hmm`; later passes use centered two-pass accumulation. Each pass
 contains total log-likelihood, per-frame log probability and pass-to-pass
 per-frame delta, frames, input
@@ -35,6 +38,31 @@ Set `PSTRAIN_GOLDEN_STRICT=1` for the strict developer/regeneration tier. It
 adds the exact feature SHA-256 and uses `rtol=1e-12, atol=1e-8` for trajectory
 values. Strict failures may reflect architecture or toolchain differences;
 portable failures require investigation.
+
+The Ubuntu Python 3.11 CI lane and `make test` enable this strict tier. A tolerance wider than the
+effect a golden is meant to pin does not pin that effect: the portable
+trajectory tolerance is roughly three orders wider than the contraction
+delta, so it remains a portability/regression envelope and is not evidence
+that the contraction-specific values are unchanged.
+
+## Floating-point contraction checks
+
+`scripts/check_fp_contract.py build` disassembles the executable, static-library,
+and shared-library artifacts in a CMake build's canonical `bin/` and `lib/`
+directories. The Tests workflow applies that check to its own CMake build trees.
+The Build workflow separately runs `scripts/check_fp_contract.py --wheels
+wheelhouse` after cibuildwheel finishes. That mode extracts every wheel, finds
+every ELF, Mach-O, and native archive by file signature, and checks each
+reported architecture. A missing training executable or `libpstrainc`, an
+unavailable disassembler, an object with no reported architecture, or a failed
+disassembly is an explicit `unchecked` error rather than a silent skip.
+
+`tests/test_fp_contract_gate.py::test_contraction_enabled_build_makes_gate_red`
+is the re-runnable negative control. It compiles `a * b + c` with contraction
+enabled, presents copies as the required build artifacts, and requires the
+shipped gate to reject the fused instruction. This proves the detector's red
+path on the test host; it does not reproduce the separate training trajectory
+or benchmark measurements reported separately.
 
 Regenerate from the repository root with:
 
