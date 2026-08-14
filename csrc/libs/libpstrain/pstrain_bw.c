@@ -67,10 +67,12 @@
 #include <s3/state_seq.h>
 #include <s3/state.h>
 #include <s3/lexicon.h>
+#include <s3/s3acc_io.h>
 
 /* The forced-alignment / utterance-HMM builders live alongside the
  * standalone bw binary; we link them through libpstrainc. */
 #include "next_utt_states.h"
+#include "accum.h"
 
 /* Forward declarations from bw code */
 extern int32 baum_welch_update(float64 *log_forw_prob,
@@ -1026,6 +1028,54 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
     ctx->total_utts = 0;
 
     E_INFO("Normalization complete\n");
+    return 0;
+}
+
+int
+pstrain_bw_dump_accum(pstrain_bw_context_t *ctx, const char *accum_dir)
+{
+    if (ctx == NULL || accum_dir == NULL || ctx->multipron) {
+        E_ERROR("Accumulator artifacts require non-multipron BW training\n");
+        return -1;
+    }
+    return accum_dump(accum_dir, ctx->inv, ctx->mixw_reest, ctx->tmat_reest,
+                      ctx->mean_reest, ctx->var_reest, ctx->pass2var, FALSE, FALSE)
+        == S3_SUCCESS ? 0 : -1;
+}
+
+int
+pstrain_bw_restore_accumdirs(pstrain_bw_context_t *ctx,
+                             const char *const *accum_dirs,
+                             uint32 n_accum_dirs)
+{
+    gauden_t *g;
+    uint32 i;
+    if (ctx == NULL || accum_dirs == NULL || n_accum_dirs == 0 || ctx->multipron) {
+        E_ERROR("Accumulator merging requires non-multipron BW training\n");
+        return -1;
+    }
+    g = ctx->inv->gauden;
+    for (i = 0; i < n_accum_dirs; ++i) {
+        uint32 n_mixw = ctx->inv->n_mixw, n_stream = ctx->inv->n_feat;
+        uint32 n_density = ctx->inv->n_density;
+        uint32 n_tmat = ctx->inv->n_tmat, n_state = ctx->inv->n_state_pm;
+        uint32 n_mgau = g->n_mgau, n_gau_stream = g->n_feat;
+        uint32 n_gau_density = g->n_density;
+        uint32 *veclen = g->veclen;
+        int32 pass2var = ctx->pass2var;
+
+        /* These are the merge primitives used by the vendored norm program. */
+        if ((ctx->mixw_reest && rdacc_mixw(accum_dirs[i], &ctx->inv->mixw_acc,
+                                            &n_mixw, &n_stream, &n_density) != S3_SUCCESS) ||
+            (ctx->tmat_reest && rdacc_tmat(accum_dirs[i], &ctx->inv->tmat_acc,
+                                           &n_tmat, &n_state) != S3_SUCCESS) ||
+            ((ctx->mean_reest || ctx->var_reest) &&
+             rdacc_den(accum_dirs[i], &g->macc, &g->vacc, &pass2var, &g->dnom,
+                       &n_mgau, &n_gau_stream, &n_gau_density, &veclen) != S3_SUCCESS)) {
+            E_ERROR("Could not merge BW accumulators from %s\n", accum_dirs[i]);
+            return -1;
+        }
+    }
     return 0;
 }
 
