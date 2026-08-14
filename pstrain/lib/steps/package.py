@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 import shutil
-from datetime import datetime
 from pathlib import Path
 
 from pstrain.lib.model import MODEL_FILES_REQUIRED
@@ -159,12 +158,10 @@ def _create_readme(
     model_name: str | None,
 ) -> None:
     """Create README file for the model package."""
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     content = f"""pstrain Acoustic Model Package
 ==========================
 
 Model: {model_name or "unnamed"}
-Created: {now}
 Generator: pstrain (SphinxTrain 2)
 
 Directory Structure
