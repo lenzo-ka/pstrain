@@ -85,17 +85,19 @@ Same as ctl file - a list of utterance identifiers.
 Text file mapping utterance IDs to their word transcripts. Format: `<s> word1 word2 ... </s> (utterance_id)`
 
 ### feat.params
-The complete training-time front-end record carried by a trained model. It is
-required when decoding, aligning, packaging, or deploying a complete model, but
-not while init and training are still constructing one.
+The complete training-time front-end record carried by a trained model. Pstrain's
+`Decoder`, `Aligner`, and `package_model` entry points require it, but init and
+training do not while they are still constructing a model.
 
 At decode time, the trained model's `feat.params` is authoritative over the
 active schema profile because it records how that model's features were actually
 made. PocketSphinx reads it after pstrain's pre-initialization assignments, so a
-value in the file wins. Six of the 19 schema fields are assigned directly to the
-decoder only when the file does not override them; the other 13 are supplied by
-the required file. Those 13 would become reachable through PocketSphinx defaults
-again only if a complete-model consumer were allowed to omit `feat.params`.
+value in the file wins. A complete file defines all 19 schema fields plus the
+`unit_area` and `round_filters` training-engine invariants; none is optional.
+Pstrain validates that inventory before its supported decode, align, and package
+entry points continue. A source gate rejects direct use of the pip PocketSphinx
+`Decoder` in the `pstrain` package, but code outside the package can bypass this
+contract and is not covered by the guarantee.
 
 ### sendump
 Precomputed senone dump file for faster model loading during decoding.

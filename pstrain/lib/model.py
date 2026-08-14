@@ -28,11 +28,41 @@ MODEL_FILES_OPTIONAL = ["sendump", "noisedict"]
 # All known model files
 MODEL_FILES_ALL = MODEL_FILES_COMPLETE_REQUIRED + MODEL_FILES_OPTIONAL
 
+# Every value serialized by ``pipeline.feat_params`` affects the training front end
+# or pins an engine default on which training relies. Complete consumers require the
+# entire record so no omitted value can fall through to a decoder-version default.
+COMPLETE_MODEL_FEAT_PARAMS_REQUIRED = frozenset(
+    {
+        "-agc",
+        "-alpha",
+        "-cmn",
+        "-cmninit",
+        "-dither",
+        "-feat",
+        "-frate",
+        "-lifter",
+        "-lowerf",
+        "-ncep",
+        "-nfft",
+        "-nfilt",
+        "-remove_dc",
+        "-remove_noise",
+        "-round_filters",
+        "-samprate",
+        "-transform",
+        "-unit_area",
+        "-upperf",
+        "-varnorm",
+        "-wlen",
+    }
+)
+
 __all__ = [
     "MODEL_FILES_REQUIRED",
     "MODEL_FILES_COMPLETE_REQUIRED",
     "MODEL_FILES_OPTIONAL",
     "MODEL_FILES_ALL",
+    "COMPLETE_MODEL_FEAT_PARAMS_REQUIRED",
     "Model",
     "CIModel",
     "CDModel",
@@ -43,7 +73,7 @@ __all__ = [
 
 
 def require_complete_model(model_dir: str | Path) -> Path:
-    """Require the front-end record expected by complete-model consumers."""
+    """Require and validate the front-end record for complete-model consumers."""
     model_dir = Path(model_dir)
     feat_params = model_dir / "feat.params"
     if not feat_params.is_file():
@@ -51,6 +81,27 @@ def require_complete_model(model_dir: str | Path) -> Path:
             f"Missing feat.params ({feat_params}) from complete model directory {model_dir}. "
             "Without it, the decode-time front end is undefined and can silently differ "
             "from the training front end in feature shape and basis."
+        )
+    parsed: dict[str, str] = {}
+    for line_number, raw_line in enumerate(feat_params.read_text().splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split(maxsplit=1)
+        if len(parts) != 2 or not parts[0].startswith("-") or not parts[1].strip():
+            raise ValueError(
+                f"Malformed feat.params line {line_number} in {feat_params}: {raw_line!r}"
+            )
+        name, value = parts
+        if name in parsed:
+            raise ValueError(f"Duplicate feat.params field {name} in {feat_params}")
+        parsed[name] = value.strip()
+
+    missing = sorted(COMPLETE_MODEL_FEAT_PARAMS_REQUIRED - parsed.keys())
+    if missing:
+        raise ValueError(
+            f"feat.params ({feat_params}) is missing required front-end fields: "
+            + ", ".join(missing)
         )
     return feat_params
 

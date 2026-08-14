@@ -1,0 +1,28 @@
+{
+  "contract": "pstrain complete-model feat.params",
+  "required_count": 21,
+  "optional_fields": [],
+  "fields": [
+    {"name": "-samprate", "basis": "training field", "effect": "input sample rate"},
+    {"name": "-ncep", "basis": "training field", "effect": "cepstral vector width"},
+    {"name": "-nfilt", "basis": "training field", "effect": "mel filter-bank width"},
+    {"name": "-nfft", "basis": "training field", "effect": "FFT size"},
+    {"name": "-lowerf", "basis": "training field", "effect": "lower filter-bank frequency"},
+    {"name": "-upperf", "basis": "training field", "effect": "upper filter-bank frequency"},
+    {"name": "-alpha", "basis": "training field", "effect": "pre-emphasis coefficient"},
+    {"name": "-dither", "basis": "training field", "effect": "input dithering"},
+    {"name": "-remove_dc", "basis": "training field", "effect": "frame DC removal"},
+    {"name": "-remove_noise", "basis": "training field", "effect": "spectral noise removal"},
+    {"name": "-frate", "basis": "training field", "effect": "feature frame rate"},
+    {"name": "-wlen", "basis": "training field", "effect": "analysis window length"},
+    {"name": "-feat", "basis": "training field", "effect": "feature stream layout"},
+    {"name": "-transform", "basis": "training field", "effect": "filter-bank transform"},
+    {"name": "-lifter", "basis": "training field", "effect": "cepstral lifter"},
+    {"name": "-agc", "basis": "training field", "effect": "automatic gain control"},
+    {"name": "-cmn", "basis": "training field", "effect": "cepstral mean normalization"},
+    {"name": "-cmninit", "basis": "training field", "effect": "initial live-CMN vector"},
+    {"name": "-varnorm", "basis": "training field", "effect": "cepstral variance normalization"},
+    {"name": "-unit_area", "basis": "training engine invariant", "effect": "filter normalization"},
+    {"name": "-round_filters", "basis": "training engine invariant", "effect": "filter-edge rounding"}
+  ]
+}
