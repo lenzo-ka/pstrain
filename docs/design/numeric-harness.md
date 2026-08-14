@@ -15,7 +15,10 @@ seconds on a development machine and remains in the normal test suite.
 ## Golden trajectory
 
 `tests/golden/numeric_bw.json` records three fixed CI Baum-Welch passes. The
-first pass uses one-pass variance accumulation, matching upstream
+values are conditional on the build's declared floating-point contraction
+policy (`off`). Like the rest of this golden, they certify self-conformance to
+pstrain's output at regeneration time, not independent numerical correctness.
+The first pass uses one-pass variance accumulation, matching upstream
 `20.ci_hmm`; later passes use centered two-pass accumulation. Each pass
 contains total log-likelihood, per-frame log probability and pass-to-pass
 per-frame delta, frames, input
