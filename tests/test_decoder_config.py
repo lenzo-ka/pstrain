@@ -49,7 +49,9 @@ def test_nondefault_feature_config_reaches_live_decoder(
 
 
 @pytest.mark.parametrize("remove_noise", [False, True])
-def test_decoder_starts_with_each_remove_noise_setting(tmp_path: Path, remove_noise: bool) -> None:
+def test_decoder_completes_two_utterances_with_each_remove_noise_setting(
+    tmp_path: Path, remove_noise: bool
+) -> None:
     fixture = Path(__file__).parent / "fixtures" / "multipron_final_state"
     model = tmp_path / "model"
     shutil.copytree(fixture / "model", model)
@@ -59,7 +61,7 @@ def test_decoder_starts_with_each_remove_noise_setting(tmp_path: Path, remove_no
 
     decoder = Decoder(model, fixture / "dictionary.dict", fixture / "filler.dict", lm=lm)
     try:
-        result = decoder.decode_file(audio)
-        assert result.success, result.error
+        results = [decoder.decode_file(audio) for _ in range(2)]
+        assert all(result.success for result in results), [result.error for result in results]
     finally:
         decoder.close()

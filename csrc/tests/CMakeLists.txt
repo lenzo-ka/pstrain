@@ -41,6 +41,24 @@ add_test(
   COMMAND test_state_seq_ownership
 )
 
+add_executable(test_decode_start_utt
+  test_decode_start_utt.c
+  ../libs/libpstrain/pstrain_decode.c
+)
+target_include_directories(test_decode_start_utt
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include
+)
+target_compile_definitions(test_decode_start_utt PRIVATE
+  PSTRAIN_POCKETSPHINX_VERSION="test"
+  PSTRAIN_POCKETSPHINX_COMMIT="stub"
+)
+
+add_test(
+  NAME decode_start_utt
+  COMMAND test_decode_start_utt
+)
+
 add_executable(test_prunetree_order test_prunetree_order.c)
 target_link_libraries(test_prunetree_order pstrainc)
 target_include_directories(test_prunetree_order
