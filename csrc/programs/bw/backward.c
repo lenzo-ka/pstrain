@@ -1142,119 +1142,104 @@ backward_update(float64 **active_alpha,
 
     if (timers)
 	ptmr_start(&timers->gau_timer);
-    n_active_cb = 0;
-    for (i = 0; i < n_state; ++i) {
-	uint32 q;
-	if (i != 0 && !(state_seq[i].flags & STATE_FLAG_INITIAL))
-	    continue;
-	for (q = 0; q < n_active_cb; ++q)
-	    if (active_cb[q] == state_seq[i].l_cb)
-		break;
-	if (q == n_active_cb) {
-	    gauden_compute_log(now_den[state_seq[i].l_cb],
-			       now_den_idx[state_seq[i].l_cb], feature[0], g,
-			       state_seq[i].cb, NULL);
-	    active_cb[n_active_cb++] = state_seq[i].l_cb;
-	}
-    }
-    gauden_scale_densities_bwd(now_den, now_den_idx, &dscale[0],
-			       active_cb, n_active_cb, g);
+    gauden_compute_log(now_den[state_seq[0].l_cb],
+		       now_den_idx[state_seq[0].l_cb],
+		       feature[0],
+		       g,
+		       state_seq[0].cb,
+                       NULL);
+
+    active_cb[0] = state_seq[0].l_cb;
+
+    gauden_scale_densities_bwd(now_den, now_den_idx,
+			       &dscale[0],
+			       active_cb, 1, g);
+
+    op = gauden_mixture(now_den[state_seq[0].l_cb],
+			now_den_idx[state_seq[0].l_cb],
+			mixw[state_seq[0].mixw],
+			g);
 
     if (timers)
 	ptmr_stop(&timers->gau_timer);
 
     if (retval == S3_SUCCESS) {
-	float64 initial_beta = 0.0;
 
 	/* do a final alpha != beta consistency check */
-	for (i = 0; i < n_state; ++i) {
-	    if (i != 0 && !(state_seq[i].flags & STATE_FLAG_INITIAL))
-		continue;
-	    op = gauden_mixture(now_den[state_seq[i].l_cb],
-				now_den_idx[state_seq[i].l_cb],
-				mixw[state_seq[i].mixw], g);
-	    beta[i] = prior_beta[i] * op
-	        * next_utt_states_initial_tprob(state_seq, i);
-	    initial_beta += beta[i];
-	}
+	beta[0] = prior_beta[0] * op;
 
-	if (fabs(initial_beta - active_alpha[n_obs-1][q_f])
+	if (fabs(beta[0] - active_alpha[n_obs-1][q_f])
 	    > (S2_ALPHA_BETA_EPSILON * active_alpha[n_obs-1][q_f])) {
 	    E_ERROR("alpha(%e) <> beta(%e)\n",
-		    active_alpha[n_obs-1][q_f], initial_beta);
+		    active_alpha[n_obs-1][q_f], beta[0]);
 
 	    retval = S3_ERROR;
 	}
 
-	if (initial_beta == 0.0) {
+	if (beta[0] == 0.0) {
 	    E_ERROR("beta underflow\n");
 
 	    retval = S3_ERROR;
 	}
     }
 
-    for (i = 0; i < n_state; ++i) {
-    if ((retval == S3_SUCCESS) && (i == 0 || (state_seq[i].flags & STATE_FLAG_INITIAL))
-	&& (asf[i] == TRUE)) {
-	l_cb = state_seq[i].l_cb;
-	l_ci_cb = state_seq[i].l_ci_cb;
-	op = gauden_mixture(now_den[l_cb], now_den_idx[l_cb],
-			    mixw[state_seq[i].mixw], g);
+    if ((retval == S3_SUCCESS) && (asf[0] == TRUE)) {
+	l_cb = state_seq[0].l_cb;
+	l_ci_cb = state_seq[0].l_ci_cb;
 
 	partial_op(p_op,
 		   op,
 		   now_den[l_cb],
 		   now_den_idx[l_cb],
-		   mixw[state_seq[i].mixw],
+		   mixw[state_seq[0].mixw],
 		   n_feat,
 		   n_top);
 
 	den_terms(d_term,
-		  prior_beta[i] * recip_final_alpha
-		      * next_utt_states_initial_tprob(state_seq, i),
+		  prior_beta[0] * recip_final_alpha,
 		  p_op,
 		  now_den[l_cb],
 		  now_den_idx[l_cb],
-		  mixw[state_seq[i].mixw],
+		  mixw[state_seq[0].mixw],
 		  n_feat,
 		  n_top);
 
-	if (state_seq[i].l_cb != state_seq[i].l_ci_cb) {
+	if (state_seq[0].l_cb != state_seq[0].l_ci_cb) {
 	    partial_ci_op(p_ci_op,
 			  now_den[l_ci_cb],
 			  now_den_idx[l_ci_cb],
-			  mixw[state_seq[i].ci_mixw],
+			  mixw[state_seq[0].ci_mixw],
 			  n_feat,
 			  n_top);
 
 	    den_terms_ci(d_term_ci,
-			 next_utt_states_initial_tprob(state_seq, i),
+			 1.0,	/* ASSUMPTION: 1 initial state */
 			 p_ci_op,
 			 now_den[l_ci_cb],
 			 now_den_idx[l_ci_cb],
-			 mixw[state_seq[i].ci_mixw],
+			 mixw[state_seq[0].ci_mixw],
 			 n_feat,
 			 n_top);
 	}
 
 
 	if (mixw_reest) {
-	    accum_den_terms(wacc[state_seq[i].l_mixw], d_term,
+	    accum_den_terms(wacc[state_seq[0].l_mixw], d_term,
 			    now_den_idx[l_cb], n_feat, n_top);
 
 	    /* check if mixw and ci_mixw are different to avoid
 	     * doubling of counts in a CI run.  Will not affect
 	     * final probabilities, but might affect algorithms
 	     * which rely on accurate EM counts */
-	    if (state_seq[i].ci_mixw != state_seq[i].mixw) {
+	    if (state_seq[0].ci_mixw != state_seq[0].mixw) {
                 if (n_cb < inv->n_mixw) {
                     /* semi-continuous, tied mixture, and discrete case */
 		    /* do the update of the CI accumulators as well */
-		    accum_den_terms(wacc[state_seq[i].l_ci_mixw], d_term,
+		    accum_den_terms(wacc[state_seq[0].l_ci_mixw], d_term,
 				    now_den_idx[l_cb], n_feat, n_top);
 		}
 		else {
-		    accum_den_terms(wacc[state_seq[i].l_ci_mixw], d_term_ci,
+		    accum_den_terms(wacc[state_seq[0].l_ci_mixw], d_term_ci,
 				    now_den_idx[l_ci_cb], n_feat, n_top);
 		}
 	    }
@@ -1292,7 +1277,6 @@ backward_update(float64 **active_alpha,
 
 	if (timers)
 	    ptmr_stop(&timers->rstf_timer);
-    }
     }
 
     printf(" %d", n_active_tot / n_obs);
