@@ -73,6 +73,24 @@ KNOWN_SKIPS: list[dict[str, Any]] = [
     },
     {
         "mode": "on",
+        "stage": "cd-untied",
+        "passes": [3, 4, 5, 6, 7, 8, 9, 10],
+        "utterance": "arctic_a0302",
+        "mechanism": (
+            "terminal alignment failure after permitted retry in the multipron posture; "
+            "accepted only when exact-zero-codebook occupancy is inside the declared band, "
+            "then recorded as a skip while training continues without this utterance update"
+        ),
+        "recorded-in": "on-mode parity anchor",
+        "adjudication": (
+            "retained after history and artifact inspection: commit 72f62a9 changed this "
+            "terminal alignment failure into an accepted occupancy-band exception that still "
+            "records a skip and continues without the utterance update; commit 17eb3d7 tightened "
+            "the band to the measured pin occupancy"
+        ),
+    },
+    {
+        "mode": "on",
         "stage": "cd-1g",
         "pass": 6,
         "utterance": "arctic_a0587",
@@ -950,6 +968,17 @@ def audit_monotonicity(project: Path) -> list[dict[str, Any]]:
                             f"{path}: pass {row.get('pass')}: invalid accepted-exception "
                             f"declaration: utterance={utterance!r}, declaration={declaration!r}"
                         )
+                    else:
+                        accepted_match = next(
+                            item
+                            for item in KNOWN_SKIPS
+                            if item["mode"] == mode
+                            and item["stage"] == stage
+                            and item["utterance"] == utterance
+                            and row.get("pass") in item.get("passes", [])
+                        )
+                        if accepted_match not in known_skips:
+                            known_skips.append(accepted_match)
                     continue
                 match = next(
                     (

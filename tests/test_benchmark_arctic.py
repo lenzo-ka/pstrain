@@ -613,7 +613,7 @@ def test_on_mode_manifest_entry_passes_once_and_is_mandatorily_reported(
         compare_results(actual, record)
 
 
-def test_a0302_band_declaration_passes_without_becoming_a_known_skip(tmp_path: Path) -> None:
+def test_a0302_band_declaration_passes_and_reports_adjudicated_skip(tmp_path: Path) -> None:
     project = tmp_path / "on"
     _write_skip_telemetry(
         project,
@@ -623,7 +623,8 @@ def test_a0302_band_declaration_passes_without_becoming_a_known_skip(tmp_path: P
         pass_numbers=tuple(range(3, 11)),
         occupancy=4600,
     )
-    assert audit_monotonicity(project) == []
+    matching_entry = next(item for item in KNOWN_SKIPS if item["utterance"] == "arctic_a0302")
+    assert audit_monotonicity(project) == [matching_entry]
 
 
 def test_on_mode_reports_multiple_manifest_entries(tmp_path: Path) -> None:
