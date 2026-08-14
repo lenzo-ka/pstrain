@@ -73,8 +73,16 @@ clean-c:
 docs-gen:
 	python -c "from pstrain.lib.config import generate_rst_docs; open('docs/api/config-reference.rst', 'w').write(generate_rst_docs())"
 
+.PHONY: cffi-exports-gen
+cffi-exports-gen:
+	python scripts/generate_cffi_exports.py
+
+.PHONY: cffi-exports-check
+cffi-exports-check:
+	python scripts/generate_cffi_exports.py --check
+
 .PHONY: config-check
-config-check:
+config-check: cffi-exports-check
 	pytest tests/test_config.py \
 		tests/test_pipeline_runner.py::test_config_reference_names_runner_keys_used_by_context \
 		tests/test_decoder_config.py \

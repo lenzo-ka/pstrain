@@ -21,6 +21,8 @@ from typing import Any
 
 import yaml
 
+from pstrain.benchmarks.corpora import sha256
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -311,15 +313,6 @@ def _complete_pin_profiles() -> dict[str, dict[str, Any]]:
         mode: Profile.model_validate(config).model_dump(mode="json")
         for mode, config in PIN_CONFIGS.items()
     }
-
-
-def sha256(path: Path) -> str:
-    """Hash a file without loading it into memory."""
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _run_trusted_child(

@@ -20,17 +20,17 @@
     pstrain_build_tree;
     pstrain_bw_build_state_seq;
     pstrain_bw_count_active_fallback_senones;
+    pstrain_bw_dump_accum;
     pstrain_bw_fallback_senone_active;
     pstrain_bw_free;
     pstrain_bw_free_state_seq;
     pstrain_bw_get_stats;
     pstrain_bw_init;
     pstrain_bw_normalize;
-    pstrain_bw_dump_accum;
-    pstrain_bw_restore_accumdirs;
     pstrain_bw_process_utt;
     pstrain_bw_process_utt_mfcc;
     pstrain_bw_process_utt_text;
+    pstrain_bw_restore_accumdirs;
     pstrain_bw_save;
     pstrain_bw_save_counts;
     pstrain_bw_set_a_beam;
@@ -64,6 +64,7 @@
     pstrain_fe_create_default;
     pstrain_flat_mixw;
     pstrain_flat_tmat;
+    pstrain_fp_contract_policy;
     pstrain_free_pset;
     pstrain_inc_comp;
     pstrain_init_gau;
@@ -80,7 +81,6 @@
     pstrain_norm_gau;
     pstrain_param_cnt;
     pstrain_pocketsphinx_version;
-    pstrain_fp_contract_policy;
     pstrain_prune_tree;
     pstrain_read_pset;
     pstrain_session_probe_is_set;
