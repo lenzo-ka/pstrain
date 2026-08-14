@@ -35,230 +35,81 @@ def test_library_loads(lib: Any) -> None:
 
 def test_logmath_init_free(lib: Any) -> None:
     """Test logmath creation and destruction."""
-    lmath = lib.logmath_init(1.0001, 0, 1)
+    lmath = lib.pstrain_cffi_logmath_init(1.0001, 0, 1)
     assert lmath is not None
-    lib.logmath_free(lmath)
+    lib.pstrain_cffi_logmath_free(lmath)
 
 
 def test_logmath_log_exp(lib: Any) -> None:
     """Test logmath log/exp operations."""
-    lmath = lib.logmath_init(1.0001, 0, 1)
+    lmath = lib.pstrain_cffi_logmath_init(1.0001, 0, 1)
 
-    log_half = lib.logmath_log(lmath, 0.5)
-    exp_back = lib.logmath_exp(lmath, log_half)
+    log_half = lib.pstrain_cffi_logmath_log(lmath, 0.5)
+    exp_back = lib.pstrain_cffi_logmath_exp(lmath, log_half)
 
     # Should be approximately 0.5
     assert abs(exp_back - 0.5) < 0.001
 
-    lib.logmath_free(lmath)
+    lib.pstrain_cffi_logmath_free(lmath)
 
 
 def test_logmath_add(lib: Any) -> None:
     """Test logmath addition in log domain."""
-    lmath = lib.logmath_init(1.0001, 0, 1)
+    lmath = lib.pstrain_cffi_logmath_init(1.0001, 0, 1)
 
-    log_half = lib.logmath_log(lmath, 0.5)
-    log_quarter = lib.logmath_log(lmath, 0.25)
-    log_sum = lib.logmath_add(lmath, log_half, log_quarter)
-    exp_sum = lib.logmath_exp(lmath, log_sum)
+    log_half = lib.pstrain_cffi_logmath_log(lmath, 0.5)
+    log_quarter = lib.pstrain_cffi_logmath_log(lmath, 0.25)
+    log_sum = lib.pstrain_cffi_logmath_add(lmath, log_half, log_quarter)
+    exp_sum = lib.pstrain_cffi_logmath_exp(lmath, log_sum)
 
     # 0.5 + 0.25 = 0.75
     assert abs(exp_sum - 0.75) < 0.001
 
-    lib.logmath_free(lmath)
+    lib.pstrain_cffi_logmath_free(lmath)
 
 
 def test_logmath_get_base(lib: Any) -> None:
     """Test logmath base retrieval."""
     base = 1.0001
-    lmath = lib.logmath_init(base, 0, 1)
+    lmath = lib.pstrain_cffi_logmath_init(base, 0, 1)
 
-    retrieved_base = lib.logmath_get_base(lmath)
+    retrieved_base = lib.pstrain_cffi_logmath_get_base(lmath)
     assert abs(retrieved_base - base) < 0.0001
 
-    lib.logmath_free(lmath)
-
-
-def test_hash_table_basic(lib: Any, ffi: FFI) -> None:
-    """Test hash table creation and basic operations."""
-    ht = lib.hash_table_new(32, 0)
-    assert ht is not None
-
-    # Enter a value
-    key = ffi.new("char[]", b"test_key")
-    val = ffi.new("int32 *", 42)
-    lib.hash_table_enter(ht, key, val)
-
-    # Lookup: hash_table_lookup(h, key, void **val) returns 0 on hit and
-    # writes the stored pointer into *out.
-    out = ffi.new("void **")
-    rc = lib.hash_table_lookup(ht, key, out)
-    assert rc == 0
-    assert out[0] == ffi.cast("void *", val)
-
-    lib.hash_table_free(ht)
-
-
-def test_hash_table_lookup_int32(lib: Any, ffi: FFI) -> None:
-    """Test hash table int32 lookup."""
-    ht = lib.hash_table_new(32, 0)
-
-    key = ffi.new("char[]", b"answer")
-    # hash_table_enter stores the pointer itself, so we need to allocate
-    val_ptr = ffi.new("int32 *", 42)
-    lib.hash_table_enter(ht, key, ffi.cast("void *", val_ptr))
-
-    out_val = ffi.new("int32 *")
-    result = lib.hash_table_lookup_int32(ht, key, out_val)
-    # Note: lookup_int32 expects the value to be stored directly, not as a pointer
-    # This test may need adjustment based on actual hash_table implementation
-    # For now, just verify the function exists and can be called
-    assert result in (0, -1)  # Success or not found
-
-    lib.hash_table_free(ht)
-
-
-def test_hash_table_replace(lib: Any, ffi: FFI) -> None:
-    """Test hash table replace operation."""
-    ht = lib.hash_table_new(32, 0)
-
-    key = ffi.new("char[]", b"value")
-    val1 = ffi.new("int32 *", 10)
-    val2 = ffi.new("int32 *", 20)
-
-    lib.hash_table_enter(ht, key, ffi.cast("void *", val1))
-    lib.hash_table_replace(ht, key, ffi.cast("void *", val2))
-
-    # Verify the pointer was replaced
-    out = ffi.new("void **")
-    rc = lib.hash_table_lookup(ht, key, out)
-    assert rc == 0
-    assert out[0] == ffi.cast("void *", val2)
-
-    lib.hash_table_free(ht)
-
-
-def test_hash_table_delete(lib: Any, ffi: FFI) -> None:
-    """Test hash table delete operation."""
-    ht = lib.hash_table_new(32, 0)
-
-    key = ffi.new("char[]", b"temp")
-    val = ffi.new("int32 *", 99)
-    lib.hash_table_enter(ht, key, val)
-
-    # Delete
-    deleted = lib.hash_table_delete(ht, key)
-    assert deleted is not None
-
-    # Should not be found now
-    out_val = ffi.new("int32 *")
-    result = lib.hash_table_lookup_int32(ht, key, out_val)
-    assert result != 0  # Not found
-
-    lib.hash_table_free(ht)
-
-
-def test_cmd_ln_init_free(lib: Any, ffi: FFI) -> None:
-    """Test command line initialization."""
-    # cmd_ln_init(inout_cmdln, defn, strict, ...) is variadic and
-    # NULL-terminated; an empty config is (NULL, NULL, FALSE, NULL).
-    cmdln = lib.cmd_ln_init(ffi.NULL, ffi.NULL, 0, ffi.NULL)
-    assert cmdln is not None
-    lib.cmd_ln_free_r(cmdln)
-
-
-def test_cmd_ln_str_r(lib: Any, ffi: FFI) -> None:
-    """Test command line string retrieval."""
-    cmdln = lib.cmd_ln_init(ffi.NULL, ffi.NULL, 0, ffi.NULL)
-
-    # Set a string value (this requires proper arg_t definition, skip for now)
-    # Just test that free works
-    lib.cmd_ln_free_r(cmdln)
-
-
-def test_acmod_set_new(lib: Any) -> None:
-    """Test acmod_set creation."""
-    acmod = lib.acmod_set_new()
-    assert acmod is not None
-
-
-def test_acmod_set_hints(lib: Any) -> None:
-    """Test acmod_set hint setting."""
-    acmod = lib.acmod_set_new()
-
-    lib.acmod_set_set_n_ci_hint(acmod, 10)
-    lib.acmod_set_set_n_tri_hint(acmod, 100)
-
-    # Hints are set (no return value to check)
-
-
-def test_gauden_alloc_free(lib: Any) -> None:
-    """Test gauden allocation."""
-    g = lib.gauden_alloc()
-    assert g is not None
-    lib.gauden_free(g)
+    lib.pstrain_cffi_logmath_free(lmath)
 
 
 def test_logmath_edge_cases(lib: Any) -> None:
     """Test logmath with edge cases."""
-    lmath = lib.logmath_init(1.0001, 0, 1)
+    lmath = lib.pstrain_cffi_logmath_init(1.0001, 0, 1)
 
     # Test very small value
-    log_tiny = lib.logmath_log(lmath, 0.0001)
-    exp_tiny = lib.logmath_exp(lmath, log_tiny)
+    log_tiny = lib.pstrain_cffi_logmath_log(lmath, 0.0001)
+    exp_tiny = lib.pstrain_cffi_logmath_exp(lmath, log_tiny)
     assert abs(exp_tiny - 0.0001) < 0.0001
 
     # Test value near 1.0
-    log_near_one = lib.logmath_log(lmath, 0.999)
-    exp_near_one = lib.logmath_exp(lmath, log_near_one)
+    log_near_one = lib.pstrain_cffi_logmath_log(lmath, 0.999)
+    exp_near_one = lib.pstrain_cffi_logmath_exp(lmath, log_near_one)
     assert abs(exp_near_one - 0.999) < 0.001
 
-    lib.logmath_free(lmath)
+    lib.pstrain_cffi_logmath_free(lmath)
 
 
 def test_logmath_different_bases(lib: Any) -> None:
     """Test logmath with different bases."""
     # Base 1.0001
-    lmath1 = lib.logmath_init(1.0001, 0, 1)
-    log1 = lib.logmath_log(lmath1, 0.5)
-    lib.logmath_free(lmath1)
+    lmath1 = lib.pstrain_cffi_logmath_init(1.0001, 0, 1)
+    log1 = lib.pstrain_cffi_logmath_log(lmath1, 0.5)
+    lib.pstrain_cffi_logmath_free(lmath1)
 
     # Base 1.001
-    lmath2 = lib.logmath_init(1.001, 0, 1)
-    log2 = lib.logmath_log(lmath2, 0.5)
-    lib.logmath_free(lmath2)
+    lmath2 = lib.pstrain_cffi_logmath_init(1.001, 0, 1)
+    log2 = lib.pstrain_cffi_logmath_log(lmath2, 0.5)
+    lib.pstrain_cffi_logmath_free(lmath2)
 
     # Different bases should give different log values
     assert log1 != log2
-
-
-def test_hash_table_multiple_entries(lib: Any, ffi: FFI) -> None:
-    """Test hash table with multiple entries."""
-    ht = lib.hash_table_new(32, 0)
-
-    keys = [b"one", b"two", b"three"]
-    values = [1, 2, 3]
-
-    # Store pointers to the values. hash_table_enter keeps the key pointer
-    # (it does not copy), so the key buffers must stay alive for the lifetime
-    # of the table — keep references to both keys and values.
-    stored_keys = []
-    stored_ptrs = []
-    for key_bytes, val in zip(keys, values, strict=False):
-        key = ffi.new("char[]", key_bytes)
-        val_ptr = ffi.new("int32 *", val)
-        stored_keys.append(key)
-        stored_ptrs.append(val_ptr)
-        lib.hash_table_enter(ht, key, ffi.cast("void *", val_ptr))
-
-    # Verify all entries can be looked up and return the stored value pointer.
-    for key, val_ptr in zip(stored_keys, stored_ptrs, strict=False):
-        out = ffi.new("void **")
-        rc = lib.hash_table_lookup(ht, key, out)
-        assert rc == 0
-        assert out[0] == ffi.cast("void *", val_ptr)
-
-    lib.hash_table_free(ht)
 
 
 def test_enum_constants(lib: Any) -> None:
@@ -285,31 +136,31 @@ def test_error_macros_exist(lib: Any) -> None:
 
 def test_logmath_identity(lib: Any) -> None:
     """Test logmath identity: exp(log(x)) = x."""
-    lmath = lib.logmath_init(1.0001, 0, 1)
+    lmath = lib.pstrain_cffi_logmath_init(1.0001, 0, 1)
 
     test_values = [0.1, 0.25, 0.5, 0.75, 0.9]
     for val in test_values:
-        log_val = lib.logmath_log(lmath, val)
-        exp_val = lib.logmath_exp(lmath, log_val)
+        log_val = lib.pstrain_cffi_logmath_log(lmath, val)
+        exp_val = lib.pstrain_cffi_logmath_exp(lmath, log_val)
         assert abs(exp_val - val) < 0.01, f"Identity failed for {val}: {exp_val}"
 
-    lib.logmath_free(lmath)
+    lib.pstrain_cffi_logmath_free(lmath)
 
 
 def test_logmath_add_commutative(lib: Any) -> None:
     """Test that logmath addition is commutative."""
-    lmath = lib.logmath_init(1.0001, 0, 1)
+    lmath = lib.pstrain_cffi_logmath_init(1.0001, 0, 1)
 
-    log_a = lib.logmath_log(lmath, 0.3)
-    log_b = lib.logmath_log(lmath, 0.4)
+    log_a = lib.pstrain_cffi_logmath_log(lmath, 0.3)
+    log_b = lib.pstrain_cffi_logmath_log(lmath, 0.4)
 
-    sum_ab = lib.logmath_add(lmath, log_a, log_b)
-    sum_ba = lib.logmath_add(lmath, log_b, log_a)
+    sum_ab = lib.pstrain_cffi_logmath_add(lmath, log_a, log_b)
+    sum_ba = lib.pstrain_cffi_logmath_add(lmath, log_b, log_a)
 
     # Should be approximately equal (within rounding)
     assert abs(sum_ab - sum_ba) < 10  # Allow some rounding error
 
-    lib.logmath_free(lmath)
+    lib.pstrain_cffi_logmath_free(lmath)
 
 
 # =============================================================================
@@ -459,12 +310,17 @@ def test_pstrain_fe_create_default() -> None:
         cepstra = ffi.new("mfcc_t *[100]", rows)
         nframes = ffi.new("int32 *", len(rows))
 
-        assert lib.fe_start_utt(frontend) == 0
-        assert lib.fe_process_frames(frontend, samples_ptr, nsamps, cepstra, nframes, ffi.NULL) == 0
+        assert lib.pstrain_cffi_fe_start_utt(frontend) == 0
+        assert (
+            lib.pstrain_cffi_fe_process_frames(
+                frontend, samples_ptr, nsamps, cepstra, nframes, ffi.NULL
+            )
+            == 0
+        )
         return np.array([[rows[i][j] for j in range(13)] for i in range(nframes[0])])
 
     try:
-        assert lib.fe_get_output_size(fe) == 13
+        assert lib.pstrain_cffi_fe_get_output_size(fe) == 13
         default_features = extract(fe)
         explicit_features = extract(explicit_fe)
         assert default_features.shape[0] > 0
@@ -474,8 +330,8 @@ def test_pstrain_fe_create_default() -> None:
         assert np.isfinite(default_features).all()
         assert np.isfinite(explicit_features).all()
     finally:
-        lib.fe_free(fe)
-        lib.fe_free(explicit_fe)
+        lib.pstrain_cffi_fe_free(fe)
+        lib.pstrain_cffi_fe_free(explicit_fe)
 
 
 def test_pstrain_fe_create_custom() -> None:
@@ -501,10 +357,10 @@ def test_pstrain_fe_create_custom() -> None:
     assert fe != _pstrainc.get_ffi().NULL
 
     # Check output size matches our ncep
-    output_size = lib.fe_get_output_size(fe)
+    output_size = lib.pstrain_cffi_fe_get_output_size(fe)
     assert output_size == 26
 
-    lib.fe_free(fe)
+    lib.pstrain_cffi_fe_free(fe)
 
 
 def test_pstrain_fe_create_8khz() -> None:
@@ -529,10 +385,10 @@ def test_pstrain_fe_create_8khz() -> None:
     )
     assert fe != _pstrainc.get_ffi().NULL
 
-    output_size = lib.fe_get_output_size(fe)
+    output_size = lib.pstrain_cffi_fe_get_output_size(fe)
     assert output_size == 13
 
-    lib.fe_free(fe)
+    lib.pstrain_cffi_fe_free(fe)
 
 
 @requires_c_library

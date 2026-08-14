@@ -71,7 +71,7 @@ def create_ts2cb(
         ts2cb[i] = ptr[i]
 
     # Free the C-allocated memory
-    lib.ckd_free(ptr)
+    lib.pstrain_cffi_ckd_free(ptr)
 
     return ts2cb, n_cb
 
@@ -110,7 +110,7 @@ def read_ts2cb(path: Path) -> tuple[npt.NDArray[np.uint32], int]:
         ts2cb[i] = ptr[i]
 
     # Free C memory
-    lib.ckd_free(ptr)
+    lib.pstrain_cffi_ckd_free(ptr)
 
     return ts2cb, n_cb
 

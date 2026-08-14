@@ -170,6 +170,7 @@ initialize_from_cmd_ln(lexicon_t **out_lex,
     return S3_SUCCESS;
 }
 
+#ifndef PSTRAIN_LIBRARY_BUILD
 static int
 initialize(lexicon_t **out_lex,
 	   model_def_t **out_mdef,
@@ -181,6 +182,7 @@ initialize(lexicon_t **out_lex,
 
     return initialize_from_cmd_ln(out_lex, out_mdef);
 }
+#endif /* PSTRAIN_LIBRARY_BUILD */
 
 /**
  * Run param_cnt using pre-configured cmd_ln state.

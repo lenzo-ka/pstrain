@@ -85,10 +85,10 @@ def test_library_has_functions() -> None:
 
     lib = get_lib()
     # Check for some key functions
-    assert hasattr(lib, "logmath_init")
-    assert hasattr(lib, "logmath_free")
-    assert hasattr(lib, "hash_table_new")
-    assert hasattr(lib, "acmod_set_new")
+    assert hasattr(lib, "pstrain_cffi_logmath_init")
+    assert hasattr(lib, "pstrain_cffi_logmath_free")
+    assert hasattr(lib, "pstrain_fe_create")
+    assert hasattr(lib, "pstrain_bw_init")
     assert hasattr(lib, "s3gau_read")
     assert hasattr(lib, "s3mixw_read")
 

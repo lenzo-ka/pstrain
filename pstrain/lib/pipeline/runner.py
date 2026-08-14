@@ -398,12 +398,12 @@ class Pipeline:
         marker = task.completion_marker
         if marker is not None and not marker.exists():
             return True, "missing completion marker"
-        out_mtimes = [p.stat().st_mtime for p in outputs]
+        out_mtimes = [p.stat().st_mtime_ns for p in outputs]
         oldest_out = min(out_mtimes)
         existing_inputs = [Path(p) for p in task.inputs if Path(p).exists()]
         if not existing_inputs:
             return False, "up to date"
-        newest_in = max(p.stat().st_mtime for p in existing_inputs)
+        newest_in = max(p.stat().st_mtime_ns for p in existing_inputs)
         if newest_in >= oldest_out:
             return True, "inputs not older than outputs"
         return False, "up to date"
@@ -643,6 +643,18 @@ def _verify_outputs(task: Task) -> None:
         raise TaskFailure(f"did not produce: {missing}")
 
 
+def _order_output_mtimes(task: Task) -> None:
+    """Keep completed outputs strictly newer than their existing inputs."""
+    existing_inputs = [Path(path) for path in task.inputs if Path(path).exists()]
+    if not existing_inputs:
+        return
+    newest_input = max(path.stat().st_mtime_ns for path in existing_inputs)
+    for output in map(Path, task.outputs):
+        stat = output.stat()
+        if stat.st_mtime_ns <= newest_input:
+            os.utime(output, ns=(stat.st_atime_ns, newest_input + 1))
+
+
 def _execute_task(task: Task) -> None:
     """Execute a task and publish its completion marker last."""
     marker = task.completion_marker
@@ -650,6 +662,7 @@ def _execute_task(task: Task) -> None:
         marker.unlink(missing_ok=True)
     task.fn()
     _verify_outputs(task)
+    _order_output_mtimes(task)
     if marker is not None:
         marker.parent.mkdir(parents=True, exist_ok=True)
         temporary = marker.with_name(f"{marker.name}.tmp-{os.getpid()}")

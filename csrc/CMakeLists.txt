@@ -104,6 +104,7 @@ set(LIB_SRCS
   libs/libcommon/lexicon.c
 
   # libpstrain - pstrain helper functions
+  libs/libpstrain/pstrain_cffi.c
   libs/libpstrain/pstrain_fe.c
   libs/libpstrain/pstrain_session.c
   libs/libpstrain/pstrain_bw.c
@@ -236,9 +237,17 @@ else()
 endif()
 set_target_properties(pstrainc_shared PROPERTIES OUTPUT_NAME pstrainc)
 if(APPLE)
-  set_target_properties(pstrainc_shared PROPERTIES INSTALL_RPATH "@loader_path")
+  set_target_properties(pstrainc_shared PROPERTIES
+    INSTALL_RPATH "@loader_path"
+    LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/pstrain.exports.macos")
+  target_link_options(pstrainc_shared PRIVATE
+    "LINKER:-exported_symbols_list,${CMAKE_CURRENT_SOURCE_DIR}/pstrain.exports.macos")
 elseif(UNIX)
-  set_target_properties(pstrainc_shared PROPERTIES INSTALL_RPATH "$ORIGIN")
+  set_target_properties(pstrainc_shared PROPERTIES
+    INSTALL_RPATH "$ORIGIN"
+    LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/pstrain.exports.elf")
+  target_link_options(pstrainc_shared PRIVATE
+    "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/pstrain.exports.elf")
 endif()
 
 target_link_libraries(pstrainc PUBLIC pocketsphinx)
@@ -319,13 +328,6 @@ set_target_properties(pstrainc PROPERTIES
   POSITION_INDEPENDENT_CODE ON
   C_VISIBILITY_PRESET default
 )
-
-# Export all symbols on all platforms
-if(BUILD_SHARED_LIBS)
-  if(WIN32)
-    set_target_properties(pstrainc PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
-  endif()
-endif()
 
 # Install library and headers
 include(GNUInstallDirs)
