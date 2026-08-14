@@ -81,6 +81,7 @@ config-check:
 		tests/test_features.py::TestFeatureExtractor::test_new_front_end_options_change_produced_features
 	$(MAKE) docs-gen
 	git diff --exit-code -- docs/api/config-reference.rst
+	python scripts/check_arctic_pin.py
 
 .PHONY: docs
 docs:
