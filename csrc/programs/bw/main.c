@@ -623,7 +623,7 @@ main_reestimate(model_inventory_t *inv,
     int32 pass2var;
     int32 var_is_full;
     int32 multipron;
-    int32 optional_boundary_silence;
+    int32 optional_final_silence;
     int32 graph_built;
 
     uint32 n_utt;
@@ -667,9 +667,9 @@ main_reestimate(model_inventory_t *inv,
     pass2var = cmd_ln_int32("-2passvar");
     var_is_full = cmd_ln_int32("-fullvar");
     multipron = cmd_ln_int32("-multipron");
-    optional_boundary_silence = cmd_ln_int32("-optional_boundary_silence");
+    optional_final_silence = cmd_ln_int32("-optional_final_silence");
     graph_built = next_utt_states_graph_built(multipron,
-                                              optional_boundary_silence);
+                                              optional_final_silence);
     pdumpdir = cmd_ln_str("-pdumpdir");
     in_veclen = cmd_ln_int32("-ceplen");
 
@@ -806,10 +806,10 @@ main_reestimate(model_inventory_t *inv,
 	if (graph_built)
 	    state_seq = next_utt_states_graph(&n_state, lex, inv, mdef, trans,
 	                                      multipron,
-	                                      optional_boundary_silence);
+	                                      optional_final_silence);
 	else
 	    state_seq = next_utt_states(&n_state, lex, inv, mdef, trans,
-	                                optional_boundary_silence);
+	                                optional_final_silence);
 	printf(" %5u", n_state);
 
 	if (state_seq == NULL) {

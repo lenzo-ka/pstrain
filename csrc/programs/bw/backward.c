@@ -59,7 +59,6 @@
 
 #include "accum.h"
 #include "baum_welch.h"
-#include "next_utt_states.h"
 
 #include <assert.h>
 #include <math.h>
@@ -1166,6 +1165,7 @@ backward_update(float64 **active_alpha,
     if (retval == S3_SUCCESS) {
 
 	/* do a final alpha != beta consistency check */
+
 	beta[0] = prior_beta[0] * op;
 
 	if (fabs(beta[0] - active_alpha[n_obs-1][q_f])

@@ -62,23 +62,13 @@
 #include "next_utt_states.h"
 
 int
-next_utt_states_graph_built(int multipron, int optional_boundary_silence)
+next_utt_states_graph_built(int multipron, int optional_final_silence)
 {
-    return multipron || optional_boundary_silence;
+    return multipron || optional_final_silence;
 }
 
-float32
-next_utt_states_initial_tprob(const state_t *state_seq, uint32 i)
-{
-    if (state_seq[i].flags & STATE_FLAG_INITIAL) {
-        uint32 fanout = state_seq[i].flags >> STATE_INITIAL_FANOUT_SHIFT;
-        return fanout == 0 ? 1.0f : 1.0f / (float32)fanout;
-    }
-    return i == 0 ? 1.0f : 0.0f;
-}
-
-/* PSTRAIN DIVERGENCE: retain both boundary SIL HMMs but add a zero-frame
- * entry alternative and direct lexical-exit arcs to the final SIL exit. */
+/* PSTRAIN DIVERGENCE: retain the final SIL HMM but add direct lexical-exit
+ * arcs to its non-emitting exit as normalized competing alternatives. */
 static state_t *
 add_boundary_bypass(state_t *old, uint32 n_state,
                     const phone_graph_t *graph, model_def_t *mdef)
@@ -170,12 +160,6 @@ add_boundary_bypass(state_t *old, uint32 n_state,
         }
     }
 
-    state[0].flags |= STATE_FLAG_INITIAL | (2 << STATE_INITIAL_FANOUT_SHIFT);
-    for (i = 0; i < graph->n_next[0]; ++i) {
-        uint32 entry = offset[graph->next_idx[0][i]];
-        state[entry].flags |= STATE_FLAG_INITIAL
-            | (2 * graph->n_next[0] << STATE_INITIAL_FANOUT_SHIFT);
-    }
     state_seq_free(old, n_state);
     ckd_free(offset);
     ckd_free(bypass_pred);
@@ -187,7 +171,7 @@ state_t *next_utt_states(uint32 *n_state,
 			 model_inventory_t *inv,
 			 model_def_t *mdef,
 			 char *trans,
-			 int optional_boundary_silence
+			 int optional_final_silence
 			 )
 {
     char **word;
@@ -246,7 +230,7 @@ state_t *next_utt_states_graph(uint32 *n_state,
 			       model_def_t *mdef,
 			       char *trans,
 			       int multipron,
-			       int optional_boundary_silence
+			       int optional_final_silence
 			       )
 {
     char *utterance;
@@ -296,7 +280,7 @@ state_t *next_utt_states_graph(uint32 *n_state,
 	return NULL;
     }
 
-    if (optional_boundary_silence)
+    if (optional_final_silence)
         state_seq = add_boundary_bypass(state_seq, *n_state, split, mdef);
     phone_graph_free(split);
 

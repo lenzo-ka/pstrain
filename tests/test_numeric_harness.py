@@ -412,7 +412,7 @@ def test_bw_golden_trajectory_and_accounting(
     caplog.set_level("INFO", logger="pstrain.lib.steps.train")
     pinned = replace(
         flat_project,
-        train=replace(flat_project.train, optional_boundary_silence=False),
+        train=replace(flat_project.train, optional_final_silence=False),
     )
     result = train_golden(pinned, output_dir)
     actual = golden_payload(pinned, result)
@@ -990,7 +990,7 @@ def test_withheld_context_uses_live_ci_fallback_across_passes(
             a_beam=1e-200,
             b_beam=1e-200,
             multipron=True,
-            optional_boundary_silence=False,
+            optional_final_silence=False,
         ),
     )
     assert result.iterations == 3

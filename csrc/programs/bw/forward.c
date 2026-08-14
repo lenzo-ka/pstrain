@@ -61,7 +61,6 @@
 #include <string.h>
 
 #include "baum_welch.h"
-#include "next_utt_states.h"
 
 #define FORWARD_DEBUG 0
 #define INACTIVE	0xffff
@@ -574,8 +573,10 @@ forward(float64 **active_alpha,
 	    if (bp && state_seq[j].mixw == TYING_NON_EMITTING) {
 		E_INFO("After non-emitting state update, best path to %d(%d) = %d(%d)\n",
 		       j, amap[j], next_active[bp[t][s]], bp[t][s]);
-			/* The predecessor came from j's actual incoming graph arc.
-			 * Optional boundary bypasses may span several state slots. */
+		/* Assumptions about topology that might not be valid
+		 * but are useful for debugging. */
+		assert(next_active[bp[t][s]] <= j);
+		assert(j - next_active[bp[t][s]] <= 2);
 	    }
 	}
 #endif

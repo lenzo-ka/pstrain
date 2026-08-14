@@ -208,10 +208,10 @@ training
    :Default: ``3``
    :Description: Emitting states per HMM
 
-``training.optional_boundary_silence``
+``training.optional_final_silence``
    :Type: ``bool``
    :Default: ``True``
-   :Description: Permit initial and final transcript silence to consume zero frames
+   :Description: Permit final transcript silence to consume zero frames
 
 ``training.question_niter``
    :Type: ``int``

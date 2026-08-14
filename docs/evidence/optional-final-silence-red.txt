@@ -1,0 +1,23 @@
+Optional-final-silence topology and mass gate: behavioral red history
+2026-08-14
+
+Command for both negative controls:
+
+  cmake --build build --target test_bw_state_seq_build -j4
+  ctest --test-dir build -R '^bw_state_seq_build$' --output-on-failure
+
+Second-initial-state negative control:
+
+  After the final-bypass graph transform, set the first lexical emitting
+  state's n_prior to zero. The focused CTest failed with:
+
+  FAIL: graph has exactly one frame-zero emitting entry
+
+Exit-mass negative control:
+
+  Change the direct final-exit bypass probability from 0.5 to 0.6 while
+  leaving retained outgoing mass at 0.5. The focused CTest failed with:
+
+  FAIL: retained and bypass final alternatives total one
+
+Both mutations were removed. The focused CTest passed afterward.

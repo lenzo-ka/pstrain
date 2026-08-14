@@ -121,7 +121,7 @@ struct pstrain_bw_context_s {
     float32 ***raw_mixw; /* Upstream-format mixture occupancy accumulators. */
     float32 ***raw_tmat; /* Upstream-format transition accumulators. */
     int32 multipron; /* Multi-pron training: build wide utterance graphs */
-    int32 optional_boundary_silence;
+    int32 optional_final_silence;
     char *fallback_senone; /* CI senones used as primary models this pass */
 
     /* Stats */
@@ -180,7 +180,7 @@ pstrain_bw_init(const char *mdef_path,
     ctx->var_reest = config->var_reest;
     ctx->pass2var = config->pass2var;
     ctx->unobserved_gaussian_policy = config->unobserved_gaussian_policy;
-    ctx->optional_boundary_silence = config->optional_boundary_silence;
+    ctx->optional_final_silence = config->optional_final_silence;
     ctx->multipron = 1;  /* On by default; disable via pstrain_bw_set_multipron(ctx, 0). */
 
     /* Initialize cmd_ln with default values - required for gauden_alloc_acc etc.
@@ -431,14 +431,14 @@ build_utt_state_seq(pstrain_bw_context_t *ctx,
                     int *needs_free)
 {
     if (!next_utt_states_graph_built(ctx->multipron,
-                                     ctx->optional_boundary_silence)) {
+                                     ctx->optional_final_silence)) {
         *needs_free = 0;
         return next_utt_states(n_state,
                                ctx->lex,
                                ctx->inv,
                                ctx->mdef,
                                trans_copy,
-                               ctx->optional_boundary_silence);
+                               ctx->optional_final_silence);
     }
 
     *needs_free = 1;
@@ -448,7 +448,7 @@ build_utt_state_seq(pstrain_bw_context_t *ctx,
                                  ctx->mdef,
                                  trans_copy,
                                  ctx->multipron,
-                                 ctx->optional_boundary_silence);
+                                 ctx->optional_final_silence);
 }
 
 /* Copy the historical linear builder's static state graph into the same

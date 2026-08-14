@@ -53,15 +53,14 @@
 #include <s3/model_def.h>
 
 int next_utt_states_graph_built(int multipron,
-                                int optional_boundary_silence);
-float32 next_utt_states_initial_tprob(const state_t *state_seq, uint32 i);
+                                int optional_final_silence);
 
 state_t *next_utt_states(uint32 *n_state,
 			 lexicon_t *lex,
 			 model_inventory_t *inv,
 			 model_def_t *mdef,
 			 char *transcript,
-			 int optional_boundary_silence);
+			 int optional_final_silence);
 
 /*
  * Graph-aware twin of next_utt_states.
@@ -86,7 +85,7 @@ state_t *next_utt_states_graph(uint32 *n_state,
 			       model_def_t *mdef,
 			       char *transcript,
 			       int multipron,
-			       int optional_boundary_silence);
+			       int optional_final_silence);
 
 state_t *next_utt_states_mmie(uint32 *n_state,
 			      lexicon_t *lex,

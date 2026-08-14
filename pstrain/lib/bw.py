@@ -45,7 +45,7 @@ class BWConfig:
     mixw_reest: bool = True
     tmat_reest: bool = True
     multipron: bool = True  # Multi-pron training: build wide graphs that sum
-    optional_boundary_silence: bool = True
+    optional_final_silence: bool = True
     # posteriors across pronunciation variants. Set to False to fall back to
     # the legacy linear path that always uses the first listed variant per
     # word (bit-identical to SphinxTrain's default behavior).
@@ -198,7 +198,7 @@ class BWTrainer:
         c_config.mixw_reest = 1 if self.config.mixw_reest else 0
         c_config.tmat_reest = 1 if self.config.tmat_reest else 0
         c_config.pass2var = 1 if self.config.pass2var else 0
-        c_config.optional_boundary_silence = 1 if self.config.optional_boundary_silence else 0
+        c_config.optional_final_silence = 1 if self.config.optional_final_silence else 0
         c_config.unobserved_gaussian_policy = {
             "zero": 1,
             "retain": 2,
