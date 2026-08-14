@@ -7,7 +7,8 @@ identify the training stage at which a small numerical change first appeared.
 This harness pins the pre-PP4 behavior at the five BASIS choke points so a
 numerical change is reviewed at its source instead of being absorbed by WER.
 
-The program lives in `tests/test_numeric_harness.py`. It uses three utterances
+The shared harness machinery lives in `tests/numeric_harness.py`, with gates in
+`tests/test_numeric_harness.py`. It uses three utterances
 for the CI trajectory and one shared ten-utterance `mini_arctic` build for the
 full 1→2→4→8 path. The complete module is expected to take less than five
 seconds on a development machine and remains in the normal test suite.
