@@ -1,11 +1,13 @@
 /* Exercise the public state-sequence builder and its failure cleanup. */
 
 #include <stdio.h>
+#include <math.h>
 #include <string.h>
 
 #include <s3/state.h>
 
 #include "../libs/libpstrain/pstrain_bw.h"
+#include "../programs/bw/next_utt_states.h"
 
 #define CHECK(cond, msg)                                                    \
     do {                                                                    \
@@ -39,6 +41,7 @@ exercise_mode(pstrain_bw_context_t *ctx, int multipron)
 
 static int
 exercise_boundary_mode(pstrain_bw_context_t *ctx, int multipron,
+                       int optional_boundary_silence,
                        uint32 *n_state_out, uint32 *n_initial, uint32 *final_priors)
 {
     state_t *states;
@@ -48,6 +51,23 @@ exercise_boundary_mode(pstrain_bw_context_t *ctx, int multipron,
     states = pstrain_bw_build_state_seq(ctx, "<s> a and </s>", &n_state);
     CHECK(states != NULL, "boundary sequence builds");
     CHECK(n_state > 1, "boundary sequence has states");
+    if (multipron && optional_boundary_silence) {
+        float32 bypass_entry_mass = 0.0f;
+        uint32 bypass_entries = 0, i;
+
+        CHECK(fabs(next_utt_states_initial_tprob(states, 0) - 1.0f) < 1e-6,
+              "retained initial SIL path has unit entry weight");
+        for (i = 1; i < n_state; ++i) {
+            if (!(states[i].flags & STATE_FLAG_INITIAL))
+                continue;
+            ++bypass_entries;
+            bypass_entry_mass += next_utt_states_initial_tprob(states, i);
+        }
+        CHECK(bypass_entries >= 2,
+              "fixture first word exposes multiple pronunciation entries");
+        CHECK(fabs(bypass_entry_mass - 1.0f) < 1e-6,
+              "multipron bypass entry alternatives preserve unit fan-out mass");
+    }
     *n_state_out = n_state;
     *n_initial = 0;
     for (uint32 i = 0; i < n_state; ++i)
@@ -67,6 +87,14 @@ main(int argc, char *argv[])
     int multipron;
 
     CHECK(argc == 8, "expected model and dictionary fixture paths");
+    CHECK(!next_utt_states_graph_built(0, 0),
+          "linear builder storage is static");
+    CHECK(next_utt_states_graph_built(1, 0),
+          "multipron graph storage is owned");
+    CHECK(next_utt_states_graph_built(0, 1),
+          "optional-boundary graph storage is owned");
+    CHECK(next_utt_states_graph_built(1, 1),
+          "combined graph storage is owned");
     memset(&config, 0, sizeof(config));
     config.a_beam = 1e-90;
     config.b_beam = 1e-10;
@@ -82,7 +110,7 @@ main(int argc, char *argv[])
     CHECK(exercise_mode(ctx, 0) == 0, "linear mode");
     CHECK(exercise_mode(ctx, 1) == 0, "graph mode");
     for (multipron = 0; multipron <= 1; ++multipron) {
-        CHECK(exercise_boundary_mode(ctx, multipron, &off_n[multipron],
+        CHECK(exercise_boundary_mode(ctx, multipron, 0, &off_n[multipron],
                                      &off_initial[multipron], &off_final[multipron]) == 0,
               "off mode retains boundaries");
     }
@@ -94,7 +122,7 @@ main(int argc, char *argv[])
     CHECK(pstrain_bw_set_dict(ctx, argv[6], argv[7]) == 0, "load optional-boundary dictionaries");
     for (multipron = 0; multipron <= 1; ++multipron) {
         CHECK(exercise_mode(ctx, multipron) == 0, "optional-boundary failure cleanup");
-        CHECK(exercise_boundary_mode(ctx, multipron, &on_n[multipron],
+        CHECK(exercise_boundary_mode(ctx, multipron, 1, &on_n[multipron],
                                      &on_initial[multipron], &on_final[multipron]) == 0,
               "on mode bypasses boundaries");
         CHECK(on_n[multipron] == off_n[multipron], "on mode retains boundary HMM states");

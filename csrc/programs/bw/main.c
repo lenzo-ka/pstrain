@@ -624,6 +624,7 @@ main_reestimate(model_inventory_t *inv,
     int32 var_is_full;
     int32 multipron;
     int32 optional_boundary_silence;
+    int32 graph_built;
 
     uint32 n_utt;
 
@@ -667,6 +668,8 @@ main_reestimate(model_inventory_t *inv,
     var_is_full = cmd_ln_int32("-fullvar");
     multipron = cmd_ln_int32("-multipron");
     optional_boundary_silence = cmd_ln_int32("-optional_boundary_silence");
+    graph_built = next_utt_states_graph_built(multipron,
+                                              optional_boundary_silence);
     pdumpdir = cmd_ln_str("-pdumpdir");
     in_veclen = cmd_ln_int32("-ceplen");
 
@@ -800,7 +803,7 @@ main_reestimate(model_inventory_t *inv,
 	 * builder allocates a fresh state_t array per utterance; the
 	 * linear builder returns a pointer into static buffers inside
 	 * state_seq_make() and must NOT be freed. */
-	if (multipron || optional_boundary_silence)
+	if (graph_built)
 	    state_seq = next_utt_states_graph(&n_state, lex, inv, mdef, trans,
 	                                      multipron,
 	                                      optional_boundary_silence);
@@ -867,10 +870,9 @@ main_reestimate(model_inventory_t *inv,
 	if (timers)
 	    ptmr_stop(&timers->upd_timer);
 
-	/* Release the graph-built state_seq if we used the multipron
-	 * path. The linear path's state_seq is backed by static
+	/* Release graph-built state_seq. The linear path is backed by static
 	 * buffers inside state_seq_make() and must NOT be freed. */
-	if (multipron && state_seq != NULL)
+	if (graph_built && state_seq != NULL)
 	    state_seq_free(state_seq, n_state);
 
 	if (pdumpfh)

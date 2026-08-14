@@ -59,6 +59,7 @@
 
 #include "accum.h"
 #include "baum_welch.h"
+#include "next_utt_states.h"
 
 #include <assert.h>
 #include <math.h>
@@ -1172,7 +1173,8 @@ backward_update(float64 **active_alpha,
 	    op = gauden_mixture(now_den[state_seq[i].l_cb],
 				now_den_idx[state_seq[i].l_cb],
 				mixw[state_seq[i].mixw], g);
-	    beta[i] = prior_beta[i] * op;
+	    beta[i] = prior_beta[i] * op
+	        * next_utt_states_initial_tprob(state_seq, i);
 	    initial_beta += beta[i];
 	}
 
@@ -1208,7 +1210,8 @@ backward_update(float64 **active_alpha,
 		   n_top);
 
 	den_terms(d_term,
-		  prior_beta[i] * recip_final_alpha,
+		  prior_beta[i] * recip_final_alpha
+		      * next_utt_states_initial_tprob(state_seq, i),
 		  p_op,
 		  now_den[l_cb],
 		  now_den_idx[l_cb],
@@ -1225,7 +1228,7 @@ backward_update(float64 **active_alpha,
 			  n_top);
 
 	    den_terms_ci(d_term_ci,
-			 1.0,	/* ASSUMPTION: 1 initial state */
+			 next_utt_states_initial_tprob(state_seq, i),
 			 p_ci_op,
 			 now_den[l_ci_cb],
 			 now_den_idx[l_ci_cb],

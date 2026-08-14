@@ -430,7 +430,8 @@ build_utt_state_seq(pstrain_bw_context_t *ctx,
                     uint32 *n_state,
                     int *needs_free)
 {
-    if (!ctx->multipron && !ctx->optional_boundary_silence) {
+    if (!next_utt_states_graph_built(ctx->multipron,
+                                     ctx->optional_boundary_silence)) {
         *needs_free = 0;
         return next_utt_states(n_state,
                                ctx->lex,

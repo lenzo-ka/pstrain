@@ -61,6 +61,7 @@
 #include <string.h>
 
 #include "baum_welch.h"
+#include "next_utt_states.h"
 
 #define FORWARD_DEBUG 0
 #define INACTIVE	0xffff
@@ -291,9 +292,9 @@ forward(float64 **active_alpha,
     if (timers)
 	ptmr_start(&timers->gau_timer);
 
-    /* PSTRAIN DIVERGENCE: omitting optional initial SIL can expose several
-     * first-word pronunciation branches.  Initialize every emitting state
-     * without a predecessor, rather than only array slot zero. */
+    /* PSTRAIN DIVERGENCE: bypassing initial SIL can expose several first-word
+     * pronunciation branches. Initialize every weighted entry, not only slot
+     * zero. */
     for (i = 0; i < n_state; ++i) {
 	uint32 q;
 	if (!is_initial_emitting_state(state_seq, i))
@@ -322,8 +323,9 @@ forward(float64 **active_alpha,
 	outprob[i] = gauden_mixture(now_den[state_seq[i].l_cb],
 				    now_den_idx[state_seq[i].l_cb],
 				    mixw[state_seq[i].mixw], g);
-	if (outprob[i] > balpha)
-	    balpha = outprob[i];
+	x = outprob[i] * next_utt_states_initial_tprob(state_seq, i);
+	if (x > balpha)
+	    balpha = x;
     }
     if (timers)
 	ptmr_stop(&timers->gau_timer);
@@ -356,7 +358,8 @@ forward(float64 **active_alpha,
     for (i = 0; i < n_state; ++i) {
 	if (!is_initial_emitting_state(state_seq, i))
 	    continue;
-	active_alpha[0][n_active] = outprob[i] * scale[0];
+	active_alpha[0][n_active] = outprob[i]
+	    * next_utt_states_initial_tprob(state_seq, i) * scale[0];
 	active_astate[0][n_active] = i;
 	active[n_active++] = i;
     }

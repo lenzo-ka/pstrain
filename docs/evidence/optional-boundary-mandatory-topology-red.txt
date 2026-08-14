@@ -1,0 +1,18 @@
+Optional-boundary bypass topology: behavioral red history
+=========================================================
+
+Baseline: final implementation with the graph builder temporarily forced to
+mandatory-boundary mode (optional_boundary_silence argument set to 0).
+Command:
+
+  cmake --build build --target test_bw_state_seq_build -j5
+  ctest --test-dir build -R '^bw_state_seq_build$' --output-on-failure
+
+Relevant output:
+
+  FAIL: initial SIL has a bypass entry
+  0% tests passed, 1 tests failed out of 1
+
+This is a behavioral red: the option and test compile, but the old mandatory
+topology fails the on-mode bypass assertion. The temporary source change was
+restored before the green run.

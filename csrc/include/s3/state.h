@@ -100,6 +100,7 @@ typedef struct state_s {
 } state_t;
 
 #define STATE_FLAG_INITIAL 0x1
+#define STATE_INITIAL_FANOUT_SHIFT 1
 
 #ifdef __cplusplus
 }
