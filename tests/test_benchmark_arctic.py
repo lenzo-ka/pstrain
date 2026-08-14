@@ -19,7 +19,9 @@ from pstrain.benchmarks.arctic import (
     PINNED_RESOURCE_HASHES,
     RECORD_SCHEMA_VERSION,
     _run_trusted_child,
+    adopt_uncovered_conditions,
     audit_monotonicity,
+    authenticate_conditions,
     authenticate_pin_resources,
     band_resources,
     benchmark_conditions,
@@ -312,6 +314,36 @@ def test_comparison_authenticates_inputs_and_pair_ids() -> None:
     pairs["voice/extra"] = pairs.pop("voice/u0")
     with pytest.raises(RuntimeError, match="utterance ID mismatch"):
         compare_results(actual, record)
+
+
+def test_condition_authentication_rejects_changed_pinned_value() -> None:
+    recorded = {"pin_conditions": {"on": {"training": {"multipron_training": True}}}}
+    actual = json.loads(json.dumps(recorded))
+    actual["pin_conditions"]["on"]["training"]["multipron_training"] = False
+    with pytest.raises(RuntimeError, match="multipron_training mismatch"):
+        authenticate_conditions(actual, recorded)
+
+
+def test_condition_authentication_reports_schema_addition_without_failing() -> None:
+    recorded = {
+        "frozen_dataclass_fields": {"features": ["samprate"]},
+        "pin_conditions": {"off": {"features": {"samprate": 16_000}}},
+    }
+    actual = json.loads(json.dumps(recorded))
+    actual["frozen_dataclass_fields"]["features"].append("new_schema_field")
+    actual["pin_conditions"]["off"]["features"]["new_schema_field"] = "default"
+
+    assert authenticate_conditions(actual, recorded) == [
+        "conditions.frozen_dataclass_fields.features.new_schema_field",
+        "conditions.pin_conditions.off.features.new_schema_field",
+    ]
+    assert adopt_uncovered_conditions(actual, recorded) == actual
+
+
+def test_committed_record_covers_and_authenticates_live_conditions() -> None:
+    record_path = Path(__file__).parents[1] / "docs/benchmarks/arctic-pin/record.json"
+    record = json.loads(record_path.read_text())
+    assert authenticate_conditions(benchmark_conditions(), record["conditions"]) == []
 
 
 def test_record_schema_and_bootstrap_smoke() -> None:

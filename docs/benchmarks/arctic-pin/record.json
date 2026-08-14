@@ -33,11 +33,17 @@
         "lowerf",
         "upperf",
         "alpha",
+        "dither",
+        "remove_dc",
+        "remove_noise",
+        "frate",
+        "wlen",
         "feat_type",
         "lifter",
         "transform",
         "agc",
         "cmn",
+        "cmninit",
         "varnorm"
       ],
       "training": [
@@ -50,12 +56,17 @@
         "untied",
         "max_skip_fraction",
         "retry_beam_factor",
+        "arctic_a0302_zero_codebook_band",
+        "accept_arctic_a0587_known_skip",
         "tree_state_weights",
+        "tree_rotate_state_weights",
+        "tree_directional_questions",
         "tree_ssplitmax",
         "tree_ssplitthr",
         "tree_csplitmax",
         "tree_csplitthr",
         "tree_mwfloor",
+        "tree_intermediate_dumps",
         "question_npermute",
         "question_quests_per_state",
         "question_niter",
@@ -76,23 +87,6 @@
       {
         "mechanism": "beam failure on a known-hard utterance after permitted retry in the multipron posture \u2014 the recorded on-mode remainder class (V7-era: a0302/b0486; set shifted with the reachable inventory: b0320 now trains); deep diagnosis deferred per banked Q6, tracked as an open item",
         "mode": "on",
-        "passes": [
-          3,
-          4,
-          5,
-          6,
-          7,
-          8,
-          9,
-          10
-        ],
-        "recorded-in": "on-mode parity anchor",
-        "stage": "cd-untied",
-        "utterance": "arctic_a0302"
-      },
-      {
-        "mechanism": "beam failure on a known-hard utterance after permitted retry in the multipron posture \u2014 the recorded on-mode remainder class (V7-era: a0302/b0486; set shifted with the reachable inventory: b0320 now trains); deep diagnosis deferred per banked Q6, tracked as an open item",
-        "mode": "on",
         "pass": 6,
         "recorded-in": "on-mode parity anchor",
         "stage": "cd-1g",
@@ -106,16 +100,22 @@
           "agc": "none",
           "alpha": 0.97,
           "cmn": "batch",
+          "cmninit": "40,3,-1",
+          "dither": true,
           "feat_type": "1s_c_d_dd",
+          "frate": 100,
           "lifter": 22,
           "lowerf": 130,
           "ncep": 13,
           "nfft": 512,
           "nfilt": 25,
+          "remove_dc": true,
+          "remove_noise": true,
           "samprate": 16000,
           "transform": "dct",
           "upperf": 6800,
-          "varnorm": "no"
+          "varnorm": "no",
+          "wlen": 0.025625
         },
         "split": {
           "seed": 42,
@@ -123,6 +123,8 @@
         },
         "training": {
           "a_beam": 1e-90,
+          "accept_arctic_a0587_known_skip": true,
+          "arctic_a0302_zero_codebook_band": null,
           "b_beam": 1e-10,
           "ci": {
             "convergence_ratio": 0.1,
@@ -145,7 +147,10 @@
           },
           "tree_csplitmax": 2000,
           "tree_csplitthr": 0.0,
+          "tree_directional_questions": false,
+          "tree_intermediate_dumps": false,
           "tree_mwfloor": 1e-08,
+          "tree_rotate_state_weights": false,
           "tree_ssplitmax": 7,
           "tree_ssplitthr": 0.0,
           "tree_state_weights": [
@@ -167,16 +172,22 @@
           "agc": "none",
           "alpha": 0.97,
           "cmn": "batch",
+          "cmninit": "40,3,-1",
+          "dither": true,
           "feat_type": "1s_c_d_dd",
+          "frate": 100,
           "lifter": 22,
           "lowerf": 130,
           "ncep": 13,
           "nfft": 512,
           "nfilt": 25,
+          "remove_dc": true,
+          "remove_noise": true,
           "samprate": 16000,
           "transform": "dct",
           "upperf": 6800,
-          "varnorm": "no"
+          "varnorm": "no",
+          "wlen": 0.025625
         },
         "split": {
           "seed": 42,
@@ -184,6 +195,11 @@
         },
         "training": {
           "a_beam": 1e-90,
+          "accept_arctic_a0587_known_skip": true,
+          "arctic_a0302_zero_codebook_band": [
+            4548,
+            4623
+          ],
           "b_beam": 1e-10,
           "ci": {
             "convergence_ratio": 0.001,
@@ -206,7 +222,10 @@
           },
           "tree_csplitmax": 2000,
           "tree_csplitthr": 0.0,
+          "tree_directional_questions": false,
+          "tree_intermediate_dumps": false,
           "tree_mwfloor": 1e-08,
+          "tree_rotate_state_weights": false,
           "tree_ssplitmax": 7,
           "tree_ssplitthr": 0.0,
           "tree_state_weights": [
@@ -17626,23 +17645,6 @@
           {
             "mechanism": "beam failure on a known-hard utterance after permitted retry in the multipron posture \u2014 the recorded on-mode remainder class (V7-era: a0302/b0486; set shifted with the reachable inventory: b0320 now trains); deep diagnosis deferred per banked Q6, tracked as an open item",
             "mode": "on",
-            "passes": [
-              3,
-              4,
-              5,
-              6,
-              7,
-              8,
-              9,
-              10
-            ],
-            "recorded-in": "on-mode parity anchor",
-            "stage": "cd-untied",
-            "utterance": "arctic_a0302"
-          },
-          {
-            "mechanism": "beam failure on a known-hard utterance after permitted retry in the multipron posture \u2014 the recorded on-mode remainder class (V7-era: a0302/b0486; set shifted with the reachable inventory: b0320 now trains); deep diagnosis deferred per banked Q6, tracked as an open item",
-            "mode": "on",
             "pass": 6,
             "recorded-in": "on-mode parity anchor",
             "stage": "cd-1g",
@@ -34649,23 +34651,6 @@
         "hyp_words": 491,
         "insertions": 9,
         "known_skips": [
-          {
-            "mechanism": "beam failure on a known-hard utterance after permitted retry in the multipron posture \u2014 the recorded on-mode remainder class (V7-era: a0302/b0486; set shifted with the reachable inventory: b0320 now trains); deep diagnosis deferred per banked Q6, tracked as an open item",
-            "mode": "on",
-            "passes": [
-              3,
-              4,
-              5,
-              6,
-              7,
-              8,
-              9,
-              10
-            ],
-            "recorded-in": "on-mode parity anchor",
-            "stage": "cd-untied",
-            "utterance": "arctic_a0302"
-          },
           {
             "mechanism": "beam failure on a known-hard utterance after permitted retry in the multipron posture \u2014 the recorded on-mode remainder class (V7-era: a0302/b0486; set shifted with the reachable inventory: b0320 now trains); deep diagnosis deferred per banked Q6, tracked as an open item",
             "mode": "on",
