@@ -87,7 +87,12 @@ class TrainingConfig(StrictModel):
     ] = 1e10
     failed_alignment: Annotated[
         Literal["recover", "abort", "omit"],
-        Field(description="Action when BW alignment fails"),
+        Field(
+            description=(
+                "Action when Baum-Welch alignment fails; ``omit`` reports and excludes "
+                "the utterance while continuing"
+            )
+        ),
     ] = "recover"
     arctic_a0302_zero_codebook_band: Annotated[
         tuple[int, int] | None,

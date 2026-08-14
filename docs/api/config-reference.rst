@@ -188,6 +188,11 @@ training
    :Default: ``{}``
    :Description: Experimental stage/pass utterance exclusions
 
+``training.failed_alignment``
+   :Type: ``recover | abort | omit``
+   :Default: ``'recover'``
+   :Description: Action when Baum-Welch alignment fails; ``omit`` reports and excludes the utterance while continuing
+
 ``training.max_skip_fraction``
    :Type: ``float``
    :Default: ``0.05``
@@ -232,11 +237,6 @@ training
    :Type: ``float``
    :Default: ``10000000000.0``
    :Description: Beam widening factor for one retry
-
-``training.failed_alignment``
-   :Type: ``recover | abort | omit``
-   :Default: ``recover``
-   :Description: Action when Baum-Welch alignment fails; ``omit`` reports and excludes the utterance while continuing
 
 ``training.tied.convergence_ratio``
    :Type: ``float``
@@ -314,6 +314,6 @@ training
    :Description: Minimum training passes
 
 ``training.untied_inventory``
-   :Type: ``Literal``
+   :Type: ``all-triphone | transcript-reachable | linear``
    :Default: ``'all-triphone'``
    :Description: Untied-model phone inventory policy
