@@ -662,7 +662,7 @@ class ModelCompareResult:
 
 def _discover_model_files(model_dir: Path) -> set[str]:
     """Discover all model-related files in a directory."""
-    known_files = set(MODEL_FILES_ALL) | {"README", "topo"}
+    known_files = set(MODEL_FILES_ALL) | {"README", "topo", "provenance.json"}
     found = set()
     for f in model_dir.iterdir():
         if f.is_file() and (f.name in known_files or f.suffix in (".mfc", ".dict")):
@@ -713,7 +713,14 @@ def compare_models(
     components: dict[str, ComponentCompare] = {}
 
     # Text files (exact match)
-    text_files = {"mdef", "feat.params", "noisedict", "README", "topo"}
+    text_files = {
+        "mdef",
+        "feat.params",
+        "noisedict",
+        "README",
+        "topo",
+        "provenance.json",
+    }
 
     # Binary parameter files (numeric comparison)
     gau_files = {"means", "variances"}

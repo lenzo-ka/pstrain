@@ -5,13 +5,18 @@ Orchestrates Baum-Welch training using the CFFI-wrapped BWTrainer.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import multiprocessing
 import os
+import resource
 import shutil
+import time
 import uuid
+from concurrent.futures import ProcessPoolExecutor
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -19,7 +24,7 @@ if TYPE_CHECKING:
     import numpy as np
     import numpy.typing as npt
 
-from pstrain.lib.bw import BWConfig, BWTrainer
+from pstrain.lib.bw import HMM, BWConfig, BWResult, BWTrainer
 from pstrain.lib.features import read_sphinx_mfc
 from pstrain.lib.model import MODEL_FILES_REQUIRED
 from pstrain.lib.transcription import parse_transcription_file
@@ -38,10 +43,137 @@ _CHECKPOINT_FILES = (
     "gauden_counts",
 )
 _TELEMETRY_FILENAME = "bw_telemetry.json"
+_ACCUMULATOR_FILES = ("gauden_counts", "mixw_counts", "tmat_counts")
 
 
 class TerminalAlignmentError(RuntimeError):
     """An utterance still cannot reach its final state after retry."""
+
+
+def _sha256_files(paths: list[Path]) -> str:
+    digest = hashlib.sha256()
+    for path in paths:
+        digest.update(path.name.encode())
+        with path.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+    return digest.hexdigest()
+
+
+def _fingerprint_model(model_dir: Path) -> str:
+    return _sha256_files([model_dir / name for name in MODEL_FILES_REQUIRED])
+
+
+def _fingerprint_config(config: BWConfig) -> str:
+    return hashlib.sha256(
+        json.dumps(asdict(config), sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _fingerprint_manifest(fileids: list[str]) -> str:
+    return hashlib.sha256("".join(f"{fileid}\n" for fileid in fileids).encode()).hexdigest()
+
+
+@dataclass(frozen=True)
+class _ShardResult:
+    shard: int
+    assigned_ids: tuple[str, ...]
+    processed_ids: tuple[str, ...]
+    retried_ids: tuple[str, ...]
+    skipped: tuple[tuple[str, str], ...]
+    total_log_lik: float
+    total_frames: int
+    accum_dir: Path
+    accepted_exceptions: tuple[tuple[str, int, int, int], ...] = ()
+    user_cpu_seconds: float = 0.0
+
+
+def _write_shard_metadata(
+    result: _ShardResult,
+    *,
+    iteration: int,
+    model_fingerprint: str,
+    config_fingerprint: str,
+    manifest_fingerprint: str,
+    shapes: dict[str, list[int]],
+) -> None:
+    payload_files = [result.accum_dir / name for name in _ACCUMULATOR_FILES]
+    metadata = {
+        "schema_version": 1,
+        "pass": iteration,
+        "shard": result.shard,
+        "model_fingerprint": model_fingerprint,
+        "config_fingerprint": config_fingerprint,
+        "manifest_fingerprint": manifest_fingerprint,
+        "parameter_shapes": shapes,
+        "assigned_ids": list(result.assigned_ids),
+        "processed_ids": list(result.processed_ids),
+        "retried_ids": list(result.retried_ids),
+        "skipped": [list(item) for item in result.skipped],
+        "accepted_exceptions": [list(item) for item in result.accepted_exceptions],
+        "payload_sha256": _sha256_files(payload_files),
+    }
+    (result.accum_dir / "artifact.json").write_text(
+        json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+
+def _validate_shard_artifacts(
+    accum_dirs: list[Path],
+    *,
+    iteration: int,
+    fileids: list[str],
+    model_fingerprint: str,
+    config_fingerprint: str,
+    manifest_fingerprint: str,
+    shapes: dict[str, list[int]],
+) -> list[dict[str, object]]:
+    expected_ids = set(fileids)
+    if len(expected_ids) != len(fileids):
+        raise RuntimeError("BW manifest contains duplicate utterance IDs")
+    seen_ids: set[str] = set()
+    seen_shards: set[int] = set()
+    metadata_rows: list[dict[str, object]] = []
+    for accum_dir in accum_dirs:
+        metadata_path = accum_dir / "artifact.json"
+        if not metadata_path.is_file():
+            raise RuntimeError(f"Missing BW shard metadata: {metadata_path}")
+        row = json.loads(metadata_path.read_text(encoding="utf-8"))
+        shard = int(row["shard"])
+        if shard in seen_shards:
+            raise RuntimeError(f"Duplicate BW shard artifact: {shard}")
+        seen_shards.add(shard)
+        expected = {
+            "pass": iteration,
+            "model_fingerprint": model_fingerprint,
+            "config_fingerprint": config_fingerprint,
+            "manifest_fingerprint": manifest_fingerprint,
+            "parameter_shapes": shapes,
+        }
+        for key, value in expected.items():
+            if row.get(key) != value:
+                raise RuntimeError(f"Incompatible BW shard {shard}: {key}")
+        payload_files = [accum_dir / name for name in _ACCUMULATOR_FILES]
+        if not all(path.is_file() for path in payload_files):
+            raise RuntimeError(f"Missing accumulator payload for BW shard {shard}")
+        if row.get("payload_sha256") != _sha256_files(payload_files):
+            raise RuntimeError(f"Accumulator payload digest mismatch for BW shard {shard}")
+        assigned = set(row["assigned_ids"])
+        overlap = seen_ids & assigned
+        if overlap:
+            raise RuntimeError(f"Overlapping BW shard coverage: {sorted(overlap)}")
+        seen_ids.update(assigned)
+        outcomes = (
+            set(row["processed_ids"])
+            | set(row["retried_ids"])
+            | {item[0] for item in row["skipped"]}
+        )
+        if outcomes != assigned:
+            raise RuntimeError(f"BW shard {shard} outcomes do not match assigned IDs")
+        metadata_rows.append(row)
+    if seen_ids != expected_ids:
+        raise RuntimeError(f"Missing BW shard coverage: {sorted(expected_ids - seen_ids)}")
+    return metadata_rows
 
 
 def _exact_zero_codebooks(model_dir: Path) -> int:
@@ -233,6 +365,134 @@ def _config_for_iteration(
     return resolved
 
 
+def _partition_manifest(fileids: list[str], n_shards: int) -> list[list[str]]:
+    """Match upstream corpus partitions: contiguous ranges in manifest order."""
+    if n_shards < 1:
+        raise ValueError("n_shards must be at least 1")
+    quotient, remainder = divmod(len(fileids), n_shards)
+    partitions: list[list[str]] = []
+    start = 0
+    for shard in range(n_shards):
+        width = quotient + (1 if shard < remainder else 0)
+        partitions.append(fileids[start : start + width])
+        start += width
+    return partitions
+
+
+def _effective_bw_shard_count(n_shards: int, *, multipron: bool) -> int:
+    """Resolve the loud multipron fallback before a training pass starts."""
+    if n_shards < 1:
+        raise ValueError("n_shards must be at least 1")
+    if n_shards > 1 and multipron:
+        logger.warning(
+            "BW sharding disabled because multipron_training=true: fallback_senone "
+            "is pass-wide state; running serially"
+        )
+        return 1
+    return n_shards
+
+
+def _initialize_bw_pool_worker() -> None:
+    """Make the process-pool worker itself the native containment boundary."""
+    from pstrain.lib import native_worker
+
+    native_worker._inside_worker = True
+
+
+def _run_bw_shard(
+    shard: int,
+    assigned_ids: list[str],
+    current_model: Path,
+    features_dir: Path,
+    transcripts: dict[str, str],
+    dictionary: Path,
+    filler_dict: Path | None,
+    iter_config: BWConfig,
+    retry_beam_factor: float,
+    excluded_fileids: set[str],
+    accum_dir: Path,
+    iteration: int,
+    arctic_a0302_zero_codebook_band: tuple[int, int] | None,
+    accept_arctic_a0587_pass: int | None,
+) -> _ShardResult:
+    user_cpu_start = resource.getrusage(resource.RUSAGE_SELF).ru_utime
+    trainer = BWTrainer(
+        mdef_path=current_model / "mdef",
+        means_path=current_model / "means",
+        vars_path=current_model / "variances",
+        mixw_path=current_model / "mixture_weights",
+        tmat_path=current_model / "transition_matrices",
+        config=iter_config,
+    )
+    trainer.set_dict(dictionary, filler_dict)
+    processed: list[str] = []
+    retried: list[str] = []
+    skipped: list[tuple[str, str]] = []
+    accepted_exceptions: list[tuple[str, int, int, int]] = []
+    for fileid in assigned_ids:
+        if fileid in excluded_fileids:
+            skipped.append((fileid, "excluded_by_schedule"))
+            continue
+        mfc_path = features_dir / f"{fileid}.mfc"
+        if not mfc_path.exists():
+            skipped.append((fileid, "feature_not_found"))
+            continue
+        if fileid not in transcripts:
+            skipped.append((fileid, "transcript_not_found"))
+            continue
+        try:
+            mfcc = read_sphinx_mfc(mfc_path)
+            if mfcc.shape[1] != 13:
+                skipped.append((fileid, "feature_dimension"))
+                continue
+            success = _process_with_final_state_retry(
+                trainer,
+                mfcc,
+                f"<s> {transcripts[fileid]} </s>",
+                iter_config.a_beam,
+                retry_beam_factor,
+                fileid,
+            )
+            if not success:
+                skipped.append((fileid, "alignment_failure"))
+            elif trainer._last_process_retried:
+                retried.append(fileid)
+            else:
+                processed.append(fileid)
+        except TerminalAlignmentError:
+            if fileid == "arctic_a0587" and iteration == accept_arctic_a0587_pass:
+                skipped.append((fileid, "alignment_failure"))
+                continue
+            occupancy = _accept_arctic_a0302_exception(
+                fileid=fileid,
+                model_dir=current_model,
+                band=arctic_a0302_zero_codebook_band,
+            )
+            if occupancy is None:
+                raise
+            assert arctic_a0302_zero_codebook_band is not None
+            lower, upper = arctic_a0302_zero_codebook_band
+            accepted_exceptions.append((fileid, occupancy, lower, upper))
+            skipped.append((fileid, "alignment_failure"))
+        except Exception:
+            logger.exception("Error processing %s in BW shard %d", fileid, shard)
+            skipped.append((fileid, "exception"))
+    stats = trainer.get_stats()
+    trainer.dump_accumulators(accum_dir)
+    return _ShardResult(
+        shard=shard,
+        assigned_ids=tuple(assigned_ids),
+        processed_ids=tuple(processed),
+        retried_ids=tuple(retried),
+        skipped=tuple(skipped),
+        total_log_lik=stats.total_log_lik,
+        total_frames=stats.total_frames,
+        accum_dir=accum_dir,
+        accepted_exceptions=tuple(accepted_exceptions),
+        user_cpu_seconds=resource.getrusage(resource.RUSAGE_SELF).ru_utime - user_cpu_start,
+    )
+
+
 def run_bw_training(
     model_dir: Path,
     output_dir: Path,
@@ -252,6 +512,8 @@ def run_bw_training(
     exclusion_schedule: dict[int | str, list[str]] | None = None,
     arctic_a0302_zero_codebook_band: tuple[int, int] | None = None,
     accept_arctic_a0587_pass: int | None = None,
+    n_shards: int = 1,
+    _in_process_reference: bool = False,
 ) -> TrainingResult:
     """Run Baum-Welch training iterations.
 
@@ -289,6 +551,7 @@ def run_bw_training(
         FileNotFoundError: If required files are missing
         RuntimeError: If training fails
     """
+    n_shards = _effective_bw_shard_count(n_shards, multipron=multipron)
     model_dir = Path(model_dir)
     output_dir = Path(output_dir)
     features_dir = Path(features_dir)
@@ -328,6 +591,9 @@ def run_bw_training(
 
     for iteration in range(1, n_iter + 1):
         logger.info("Starting iteration %d/%d...", iteration, n_iter)
+        pass_wall_start = time.perf_counter()
+        pass_self_start = resource.getrusage(resource.RUSAGE_SELF).ru_utime
+        pass_children_start = resource.getrusage(resource.RUSAGE_CHILDREN).ru_utime
 
         # SphinxTrain's policy is stage-specific: CI and tied stages begin with
         # one-pass variance, while stage 30 CD-untied uses -2passvar yes from
@@ -374,7 +640,107 @@ def run_bw_training(
         excluded_fileids = set(exclusion_schedule.get("*", ()))
         excluded_fileids.update(exclusion_schedule.get(iteration, ()))
         excluded_fileids.update(exclusion_schedule.get(str(iteration), ()))
-        for fileid in fileids:
+        merged_stats: BWResult | None = None
+        shard_metadata: list[dict[str, object]] = []
+        iteration_fileids = fileids
+        if not multipron and not _in_process_reference:
+            iteration_fileids = []
+            pass_root = output_dir / ".bw-accum" / f"pass-{iteration:02d}"
+            shutil.rmtree(pass_root, ignore_errors=True)
+            pass_root.mkdir(parents=True)
+            partitions = _partition_manifest(fileids, n_shards)
+            shard_dirs = [pass_root / f"shard-{index:05d}" for index in range(n_shards)]
+            arguments = [
+                (
+                    index,
+                    assigned,
+                    current_model,
+                    features_dir,
+                    transcripts,
+                    dictionary,
+                    filler_dict,
+                    iter_config,
+                    retry_beam_factor,
+                    excluded_fileids,
+                    shard_dirs[index],
+                    iteration,
+                    arctic_a0302_zero_codebook_band,
+                    accept_arctic_a0587_pass,
+                )
+                for index, assigned in enumerate(partitions)
+            ]
+            with ProcessPoolExecutor(
+                max_workers=n_shards,
+                mp_context=multiprocessing.get_context("spawn"),
+                initializer=_initialize_bw_pool_worker,
+            ) as pool:
+                futures = [pool.submit(_run_bw_shard, *argument) for argument in arguments]
+                shard_results = [future.result() for future in futures]
+            shard_results.sort(key=lambda result: result.shard)
+            model_fingerprint = _fingerprint_model(current_model)
+            config_fingerprint = _fingerprint_config(iter_config)
+            manifest_fingerprint = _fingerprint_manifest(fileids)
+            hmm = HMM.load(current_model)
+            shapes = {
+                "means": list(hmm.means.shape),
+                "variances": list(hmm.variances.shape),
+                "mixture_weights": list(hmm.mixw.shape),
+                "transition_matrices": list(hmm.tmat.shape),
+            }
+            for result in shard_results:
+                _write_shard_metadata(
+                    result,
+                    iteration=iteration,
+                    model_fingerprint=model_fingerprint,
+                    config_fingerprint=config_fingerprint,
+                    manifest_fingerprint=manifest_fingerprint,
+                    shapes=shapes,
+                )
+            shard_metadata = _validate_shard_artifacts(
+                shard_dirs,
+                iteration=iteration,
+                fileids=fileids,
+                model_fingerprint=model_fingerprint,
+                config_fingerprint=config_fingerprint,
+                manifest_fingerprint=manifest_fingerprint,
+                shapes=shapes,
+            )
+            trainer.restore_accumulators(shard_dirs)
+            processed_ids = [item for result in shard_results for item in result.processed_ids]
+            retried_ids = [item for result in shard_results for item in result.retried_ids]
+            skipped_items = [item for result in shard_results for item in result.skipped]
+            processed = len(processed_ids)
+            retried = len(retried_ids)
+            skipped = len(skipped_items)
+            excluded = sum(reason == "excluded_by_schedule" for _, reason in skipped_items)
+            for fileid, reason in skipped_items:
+                skip_reasons[reason] += 1
+                if reason not in {
+                    "excluded_by_schedule",
+                    "feature_not_found",
+                    "transcript_not_found",
+                    "feature_dimension",
+                }:
+                    terminal_skips.append({"utterance": fileid, "reason": reason})
+            for result in shard_results:
+                for fileid, shard_occupancy, lower, upper in result.accepted_exceptions:
+                    accepted_exceptions.append(
+                        {
+                            "sentinel": fileid,
+                            "quantity": "exact_zero_codebooks",
+                            "value": shard_occupancy,
+                            "band": [lower, upper],
+                        }
+                    )
+            total_log_lik = sum(result.total_log_lik for result in shard_results)
+            total_frames = sum(result.total_frames for result in shard_results)
+            merged_stats = BWResult(
+                total_log_lik=total_log_lik,
+                total_frames=total_frames,
+                total_utts=processed + retried,
+                avg_log_prob=total_log_lik / total_frames if total_frames else 0.0,
+            )
+        for fileid in iteration_fileids:
             if fileid in excluded_fileids:
                 logger.info("Skipping %s on iteration %d: excluded_by_schedule", fileid, iteration)
                 skipped += 1
@@ -492,7 +858,7 @@ def run_bw_training(
             raise RuntimeError("No utterances processed successfully")
 
         # Get statistics BEFORE normalization (normalize resets stats)
-        stats = trainer.get_stats()
+        stats = merged_stats or trainer.get_stats()
         last_frames = stats.total_frames
         last_utts = stats.total_utts
         logger.info(
@@ -542,6 +908,21 @@ def run_bw_training(
             "signed_convergence_delta": per_frame_delta,
             "stop_decision": stop_decision,
         }
+        pass_wall = time.perf_counter() - pass_wall_start
+        pass_user_cpu = (
+            resource.getrusage(resource.RUSAGE_SELF).ru_utime
+            - pass_self_start
+            + resource.getrusage(resource.RUSAGE_CHILDREN).ru_utime
+            - pass_children_start
+        )
+        if not multipron and not _in_process_reference:
+            pass_user_cpu = sum(result.user_cpu_seconds for result in shard_results)
+        telemetry_row["performance"] = {
+            "wall_seconds": pass_wall,
+            "user_cpu_seconds": pass_user_cpu,
+            "parallelism_user_cpu_per_wall": pass_user_cpu / pass_wall if pass_wall else 0.0,
+            "workers": n_shards if not multipron and not _in_process_reference else 1,
+        }
         telemetry_row["accounting"] = {
             "input_utts": len(fileids),
             "processed_utts": processed,
@@ -551,6 +932,8 @@ def run_bw_training(
             "terminal_skips": terminal_skips,
             "accepted_exceptions": accepted_exceptions,
         }
+        if shard_metadata:
+            telemetry_row["shards"] = shard_metadata
         telemetry_rows.append(telemetry_row)
         logger.info(
             "BW telemetry: pass=%d total_log_likelihood=%.6f total_frames=%d "

@@ -337,6 +337,10 @@ int pstrain_bw_process_utt(pstrain_bw_context_t *ctx,
                        const uint32 *phone_ids,
                        uint32 n_phones);
 int pstrain_bw_normalize(pstrain_bw_context_t *ctx);
+int pstrain_bw_dump_accum(pstrain_bw_context_t *ctx, const char *accum_dir);
+int pstrain_bw_restore_accumdirs(pstrain_bw_context_t *ctx,
+                              const char *const *accum_dirs,
+                              uint32 n_accum_dirs);
 int pstrain_bw_save(pstrain_bw_context_t *ctx,
                 const char *means_path,
                 const char *vars_path,

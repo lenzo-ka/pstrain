@@ -192,6 +192,14 @@ pstrain_bw_process_utt(pstrain_bw_context_t *ctx,
 int
 pstrain_bw_normalize(pstrain_bw_context_t *ctx);
 
+/** Serialize native BW accumulators in the upstream accum_dump format. */
+int pstrain_bw_dump_accum(pstrain_bw_context_t *ctx, const char *accum_dir);
+
+/** Merge upstream accumulator directories with the vendored norm rdacc path. */
+int pstrain_bw_restore_accumdirs(pstrain_bw_context_t *ctx,
+                                 const char *const *accum_dirs,
+                                 uint32 n_accum_dirs);
+
 /**
  * Save trained model
  *
