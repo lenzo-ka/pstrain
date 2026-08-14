@@ -238,7 +238,10 @@ def test_irrelevant_config_edit_does_not_rebuild_features(
     )
     unchanged = build_pipeline(PipelineContext.from_config(empty_project, config_name="custom"))
 
-    assert not any(entry.stale for entry in unchanged.plan("features"))
+    plan = unchanged.plan("features")
+    assert not any(entry.stale for entry in plan), [
+        (entry.task.name, entry.reason) for entry in plan if entry.stale
+    ]
     assert unchanged.run("features", jobs=1) == 0
     assert runs == ["ran"]
 

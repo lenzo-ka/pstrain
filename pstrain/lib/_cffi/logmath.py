@@ -34,7 +34,7 @@ class LogMath:
         ffi, lib = _init()
         self._ffi = ffi
         self._lib = lib
-        self._lmath = lib.logmath_init(base, shift, 1 if use_table else 0)
+        self._lmath = lib.pstrain_cffi_logmath_init(base, shift, 1 if use_table else 0)
         if self._lmath == ffi.NULL:
             raise RuntimeError("Failed to initialize logmath")
 
@@ -45,7 +45,7 @@ class LogMath:
                 self._proxy.close()
             return
         if hasattr(self, "_lmath") and self._lmath is not None:
-            self._lib.logmath_free(self._lmath)
+            self._lib.pstrain_cffi_logmath_free(self._lmath)
 
     def log(self, p: float) -> int:
         """Convert probability to log domain.
@@ -58,7 +58,7 @@ class LogMath:
         """
         if hasattr(self, "_proxy"):
             return int(self._proxy.call("log", p))
-        result: int = self._lib.logmath_log(self._lmath, p)
+        result: int = self._lib.pstrain_cffi_logmath_log(self._lmath, p)
         return result
 
     def exp(self, logp: int) -> float:
@@ -72,7 +72,7 @@ class LogMath:
         """
         if hasattr(self, "_proxy"):
             return float(self._proxy.call("exp", logp))
-        result: float = self._lib.logmath_exp(self._lmath, logp)
+        result: float = self._lib.pstrain_cffi_logmath_exp(self._lmath, logp)
         return result
 
     def add(self, logp: int, logq: int) -> int:
@@ -89,7 +89,7 @@ class LogMath:
         """
         if hasattr(self, "_proxy"):
             return int(self._proxy.call("add", logp, logq))
-        result: int = self._lib.logmath_add(self._lmath, logp, logq)
+        result: int = self._lib.pstrain_cffi_logmath_add(self._lmath, logp, logq)
         return result
 
     @property
@@ -97,7 +97,7 @@ class LogMath:
         """Get the log base."""
         if hasattr(self, "_proxy"):
             return float(self._proxy.call("get_base"))
-        result: float = self._lib.logmath_get_base(self._lmath)
+        result: float = self._lib.pstrain_cffi_logmath_get_base(self._lmath)
         return result
 
     def get_base(self) -> float:

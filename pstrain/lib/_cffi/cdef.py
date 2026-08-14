@@ -187,39 +187,22 @@ int model_def_write(model_def_t *mdef, const char *fn);
 void model_def_free(model_def_t *mdef);
 
 // ============================================================
-// ACOUSTIC MODEL SET
-// ============================================================
-
-acmod_set_t *acmod_set_new(void);
-int32 acmod_set_set_n_ci_hint(acmod_set_t *acmod_set, uint32 n_ci_hint);
-int32 acmod_set_set_n_tri_hint(acmod_set_t *acmod_set, uint32 n_tri_hint);
-acmod_id_t acmod_set_add_ci(acmod_set_t *acmod_set, const char *name, const char **attrib);
-acmod_id_t acmod_set_name2id(acmod_set_t *acmod_set, const char *name);
-const char *acmod_set_id2name(acmod_set_t *acmod_set, acmod_id_t id);
-uint32 acmod_set_n_acmod(acmod_set_t *acmod_set);
-uint32 acmod_set_n_ci(acmod_set_t *acmod_set);
-
-// ============================================================
 // FEATURE EXTRACTION (Front End)
 // ============================================================
 
-fe_t *fe_init_auto(void);
-fe_t *fe_init_auto_r(cmd_ln_t *config);
-void fe_start_stream(fe_t *fe);
-int fe_start_utt(fe_t *fe);
-int fe_process_frames(fe_t *fe,
+void pstrain_cffi_fe_start_stream(fe_t *fe);
+int pstrain_cffi_fe_start_utt(fe_t *fe);
+int pstrain_cffi_fe_process_frames(fe_t *fe,
                       int16 const **inout_spch,
                       size_t *inout_nsamps,
                       mfcc_t **buf_cep,
                       int32 *inout_nframes,
                       int32 *out_frameidx);
-int fe_end_utt(fe_t *fe, mfcc_t *out_cepvector, int32 *out_nframes);
-int fe_free(fe_t *fe);
-
-int fe_get_output_size(fe_t *fe);
-int fe_get_input_size(fe_t *fe);
-float fe_get_sampling_rate(fe_t *fe);
-int fe_mfcc_to_float(fe_t *fe, mfcc_t **input, float32 **output, int32 nframes);
+int pstrain_cffi_fe_end_utt(fe_t *fe, mfcc_t *out_cepvector, int32 *out_nframes);
+int pstrain_cffi_fe_free(fe_t *fe);
+int pstrain_cffi_fe_get_output_size(fe_t *fe);
+int pstrain_cffi_fe_mfcc_to_float(fe_t *fe, mfcc_t **input,
+                                 float32 **output, int32 nframes);
 
 // pstrain helper functions - simplified FE initialization
 fe_t *pstrain_fe_create(float samprate, int nfilt, int nfft,
@@ -366,86 +349,22 @@ void pstrain_bw_get_stats(pstrain_bw_context_t *ctx,
 int pstrain_bw_save_counts(pstrain_bw_context_t *ctx, const char *counts_path);
 
 // ============================================================
-// FEATURE PROCESSING
-// ============================================================
-
-feat_t *feat_init(const char *type,
-                  cmn_type_t cmn_type,
-                  int32 varnorm,
-                  agc_type_t agc_type,
-                  int32 breport,
-                  int32 cepsize);
-void feat_free(feat_t *fcb);
-int32 feat_s2mfc2feat_live(feat_t *fcb,
-                            mfcc_t **uttcep,
-                            int32 *inout_ncep,
-                            int32 beginutt,
-                            int32 endutt,
-                            mfcc_t ***ofeat);
-
-// ============================================================
 // LOG MATH
 // ============================================================
 
-logmath_t *logmath_init(float64 base, int shift, int use_table);
-void logmath_free(logmath_t *lmath);
-int32 logmath_log(logmath_t *lmath, float64 p);
-float64 logmath_exp(logmath_t *lmath, int32 p);
-int32 logmath_add(logmath_t *lmath, int32 p, int32 q);
-float64 logmath_get_base(logmath_t *lmath);
-
-// ============================================================
-// COMMAND LINE
-// ============================================================
-
-cmd_ln_t *cmd_ln_init(cmd_ln_t *inout_cmdln, void *defn, int32 strict, ...);
-cmd_ln_t *cmd_ln_parse_r(cmd_ln_t *inout_cmdln,
-                          const arg_t *defn,
-                          int32 argc, char *argv[],
-                          int32 strict);
-void cmd_ln_free_r(cmd_ln_t *cmdln);
-
-const char *cmd_ln_str_r(cmd_ln_t *cmdln, const char *name);
-int32 cmd_ln_int32_r(cmd_ln_t *cmdln, const char *name);
-float64 cmd_ln_float64_r(cmd_ln_t *cmdln, const char *name);
-int32 cmd_ln_boolean_r(cmd_ln_t *cmdln, const char *name);
-
-// Global versions (deprecated but still useful)
-const char *cmd_ln_str(const char *name);
-int32 cmd_ln_int32(const char *name);
-float64 cmd_ln_float64(const char *name);
-int32 cmd_ln_boolean(const char *name);
-
-// ============================================================
-// GAUDEN (Gaussian density evaluation)
-// ============================================================
-
-gauden_t *gauden_alloc(void);
-void gauden_free(gauden_t *g);
-
-// ============================================================
-// HASH TABLE
-// ============================================================
-
-hash_table_t *hash_table_new(int32 size, int32 casearg);
-void hash_table_free(hash_table_t *h);
-void *hash_table_enter(hash_table_t *h, const char *key, void *val);
-void *hash_table_replace(hash_table_t *h, const char *key, void *val);
-void *hash_table_delete(hash_table_t *h, const char *key);
-int32 hash_table_lookup(hash_table_t *h, const char *key, void **val);
-int32 hash_table_lookup_int32(hash_table_t *h, const char *key, int32 *out_val);
+logmath_t *pstrain_cffi_logmath_init(float64 base, int shift, int use_table);
+void pstrain_cffi_logmath_free(logmath_t *lmath);
+int32 pstrain_cffi_logmath_log(logmath_t *lmath, float64 p);
+float64 pstrain_cffi_logmath_exp(logmath_t *lmath, int32 p);
+int32 pstrain_cffi_logmath_add(logmath_t *lmath, int32 p, int32 q);
+float64 pstrain_cffi_logmath_get_base(logmath_t *lmath);
 
 // ============================================================
 // MEMORY ALLOCATION (ckd_alloc)
 // ============================================================
 
-void *ckd_calloc(size_t n_elem, size_t elem_size);
-void *ckd_malloc(size_t size);
-void *ckd_realloc(void *ptr, size_t new_size);
-char *ckd_salloc(const char *str);
-void ckd_free(void *ptr);
-void ckd_free_2d(void *ptr);
-void ckd_free_3d(void *ptr);
+void pstrain_cffi_ckd_free(void *ptr);
+void pstrain_cffi_ckd_free_3d(void *ptr);
 
 // ============================================================
 // ERROR HANDLING
@@ -454,33 +373,6 @@ void ckd_free_3d(void *ptr);
 void pstrain_session_reset(void);
 int pstrain_session_probe_set(void);
 int pstrain_session_probe_is_set(void);
-
-// ============================================================
-// CLUSTERING
-// ============================================================
-
-// K-means clustering
-int32 kmeans(float32 **data, uint32 n_data, uint32 n_dim,
-             float32 **centroids, uint32 n_centroids,
-             float32 min_ratio, int32 max_iter);
-
-// ============================================================
-// MLLR ADAPTATION
-// ============================================================
-
-int mllr_read(const char *fn,
-              float32 ****out_A,
-              float32 ***out_b,
-              uint32 **out_veclen,
-              uint32 *out_n_class,
-              uint32 *out_n_stream);
-
-int mllr_write(const char *fn,
-               float32 ***A,
-               float32 **b,
-               uint32 *veclen,
-               uint32 n_class,
-               uint32 n_stream);
 
 // ============================================================
 // MDEF GENERATION (mk_mdef_gen)
@@ -742,19 +634,6 @@ int s3cb2mllr_write(const char *fn,
                     int32 *cb2mllr,
                     uint32 n_cb,
                     uint32 n_mllr);
-
-// mllr_class_io.h - MLLR class mapping I/O
-int mllr_class_read(uint32 **mllr_cmap,
-                    uint32 *n_map,
-                    uint32 *n_class,
-                    const char **comment,
-                    const char *file_name);
-
-int mllr_class_write(const char *file_name,
-                     uint32 *mllr_class_map,
-                     uint32 n_mgau,
-                     uint32 n_mllr_class,
-                     char *comment);
 
 // ============================================================
 // KD-TREE FUNCTIONS (pstrain_kdtree.h)
