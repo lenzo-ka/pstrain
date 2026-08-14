@@ -72,6 +72,8 @@ is_initial_emitting_state(const state_t *state_seq, uint32 i)
 
     if (state_seq[i].mixw == TYING_NON_EMITTING)
 	return FALSE;
+    if (state_seq[i].flags & STATE_FLAG_INITIAL)
+	return TRUE;
     for (p = 0; p < state_seq[i].n_prior; ++p)
 	if (state_seq[i].prior_state[p] != i)
 	    return FALSE;

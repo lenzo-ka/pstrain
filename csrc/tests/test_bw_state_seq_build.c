@@ -39,7 +39,7 @@ exercise_mode(pstrain_bw_context_t *ctx, int multipron)
 
 static int
 exercise_boundary_mode(pstrain_bw_context_t *ctx, int multipron,
-                       uint32 *n_state_out, uint32 *first_phone, uint32 *last_phone)
+                       uint32 *n_state_out, uint32 *n_initial, uint32 *final_priors)
 {
     state_t *states;
     uint32 n_state = 0;
@@ -49,8 +49,11 @@ exercise_boundary_mode(pstrain_bw_context_t *ctx, int multipron,
     CHECK(states != NULL, "boundary sequence builds");
     CHECK(n_state > 1, "boundary sequence has states");
     *n_state_out = n_state;
-    *first_phone = states[0].phn;
-    *last_phone = states[n_state - 2].phn;
+    *n_initial = 0;
+    for (uint32 i = 0; i < n_state; ++i)
+        if (states[i].flags & STATE_FLAG_INITIAL)
+            ++*n_initial;
+    *final_priors = states[n_state - 1].n_prior;
     pstrain_bw_free_state_seq(states, n_state);
     return 0;
 }
@@ -60,7 +63,7 @@ main(int argc, char *argv[])
 {
     pstrain_bw_config_t config;
     pstrain_bw_context_t *ctx;
-    uint32 off_n[2], on_n[2], off_first[2], on_first[2], off_last[2], on_last[2];
+    uint32 off_n[2], on_n[2], off_initial[2], on_initial[2], off_final[2], on_final[2];
     int multipron;
 
     CHECK(argc == 8, "expected model and dictionary fixture paths");
@@ -80,7 +83,7 @@ main(int argc, char *argv[])
     CHECK(exercise_mode(ctx, 1) == 0, "graph mode");
     for (multipron = 0; multipron <= 1; ++multipron) {
         CHECK(exercise_boundary_mode(ctx, multipron, &off_n[multipron],
-                                     &off_first[multipron], &off_last[multipron]) == 0,
+                                     &off_initial[multipron], &off_final[multipron]) == 0,
               "off mode retains boundaries");
     }
     pstrain_bw_free(ctx);
@@ -92,11 +95,12 @@ main(int argc, char *argv[])
     for (multipron = 0; multipron <= 1; ++multipron) {
         CHECK(exercise_mode(ctx, multipron) == 0, "optional-boundary failure cleanup");
         CHECK(exercise_boundary_mode(ctx, multipron, &on_n[multipron],
-                                     &on_first[multipron], &on_last[multipron]) == 0,
+                                     &on_initial[multipron], &on_final[multipron]) == 0,
               "on mode bypasses boundaries");
-        CHECK(on_n[multipron] < off_n[multipron], "on mode removes boundary HMM states");
-        CHECK(on_first[multipron] != off_first[multipron], "initial SIL is bypassed");
-        CHECK(on_last[multipron] != off_last[multipron], "final SIL is bypassed");
+        CHECK(on_n[multipron] == off_n[multipron], "on mode retains boundary HMM states");
+        CHECK(off_initial[multipron] == 0, "off mode has no optional entry");
+        CHECK(on_initial[multipron] > off_initial[multipron], "initial SIL has a bypass entry");
+        CHECK(on_final[multipron] > off_final[multipron], "final SIL has bypass predecessors");
     }
     pstrain_bw_free(ctx);
     printf("PASS: public BW state-sequence build modes survive injected failure\n");

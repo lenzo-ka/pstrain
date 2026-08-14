@@ -800,8 +800,9 @@ main_reestimate(model_inventory_t *inv,
 	 * builder allocates a fresh state_t array per utterance; the
 	 * linear builder returns a pointer into static buffers inside
 	 * state_seq_make() and must NOT be freed. */
-	if (multipron)
+	if (multipron || optional_boundary_silence)
 	    state_seq = next_utt_states_graph(&n_state, lex, inv, mdef, trans,
+	                                      multipron,
 	                                      optional_boundary_silence);
 	else
 	    state_seq = next_utt_states(&n_state, lex, inv, mdef, trans,

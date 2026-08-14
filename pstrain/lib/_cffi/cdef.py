@@ -306,6 +306,7 @@ typedef struct state_s {
     uint32 l_ci_cb;
     float32 *tacc;
     uint32 phn;
+    uint32 flags;
 } state_t;
 
 pstrain_bw_context_t *pstrain_bw_init(const char *mdef_path,

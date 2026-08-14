@@ -81,6 +81,7 @@ state_t *next_utt_states_graph(uint32 *n_state,
 			       model_inventory_t *inv,
 			       model_def_t *mdef,
 			       char *transcript,
+			       int multipron,
 			       int optional_boundary_silence);
 
 state_t *next_utt_states_mmie(uint32 *n_state,
