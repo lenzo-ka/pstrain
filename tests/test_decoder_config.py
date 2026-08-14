@@ -49,6 +49,30 @@ def test_nondefault_feature_config_reaches_live_decoder(
 
 
 @pytest.mark.parametrize("remove_noise", [False, True])
+def test_remove_noise_reaches_live_decoder_without_feat_params(
+    tmp_path: Path, remove_noise: bool
+) -> None:
+    fixture = Path(__file__).parent / "fixtures" / "multipron_final_state"
+    model = tmp_path / "model"
+    shutil.copytree(
+        fixture / "model",
+        model,
+        ignore=shutil.ignore_patterns("feat.params"),
+    )
+    decoder = Decoder(
+        model,
+        fixture / "dictionary.dict",
+        fixture / "filler.dict",
+        feature_config=FeatureConfig(remove_noise=remove_noise),
+    )
+    try:
+        actual = decoder._lib.pstrain_decoder_config_int(decoder._decoder, b"remove_noise")
+        assert actual == remove_noise
+    finally:
+        decoder.close()
+
+
+@pytest.mark.parametrize("remove_noise", [False, True])
 def test_decoder_completes_two_utterances_with_each_remove_noise_setting(
     tmp_path: Path, remove_noise: bool
 ) -> None:

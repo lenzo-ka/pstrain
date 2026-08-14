@@ -156,6 +156,7 @@ class Decoder:
                 strings.append(self._ffi.new("char[]", value.encode()))
             config.agc, config.cmn, config.cmninit = strings[-3:]
             config.varnorm = feature_config.varnorm == "yes"
+            config.remove_noise = feature_config.remove_noise
             self._decoder = self._lib.pstrain_decoder_create(config)
             if self._decoder == self._ffi.NULL:
                 raise RuntimeError("PocketSphinx decoder initialization failed")

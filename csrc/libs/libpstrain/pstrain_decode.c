@@ -47,6 +47,7 @@ pstrain_decoder_create(const pstrain_decoder_config_t *options)
         || !set_str(config, "cmn", options->cmn)
         || !set_str(config, "cmninit", options->cmninit)
         || ps_config_set_bool(config, "varnorm", options->varnorm) == NULL
+        || ps_config_set_bool(config, "remove_noise", options->remove_noise) == NULL
         || !set_str(config, "agc", options->agc)) {
         ps_config_free(config);
         return NULL;

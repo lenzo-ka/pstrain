@@ -15,7 +15,6 @@ struct ps_decoder_s {
     ps_config_t config;
 };
 
-static int initial_remove_noise;
 static int start_stream_result;
 static int start_stream_calls;
 static int start_utt_calls;
@@ -35,8 +34,6 @@ ps_config_init(const void *defaults)
     ps_config_t *config;
     (void)defaults;
     config = calloc(1, sizeof(*config));
-    if (config != NULL)
-        config->remove_noise = initial_remove_noise;
     return config;
 }
 
@@ -69,8 +66,8 @@ ps_config_set_int(ps_config_t *config, const char *name, long value)
 ps_config_t *
 ps_config_set_bool(ps_config_t *config, const char *name, int value)
 {
-    (void)name;
-    (void)value;
+    if (strcmp(name, "remove_noise") == 0)
+        config->remove_noise = value;
     return config;
 }
 
@@ -154,7 +151,7 @@ static pstrain_decoder_t *
 new_decoder(int remove_noise)
 {
     pstrain_decoder_config_t options = {0};
-    initial_remove_noise = remove_noise;
+    options.remove_noise = remove_noise;
     return pstrain_decoder_create(&options);
 }
 
