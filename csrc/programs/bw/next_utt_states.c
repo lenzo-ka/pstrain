@@ -61,6 +61,92 @@
 
 #include "next_utt_states.h"
 
+/* Add one shared non-emitting sentence exit when removing </s> exposes
+ * multiple terminal pronunciation branches.  BW requires n_state - 1 to be
+ * the sole final state, but this state consumes no frame and therefore keeps
+ * the boundary bypass exact. */
+static state_t *
+add_shared_terminal(state_t *old, uint32 *n_state)
+{
+    state_t *state;
+    uint32 *next_state, *prior_state;
+    float32 *next_tprob, *prior_tprob;
+    uint32 i, terminal_count = 0, total_next = 0, total_prior = 0;
+    uint32 noff = 0, poff = 0, final = *n_state;
+
+    for (i = 0; i < *n_state; ++i) {
+        total_next += old[i].n_next;
+        total_prior += old[i].n_prior;
+        if (old[i].n_next == 0)
+            ++terminal_count;
+    }
+    if (terminal_count <= 1)
+        return old;
+
+    total_next += terminal_count;
+    total_prior += terminal_count;
+    state = ckd_calloc(*n_state + 1, sizeof(*state));
+    next_state = ckd_calloc(total_next, sizeof(*next_state));
+    next_tprob = ckd_calloc(total_next, sizeof(*next_tprob));
+    prior_state = ckd_calloc(total_prior, sizeof(*prior_state));
+    prior_tprob = ckd_calloc(total_prior, sizeof(*prior_tprob));
+
+    for (i = 0; i < *n_state; ++i) {
+        state[i] = old[i];
+        state[i].next_state = next_state + noff;
+        state[i].next_tprob = next_tprob + noff;
+        if (old[i].n_next) {
+            memcpy(state[i].next_state, old[i].next_state,
+                   old[i].n_next * sizeof(*next_state));
+            memcpy(state[i].next_tprob, old[i].next_tprob,
+                   old[i].n_next * sizeof(*next_tprob));
+        }
+        noff += old[i].n_next;
+        if (old[i].n_next == 0) {
+            state[i].next_state[0] = final;
+            state[i].next_tprob[0] = 1.0f;
+            state[i].n_next = 1;
+            ++noff;
+        }
+
+        state[i].prior_state = prior_state + poff;
+        state[i].prior_tprob = prior_tprob + poff;
+        if (old[i].n_prior) {
+            memcpy(state[i].prior_state, old[i].prior_state,
+                   old[i].n_prior * sizeof(*prior_state));
+            memcpy(state[i].prior_tprob, old[i].prior_tprob,
+                   old[i].n_prior * sizeof(*prior_tprob));
+        }
+        poff += old[i].n_prior;
+    }
+
+    state[final] = old[*n_state - 1];
+    state[final].mixw = state[final].ci_mixw = TYING_NO_ID;
+    state[final].l_mixw = state[final].l_ci_mixw = TYING_NO_ID;
+    state[final].cb = state[final].ci_cb = TYING_NO_ID;
+    state[final].l_cb = state[final].l_ci_cb = TYING_NO_ID;
+    state[final].n_next = 0;
+    state[final].next_state = NULL;
+    state[final].next_tprob = NULL;
+    state[final].n_prior = terminal_count;
+    state[final].prior_state = prior_state + poff;
+    state[final].prior_tprob = prior_tprob + poff;
+    {
+        uint32 q = 0;
+        for (i = 0; i < *n_state; ++i) {
+        if (old[i].n_next == 0) {
+                state[final].prior_state[q] = i;
+                state[final].prior_tprob[q] = 1.0f;
+                ++q;
+            }
+        }
+    }
+
+    state_seq_free(old, *n_state);
+    ++*n_state;
+    return state;
+}
+
 state_t *next_utt_states(uint32 *n_state,
 			 lexicon_t *lex,
 			 model_inventory_t *inv,
@@ -198,6 +284,9 @@ state_t *next_utt_states_graph(uint32 *n_state,
 	E_ERROR("state_seq_make_graph failed\n");
 	return NULL;
     }
+
+    if (optional_boundary_silence)
+        state_seq = add_shared_terminal(state_seq, n_state);
 
     return state_seq;
 }
