@@ -43,26 +43,29 @@ when the acoustic-model bytes are identical.
 Both `off/slt55` and `off/big` come from the named benchmark profile `off`;
 both `on/slt55` and `on/big` come from the named benchmark profile `on`. There
 are no run-time overrides. These are the complete differences from the shipped
-schema defaults; an unlisted setting equals its shipped default.
+schema defaults; an unlisted setting equals its shipped default. The record's
+conditions and each cell's provenance come from the same resolved build-child
+snapshot, and validation rejects disagreement between them. The off profile has
+9 differences and the on profile has 7.
 
-| Cells | Setting | Shipped default | Cell value |
-|---|---|---:|---:|
-| off/slt55, off/big | `split.test_count` | `null` | `0` |
-| off/slt55, off/big | `training.accept_arctic_a0587_known_skip` | `false` | `true` |
-| off/slt55, off/big | `training.ci.convergence_ratio` | `0.001` | `0.1` |
-| off/slt55, off/big | `training.multipron_training` | `true` | `false` |
-| off/slt55, off/big | `training.tied.convergence_ratio` | `0.001` | `0.1` |
-| off/slt55, off/big | `training.tree_directional_questions` | `true` | `false` |
-| off/slt55, off/big | `training.tree_rotate_state_weights` | `true` | `false` |
-| off/slt55, off/big | `training.untied.convergence_ratio` | `0.001` | `0.1` |
-| off/slt55, off/big | `training.untied_inventory` | `"all-triphone"` | `"linear"` |
-| on/slt55, on/big | `split.test_count` | `null` | `0` |
-| on/slt55, on/big | `training.accept_arctic_a0587_known_skip` | `false` | `true` |
-| on/slt55, on/big | `training.arctic_a0302_zero_codebook_band` | `null` | `[4548,4623]` |
-| on/slt55, on/big | `training.tree_directional_questions` | `true` | `false` |
-| on/slt55, on/big | `training.tree_rotate_state_weights` | `true` | `false` |
-| on/slt55, on/big | `training.untied.max_iterations` | `6` | `10` |
-| on/slt55, on/big | `training.untied_inventory` | `"all-triphone"` | `"transcript-reachable"` |
+| Cells | Setting | Shipped default | Cell value | Winning source kind |
+|---|---|---:|---:|---|
+| off/slt55, off/big | `split.test_count` | `null` | `0` | `project-profile` |
+| off/slt55, off/big | `training.accept_arctic_a0587_known_skip` | `false` | `true` | `project-profile` |
+| off/slt55, off/big | `training.ci.convergence_ratio` | `0.001` | `0.1` | `project-profile` |
+| off/slt55, off/big | `training.multipron_training` | `true` | `false` | `project-profile` |
+| off/slt55, off/big | `training.tied.convergence_ratio` | `0.001` | `0.1` | `project-profile` |
+| off/slt55, off/big | `training.tree_directional_questions` | `true` | `false` | `project-profile` |
+| off/slt55, off/big | `training.tree_rotate_state_weights` | `true` | `false` | `project-profile` |
+| off/slt55, off/big | `training.untied.convergence_ratio` | `0.001` | `0.1` | `project-profile` |
+| off/slt55, off/big | `training.untied_inventory` | `"all-triphone"` | `"linear"` | `project-profile` |
+| on/slt55, on/big | `split.test_count` | `null` | `0` | `project-profile` |
+| on/slt55, on/big | `training.accept_arctic_a0587_known_skip` | `false` | `true` | `project-profile` |
+| on/slt55, on/big | `training.arctic_a0302_zero_codebook_band` | `null` | `[4548,4623]` | `project-profile` |
+| on/slt55, on/big | `training.tree_directional_questions` | `true` | `false` | `project-profile` |
+| on/slt55, on/big | `training.tree_rotate_state_weights` | `true` | `false` | `project-profile` |
+| on/slt55, on/big | `training.untied.max_iterations` | `6` | `10` | `project-profile` |
+| on/slt55, on/big | `training.untied_inventory` | `"all-triphone"` | `"transcript-reachable"` | `project-profile` |
 
 The corpus archive identities are BDL
 `26b91aaf48b2799b2956792b4632c2f926cd0542f402b5452d5adecb60942904`,
