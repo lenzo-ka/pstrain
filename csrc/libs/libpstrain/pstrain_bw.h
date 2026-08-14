@@ -35,6 +35,7 @@ typedef struct pstrain_bw_config_s {
     int32 mean_reest;    /**< Re-estimate means (default: 1) */
     int32 var_reest;     /**< Re-estimate variances (default: 1) */
     int32 pass2var;      /**< Use 2-pass variance estimation (default: 1) */
+    int32 optional_final_silence; /**< Retain final SIL and permit zero-frame bypass (default: 1) */
     pstrain_bw_unobserved_gaussian_policy_t unobserved_gaussian_policy;
 } pstrain_bw_config_t;
 

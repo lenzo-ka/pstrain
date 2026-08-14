@@ -49,6 +49,7 @@ profiles:
       question_quests_per_state: 20
       question_niter: 1
       multipron_training: true
+      optional_final_silence: true
       untied_inventory: all-triphone
       exclusion_schedule: {}
     split:

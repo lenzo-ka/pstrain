@@ -281,6 +281,7 @@ typedef struct pstrain_bw_config_s {
     int32 mean_reest;
     int32 var_reest;
     int32 pass2var;
+    int32 optional_final_silence;
     int32 unobserved_gaussian_policy;
 } pstrain_bw_config_t;
 
@@ -305,6 +306,7 @@ typedef struct state_s {
     uint32 l_ci_cb;
     float32 *tacc;
     uint32 phn;
+    uint32 flags;
 } state_t;
 
 pstrain_bw_context_t *pstrain_bw_init(const char *mdef_path,

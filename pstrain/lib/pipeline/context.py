@@ -176,6 +176,9 @@ class TrainParams:
     accept_arctic_a0587_known_skip: bool = field(
         default_factory=lambda: Profile().training.accept_arctic_a0587_known_skip
     )
+    optional_final_silence: bool = field(
+        default_factory=lambda: Profile().training.optional_final_silence
+    )
     # Tuned by SphinxTrain scripts/40.buildtrees/buildtree.pl for 3-state HMMs.
     tree_state_weights: tuple[float, ...] = field(
         default_factory=lambda: Profile().training.tree_state_weights
