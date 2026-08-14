@@ -6,6 +6,7 @@ import json
 import re
 import shutil
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -409,8 +410,12 @@ def test_bw_golden_trajectory_and_accounting(
     expected = json.loads(GOLDEN.read_text())
     output_dir = tmp_path / "trained"
     caplog.set_level("INFO", logger="pstrain.lib.steps.train")
-    result = train_golden(flat_project, output_dir)
-    actual = golden_payload(flat_project, result)
+    pinned = replace(
+        flat_project,
+        train=replace(flat_project.train, optional_boundary_silence=False),
+    )
+    result = train_golden(pinned, output_dir)
+    actual = golden_payload(pinned, result)
     tolerance = expected["strict_tolerance" if strict_golden_enabled() else "portable_tolerance"]
     assert len(actual["trajectory"]) == len(expected["trajectory"]) == 3
     for observed, golden in zip(actual["trajectory"], expected["trajectory"], strict=True):
@@ -985,6 +990,7 @@ def test_withheld_context_uses_live_ci_fallback_across_passes(
             a_beam=1e-200,
             b_beam=1e-200,
             multipron=True,
+            optional_boundary_silence=False,
         ),
     )
     assert result.iterations == 3

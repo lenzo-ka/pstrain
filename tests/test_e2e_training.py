@@ -215,7 +215,10 @@ def test_build_cd_8g_produces_genuine_tied_model(tmp_path: Path) -> None:
     ctx = PipelineContext.from_config(project_dir)
     # A8's saved-stage beam regression uses this deliberately wide value;
     # the public/upstream-compatible default remains 1e-90.
-    ctx = replace(ctx, train=replace(ctx.train, a_beam=1e-200))
+    ctx = replace(
+        ctx,
+        train=replace(ctx.train, a_beam=1e-200, optional_boundary_silence=False),
+    )
     # Measured locally at 1.7 seconds (Apple M-series, Python 3.12, jobs=2).
     rc = build_pipeline(ctx).run("cd-8g", jobs=2)
     assert rc == 0, "pipeline run of cd-8g failed"
