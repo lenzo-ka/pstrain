@@ -32,7 +32,7 @@ import socket
 from dataclasses import asdict, dataclass, field
 from functools import cache
 from pathlib import Path
-from typing import Any, Self, cast
+from typing import Any, Literal, Self, cast
 
 from pstrain import __version__
 from pstrain.lib.commands import PSTRAIN_BINARIES, resolve_binary
@@ -170,6 +170,9 @@ class TrainParams:
     # Retry forward-final-state pruning failures once at a beam this many
     # times wider (1e-90 / 1e10 = 1e-100).
     retry_beam_factor: float = field(default_factory=lambda: Profile().training.retry_beam_factor)
+    failed_alignment: Literal["recover", "abort", "omit"] = field(
+        default_factory=lambda: Profile().training.failed_alignment
+    )
     arctic_a0302_zero_codebook_band: tuple[int, int] | None = field(
         default_factory=lambda: Profile().training.arctic_a0302_zero_codebook_band
     )

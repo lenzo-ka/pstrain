@@ -700,7 +700,7 @@ def test_failed_alignment_position_defaults_to_recover_and_resolves_omit(
     empty_project: Path,
 ) -> None:
     assert PipelineContext.from_config(empty_project).train.failed_alignment == "recover"
-    (empty_project / "etc" / "config.yaml").write_text(
+    (empty_project / "etc" / "configs.yaml").write_text(
         "default:\n  training:\n    failed_alignment: omit\n"
     )
     assert PipelineContext.from_config(empty_project).train.failed_alignment == "omit"
@@ -918,6 +918,7 @@ def test_configured_bw_parameters_reach_training_call(
         "default:\n  training:\n    a_beam: 1e-123\n    b_beam: 1e-9\n"
         "    ci: {max_iterations: 7, convergence_ratio: 0.004, min_iterations: 3}\n"
         "    max_skip_fraction: 0.02\n    retry_beam_factor: 1e12\n"
+        "    failed_alignment: omit\n"
     )
     ctx = PipelineContext.from_config(empty_project)
     flat = ctx.model_dir("flat")
@@ -1008,6 +1009,7 @@ def test_configured_bw_parameters_reach_training_call(
     assert captured["first_pass_2passvar"] is False
     assert captured["max_skip_fraction"] == 0.02
     assert captured["retry_beam_factor"] == 1e12
+    assert captured["failed_alignment"] == "omit"
 
 
 def test_configured_untied_schedule_and_variance_reach_training_call(

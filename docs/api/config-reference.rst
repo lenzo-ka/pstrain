@@ -233,6 +233,11 @@ training
    :Default: ``10000000000.0``
    :Description: Beam widening factor for one retry
 
+``training.failed_alignment``
+   :Type: ``recover | abort | omit``
+   :Default: ``recover``
+   :Description: Action when Baum-Welch alignment fails; ``omit`` reports and excludes the utterance while continuing
+
 ``training.tied.convergence_ratio``
    :Type: ``float``
    :Default: ``0.001``
