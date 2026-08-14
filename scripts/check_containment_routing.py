@@ -124,12 +124,17 @@ class Scanner(ast.NodeVisitor):
             elif self.worker_depth:
                 disposition, reason = "worker_only", "control flow requires in_worker()"
             elif self._proxied_class() and symbol.startswith("self._lib."):
-                disposition, reason = "proxied", "enclosing class is constructed via NativeObjectProxy"
+                disposition, reason = (
+                    "proxied",
+                    "enclosing class is constructed via NativeObjectProxy",
+                )
             else:
                 disposition, reason = "violation", "CFFI is reachable in the caller process"
             function = self.functions[-1].name if self.functions else "<module>"
             self.callsites.append(
-                Callsite(self.path, node.lineno, node.col_offset, function, symbol, disposition, reason)
+                Callsite(
+                    self.path, node.lineno, node.col_offset, function, symbol, disposition, reason
+                )
             )
         self.generic_visit(node)
 
