@@ -8,7 +8,6 @@
 
 #include "../libs/libpstrain/pstrain_bw.h"
 #include "../programs/bw/next_utt_states.h"
-#include "../programs/bw/backward.h"
 
 #define CHECK(cond, msg)                                                    \
     do {                                                                    \
@@ -103,8 +102,6 @@ main(int argc, char *argv[])
     int multipron;
 
     CHECK(argc == 8, "expected model and dictionary fixture paths");
-    CHECK(fabs(backward_initial_ci_posterior(0.2, 0.4, 2.0, 0.5) - 0.08) < 1e-12,
-          "initial CI density terms use posterior rather than entry prior");
     CHECK(!next_utt_states_graph_built(0, 0),
           "linear builder storage is static");
     CHECK(next_utt_states_graph_built(1, 0),

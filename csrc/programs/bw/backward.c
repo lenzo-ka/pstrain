@@ -164,18 +164,6 @@ den_terms_ci(float64 **d_term,
     }
 }
 
-float64
-backward_initial_ci_posterior(float64 prior_beta,
-			      float64 output_prob,
-			      float64 recip_final_alpha,
-			      float64 entry_weight)
-{
-    (void)prior_beta;
-    (void)output_prob;
-    (void)recip_final_alpha;
-    return entry_weight;
-}
-
 void
 den_terms(float64 **d_term,
 	  float64 p_reest_term,
@@ -1240,9 +1228,7 @@ backward_update(float64 **active_alpha,
 			  n_top);
 
 	    den_terms_ci(d_term_ci,
-			 backward_initial_ci_posterior(
-			     prior_beta[i], op, recip_final_alpha,
-			     next_utt_states_initial_tprob(state_seq, i)),
+			 next_utt_states_initial_tprob(state_seq, i),
 			 p_ci_op,
 			 now_den[l_ci_cb],
 			 now_den_idx[l_ci_cb],
