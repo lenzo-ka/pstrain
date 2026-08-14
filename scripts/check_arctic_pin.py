@@ -15,6 +15,7 @@ from pstrain.benchmarks.arctic import (  # noqa: E402
     adopt_uncovered_conditions,
     authenticate_conditions,
     benchmark_conditions,
+    resolved_configuration_provenance,
     validate_record,
 )
 
@@ -36,6 +37,19 @@ def main() -> int:
     uncovered = authenticate_conditions(actual, record["conditions"])
     if args.adopt_uncovered:
         record["conditions"] = adopt_uncovered_conditions(actual, record["conditions"])
+        pin_conditions = record["conditions"]["pin_conditions"]
+        source_kinds = record["conditions"]["pin_condition_source_kinds"]
+        for mode, datasets in record["results"].items():
+            provenance = resolved_configuration_provenance(
+                {
+                    "profile": pin_conditions[mode],
+                    "profile_name": mode,
+                    "field_source_kinds": source_kinds[mode],
+                }
+            )
+            for cell in datasets.values():
+                cell["configuration_provenance"] = provenance
+        validate_record(record)
         args.record.write_text(
             json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
