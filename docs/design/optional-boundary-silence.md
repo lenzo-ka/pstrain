@@ -2,6 +2,8 @@
 
 ## Deliberate vendored divergence
 
+Decision date: 2026-08-14.
+
 Upstream SphinxTrain requires the filler-dictionary HMMs represented by
 `<s>` and `</s>` on every utterance path. Pstrain deliberately diverges:
 `training.optional_boundary_silence` defaults to `true`, permitting both
@@ -17,8 +19,10 @@ model on every Baum-Welch pass.
 ## Graph ownership
 
 The forced aligner's `align_build_sent_hmm()` separately adds mandatory start
-and finish words. A separately gated bypass prototype made every one of the
-1,132 measured SLT alignments fail, so that graph is deliberately unchanged.
+and finish words. A separately gated bypass prototype was observed to make
+every one of the 1,132 measured SLT alignments fail. That observation was the
+removal criterion; the failure mechanism was not diagnosed, so the graph is
+deliberately unchanged.
 This divergence belongs only to the training state sequence, where posterior
 accumulation creates the contamination being corrected.
 
@@ -29,6 +33,11 @@ direct arcs from the last spoken HMM exits to the existing final non-emitting
 sentence exit. The ordinary arcs through both `SIL` HMMs remain available.
 The added alternatives consume zero frames; interior optional silence behavior
 is unchanged.
+
+The retained initial `SIL` path has virtual-start weight 1. The zero-frame
+bypass also has total virtual-start weight 1, distributed uniformly across the
+initial phone graph's successors. This preserves the graph builder's existing
+`1 / n_next` pronunciation fan-out convention.
 
 ## Scope
 

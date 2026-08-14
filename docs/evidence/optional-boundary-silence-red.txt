@@ -1,4 +1,4 @@
-Optional boundary silence gate: demonstrated red history
+Optional boundary silence ABI reach: compile-red history
 =========================================================
 
 Baseline: origin/main at 97329d6
@@ -17,7 +17,6 @@ Relevant output:
   gmake[1]: *** [CMakeFiles/Makefile2:798: csrc/tests/CMakeFiles/test_bw_state_seq_build.dir/rule] Error 2
   gmake: *** [Makefile:472: test_bw_state_seq_build] Error 2
 
-The baseline cannot compile the gate because neither the schema-plumbed native
-option nor the bypass implementation exists there. On the feature branch the
-same test compiles and exercises both enabled and disabled positions in both
-the linear and multipron state-sequence builders.
+The baseline cannot compile this overlay because the native option does not
+exist there. This is ABI/reach evidence only, not behavioral red history. The
+behavioral mandatory-topology red is recorded separately.

@@ -544,7 +544,7 @@ If yo want to do parallel training for N machines. Run N trainers with \n\
 	{ "-optional_boundary_silence",
 	  ARG_BOOLEAN,
 	  "yes",
-	  "Omit transcript <s> and </s> SIL HMMs so they consume zero frames." },
+	  "Retain transcript <s> and </s> SIL HMM paths and permit zero-frame bypass." },
 
 	{ "-mmie_type",
 	  ARG_STRING,
