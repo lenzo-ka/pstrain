@@ -4,9 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import hashlib
 import json
 import sys
-import wave
 from pathlib import Path
 
 import numpy as np
@@ -39,30 +40,15 @@ def sil_senones(mdef: Path) -> list[int]:
     raise RuntimeError("SIL CI row missing from mdef")
 
 
-def trailing_silence_seconds(path: Path) -> float:
-    """Measure trailing silence in 20 ms RMS windows at -40 dB from peak."""
-    with wave.open(str(path), "rb") as source:
-        if source.getsampwidth() != 2:
-            raise RuntimeError(f"expected 16-bit PCM: {path}")
-        rate = source.getframerate()
-        channels = source.getnchannels()
-        samples = np.frombuffer(source.readframes(source.getnframes()), dtype="<i2")
-    if channels > 1:
-        samples = samples.reshape(-1, channels).mean(axis=1)
-    samples = samples.astype(np.float64)
-    peak = float(np.max(np.abs(samples), initial=0.0))
-    if peak == 0.0:
-        return len(samples) / rate
-    window = max(1, round(rate * 0.02))
-    threshold = peak * 10 ** (-40.0 / 20.0)
-    silent_samples = 0
-    for end in range(len(samples), 0, -window):
-        chunk = samples[max(0, end - window) : end]
-        rms = float(np.sqrt(np.mean(chunk * chunk)))
-        if rms > threshold:
-            break
-        silent_samples += len(chunk)
-    return silent_samples / rate
+ARMS = ("off", "final-only", "initial-only", "both")
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def bw_pass(
@@ -71,7 +57,7 @@ def bw_pass(
     filler: Path,
     features: Path,
     refs: dict[str, str],
-    enabled: bool,
+    arm: str,
     multipron: bool,
     counts_path: Path,
 ) -> tuple[float, list[str], dict[str, float]]:
@@ -81,7 +67,8 @@ def bw_pass(
         a_beam=1e-90,
         b_beam=1e-10,
         multipron=multipron,
-        optional_boundary_silence=enabled,
+        optional_boundary_silence=arm != "off",
+        optional_boundary_measurement_arm=arm,
     )
     trainer = BWTrainer(
         model / "mdef",
@@ -115,68 +102,59 @@ def summarize_mode(
     filler: Path,
     features: Path,
     refs: dict[str, str],
-    trailing_silence: dict[str, float],
     multipron: bool,
     output: Path,
 ) -> dict[str, object]:
     label = "multipron" if multipron else "single_pron"
-    off, off_failed, off_per_utt = bw_pass(
-        model,
-        dictionary,
-        filler,
-        features,
-        refs,
-        False,
-        multipron,
-        output.with_suffix(f".{label}.off"),
-    )
-    on, on_failed, on_per_utt = bw_pass(
-        model,
-        dictionary,
-        filler,
-        features,
-        refs,
-        True,
-        multipron,
-        output.with_suffix(f".{label}.on"),
-    )
+    measurements = {}
+    for arm in ARMS:
+        occupancy, failed, per_utt = bw_pass(
+            model,
+            dictionary,
+            filler,
+            features,
+            refs,
+            arm,
+            multipron,
+            output.with_suffix(f".{label}.{arm}"),
+        )
+        measurements[arm] = {
+            "bw_sil_occupancy": occupancy,
+            "bw_failures": failed,
+            "per_utterance": per_utt,
+        }
+    off = measurements["off"]
     rows = []
-    strata = {
-        "no_measured_trailing_silence": {"utterances": 0, "sil_occupancy_delta_off_minus_on": 0.0},
-        "measured_trailing_silence_present": {
-            "utterances": 0,
-            "sil_occupancy_delta_off_minus_on": 0.0,
-        },
-    }
     for fileid in refs:
-        seconds = trailing_silence[fileid]
-        delta = off_per_utt[fileid] - on_per_utt[fileid]
-        stratum = (
-            "measured_trailing_silence_present" if seconds > 0.0 else "no_measured_trailing_silence"
-        )
-        strata[stratum]["utterances"] += 1
-        strata[stratum]["sil_occupancy_delta_off_minus_on"] += delta
-        rows.append(
-            {
-                "fileid": fileid,
-                "trailing_silence_seconds": seconds,
-                "trailing_silence_present": seconds > 0.0,
-                "sil_occupancy_off": off_per_utt[fileid],
-                "sil_occupancy_on": on_per_utt[fileid],
-                "sil_occupancy_delta_off_minus_on": delta,
-            }
-        )
-    delta = off - on
+        row = {"mode": label, "fileid": fileid}
+        for arm in ARMS:
+            arm_data = measurements[arm]
+            row[f"{arm}_failed"] = fileid in arm_data["bw_failures"]
+            row[f"{arm}_sil_occupancy"] = arm_data["per_utterance"][fileid]
+        rows.append(row)
+    arms = {}
+    off_failures = set(off["bw_failures"])
+    for arm in ARMS:
+        arm_data = measurements[arm]
+        failures = set(arm_data["bw_failures"])
+        delta = arm_data["bw_sil_occupancy"] - off["bw_sil_occupancy"]
+        arms[arm] = {
+            "arctic_a0587_recovers": "arctic_a0587" in off_failures
+            and "arctic_a0587" not in failures,
+            "bw_failure_count": len(failures),
+            "bw_failures": sorted(failures),
+            "recovered_failures_vs_off": sorted(off_failures - failures),
+            "new_failures_vs_off": sorted(failures - off_failures),
+            "bw_sil_occupancy": arm_data["bw_sil_occupancy"],
+            "bw_sil_occupancy_delta_from_off": delta,
+            "bw_sil_occupancy_delta_percent_of_off": (
+                100.0 * delta / off["bw_sil_occupancy"] if off["bw_sil_occupancy"] else None
+            ),
+            "delta_denominator": "off.bw_sil_occupancy",
+        }
     return {
         "multipron": multipron,
-        "bw_sil_occupancy_off": off,
-        "bw_sil_occupancy_on": on,
-        "bw_sil_occupancy_delta_off_minus_on": delta,
-        "bw_sil_occupancy_reduction_percent": 100.0 * delta / off if off else None,
-        "bw_sil_occupancy_reduction_percent_denominator": "bw_sil_occupancy_off",
-        "bw_failures_off": off_failed,
-        "bw_failures_on": on_failed,
-        "strata": strata,
+        "arms": arms,
         "per_utterance": rows,
     }
 
@@ -188,41 +166,41 @@ def main() -> None:
     parser.add_argument("output", type=Path)
     parser.add_argument("--model", default="shared/models/cd-1g/ladder4")
     parser.add_argument("--features", default="shared/features/ladder4")
-    parser.add_argument("--audio", default="audio")
     args = parser.parse_args()
     project = args.project.resolve()
     refs = transcripts(args.transcription)
     model = project / args.model
     features = project / args.features
-    audio = project / args.audio
     dictionary = project / "shared/dictionary.dict"
     filler = project / "shared/filler.dict"
-    trailing_silence = {
-        fileid: trailing_silence_seconds(audio / f"{fileid}.wav") for fileid in refs
+    input_paths = {
+        "transcription": args.transcription.resolve(),
+        "model_mdef": (model / "mdef").resolve(),
+        "model_means": (model / "means").resolve(),
+        "model_variances": (model / "variances").resolve(),
+        "model_mixture_weights": (model / "mixture_weights").resolve(),
+        "model_transition_matrices": (model / "transition_matrices").resolve(),
+        "dictionary": dictionary.resolve(),
+        "filler_dictionary": filler.resolve(),
     }
     payload = {
         "utterances": len(refs),
         "inputs": {
             "project": str(project),
-            "transcription": str(args.transcription.resolve()),
             "model": str(model.resolve()),
             "features": str(features.resolve()),
-            "audio": str(audio.resolve()),
-            "dictionary": str(dictionary.resolve()),
-            "filler_dictionary": str(filler.resolve()),
+            "files": {
+                label: {"path": str(path), "sha256": sha256(path)}
+                for label, path in input_paths.items()
+            },
         },
-        "trailing_silence_measurement": {
-            "window_seconds": 0.02,
-            "rms_threshold_db_relative_to_peak": -40.0,
-            "present_definition": "at least one trailing window at or below threshold",
-        },
+        "measurement_selector": "temporary internal four-arm split; not a shipped configuration surface",
         "single_pron": summarize_mode(
             model,
             dictionary,
             filler,
             features,
             refs,
-            trailing_silence,
             False,
             args.output,
         ),
@@ -232,11 +210,17 @@ def main() -> None:
             filler,
             features,
             refs,
-            trailing_silence,
             True,
             args.output,
         ),
     }
+    rows = payload["single_pron"]["per_utterance"] + payload["multipron"]["per_utterance"]
+    csv_path = args.output.with_suffix(".csv")
+    with csv_path.open("w", newline="") as target:
+        writer = csv.DictWriter(target, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    payload["per_utterance_csv"] = {"path": str(csv_path.resolve()), "sha256": sha256(csv_path)}
     args.output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     print(json.dumps(payload, indent=2, sort_keys=True))
 
