@@ -27,9 +27,11 @@ reduces shard artifacts in ascending shard ID through the vendored accumulator r
 The contract guarantees remain:
 
 1. Repeating a run with the same manifest and shard count produces byte-identical accumulator
-   artifacts and model files.
+   artifacts and model files. The executable evidence exercises shard count 2 for exactly three
+   passes; other shard counts and pass counts are untested.
 2. Assigned, processed, retried, and skipped utterance identities, accepted frame counts, and
-   per-pass stop decisions are exactly partition-independent.
+   per-pass stop decisions are exactly partition-independent. The executable evidence compares
+   shard counts 1 and 2 for exactly three passes; other shard counts and pass counts are untested.
 3. Floating parameters are not claimed equal across shard counts.
 4. Effective BW shard count is recorded in training provenance and model-directory comparison
    includes `provenance.json`.
