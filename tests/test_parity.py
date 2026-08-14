@@ -9,6 +9,7 @@ from __future__ import annotations
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -210,17 +211,13 @@ class TestSphinxFeParity:
     """Test sphinx_fe shell-out vs CFFI parity."""
 
     @pytest.mark.skipif(not binary_available("sphinx_fe"), reason="sphinx_fe not found")
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Known gap: the CFFI feature path (pstrain_fe_create, a 'simplified' "
-        "front-end that ignores remove_noise/transform/lifter/unit_area — see "
-        "pstrain/lib/features.py:123) does not match the sphinx_fe CLI, which applies "
-        "them. Cepstra differ by ~30 on average even with dither off. Aligning "
-        "the two front-ends is feature-config work (plan Phase 2/7), not a "
-        "Phase-1 fix; xfail(strict) so this flips red the moment they converge.",
-    )
     def test_feature_extraction(self, test_data_dir: Path) -> None:
-        """CFFI vs sphinx_fe CLI features (currently a documented divergence)."""
+        """CFFI and sphinx_fe produce identical features with matched parameters.
+
+        Validated on macOS. On Linux, a live symbol collision can make both calls
+        resolve to PocketSphinx's front end, so a passing Linux result alone does
+        not establish that the two implementations are equal.
+        """
         # Create a simple audio file (sine wave)
         import wave
 
@@ -237,15 +234,43 @@ class TestSphinxFeParity:
             f.setframerate(sample_rate)
             f.writeframes(audio.tobytes())
 
-        # Shell-out (dither off so the comparison is deterministic).
+        parameters: dict[str, Any] = {
+            "samprate": sample_rate,
+            "nfilt": 25,
+            "nfft": 512,
+            "lowerf": 130.0,
+            "upperf": 6800.0,
+            "ncep": 13,
+            "alpha": 0.97,
+            "lifter": 22,
+            "dither": False,
+            "remove_dc": True,
+            "remove_noise": True,
+            "transform": "dct",
+            "frate": 100,
+            "wlen": 0.025625,
+        }
+
+        # Shell-out, with every effective front-end parameter explicit.
         shell_output = test_data_dir / "shell_features.mfc"
         builder = CommandBuilder()
         cmd = builder.sphinx_fe(
             input_file=audio_path,
             output_file=shell_output,
-            samprate=sample_rate,
-            ncep=13,
-            dither=False,
+            samprate=parameters["samprate"],
+            nfilt=parameters["nfilt"],
+            nfft=parameters["nfft"],
+            lowerf=parameters["lowerf"],
+            upperf=parameters["upperf"],
+            ncep=parameters["ncep"],
+            remove_dc=parameters["remove_dc"],
+            dither=parameters["dither"],
+            alpha=parameters["alpha"],
+            lifter=parameters["lifter"],
+            remove_noise="yes" if parameters["remove_noise"] else "no",
+            transform=parameters["transform"],
+            frate=parameters["frate"],
+            wlen=parameters["wlen"],
         )
         cmd.run()
 
@@ -253,7 +278,7 @@ class TestSphinxFeParity:
         cffi_output = test_data_dir / "cffi_features.mfc"
         from pstrain.lib.features import extract_features
 
-        extract_features(audio_path, cffi_output)
+        extract_features(audio_path, cffi_output, **parameters)
 
         # Compare
         from pstrain.lib.features import read_sphinx_mfc
@@ -261,8 +286,7 @@ class TestSphinxFeParity:
         shell_feats = read_sphinx_mfc(shell_output)
         cffi_feats = read_sphinx_mfc(cffi_output)
 
-        # Allow small differences due to potential implementation details
-        np.testing.assert_allclose(shell_feats, cffi_feats, rtol=1e-4, atol=1e-4)
+        np.testing.assert_array_equal(shell_feats, cffi_feats)
 
 
 class TestPrintpParity:

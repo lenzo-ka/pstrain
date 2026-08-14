@@ -57,7 +57,9 @@ model-file identities, and resource metadata.
 ## Baseline
 
 Delta is pstrain minus the preserved upstream oracle in WER percentage points.
-The intervals are paired 95% bootstrap confidence intervals.
+The bands are paired 95% bootstrap summaries, not iid confidence intervals:
+utterances are clustered by speaker rather than exchangeable independent
+observations. The big cells therefore resample within speaker strata.
 
 | Mode | Cell | pstrain WER | Oracle WER | Delta pp | Paired 95% CI | Interpretation |
 |---|---|---:|---:|---:|---:|---|
