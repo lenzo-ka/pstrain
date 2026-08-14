@@ -174,6 +174,23 @@ class TestAligner:
         with pytest.raises(FileNotFoundError, match="Model file missing"):
             Aligner(empty_model, dict_path)
 
+    def test_missing_feat_params_explains_front_end_mismatch(self, tmp_path: Path) -> None:
+        model = tmp_path / "model"
+        model.mkdir()
+        for name in ("mdef", "means", "variances", "mixture_weights", "transition_matrices"):
+            (model / name).write_text(name)
+        dict_path = tmp_path / "dict"
+        dict_path.write_text("")
+
+        with pytest.raises(
+            FileNotFoundError,
+            match=(
+                rf"feat\.params.*{model}.*decode-time front end.*"
+                r"silently differ.*feature shape and basis"
+            ),
+        ):
+            Aligner(model, dict_path)
+
 
 class TestLoadTranscripts:
     def test_parses_sphinx_format(self, tmp_path: Path) -> None:

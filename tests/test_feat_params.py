@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from pstrain.lib.filetypes import FileType, detect_file_type
 from pstrain.lib.model import MODEL_FILES_REQUIRED
 from pstrain.lib.pipeline.context import FeatParams
 from pstrain.lib.pipeline.feat_params import feat_params_lines, write_feat_params
@@ -103,5 +104,22 @@ def test_packaging_requires_trained_feat_params(tmp_path: Path) -> None:
     model_dir = tmp_path / "model"
     model_dir.mkdir()
 
-    with pytest.raises(FileNotFoundError, match=r"trained model directory lacks feat\.params"):
+    with pytest.raises(
+        FileNotFoundError,
+        match=(
+            rf"feat\.params.*{model_dir}.*decode-time front end.*"
+            r"silently differ.*feature shape and basis"
+        ),
+    ):
         package_model(model_dir, tmp_path / "dist")
+
+
+def test_model_under_construction_does_not_require_feat_params(tmp_path: Path) -> None:
+    """Training's five-file model contract remains valid before feat.params exists."""
+    model_dir = tmp_path / "model-under-construction"
+    model_dir.mkdir()
+    for filename in MODEL_FILES_REQUIRED:
+        (model_dir / filename).write_text(filename)
+
+    assert "feat.params" not in MODEL_FILES_REQUIRED
+    assert detect_file_type(model_dir) is FileType.MODEL
