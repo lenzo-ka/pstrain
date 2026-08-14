@@ -995,8 +995,7 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
                 }
                 else {
                     memcpy(ctx->raw_mixw[i][j],
-                           fallback_tracked ? previous_raw_mixw[i][j]
-                                            : ctx->inv->mixw[i][j],
+                           previous_raw_mixw[i][j],
                            ctx->inv->n_density * sizeof(float32));
                 }
                 E_WARN("mixw %u feat %u has no data, %s values\n", i, j,
@@ -1029,7 +1028,7 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
                            ctx->inv->n_state_pm * sizeof(float32));
                 }
                 else {
-                    memcpy(ctx->raw_tmat[i][j], ctx->inv->tmat[i][j],
+                    memcpy(ctx->raw_tmat[i][j], previous_raw_tmat[i][j],
                            ctx->inv->n_state_pm * sizeof(float32));
                 }
                 E_WARN("tmat %u state %u has no data, %s values\n", i, j,

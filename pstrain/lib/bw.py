@@ -88,7 +88,12 @@ class HMM:
 
     @classmethod
     def load(cls, model_dir: Path) -> Self:
-        """Load model from directory using CFFI."""
+        """Load runtime probability parameters from a model directory.
+
+        Serialized mixture and transition rows may contain upstream-style raw
+        occupancy counts. Nonzero rows are normalized here so the public HMM
+        API retains its probability-array contract.
+        """
         model_dir = Path(model_dir)
 
         # Use CFFI to read model files
@@ -104,9 +109,25 @@ class HMM:
         mixw_raw, n_mixw, n_feat_stream, n_density_mw = _pstrainc.read_mixw(
             str(model_dir / "mixture_weights")
         )
-        mixw = mixw_raw.reshape(n_mixw, n_density_mw)
+        if n_feat_stream != 1:
+            raise ValueError("HMM.load currently requires a single mixture-weight stream")
+        mixw_counts = mixw_raw.reshape(n_mixw, n_density_mw)
+        mixw_sums = mixw_counts.sum(axis=-1, keepdims=True)
+        mixw = np.divide(
+            mixw_counts,
+            mixw_sums,
+            out=np.zeros_like(mixw_counts),
+            where=mixw_sums != 0,
+        )
 
-        tmat, n_tmat, n_state = _pstrainc.read_tmat(str(model_dir / "transition_matrices"))
+        tmat_counts, n_tmat, n_state = _pstrainc.read_tmat(str(model_dir / "transition_matrices"))
+        tmat_sums = tmat_counts.sum(axis=-1, keepdims=True)
+        tmat = np.divide(
+            tmat_counts,
+            tmat_sums,
+            out=np.zeros_like(tmat_counts),
+            where=tmat_sums != 0,
+        )
 
         return cls(means, variances, mixw, tmat)
 
