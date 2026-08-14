@@ -80,6 +80,7 @@ def test_build_ci_1g_produces_finite_model(
     )
 
     ctx = PipelineContext.from_config(project_dir)
+    ctx = replace(ctx, runner=replace(ctx.runner, jobs=2))
     with caplog.at_level("WARNING"):
         rc = build_pipeline(ctx).run("ci-1g", jobs=2)
     assert rc == 0, "pipeline run of ci-1g failed"
