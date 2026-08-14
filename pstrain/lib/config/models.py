@@ -85,6 +85,15 @@ class TrainingConfig(StrictModel):
     retry_beam_factor: Annotated[
         float, Field(gt=0, description="Beam widening factor for one retry")
     ] = 1e10
+    failed_alignment: Annotated[
+        Literal["recover", "abort", "omit"],
+        Field(
+            description=(
+                "Action when Baum-Welch alignment fails; ``omit`` reports and excludes "
+                "the utterance while continuing"
+            )
+        ),
+    ] = "recover"
     arctic_a0302_zero_codebook_band: Annotated[
         tuple[int, int] | None,
         Field(

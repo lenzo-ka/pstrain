@@ -696,6 +696,16 @@ def test_optional_final_silence_defaults_on_and_can_be_disabled(empty_project: P
     assert PipelineContext.from_config(empty_project).train.optional_final_silence is False
 
 
+def test_failed_alignment_position_defaults_to_recover_and_resolves_omit(
+    empty_project: Path,
+) -> None:
+    assert PipelineContext.from_config(empty_project).train.failed_alignment == "recover"
+    (empty_project / "etc" / "configs.yaml").write_text(
+        "default:\n  training:\n    failed_alignment: omit\n"
+    )
+    assert PipelineContext.from_config(empty_project).train.failed_alignment == "omit"
+
+
 def test_linear_training_defaults_to_occurrence_inventory(empty_project: Path) -> None:
     """An omitted inventory policy retains the pre-PR31 linear behavior."""
     (empty_project / "etc" / "configs.yaml").write_text(
@@ -908,6 +918,7 @@ def test_configured_bw_parameters_reach_training_call(
         "default:\n  training:\n    a_beam: 1e-123\n    b_beam: 1e-9\n"
         "    ci: {max_iterations: 7, convergence_ratio: 0.004, min_iterations: 3}\n"
         "    max_skip_fraction: 0.02\n    retry_beam_factor: 1e12\n"
+        "    failed_alignment: omit\n"
     )
     ctx = PipelineContext.from_config(empty_project)
     flat = ctx.model_dir("flat")
@@ -998,6 +1009,7 @@ def test_configured_bw_parameters_reach_training_call(
     assert captured["first_pass_2passvar"] is False
     assert captured["max_skip_fraction"] == 0.02
     assert captured["retry_beam_factor"] == 1e12
+    assert captured["failed_alignment"] == "omit"
 
 
 def test_configured_untied_schedule_and_variance_reach_training_call(

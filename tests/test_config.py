@@ -15,6 +15,7 @@ from pstrain.lib.config.resolver import (
     resolve_config,
     validate_consumer_coverage,
 )
+from pstrain.lib.config.schema import get_parameter
 from pstrain.lib.pipeline.context import DEFAULT_CONFIGS, PipelineContext
 
 
@@ -26,6 +27,12 @@ def test_tree_semantic_fixes_are_on_by_default() -> None:
     training = TrainingConfig()
     assert training.tree_rotate_state_weights is True
     assert training.tree_directional_questions is True
+
+
+def test_literal_parameter_types_list_admissible_values() -> None:
+    parameter = get_parameter("training.failed_alignment")
+    assert parameter is not None
+    assert parameter.type == "recover | abort | omit"
 
 
 def test_tree_state_weight_count_must_match_emitting_states() -> None:

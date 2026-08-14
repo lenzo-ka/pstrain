@@ -18,7 +18,7 @@ from concurrent.futures import ProcessPoolExecutor
 from contextlib import suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     import numpy as np
@@ -273,6 +273,7 @@ def _process_with_final_state_retry(
     normal_beam: float,
     retry_beam_factor: float,
     fileid: str,
+    failed_alignment: Literal["recover", "abort", "omit"] = "recover",
 ) -> bool:
     """Process an update, retrying only a forward-final-state pruning failure.
 
@@ -289,9 +290,17 @@ def _process_with_final_state_retry(
             return success
 
         if not trainer.final_state_not_reached:
+            if failed_alignment == "abort":
+                raise TerminalAlignmentError(f"Alignment failed for {fileid}")
+            if failed_alignment == "omit":
+                logger.error("%s ignored after failed alignment", fileid)
             return False
 
-        if retry_beam_factor <= 1.0:
+        if failed_alignment == "omit":
+            logger.error("%s ignored after failed alignment", fileid)
+            return False
+
+        if failed_alignment == "abort" or retry_beam_factor <= 1.0:
             raise TerminalAlignmentError(
                 f"Final state not reached for {fileid} with a_beam={normal_beam:.3g}; "
                 "retry is disabled"
@@ -410,6 +419,7 @@ def _run_bw_shard(
     filler_dict: Path | None,
     iter_config: BWConfig,
     retry_beam_factor: float,
+    failed_alignment: Literal["recover", "abort", "omit"],
     excluded_fileids: set[str],
     accum_dir: Path,
     iteration: int,
@@ -453,6 +463,7 @@ def _run_bw_shard(
                 iter_config.a_beam,
                 retry_beam_factor,
                 fileid,
+                failed_alignment,
             )
             if not success:
                 skipped.append((fileid, "alignment_failure"))
@@ -510,6 +521,7 @@ def run_bw_training(
     multipron: bool = True,
     max_skip_fraction: float = 0.05,
     retry_beam_factor: float = 1e10,
+    failed_alignment: Literal["recover", "abort", "omit"] = "recover",
     exclusion_schedule: dict[int | str, list[str]] | None = None,
     arctic_a0302_zero_codebook_band: tuple[int, int] | None = None,
     accept_arctic_a0587_pass: int | None = None,
@@ -539,6 +551,8 @@ def run_bw_training(
         retry_beam_factor: Widen the forward beam by this factor for one retry
             when pruning prevents the final state from being reached. Set to 1
             to disable retries.
+        failed_alignment: Recover with one widened-beam retry, abort the stage,
+            or report and omit the utterance while continuing.
         first_pass_2passvar: Required stage policy for the first iteration.
             ``True`` selects centered two-pass accumulation and ``False``
             selects one-pass variance accumulation.
@@ -663,6 +677,7 @@ def run_bw_training(
                     filler_dict,
                     iter_config,
                     retry_beam_factor,
+                    failed_alignment,
                     excluded_fileids,
                     shard_dirs[index],
                     iteration,
@@ -786,6 +801,7 @@ def run_bw_training(
                     iter_config.a_beam,
                     retry_beam_factor,
                     fileid,
+                    failed_alignment,
                 )
                 if success:
                     if trainer._last_process_retried:
