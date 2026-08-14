@@ -198,11 +198,6 @@ training
    :Default: ``True``
    :Description: Sum posteriors over pronunciation variants
 
-``training.optional_boundary_silence``
-   :Type: ``bool``
-   :Default: ``True``
-   :Description: Permit initial and final transcript silence to consume zero frames
-
 ``training.n_senones``
    :Type: ``int``
    :Default: ``200``
@@ -212,6 +207,11 @@ training
    :Type: ``int``
    :Default: ``3``
    :Description: Emitting states per HMM
+
+``training.optional_boundary_silence``
+   :Type: ``bool``
+   :Default: ``True``
+   :Description: Permit initial and final transcript silence to consume zero frames
 
 ``training.question_niter``
    :Type: ``int``
