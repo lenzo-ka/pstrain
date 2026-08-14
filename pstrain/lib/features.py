@@ -35,8 +35,6 @@ __all__ = [
     "FeatureExtractor",
     "extract_features",
     "read_sphinx_mfc",
-    "apply_cmn",
-    "compute_deltas",
 ]
 
 
@@ -399,69 +397,3 @@ def read_sphinx_mfc(path: Path) -> npt.NDArray[np.float32]:
             return data.reshape(-1, veclen)
 
     raise ValueError(f"Cannot determine veclen for {n_floats} floats")
-
-
-def apply_cmn(
-    features: npt.NDArray[np.float32],
-) -> npt.NDArray[np.float32]:
-    """Apply Cepstral Mean Normalization (CMN) to features.
-
-    Batch CMN subtracts the mean of each coefficient across the utterance.
-    This normalizes for channel/speaker variation.
-
-    Args:
-        features: Input features of shape (n_frames, veclen)
-
-    Returns:
-        CMN-normalized features of same shape
-    """
-    # Compute mean across frames for each coefficient
-    mean = features.mean(axis=0, keepdims=True)
-    # Subtract mean
-    return (features - mean).astype(np.float32)
-
-
-def compute_deltas(
-    features: npt.NDArray[np.float32],
-    window: int = 2,
-) -> npt.NDArray[np.float32]:
-    """Compute delta and delta-delta features.
-
-    Sphinx-style regression delta computation using a window of frames.
-    Returns concatenated [static; delta; delta-delta] features.
-
-    Args:
-        features: Input features of shape (n_frames, veclen)
-        window: Delta window size (default: 2, uses frames [-2, -1, +1, +2])
-
-    Returns:
-        Feature array of shape (n_frames, veclen * 3) with static+delta+deltadelta
-    """
-    n_frames, veclen = features.shape
-
-    # Compute regression weights
-    denom = 2 * sum(i * i for i in range(1, window + 1))
-
-    # Pad features for delta computation
-    padded = np.pad(features, ((window, window), (0, 0)), mode="edge")
-
-    # Compute deltas using linear regression
-    deltas = np.zeros_like(features)
-    for i in range(1, window + 1):
-        deltas += i * (
-            padded[window + i : window + i + n_frames] - padded[window - i : window - i + n_frames]
-        )
-    deltas /= denom
-
-    # Compute delta-deltas from deltas
-    padded_deltas = np.pad(deltas, ((window, window), (0, 0)), mode="edge")
-    delta_deltas = np.zeros_like(features)
-    for i in range(1, window + 1):
-        delta_deltas += i * (
-            padded_deltas[window + i : window + i + n_frames]
-            - padded_deltas[window - i : window - i + n_frames]
-        )
-    delta_deltas /= denom
-
-    # Concatenate: [static; delta; delta-delta]
-    return np.hstack([features, deltas, delta_deltas]).astype(np.float32)
