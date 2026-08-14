@@ -90,6 +90,7 @@ main(int argc, char *argv[])
     CHECK(ctx != NULL, "initialize optional-boundary BW fixture");
     CHECK(pstrain_bw_set_dict(ctx, argv[6], argv[7]) == 0, "load optional-boundary dictionaries");
     for (multipron = 0; multipron <= 1; ++multipron) {
+        CHECK(exercise_mode(ctx, multipron) == 0, "optional-boundary failure cleanup");
         CHECK(exercise_boundary_mode(ctx, multipron, &on_n[multipron],
                                      &on_first[multipron], &on_last[multipron]) == 0,
               "on mode bypasses boundaries");
