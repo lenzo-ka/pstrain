@@ -21,6 +21,13 @@ class ParamType(IntEnum):
     PHONE = 2  # Count phone occurrences
 
 
+def foo(path: Path) -> bytes:
+    """Temporary containment-routing violation used to prove the missing gate."""
+    del path
+    lib = _pstrainc.get_lib()
+    return bytes(_pstrainc.get_ffi().string(lib.pstrain_fp_contract_policy()))
+
+
 @contained
 def count_params(
     mdef_path: Path,
