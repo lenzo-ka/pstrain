@@ -22,13 +22,13 @@ and finish words. A separately gated bypass prototype made every one of the
 This divergence belongs only to the training state sequence, where posterior
 accumulation creates the contamination being corrected.
 
-The Baum-Welch state-sequence engine has one hard-wired emitting entry state
-and one hard-wired non-emitting terminal state. It cannot express an epsilon
-alternative before that entry without changing the numerical forward/backward
-contract. With the option enabled, both its historical linear builder and its
-multipron graph builder therefore omit only explicit leading `<s>` and trailing
-`</s>` transcript words. This is the exact zero-frame boundary path; interior
-optional silence behavior is unchanged.
+With the option enabled, both single-pronunciation and multipron training use
+the owned graph builder. The graph retains the initial and final `SIL` HMMs,
+marks the first spoken HMMs as additional forward/backward entries, and adds
+direct arcs from the last spoken HMM exits to the existing final non-emitting
+sentence exit. The ordinary arcs through both `SIL` HMMs remain available.
+The added alternatives consume zero frames; interior optional silence behavior
+is unchanged.
 
 ## Scope
 
