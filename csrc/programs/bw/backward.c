@@ -170,10 +170,7 @@ backward_initial_ci_posterior(float64 prior_beta,
 			      float64 recip_final_alpha,
 			      float64 entry_weight)
 {
-    (void)prior_beta;
-    (void)output_prob;
-    (void)recip_final_alpha;
-    return entry_weight;
+    return prior_beta * output_prob * recip_final_alpha * entry_weight;
 }
 
 void
