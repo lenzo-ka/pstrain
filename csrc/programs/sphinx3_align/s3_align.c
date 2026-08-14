@@ -730,6 +730,26 @@ build_state_dag(void)
     return 0;
 }
 
+int32
+align_has_boundary_bypasses(int32 *initial, int32 *final)
+{
+    plink_t *link;
+
+    if (initial == NULL || final == NULL)
+        return -1;
+    *initial = 0;
+    *final = 0;
+    for (link = phead.succlist; link; link = link->next) {
+        if (link->node->wid != dict->startwid)
+            *initial = 1;
+    }
+    for (link = ptail.predlist; link; link = link->next) {
+        if (link->node->wid != dict->finishwid)
+            *final = 1;
+    }
+    return 0;
+}
+
 
 static void
 destroy_state_dag(void)

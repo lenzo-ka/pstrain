@@ -166,6 +166,9 @@ int32 align_build_sent_hmm(char *transcript,  /**< In: Word transcript */
 
 int32 align_destroy_sent_hmm(void);
 
+/** Inspect whether the current sentence DAG bypasses both boundary words. */
+int32 align_has_boundary_bypasses(int32 *initial, int32 *final);
+
 int32 align_start_utt(char *uttid);
 
 /**

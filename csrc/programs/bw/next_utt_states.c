@@ -57,6 +57,8 @@
 
 #include <s3/state_seq.h>
 
+#include <string.h>
+
 #include "next_utt_states.h"
 
 state_t *next_utt_states(uint32 *n_state,

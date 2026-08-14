@@ -54,6 +54,7 @@ class Aligner:
         filler_dict: Filler / non-speech dictionary path. Optional.
         beam: Pruning beam (default 1e-64, matches sphinx3_align).
         insert_sil: Insert optional inter-word silences (default ``True``).
+        optional_boundary_silence: Permit initial/final silence to consume zero frames.
         include_phones: Return phone segmentation in the result.
         include_states: Return per-frame state segmentation.
         cmn: Cepstral mean normalization mode. ``"batch"`` matches the

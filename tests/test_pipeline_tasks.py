@@ -687,6 +687,15 @@ def test_multipron_training_defaults_on(empty_project: Path) -> None:
     assert ctx.train.untied_inventory == "all-triphone"
 
 
+def test_optional_boundary_silence_defaults_on_and_can_be_disabled(empty_project: Path) -> None:
+    """The schema declaration owns both the corrected default and its legacy gate."""
+    assert PipelineContext.from_config(empty_project).train.optional_boundary_silence is True
+    (empty_project / "etc" / "configs.yaml").write_text(
+        "default:\n  training:\n    optional_boundary_silence: false\n"
+    )
+    assert PipelineContext.from_config(empty_project).train.optional_boundary_silence is False
+
+
 def test_linear_training_defaults_to_occurrence_inventory(empty_project: Path) -> None:
     """An omitted inventory policy retains the pre-PR31 linear behavior."""
     (empty_project / "etc" / "configs.yaml").write_text(
@@ -982,6 +991,7 @@ def test_configured_bw_parameters_reach_training_call(
     assert c_config.tmat_floor == 1e-4
     assert c_config.unobserved_gaussian_policy == 1
     assert c_config.pass2var == 0
+    assert c_config.optional_boundary_silence == 1
     assert captured["convergence_ratio"] == 0.004
     assert captured["min_iterations"] == 3
     assert captured["n_iter"] == 7
