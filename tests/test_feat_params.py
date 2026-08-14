@@ -78,6 +78,7 @@ def test_packaging_copies_trained_feat_params_despite_config_drift(tmp_path: Pat
     )
 
     assert result["feat_params"].read_bytes() == expected
+    assert "Created:" not in result["readme"].read_text()
 
 
 @pytest.mark.parametrize(
