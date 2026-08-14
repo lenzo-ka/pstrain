@@ -65,6 +65,19 @@
 #define FORWARD_DEBUG 0
 #define INACTIVE	0xffff
 
+static int
+is_initial_emitting_state(const state_t *state_seq, uint32 i)
+{
+    uint32 p;
+
+    if (state_seq[i].mixw == TYING_NON_EMITTING)
+	return FALSE;
+    for (p = 0; p < state_seq[i].n_prior; ++p)
+	if (state_seq[i].prior_state[p] != i)
+	    return FALSE;
+    return TRUE;
+}
+
 /*********************************************************************
  *
  * Function:
@@ -281,7 +294,7 @@ forward(float64 **active_alpha,
      * without a predecessor, rather than only array slot zero. */
     for (i = 0; i < n_state; ++i) {
 	uint32 q;
-	if (state_seq[i].n_prior != 0 || state_seq[i].mixw == TYING_NON_EMITTING)
+	if (!is_initial_emitting_state(state_seq, i))
 	    continue;
 	for (q = 0; q < n_active_l_cb; ++q)
 	    if (active_l_cb[q] == state_seq[i].l_cb)
@@ -302,7 +315,7 @@ forward(float64 **active_alpha,
 					   active_l_cb, n_active_l_cb, g);
     balpha = 0.0;
     for (i = 0; i < n_state; ++i) {
-	if (state_seq[i].n_prior != 0 || state_seq[i].mixw == TYING_NON_EMITTING)
+	if (!is_initial_emitting_state(state_seq, i))
 	    continue;
 	outprob[i] = gauden_mixture(now_den[state_seq[i].l_cb],
 				    now_den_idx[state_seq[i].l_cb],
@@ -339,7 +352,7 @@ forward(float64 **active_alpha,
     /* Compute scale for t == 0 */
     scale[0] = 1.0 / balpha;
     for (i = 0; i < n_state; ++i) {
-	if (state_seq[i].n_prior != 0 || state_seq[i].mixw == TYING_NON_EMITTING)
+	if (!is_initial_emitting_state(state_seq, i))
 	    continue;
 	active_alpha[0][n_active] = outprob[i] * scale[0];
 	active_astate[0][n_active] = i;
