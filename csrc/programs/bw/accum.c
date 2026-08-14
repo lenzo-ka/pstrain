@@ -969,23 +969,6 @@ accum_dump(const char *out_dir,
 }
 
 int
-accum_viterbi(uint32 *vit_sseq,
-	      uint32 n_vit_sseq,
-	      state_t *state,
-	      vector_t **obs,
-	      uint32 n_obs,
-	      model_inventory_t *inv,
-	      float64 ****den,
-	      uint32 ****den_idx,
-	      int32 mixw_reest,
-	      int32 tmat_reest,
-	      int32 mean_reest,
-	      int32 var_reest)
-{
-	return S3_SUCCESS;
-}
-
-int
 mmi_accum_gauden(float32 ***denacc,
 		 uint32 *lcl2gbl,
 		 uint32 n_lcl2gbl,
