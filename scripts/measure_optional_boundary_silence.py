@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.meta_path = [finder for finder in sys.meta_path if "_editable" not in type(finder).__module__]
 
 from pstrain.lib import _pstrainc
 from pstrain.lib.alignment import Aligner
