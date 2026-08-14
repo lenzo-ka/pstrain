@@ -696,6 +696,16 @@ def test_optional_final_silence_defaults_on_and_can_be_disabled(empty_project: P
     assert PipelineContext.from_config(empty_project).train.optional_final_silence is False
 
 
+def test_failed_alignment_position_defaults_to_recover_and_resolves_omit(
+    empty_project: Path,
+) -> None:
+    assert PipelineContext.from_config(empty_project).train.failed_alignment == "recover"
+    (empty_project / "etc" / "config.yaml").write_text(
+        "default:\n  training:\n    failed_alignment: omit\n"
+    )
+    assert PipelineContext.from_config(empty_project).train.failed_alignment == "omit"
+
+
 def test_linear_training_defaults_to_occurrence_inventory(empty_project: Path) -> None:
     """An omitted inventory policy retains the pre-PR31 linear behavior."""
     (empty_project / "etc" / "configs.yaml").write_text(
