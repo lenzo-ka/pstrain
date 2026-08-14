@@ -1267,7 +1267,16 @@ def adopt_uncovered_conditions(actual: dict[str, Any], recorded: dict[str, Any])
 def compare_results(
     actual: dict[str, Any], record: dict[str, Any], *, allow_engine_drift: bool = False
 ) -> list[dict[str, Any]]:
-    """Authenticate inputs and bootstrap aligned current-minus-recorded WER."""
+    """Gate a current pstrain run against the pinned pstrain Arctic run.
+
+    REFERENCE: authenticated recorded per-utterance rows with the pinned engine,
+    trained models, corpus, PocketSphinx decoder, dictionary, language model,
+    and WER/bootstrap scorer lineage. AXIS: current versus recorded pstrain run
+    for each training mode and corpus cell; ``allow_engine_drift`` explicitly
+    relaxes only engine identity. SILENT ON: defects shared by both runs and
+    their SphinxTrain lineage, architecture, arithmetic, and correctness versus
+    the separately preserved upstream oracle.
+    """
     validate_record(record)
     _require_equal("resources", actual.get("resources"), record.get("resources"))
     actual_conditions = actual.get("conditions")

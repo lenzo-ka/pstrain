@@ -45,6 +45,14 @@ def test_decode_shard_constructs_one_decoder_and_reuses_it(
 def test_parallel_merge_is_canonical_and_uses_distinct_executor_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Gate process-shard merging against this test's mocked serial decode.
+
+    REFERENCE: one-worker pstrain traversal using the same fake decoder, fake
+    hypotheses, model/dictionary placeholders, and no live aligner or scorer.
+    AXIS: worker count (one versus two) and reversed per-shard completion order.
+    SILENT ON: real decoder or model correctness, defects shared with serial
+    traversal, other orderings, architecture, and arithmetic.
+    """
     executor_calls: list[int] = []
 
     class ImmediateFuture:
