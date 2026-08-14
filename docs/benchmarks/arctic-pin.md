@@ -139,12 +139,8 @@ These are documented training-set composition facts, not decode failures:
 | Mode | Utterance | Stage and pass | Mechanism |
 |---|---|---|---|
 | off | `arctic_a0587` | `cd-2g`, pass 1 | Beam failure on a hard utterance after the permitted retry; mirrored upstream, whose preserved build ignores it at CI passes 5–6. |
+| on | `arctic_a0302` | `cd-untied`, passes 3–10 | Terminal alignment failure after the permitted retry. Commit `72f62a9` made this an accepted occupancy-band exception, which still records a skip and continues without this utterance update; `17eb3d7` tightened the band to the measured pin occupancy. |
 | on | `arctic_a0587` | `cd-1g`, pass 6 | Beam failure on a known-hard utterance after the permitted retry in the multipron posture; part of the same recorded on-mode remainder mechanism. |
-
-`arctic_a0302` at on-mode `cd-untied` passes 3–10 is no longer a known skip. The
-landed accepted-exception policy authenticates the governing exact-zero mean-and-variance
-codebook occupancy against the inclusive band `[4548, 4623]`; values on either side halt
-training. This intentional replacement was measured and ratified on 2026-08-12.
 
 ## Condition contract maintenance
 

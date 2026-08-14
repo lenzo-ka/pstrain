@@ -85,6 +85,24 @@
         "utterance": "arctic_a0587"
       },
       {
+        "adjudication": "retained after history and artifact inspection: commit 72f62a9 changed this terminal alignment failure into an accepted occupancy-band exception that still records a skip and continues without the utterance update; commit 17eb3d7 tightened the band to the measured pin occupancy",
+        "mechanism": "terminal alignment failure after permitted retry in the multipron posture; accepted only when exact-zero-codebook occupancy is inside the declared band, then recorded as a skip while training continues without this utterance update",
+        "mode": "on",
+        "passes": [
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10
+        ],
+        "recorded-in": "on-mode parity anchor",
+        "stage": "cd-untied",
+        "utterance": "arctic_a0302"
+      },
+      {
         "mechanism": "beam failure on a known-hard utterance after permitted retry in the multipron posture \u2014 the recorded on-mode remainder class (V7-era: a0302/b0486; set shifted with the reachable inventory: b0320 now trains); deep diagnosis deferred per banked Q6, tracked as an open item",
         "mode": "on",
         "pass": 6,
@@ -18000,7 +18018,8 @@
         "insertions": 1708,
         "known_skips": [
           {
-            "mechanism": "beam failure on a known-hard utterance after permitted retry in the multipron posture \u2014 the recorded on-mode remainder class (V7-era: a0302/b0486; set shifted with the reachable inventory: b0320 now trains); deep diagnosis deferred per banked Q6, tracked as an open item",
+            "adjudication": "retained after history and artifact inspection: commit 72f62a9 changed this terminal alignment failure into an accepted occupancy-band exception that still records a skip and continues without the utterance update; commit 17eb3d7 tightened the band to the measured pin occupancy",
+            "mechanism": "terminal alignment failure after permitted retry in the multipron posture; accepted only when exact-zero-codebook occupancy is inside the declared band, then recorded as a skip while training continues without this utterance update",
             "mode": "on",
             "passes": [
               3,
@@ -35093,7 +35112,8 @@
         "insertions": 9,
         "known_skips": [
           {
-            "mechanism": "beam failure on a known-hard utterance after permitted retry in the multipron posture \u2014 the recorded on-mode remainder class (V7-era: a0302/b0486; set shifted with the reachable inventory: b0320 now trains); deep diagnosis deferred per banked Q6, tracked as an open item",
+            "adjudication": "retained after history and artifact inspection: commit 72f62a9 changed this terminal alignment failure into an accepted occupancy-band exception that still records a skip and continues without the utterance update; commit 17eb3d7 tightened the band to the measured pin occupancy",
+            "mechanism": "terminal alignment failure after permitted retry in the multipron posture; accepted only when exact-zero-codebook occupancy is inside the declared band, then recorded as a skip while training continues without this utterance update",
             "mode": "on",
             "passes": [
               3,
