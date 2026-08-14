@@ -41,8 +41,16 @@ def test_model_comparison_surfaces_effective_bw_shard_count(tmp_path: Path) -> N
 
     result = compare_models(one, two)
 
-    assert not result.all_match
+    assert not result.all_compared_components_match
     assert not result.components["provenance.json"].match
+    assert result.components["provenance.json"].structured_diff == [
+        {
+            "path": "/execution/bw_shard_count",
+            "operation": "changed",
+            "first": 1,
+            "second": 2,
+        }
+    ]
     assert "provenance.json: DIFFER (text)" in result.summary()
 
 

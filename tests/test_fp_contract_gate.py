@@ -6,6 +6,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -47,5 +48,38 @@ def test_contraction_enabled_build_makes_gate_red(tmp_path: Path) -> None:
         text=True,
     )
 
+    assert result.returncode == 1
+    assert "FP contraction gate failed; fused instructions found" in result.stderr
+
+
+def test_contraction_enabled_wheel_makes_gate_red(tmp_path: Path) -> None:
+    """The wheel extraction path must present fused native artifacts to the detector."""
+    machine = platform.machine().lower()
+    if machine not in {"x86_64", "amd64", "arm64", "aarch64"}:
+        pytest.skip(f"negative control has no compiler flags for {machine}")
+    compiler = shutil.which("cc")
+    if compiler is None:
+        pytest.skip("negative control requires a C compiler")
+
+    source = tmp_path / "fused.c"
+    source.write_text("double fused(double a,double b,double c){return a*b+c;}\n")
+    artifact = tmp_path / "fused.so"
+    flags = ["-O3", "-ffp-contract=fast", "-dynamiclib" if sys.platform == "darwin" else "-shared"]
+    if machine in {"x86_64", "amd64"}:
+        flags.append("-mfma")
+    subprocess.run([compiler, *flags, str(source), "-o", str(artifact)], check=True)
+
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    wheel = wheelhouse / "negative_control-0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        for name in ("bw", "norm", "sphinx_fe", "libpstrainc.so"):
+            archive.write(artifact, f"pstrain/_lib/{name}")
+
+    result = subprocess.run(
+        [sys.executable, "scripts/check_fp_contract.py", "--wheels", str(wheelhouse)],
+        capture_output=True,
+        text=True,
+    )
     assert result.returncode == 1
     assert "FP contraction gate failed; fused instructions found" in result.stderr

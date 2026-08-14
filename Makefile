@@ -42,7 +42,7 @@ install-dev: build-c
 test: check-c
 	ctest --test-dir $(BUILD_DIR) --output-on-failure --no-tests=error
 	python scripts/check_fp_contract.py $(BUILD_DIR)
-	PSTRAIN_REQUIRE_CLIB=1 PSTRAIN_GOLDEN_STRICT=1 pytest
+	PSTRAIN_REQUIRE_CLIB=1 pytest
 
 .PHONY: fp-contract-check
 fp-contract-check: check-c

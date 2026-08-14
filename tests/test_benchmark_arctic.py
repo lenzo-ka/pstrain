@@ -32,6 +32,7 @@ from pstrain.benchmarks.arctic import (
     bootstrap_ci,
     compare_results,
     configuration_provenance,
+    engine_identity,
     extract_archive,
     fetch_archive,
     load_transcripts,
@@ -52,6 +53,7 @@ from pstrain.lib.config.resolver import resolve_config
 from pstrain.lib.corpus.split import train_test_split
 from pstrain.lib.lm import build_lm
 from pstrain.lib.transcription import parse_transcription_file
+from tests.clib import requires_c_library
 
 
 def test_archive_manifest_matches_runtime_config() -> None:
@@ -138,6 +140,17 @@ def test_data_resolves_from_wheel_and_repo_layouts(tmp_path: Path) -> None:
     assert resolve_data_dir(package_root=wheel_root, repo_root=repo_root) == wheel_data
     (wheel_data / "pin-train.transcription").unlink()
     assert resolve_data_dir(package_root=wheel_root, repo_root=repo_root) == repo_data
+
+
+@requires_c_library
+def test_engine_identity_is_in_default_test_suite() -> None:
+    """The default suite authenticates the engine fields used by benchmark records."""
+    dictionary = DATA_DIR / "cmu_arctic_slt.dict"
+    identity = engine_identity(dictionary)
+    assert identity["native_library_sha256"] != "absent"
+    assert identity["native_library_fp_contract_declared"] == "off"
+    assert identity["decode_dictionary_sha256"] == sha256(dictionary)
+    assert any(key.startswith("native_program_") for key in identity)
 
 
 def test_pin_band_resources_and_hashes() -> None:

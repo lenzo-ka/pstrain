@@ -22,7 +22,7 @@ def test_model_comparison_consults_fp_contract_provenance(tmp_path: Path) -> Non
 
     result = compare_models(first, second)
 
-    assert not result.all_match
+    assert not result.all_compared_components_match
     assert result.components["provenance.json"].text_match is False
 
 
@@ -34,7 +34,7 @@ def test_model_comparison_rejects_missing_provenance(tmp_path: Path) -> None:
 
     result = compare_models(first, second)
 
-    assert not result.all_match
+    assert not result.all_compared_components_match
     assert not result.components["provenance.json"].exists_b
 
 
@@ -46,7 +46,7 @@ def test_model_comparison_reports_both_policies_undeclared(tmp_path: Path) -> No
 
     result = compare_models(first, second)
 
-    assert not result.all_match
+    assert not result.all_compared_components_match
     provenance = result.components["provenance.json"]
     assert provenance.status == (
         "contraction policy undeclared for both models; comparability cannot be established"
@@ -65,6 +65,6 @@ def test_model_comparison_reports_both_legacy_policies_undeclared(tmp_path: Path
 
     result = compare_models(first, second)
 
-    assert not result.all_match
+    assert not result.all_compared_components_match
     assert "comparability cannot be established" in result.summary()
     assert result.components["provenance.json"].text_match is True

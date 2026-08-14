@@ -141,9 +141,9 @@ def golden_payload(ctx: PipelineContext, result: TrainingResult) -> dict[str, An
     }
 
 
-def strict_golden_enabled() -> bool:
-    """Return whether same-machine bitwise golden checks were requested."""
-    return os.environ.get("PSTRAIN_GOLDEN_STRICT") == "1"
+def x86_64_strict_golden_enabled() -> bool:
+    """Return whether x86_64 regeneration-golden checks were requested."""
+    return os.environ.get("PSTRAIN_GOLDEN_X86_64_STRICT") == "1"
 
 
 def read_model_arrays(model_dir: Path) -> dict[str, np.ndarray[Any, Any]]:

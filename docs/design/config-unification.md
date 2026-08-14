@@ -82,7 +82,7 @@ There is no single precedence chain today; there are separate consumers:
 | Global `--dry-run` and JSON flags | CLI framework | Invocation behavior and output only; they are not training configuration. |
 | `PSTRAIN_BIN_DIR`, `PSTRAIN_LIB_PATH`, `PSTRAIN_INCLUDE_DIR`, and platform library-path variables | native path discovery | Process environment overrides installation discovery, not model configuration. |
 | `PSTRAIN_BW_CHECKPOINTS` | Baum-Welch training | Debug artifact switch read directly by the engine wrapper. |
-| `PSTRAIN_REQUIRE_CLIB`, `PSTRAIN_TIMINGS_FAULT`, `PSTRAIN_GOLDEN_STRICT`, and `PSTRAIN_BENCH_CACHE` | tests, fault injection, or benchmark harness | Operational/test controls outside ordinary project configuration. |
+| `PSTRAIN_REQUIRE_CLIB`, `PSTRAIN_TIMINGS_FAULT`, `PSTRAIN_GOLDEN_X86_64_STRICT`, and `PSTRAIN_BENCH_CACHE` | tests, fault injection, or benchmark harness | Operational/test controls outside ordinary project configuration. |
 
 The old `pstrain/lib/dictionary.py` module no longer exists. Dictionary code is
 already a package at `pstrain/lib/dictionary/`; C2 must reconcile stale

@@ -527,6 +527,7 @@ class ComponentCompare:
     result: CompareResult | None = None
     text_match: bool | None = None  # For text files
     status: str | None = None
+    structured_diff: list[dict[str, Any]] | None = None
 
     @property
     def match(self) -> bool:
@@ -571,6 +572,7 @@ class ComponentCompare:
             "result": self.result.to_dict() if self.result else None,
             "text_match": self.text_match,
             "status": self.status,
+            "structured_diff": self.structured_diff,
         }
 
 
@@ -584,8 +586,8 @@ class ModelCompareResult:
     topology_compatible: bool  # mdef + feat.params match
 
     @property
-    def all_match(self) -> bool:
-        """Return True if all components match."""
+    def all_compared_components_match(self) -> bool:
+        """Return True if every discovered comparison component matches."""
         return all(c.match for c in self.components.values())
 
     @property
@@ -605,7 +607,7 @@ class ModelCompareResult:
             "dir_b": str(self.dir_b),
             "components": {name: comp.to_dict() for name, comp in self.components.items()},
             "topology_compatible": self.topology_compatible,
-            "all_match": self.all_match,
+            "all_compared_components_match": self.all_compared_components_match,
             "critical_match": self.critical_match,
         }
 
@@ -631,7 +633,7 @@ class ModelCompareResult:
                 differing.append((name, comp))
 
         # Overall status
-        if self.all_match:
+        if self.all_compared_components_match:
             lines.append("ALL MATCH")
         elif self.topology_compatible:
             lines.append("TOPOLOGY COMPATIBLE (parameters differ)")
@@ -688,25 +690,53 @@ def _compare_text_file(file_a: Path, file_b: Path) -> bool:
         return False
 
 
+def _normalized_provenance(path: Path) -> Any:
+    """Load effective provenance while ignoring diagnostic filesystem paths."""
+    value = json.loads(path.read_text())
+
+    def without_paths(item: Any) -> Any:
+        if isinstance(item, dict):
+            return {key: without_paths(val) for key, val in item.items() if key != "path"}
+        if isinstance(item, list):
+            return [without_paths(val) for val in item]
+        return item
+
+    return without_paths(value)
+
+
 def _compare_provenance_file(file_a: Path, file_b: Path) -> bool:
-    """Compare effective provenance while ignoring diagnostic filesystem paths."""
-
-    def normalized(path: Path) -> Any:
-        value = json.loads(path.read_text())
-
-        def without_paths(item: Any) -> Any:
-            if isinstance(item, dict):
-                return {key: without_paths(val) for key, val in item.items() if key != "path"}
-            if isinstance(item, list):
-                return [without_paths(val) for val in item]
-            return item
-
-        return without_paths(value)
+    """Compare normalized effective provenance."""
 
     try:
-        return bool(normalized(file_a) == normalized(file_b))
+        return bool(_normalized_provenance(file_a) == _normalized_provenance(file_b))
     except (OSError, ValueError, TypeError):
         return False
+
+
+def _provenance_diff(file_a: Path, file_b: Path) -> list[dict[str, Any]]:
+    """Return JSON-Patch-shaped differences between normalized provenance documents."""
+    missing = object()
+    differences: list[dict[str, Any]] = []
+
+    def visit(a: Any, b: Any, path: str) -> None:
+        if isinstance(a, dict) and isinstance(b, dict):
+            for key in sorted(a.keys() | b.keys()):
+                visit(a.get(key, missing), b.get(key, missing), f"{path}/{key}")
+        elif a != b:
+            row: dict[str, Any] = {"path": path or "/"}
+            if a is missing:
+                row.update(operation="added", second=b)
+            elif b is missing:
+                row.update(operation="removed", first=a)
+            else:
+                row.update(operation="changed", first=a, second=b)
+            differences.append(row)
+
+    try:
+        visit(_normalized_provenance(file_a), _normalized_provenance(file_b), "")
+    except (OSError, ValueError, TypeError):
+        return [{"path": "/", "operation": "unreadable"}]
+    return differences
 
 
 def _fp_contract_declaration(path: Path) -> str | None:
@@ -776,18 +806,24 @@ def compare_models(
             declaration_a = _fp_contract_declaration(dir_a / filename) if exists_a else None
             declaration_b = _fp_contract_declaration(dir_b / filename) if exists_b else None
             if declaration_a is None and declaration_b is None:
+                text_match = (
+                    _compare_provenance_file(dir_a / filename, dir_b / filename)
+                    if exists_a and exists_b
+                    else None
+                )
                 components[filename] = ComponentCompare(
                     name=filename,
                     exists_a=exists_a,
                     exists_b=exists_b,
-                    text_match=(
-                        _compare_provenance_file(dir_a / filename, dir_b / filename)
-                        if exists_a and exists_b
-                        else None
-                    ),
+                    text_match=text_match,
                     status=(
                         "contraction policy undeclared for both models; "
                         "comparability cannot be established"
+                    ),
+                    structured_diff=(
+                        _provenance_diff(dir_a / filename, dir_b / filename)
+                        if text_match is False
+                        else ([] if text_match is True else None)
                     ),
                 )
                 continue
@@ -814,6 +850,11 @@ def compare_models(
                 exists_a=True,
                 exists_b=True,
                 text_match=text_match,
+                structured_diff=(
+                    _provenance_diff(file_a, file_b)
+                    if filename == "provenance.json" and not text_match
+                    else ([] if filename == "provenance.json" else None)
+                ),
             )
         elif filename in gau_files:
             result = compare_gaussians(file_a, file_b, rtol, atol)
