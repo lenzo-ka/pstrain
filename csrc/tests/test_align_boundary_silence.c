@@ -1,6 +1,9 @@
 #include <stdio.h>
 
 #include "../libs/libpstrain/pstrain_align.h"
+#include "../programs/sphinx3_align/tmat.h"
+#include "../programs/sphinx3_align/mdef.h"
+#include "../programs/sphinx3_align/dict.h"
 #include "../programs/sphinx3_align/s3_align.h"
 
 #define CHECK(cond, msg)                                                    \
