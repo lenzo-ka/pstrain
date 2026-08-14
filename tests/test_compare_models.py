@@ -67,3 +67,4 @@ def test_model_comparison_reports_both_legacy_policies_undeclared(tmp_path: Path
 
     assert not result.all_match
     assert "comparability cannot be established" in result.summary()
+    assert result.components["provenance.json"].text_match is True

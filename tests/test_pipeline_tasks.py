@@ -20,7 +20,7 @@ import pytest
 import yaml
 
 from pstrain.lib.pipeline import PipelineContext
-from pstrain.lib.pipeline.context import DEFAULT_CONFIGS, FeatParams, SplitParams
+from pstrain.lib.pipeline.context import DEFAULT_CONFIGS, FeatParams, RunnerParams, SplitParams
 from pstrain.lib.pipeline.tasks import DEFAULT_TARGET, TARGETS, build_pipeline
 from tests.clib import C_LIBRARY_AVAILABLE
 
@@ -311,6 +311,33 @@ def test_stage_fingerprints_cover_only_effective_relevant_values(empty_project: 
 
     document = base.provenance_document("training")
     assert document["fingerprint"] in base.provenance_path("training").name
+
+
+@pytest.mark.parametrize(
+    ("multipron", "effective_shards"),
+    [(False, 3), (True, 1)],
+)
+def test_training_provenance_declares_requested_and_effective_bw_shard_count(
+    empty_project: Path, monkeypatch: pytest.MonkeyPatch, multipron: bool, effective_shards: int
+) -> None:
+    """Record requested jobs separately from the effective BW shard count."""
+    monkeypatch.setattr("pstrain.lib.pipeline.context.socket.gethostname", lambda: "training-host")
+    monkeypatch.setattr("pstrain.lib.pipeline.context.platform.machine", lambda: "test-arch")
+    base = PipelineContext.from_config(empty_project)
+    ctx = replace(
+        base,
+        runner=RunnerParams(jobs=3),
+        train=replace(base.train, multipron_training=multipron),
+    )
+
+    execution = ctx.provenance_document("training")["execution"]
+
+    assert execution == {
+        "host": "training-host",
+        "architecture": "test-arch",
+        "requested_jobs": 3,
+        "bw_shard_count": effective_shards,
+    }
 
 
 def test_exclusion_schedule_config_and_provenance_are_verbatim(empty_project: Path) -> None:

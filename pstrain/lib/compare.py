@@ -546,6 +546,8 @@ class ComponentCompare:
     def summary(self) -> str:
         """Return human-readable summary."""
         if self.status is not None:
+            if self.text_match is False:
+                return f"DIFFER (text); {self.status}"
             return self.status
         if not self.exists_a and not self.exists_b:
             return "not present in either"
@@ -752,7 +754,14 @@ def compare_models(
     components: dict[str, ComponentCompare] = {}
 
     # Text files (exact match)
-    text_files = {"mdef", "feat.params", "noisedict", "README", "topo", "provenance.json"}
+    text_files = {
+        "mdef",
+        "feat.params",
+        "noisedict",
+        "README",
+        "topo",
+        "provenance.json",
+    }
 
     # Binary parameter files (numeric comparison)
     gau_files = {"means", "variances"}
@@ -771,6 +780,11 @@ def compare_models(
                     name=filename,
                     exists_a=exists_a,
                     exists_b=exists_b,
+                    text_match=(
+                        _compare_provenance_file(dir_a / filename, dir_b / filename)
+                        if exists_a and exists_b
+                        else None
+                    ),
                     status=(
                         "contraction policy undeclared for both models; "
                         "comparability cannot be established"

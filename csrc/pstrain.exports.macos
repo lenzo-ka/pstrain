@@ -24,6 +24,8 @@ _pstrain_bw_free_state_seq
 _pstrain_bw_get_stats
 _pstrain_bw_init
 _pstrain_bw_normalize
+_pstrain_bw_dump_accum
+_pstrain_bw_restore_accumdirs
 _pstrain_bw_process_utt
 _pstrain_bw_process_utt_mfcc
 _pstrain_bw_process_utt_text

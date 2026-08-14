@@ -26,6 +26,8 @@
     pstrain_bw_get_stats;
     pstrain_bw_init;
     pstrain_bw_normalize;
+    pstrain_bw_dump_accum;
+    pstrain_bw_restore_accumdirs;
     pstrain_bw_process_utt;
     pstrain_bw_process_utt_mfcc;
     pstrain_bw_process_utt_text;

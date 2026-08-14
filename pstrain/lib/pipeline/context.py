@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import platform
+import socket
 from dataclasses import asdict, dataclass, field
 from functools import cache
 from pathlib import Path
@@ -456,10 +458,20 @@ class PipelineContext:
         elif stage == "split":
             payload["split"] = asdict(self.split)
         elif stage == "training":
+            requested_bw_jobs = self.runner.jobs or 1
+            effective_bw_shards = (
+                1 if requested_bw_jobs > 1 and self.train.multipron_training else requested_bw_jobs
+            )
             payload.update(
                 features=asdict(self.feat),
                 training=asdict(self.train),
                 split=asdict(self.split),
+                execution={
+                    "host": socket.gethostname(),
+                    "architecture": platform.machine(),
+                    "requested_jobs": requested_bw_jobs,
+                    "bw_shard_count": effective_bw_shards,
+                },
             )
         else:
             raise ValueError(f"unknown provenance stage: {stage!r}")
