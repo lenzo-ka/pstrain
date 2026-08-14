@@ -82,6 +82,16 @@ config-check:
 	$(MAKE) docs-gen
 	git diff --exit-code -- docs/api/config-reference.rst
 
+.PHONY: contract-docs-gen
+contract-docs-gen:
+	python -c "from pstrain.lib.contract_docs import write_bw_sharding_contract; write_bw_sharding_contract()"
+
+.PHONY: contract-check
+contract-check:
+	pytest tests/test_contract_docs.py
+	$(MAKE) contract-docs-gen
+	git diff --exit-code -- docs/design/bw-sharding-contract.md
+
 .PHONY: docs
 docs:
 	cd docs && $(MAKE) html

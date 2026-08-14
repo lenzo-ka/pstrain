@@ -14,6 +14,7 @@ import pytest
 
 from pstrain.lib import _pstrainc
 from pstrain.lib.bw import BWConfig, BWTrainer
+from pstrain.lib.contract_docs import contract_check_fields, contract_check_files, contract_scope
 from pstrain.lib.features import read_sphinx_mfc
 from pstrain.lib.pipeline import PipelineContext
 from pstrain.lib.pipeline.tasks import TARGETS
@@ -41,6 +42,25 @@ _CHECKPOINT_MODEL_FILES = {
     "transition_matrices",
     "gauden_counts",
 }
+_CONTRACT_MODEL_FILES = ("mdef", "means", "variances", "mixture_weights", "transition_matrices")
+_CONTRACT_ACCUMULATOR_FILES = ("artifact.json", "gauden_counts", "mixw_counts", "tmat_counts")
+_CONTRACT_DISCRETE_FIELDS = (
+    "assigned_ids",
+    "processed_ids",
+    "retried_ids",
+    "skipped",
+    "total_frames",
+    "stop_decision",
+)
+_CONTRACT_REFERENCE_FILES = (
+    "gauden_counts",
+    "mdef",
+    "means",
+    "mixture_weights",
+    "transition_matrices",
+    "variances",
+)
+_CONTRACT_TELEMETRY_FIELDS = ("total_frames", "stop_decision")
 _M4_FIXTURE = Path(__file__).parent / "fixtures" / "multipron_final_state"
 
 
@@ -1085,6 +1105,18 @@ def test_bw_discrete_contract_negative_control_rejects_dropped_identity() -> Non
 
 
 @requires_c_library
+@contract_scope(
+    order=1,
+    kind="fixed-count-reproducibility",
+    shard_counts=(2,),
+    passes=3,
+)
+@contract_scope(
+    order=2,
+    kind="cross-count-discrete-state",
+    shard_counts=(1, 2),
+    passes=3,
+)
 def test_seeded_bw_shards_are_reproducible_and_discrete_state_is_partition_independent(
     flat_project: PipelineContext, tmp_path: Path
 ) -> None:
@@ -1114,26 +1146,39 @@ def test_seeded_bw_shards_are_reproducible_and_discrete_state_is_partition_indep
             n_shards=n_shards,
         )
 
-    model_files = ("mdef", "means", "variances", "mixture_weights", "transition_matrices")
-    for name in model_files:
-        assert _file_bytes(outputs[1], name) == _file_bytes(outputs[2], name)
+    contract_check_files(
+        left=outputs[1], right=outputs[2], artifacts=_CONTRACT_MODEL_FILES, scope=1
+    )
     for pass_number in range(1, 4):
         for shard_number in range(2):
             relative = f".bw-accum/pass-{pass_number:02d}/shard-{shard_number:05d}"
-            for name in ("artifact.json", "gauden_counts", "mixw_counts", "tmat_counts"):
-                assert _file_bytes(outputs[1], f"{relative}/{name}") == _file_bytes(
-                    outputs[2], f"{relative}/{name}"
-                )
+            contract_check_files(
+                left=outputs[1] / relative,
+                right=outputs[2] / relative,
+                artifacts=_CONTRACT_ACCUMULATOR_FILES,
+                scope=1,
+            )
 
     telemetry = [json.loads((output / "bw_telemetry.json").read_text()) for output in outputs]
     assert all(len(item["passes"]) == 3 for item in telemetry)
     for serial_pass, sharded_pass in zip(
         telemetry[0]["passes"], telemetry[1]["passes"], strict=True
     ):
-        _assert_bw_discrete_contract(serial_pass, sharded_pass)
+        contract_check_fields(
+            left=_bw_contract_state(serial_pass),
+            right=_bw_contract_state(sharded_pass),
+            artifacts=_CONTRACT_DISCRETE_FIELDS,
+            scope=2,
+        )
 
 
 @requires_c_library
+@contract_scope(
+    order=3,
+    kind="one-shard-reference",
+    shard_counts=(1,),
+    passes=3,
+)
 def test_one_shard_reducer_matches_established_in_process_bw(
     flat_project: PipelineContext, tmp_path: Path
 ) -> None:
@@ -1163,14 +1208,14 @@ def test_one_shard_reducer_matches_established_in_process_bw(
     run_bw_training(output_dir=established, _in_process_reference=True, **common)
     run_bw_training(output_dir=reduced, **common)
 
-    for name in (*sorted(_CHECKPOINT_MODEL_FILES), "bw_telemetry.json"):
-        if name == "bw_telemetry.json":
-            established_telemetry = json.loads((established / name).read_text())
-            reduced_telemetry = json.loads((reduced / name).read_text())
-            for established_pass, reduced_pass in zip(
-                established_telemetry["passes"], reduced_telemetry["passes"], strict=True
-            ):
-                assert established_pass["total_frames"] == reduced_pass["total_frames"]
-                assert established_pass["stop_decision"] == reduced_pass["stop_decision"]
-            continue
-        assert _file_bytes(established, name) == _file_bytes(reduced, name)
+    contract_check_files(
+        left=established, right=reduced, artifacts=_CONTRACT_REFERENCE_FILES, scope=3
+    )
+    established_telemetry = json.loads((established / "bw_telemetry.json").read_text())
+    reduced_telemetry = json.loads((reduced / "bw_telemetry.json").read_text())
+    for established_pass, reduced_pass in zip(
+        established_telemetry["passes"], reduced_telemetry["passes"], strict=True
+    ):
+        contract_check_fields(
+            left=established_pass, right=reduced_pass, artifacts=_CONTRACT_TELEMETRY_FIELDS, scope=3
+        )

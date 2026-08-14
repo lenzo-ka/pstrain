@@ -44,6 +44,7 @@ _CHECKPOINT_FILES = (
 )
 _TELEMETRY_FILENAME = "bw_telemetry.json"
 _ACCUMULATOR_FILES = ("gauden_counts", "mixw_counts", "tmat_counts")
+_COPIED_TRAINING_OUTPUTS = ("mdef",)
 
 
 class TerminalAlignmentError(RuntimeError):
@@ -577,8 +578,9 @@ def run_bw_training(
     if checkpoints_enabled:
         shutil.rmtree(output_dir / "iterations", ignore_errors=True)
 
-    # Copy mdef (unchanged during training)
-    shutil.copy(model_dir / "mdef", output_dir / "mdef")
+    # Copy structural inputs unchanged; these are not produced by training.
+    for filename in _COPIED_TRAINING_OUTPUTS:
+        shutil.copy(model_dir / filename, output_dir / filename)
 
     prev_likelihood = float("-inf")
     current_model = model_dir
