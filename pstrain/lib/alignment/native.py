@@ -31,6 +31,7 @@ from pstrain.lib import native_worker
 from pstrain.lib._cffi.core import _init
 from pstrain.lib.alignment.core import AlignedSegment, AlignmentResult
 from pstrain.lib.features import FeatureExtractor
+from pstrain.lib.model import MODEL_FILES_REQUIRED, require_complete_model
 
 if TYPE_CHECKING:
     import numpy.typing as npt
@@ -48,7 +49,7 @@ class Aligner:
     Args:
         model_dir: Acoustic model directory. Must contain ``mdef``,
             ``means``, ``variances``, ``mixture_weights``,
-            ``transition_matrices``, and (optionally) ``feat.params``.
+            ``transition_matrices``, and ``feat.params``.
         dict_path: Pronunciation dictionary path.
         filler_dict: Filler / non-speech dictionary path. Optional.
         beam: Pruning beam (default 1e-64, matches sphinx3_align).
@@ -94,6 +95,11 @@ class Aligner:
         dict_path = Path(dict_path)
         if not model_dir.is_dir():
             raise FileNotFoundError(f"Model directory not found: {model_dir}")
+        for name in MODEL_FILES_REQUIRED:
+            model_file = model_dir / name
+            if not model_file.exists():
+                raise FileNotFoundError(f"Model file missing: {model_file}")
+        feat_params = require_complete_model(model_dir)
         if not dict_path.exists():
             raise FileNotFoundError(f"Dictionary not found: {dict_path}")
 
@@ -129,11 +135,6 @@ class Aligner:
         var = model_dir / "variances"
         mixw = model_dir / "mixture_weights"
         tmat = model_dir / "transition_matrices"
-        feat_params = model_dir / "feat.params"
-        for f in (mdef, means, var, mixw, tmat):
-            if not f.exists():
-                raise FileNotFoundError(f"Model file missing: {f}")
-
         cfg = ffi.new("pstrain_align_config_t *")
         lib.pstrain_align_config_default(cfg)
         cfg.beam = float(beam)
@@ -157,7 +158,7 @@ class Aligner:
             str(var).encode(),
             str(mixw).encode(),
             str(tmat).encode(),
-            str(feat_params).encode() if feat_params.exists() else ffi.NULL,
+            str(feat_params).encode(),
             str(dict_path).encode(),
             str(filler_dict).encode() if filler_dict else ffi.NULL,
             cfg,
