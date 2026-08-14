@@ -193,13 +193,24 @@ def main() -> None:
     project = args.project.resolve()
     refs = transcripts(args.transcription)
     model = project / args.model
+    features = project / args.features
+    audio = project / args.audio
     dictionary = project / "shared/dictionary.dict"
     filler = project / "shared/filler.dict"
     trailing_silence = {
-        fileid: trailing_silence_seconds(project / args.audio / f"{fileid}.wav") for fileid in refs
+        fileid: trailing_silence_seconds(audio / f"{fileid}.wav") for fileid in refs
     }
     payload = {
         "utterances": len(refs),
+        "inputs": {
+            "project": str(project),
+            "transcription": str(args.transcription.resolve()),
+            "model": str(model.resolve()),
+            "features": str(features.resolve()),
+            "audio": str(audio.resolve()),
+            "dictionary": str(dictionary.resolve()),
+            "filler_dictionary": str(filler.resolve()),
+        },
         "trailing_silence_measurement": {
             "window_seconds": 0.02,
             "rms_threshold_db_relative_to_peak": -40.0,
@@ -209,7 +220,7 @@ def main() -> None:
             model,
             dictionary,
             filler,
-            project / args.features,
+            features,
             refs,
             trailing_silence,
             False,
@@ -219,7 +230,7 @@ def main() -> None:
             model,
             dictionary,
             filler,
-            project / args.features,
+            features,
             refs,
             trailing_silence,
             True,
