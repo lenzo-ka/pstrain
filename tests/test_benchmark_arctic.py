@@ -3,9 +3,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
+import sys
 import tarfile
+from collections.abc import Callable
 from dataclasses import asdict, fields, replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -355,6 +359,106 @@ def test_record_rejects_provenance_that_disagrees_with_conditions() -> None:
     ].pop()
     with pytest.raises(RuntimeError, match="provenance/conditions consistency"):
         validate_record(record)
+
+
+def test_adopt_uncovered_keeps_cell_provenance_consistent(tmp_path: Path) -> None:
+    source = Path("docs/benchmarks/arctic-pin/record.json")
+    record = json.loads(source.read_text())
+    setting = "training.optional_final_silence"
+    for mode in ("off", "on"):
+        del record["conditions"]["pin_conditions"][mode]["training"]["optional_final_silence"]
+        for dataset in ("slt55", "big"):
+            provenance = record["results"][mode][dataset]["configuration_provenance"]
+            provenance["diff_from_shipped_defaults"] = [
+                row for row in provenance["diff_from_shipped_defaults"] if row["setting"] != setting
+            ]
+    validate_record(record)
+    measurements = {
+        mode: {
+            dataset: {
+                key: record["results"][mode][dataset][key] for key in ("wer", "errors", "ref_words")
+            }
+            for dataset in ("slt55", "big")
+        }
+        for mode in ("off", "on")
+    }
+    adopted = tmp_path / "record.json"
+    adopted.write_text(json.dumps(record))
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/check_arctic_pin.py",
+            "--record",
+            str(adopted),
+            "--adopt-uncovered",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "adopted 2 previously uncovered" in completed.stdout
+    updated = json.loads(adopted.read_text())
+    validate_record(updated)
+    assert (
+        updated["conditions"]["pin_conditions"]["off"]["training"]["optional_final_silence"]
+        is False
+    )
+    assert (
+        updated["conditions"]["pin_conditions"]["on"]["training"]["optional_final_silence"] is False
+    )
+    assert {
+        mode: {
+            dataset: {
+                key: updated["results"][mode][dataset][key]
+                for key in ("wer", "errors", "ref_words")
+            }
+            for dataset in ("slt55", "big")
+        }
+        for mode in ("off", "on")
+    } == measurements
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (
+            lambda record: record["results"]["off"]["slt55"]["configuration_provenance"][
+                "diff_from_shipped_defaults"
+            ].pop(),
+            "provenance/conditions consistency mismatch",
+        ),
+        (
+            lambda record: record["conditions"]["decoder"].__setitem__("wip", 0.3),
+            "conditions.decoder.wip mismatch",
+        ),
+    ],
+)
+def test_adopt_uncovered_refuses_existing_drift(
+    tmp_path: Path, mutation: Callable[[dict[str, Any]], object], message: str
+) -> None:
+    record = json.loads(Path("docs/benchmarks/arctic-pin/record.json").read_text())
+    mutation(record)
+    path = tmp_path / "record.json"
+    path.write_text(json.dumps(record))
+    before = path.read_bytes()
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/check_arctic_pin.py",
+            "--record",
+            str(path),
+            "--adopt-uncovered",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode != 0
+    assert message in completed.stderr
+    assert path.read_bytes() == before
 
 
 def _cell(errors: tuple[int, ...], *, recorded: bool) -> dict[str, object]:
