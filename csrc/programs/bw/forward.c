@@ -277,45 +277,28 @@ forward(float64 **active_alpha,
     if (timers)
 	ptmr_start(&timers->gau_timer);
 
-    /* PSTRAIN DIVERGENCE: bypassing initial SIL can expose several first-word
-     * pronunciation branches. Initialize every weighted entry, not only slot
-     * zero. */
-    for (i = 0; i < n_state; ++i) {
-	uint32 q;
-	if (state_seq[i].n_prior != 0 || state_seq[i].mixw == TYING_NON_EMITTING)
-	    continue;
-	for (q = 0; q < n_active_l_cb; ++q)
-	    if (active_l_cb[q] == state_seq[i].l_cb)
-		break;
-	if (q == n_active_l_cb) {
-	    gauden_compute_log(now_den[state_seq[i].l_cb],
-			       now_den_idx[state_seq[i].l_cb], feature[0], g,
-			       state_seq[i].cb, NULL);
-	    active_l_cb[n_active_l_cb++] = state_seq[i].l_cb;
-	}
-    }
-    if (n_active_l_cb == 0) {
-	E_ERROR("No emitting initial state\n");
-	retval = S3_ERROR;
-	goto cleanup;
-    }
+    /* compute alpha for the initial state at t == 0 */
+    /* Compute the component Gaussians for state 0 mixture density */
+    gauden_compute_log(now_den[state_seq[0].l_cb],
+		       now_den_idx[state_seq[0].l_cb],
+		       feature[0],
+		       g,
+		       state_seq[0].cb, NULL);
+
+    active_l_cb[0] = state_seq[0].l_cb;
+
     dscale[0] = gauden_scale_densities_fwd(now_den, now_den_idx,
-					   active_l_cb, n_active_l_cb, g);
-    balpha = 0.0;
-    for (i = 0; i < n_state; ++i) {
-	if (state_seq[i].n_prior != 0 || state_seq[i].mixw == TYING_NON_EMITTING)
-	    continue;
-	outprob[i] = gauden_mixture(now_den[state_seq[i].l_cb],
-				    now_den_idx[state_seq[i].l_cb],
-				    mixw[state_seq[i].mixw], g);
-	x = outprob[i] * next_utt_states_initial_tprob(state_seq, i);
-	if (x > balpha)
-	    balpha = x;
-    }
+					   active_l_cb, 1, g);
+
+    /* Compute the mixture density value for state 0 time 0 */
+    outprob[0] = gauden_mixture(now_den[state_seq[0].l_cb],
+				now_den_idx[state_seq[0].l_cb],
+				mixw[state_seq[0].mixw],
+				g);
     if (timers)
 	ptmr_stop(&timers->gau_timer);
-    if (balpha <= MIN_IEEE_NORM_POS_FLOAT32) {
-	E_ERROR("Small best output prob (== %.2e) seen at frame 0\n", balpha);
+    if (outprob[0] <= MIN_IEEE_NORM_POS_FLOAT32) {
+	E_ERROR("Small output prob (== %.2e) seen at frame 0 state 0\n", outprob[0]);
 
 	retval = S3_ERROR;
 
@@ -326,29 +309,31 @@ forward(float64 **active_alpha,
      * Allocate space for the initial state in the alpha
      * and active state arrays
      */
-    active_alpha[0] = ckd_calloc(n_state, sizeof(float64));
-    active_astate[0] = ckd_calloc(n_state, sizeof(uint32));
+    active_alpha[0] = ckd_calloc(1, sizeof(float64));
+    active_astate[0] = ckd_calloc(1, sizeof(uint32));
     if (bp)
-	bp[0] = ckd_calloc(n_state, sizeof(uint32)); /* Unused, actually */
-    aalpha_alloc = n_state;
+	bp[0] = ckd_calloc(1, sizeof(uint32)); /* Unused, actually */
+    aalpha_alloc = 1;
 
     /*
      * Allocate the bestscore array for embedded Viterbi
      */
     if (bp)
-	best_pred = ckd_calloc(n_state, sizeof(float64));
+	best_pred = ckd_calloc(1, sizeof(float64));
 
     /* Compute scale for t == 0 */
-    scale[0] = 1.0 / balpha;
-    for (i = 0; i < n_state; ++i) {
-	if (state_seq[i].n_prior != 0 || state_seq[i].mixw == TYING_NON_EMITTING)
-	    continue;
-	active_alpha[0][n_active] = outprob[i]
-	    * next_utt_states_initial_tprob(state_seq, i) * scale[0];
-	active_astate[0][n_active] = i;
-	active[n_active++] = i;
-    }
-    n_active_astate[0] = n_active;
+    scale[0] = 1.0 / outprob[0];
+
+    /* set the scaled alpha variable for the initial state */
+    active_alpha[0][0] = 1.0;
+    /* put the initial state in the active state array for t == 0 */
+    active_astate[0][0] = 0;
+    /* Only one initial state (for now) */
+    n_active_astate[0] = 1;
+
+    /* insert the initial state in the active list */
+    active[n_active] = 0;
+    n_active++;
 
     /* Compute scaled alpha over all remaining time in the utterance */
     for (t = 1; t < n_obs; t++) {
