@@ -81,8 +81,7 @@ next_utt_states_initial_tprob(const state_t *state_seq, uint32 i)
  * entry alternative and direct lexical-exit arcs to the final SIL exit. */
 static state_t *
 add_boundary_bypass(state_t *old, uint32 n_state,
-                    const phone_graph_t *graph, model_def_t *mdef,
-                    int boundary_mode)
+                    const phone_graph_t *graph, model_def_t *mdef)
 {
     state_t *state;
     uint32 *next_state, *prior_state;
@@ -100,8 +99,7 @@ add_boundary_bypass(state_t *old, uint32 n_state,
         offset[i] = offset[i - 1] + mdef->defn[graph->phone[i - 1]].n_state;
     final_slot = graph->n - 1;
     final_exit = offset[final_slot] + mdef->defn[graph->phone[final_slot]].n_state - 1;
-    n_bypass = (boundary_mode == 1 || boundary_mode == 3)
-        ? graph->n_prior[final_slot] : 0;
+    n_bypass = graph->n_prior[final_slot];
     for (i = 0; i < n_bypass; ++i) {
         uint32 pred = graph->prior_idx[final_slot][i];
         uint32 pred_exit = offset[pred] + mdef->defn[graph->phone[pred]].n_state - 1;
@@ -172,13 +170,11 @@ add_boundary_bypass(state_t *old, uint32 n_state,
         }
     }
 
-    if (boundary_mode == 1 || boundary_mode == 2) {
-        state[0].flags |= STATE_FLAG_INITIAL | (2 << STATE_INITIAL_FANOUT_SHIFT);
-        for (i = 0; i < graph->n_next[0]; ++i) {
-            uint32 entry = offset[graph->next_idx[0][i]];
-            state[entry].flags |= STATE_FLAG_INITIAL
-                | (2 * graph->n_next[0] << STATE_INITIAL_FANOUT_SHIFT);
-        }
+    state[0].flags |= STATE_FLAG_INITIAL | (2 << STATE_INITIAL_FANOUT_SHIFT);
+    for (i = 0; i < graph->n_next[0]; ++i) {
+        uint32 entry = offset[graph->next_idx[0][i]];
+        state[entry].flags |= STATE_FLAG_INITIAL
+            | (2 * graph->n_next[0] << STATE_INITIAL_FANOUT_SHIFT);
     }
     state_seq_free(old, n_state);
     ckd_free(offset);
@@ -301,8 +297,7 @@ state_t *next_utt_states_graph(uint32 *n_state,
     }
 
     if (optional_boundary_silence)
-        state_seq = add_boundary_bypass(state_seq, *n_state, split, mdef,
-                                        optional_boundary_silence);
+        state_seq = add_boundary_bypass(state_seq, *n_state, split, mdef);
     phone_graph_free(split);
 
     return state_seq;
