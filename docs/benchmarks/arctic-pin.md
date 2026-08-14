@@ -110,8 +110,20 @@ These are documented training-set composition facts, not decode failures:
 | Mode | Utterance | Stage and pass | Mechanism |
 |---|---|---|---|
 | off | `arctic_a0587` | `cd-2g`, pass 1 | Beam failure on a hard utterance after the permitted retry; mirrored upstream, whose preserved build ignores it at CI passes 5–6. |
-| on | `arctic_a0302` | `cd-untied`, passes 3–10 | Beam failure on a known-hard utterance after the permitted retry in the multipron posture; part of the recorded on-mode remainder class as the reachable inventory shifted. |
 | on | `arctic_a0587` | `cd-1g`, pass 6 | Beam failure on a known-hard utterance after the permitted retry in the multipron posture; part of the same recorded on-mode remainder mechanism. |
+
+`arctic_a0302` at on-mode `cd-untied` passes 3–10 is no longer a known skip. The
+landed accepted-exception policy authenticates the governing exact-zero mean-and-variance
+codebook occupancy against the inclusive band `[4548, 4623]`; values on either side halt
+training. This intentional replacement was measured and ratified on 2026-08-12.
+
+## Condition contract maintenance
+
+The record owns the condition fields it contains. A changed or removed pinned value is fatal;
+a live field added after the record was written is reported as uncovered but does not masquerade
+as benchmark drift. `make config-check` runs this authentication in the ordinary suite. Adopt
+newly added fields deliberately, without changing existing pins or any measured result, with
+`python scripts/check_arctic_pin.py --adopt-uncovered`.
 
 ## Replicability
 

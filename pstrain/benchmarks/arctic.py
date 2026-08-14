@@ -12,6 +12,7 @@ import sys
 import tarfile
 import urllib.error
 import urllib.request
+import warnings
 from contextlib import suppress
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
@@ -975,13 +976,85 @@ def validate_record(record: dict[str, Any]) -> None:
             _validate_cell(record["results"][mode][dataset], f"{mode}/{dataset}", recorded=True)
 
 
+def authenticate_conditions(actual: dict[str, Any], recorded: dict[str, Any]) -> list[str]:
+    """Authenticate record-owned conditions and return live fields not yet covered."""
+    uncovered: list[str] = []
+
+    def compare(actual_value: Any, recorded_value: Any, path: str) -> None:
+        if isinstance(recorded_value, dict):
+            if not isinstance(actual_value, dict):
+                _require_equal(path, actual_value, recorded_value)
+            for key, expected in recorded_value.items():
+                if key not in actual_value:
+                    raise RuntimeError(f"conditions mismatch: pinned field is absent: {path}.{key}")
+                compare(actual_value[key], expected, f"{path}.{key}")
+            uncovered.extend(
+                f"{path}.{key}" for key in sorted(set(actual_value) - set(recorded_value))
+            )
+            return
+        if path in {
+            "conditions.frozen_dataclass_fields.features",
+            "conditions.frozen_dataclass_fields.training",
+        }:
+            if not isinstance(actual_value, list) or not isinstance(recorded_value, list):
+                _require_equal(path, actual_value, recorded_value)
+            missing = [name for name in recorded_value if name not in actual_value]
+            if missing:
+                raise RuntimeError(
+                    f"conditions mismatch: pinned fields are absent: {path}: {missing}"
+                )
+            uncovered.extend(
+                f"{path}.{name}" for name in actual_value if name not in recorded_value
+            )
+            return
+        _require_equal(path, actual_value, recorded_value)
+
+    compare(actual, recorded, "conditions")
+    return uncovered
+
+
+def adopt_uncovered_conditions(actual: dict[str, Any], recorded: dict[str, Any]) -> dict[str, Any]:
+    """Add live-only condition fields without changing any condition already pinned."""
+    authenticate_conditions(actual, recorded)
+
+    def adopt(actual_value: Any, recorded_value: Any, path: str) -> Any:
+        if isinstance(recorded_value, dict):
+            return {
+                key: (
+                    adopt(actual_value[key], value, f"{path}.{key}")
+                    if key in recorded_value
+                    else actual_value[key]
+                )
+                for key, value in actual_value.items()
+            }
+        if path in {
+            "conditions.frozen_dataclass_fields.features",
+            "conditions.frozen_dataclass_fields.training",
+        }:
+            return list(actual_value)
+        return recorded_value
+
+    adopted = adopt(actual, recorded, "conditions")
+    assert isinstance(adopted, dict)
+    return adopted
+
+
 def compare_results(
     actual: dict[str, Any], record: dict[str, Any], *, allow_engine_drift: bool = False
 ) -> list[dict[str, Any]]:
     """Authenticate inputs and bootstrap aligned current-minus-recorded WER."""
     validate_record(record)
     _require_equal("resources", actual.get("resources"), record.get("resources"))
-    _require_equal("conditions", actual.get("conditions"), record.get("conditions"))
+    actual_conditions = actual.get("conditions")
+    if not isinstance(actual_conditions, dict):
+        raise RuntimeError("conditions mismatch: actual conditions are not an object")
+    uncovered = authenticate_conditions(actual_conditions, record["conditions"])
+    if uncovered:
+        warnings.warn(
+            "Arctic pin record does not cover live condition fields: " + ", ".join(uncovered),
+            RuntimeWarning,
+            stacklevel=2,
+        )
     if not allow_engine_drift:
         _require_equal("engine identity", actual.get("engine"), record.get("engine"))
     rows: list[dict[str, Any]] = []
