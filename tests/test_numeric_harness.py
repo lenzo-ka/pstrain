@@ -126,6 +126,7 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
     features = np.full((60, 39), 0.25, dtype=np.float32)
     phones = np.array([0], dtype=np.uint32)
     outputs: dict[str, dict[str, np.ndarray[Any, Any]]] = {}
+    accumulators: dict[str, dict[str, np.ndarray[Any, Any]]] = {}
 
     policies: tuple[Literal["zero", "retain"], ...] = ("zero", "retain")
     for policy in policies:
@@ -144,7 +145,16 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
             ),
         )
         assert trainer.process_utterance(features, phones)
+        # Two identical updates make raw occupancy row sums observably differ
+        # from normalized probabilities even for a one-state path.
+        assert trainer.process_utterance(features, phones)
         assert trainer.count_active_fallback_senones() == 0
+        accum_dir = tmp_path / f"{policy}-accum"
+        trainer.dump_accumulators(accum_dir)
+        accumulators[policy] = {
+            "mixture_weights": _pstrainc.read_mixw(str(accum_dir / "mixw_counts"))[0],
+            "transition_matrices": _pstrainc.read_tmat(str(accum_dir / "tmat_counts"))[0],
+        }
         assert trainer.normalize()
         out = tmp_path / policy
         out.mkdir()
@@ -181,6 +191,7 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
     np.testing.assert_array_equal(retain_mixw[mixw_empty], mixw[mixw_empty])
     mixw_occupied = ~mixw_empty
     np.testing.assert_array_equal(zero_mixw[mixw_occupied], retain_mixw[mixw_occupied])
+    np.testing.assert_array_equal(zero_mixw, accumulators["zero"]["mixture_weights"])
 
     zero_tmat = outputs["zero"]["transition_matrices"]
     retain_tmat = outputs["retain"]["transition_matrices"]
@@ -190,6 +201,7 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
     np.testing.assert_array_equal(retain_tmat[tmat_empty], prior_tmat[tmat_empty])
     tmat_occupied = ~tmat_empty
     np.testing.assert_array_equal(zero_tmat[tmat_occupied], retain_tmat[tmat_occupied])
+    np.testing.assert_array_equal(zero_tmat, accumulators["zero"]["transition_matrices"])
 
     # Every occupied cell saw the same value, so direct one-pass V/N-E[x]^2
     # is exactly zero in float32.  The saved artifact must not contain the
@@ -226,7 +238,9 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
     assert scores["zero"] == scores["retain"]
 
     # The training loader matches upstream senone loading: an all-zero row is
-    # floored cell-wise and normalized, producing a uniform evaluation PDF.
+    # floored cell-wise and normalized for evaluation. Saving without a new BW
+    # pass preserves the serialized raw row rather than leaking that runtime
+    # normalization back into the artifact.
     reloaded = BWTrainer(
         model / "mdef",
         tmp_path / "zero" / "means",
@@ -249,9 +263,7 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
         reloaded_dir / "transition_matrices",
     )
     reloaded_mixw = _pstrainc.read_mixw(str(reloaded_dir / "mixture_weights"))[0]
-    np.testing.assert_array_equal(
-        reloaded_mixw[mixw_empty], np.full_like(reloaded_mixw[mixw_empty], 0.5)
-    )
+    assert np.count_nonzero(reloaded_mixw[mixw_empty]) == 0
 
 
 @requires_c_library
@@ -453,17 +465,18 @@ def test_real_training_retry_is_accounted_once_and_conserves_stats(
     assert row.total_log_lik == pytest.approx(expected.total_log_lik, rel=1e-14, abs=1e-8)
 
 
-def _assert_normalized_model(model_dir: Path) -> None:
+def _assert_bw_model(model_dir: Path) -> None:
     arrays = read_model_arrays(model_dir)
     for name, values in arrays.items():
         assert np.isfinite(values).all(), name
-    # BW artifacts intentionally contain direct, unfloored normalization
-    # output.  The next engine load applies the evaluation floor.
+    # Gaussian artifacts contain direct, unfloored normalization output.  Mixw
+    # and tmat artifacts follow upstream and retain raw BW accumulators; the
+    # next engine load normalizes and applies the evaluation floors.
     assert (np.maximum(arrays["variances"], np.float32(1e-4)) >= 1e-4).all()
     mixw_sums = arrays["mixture_weights"].sum(axis=-1)
-    np.testing.assert_allclose(mixw_sums[mixw_sums > 0], 1.0, rtol=1e-6, atol=1e-6)
     tmat_sums = arrays["transition_matrices"].sum(axis=-1)
-    np.testing.assert_allclose(tmat_sums[tmat_sums > 0], 1.0, rtol=1e-6, atol=1e-6)
+    assert np.any(mixw_sums > 1.0)
+    assert np.any(tmat_sums > 1.0)
 
 
 @requires_c_library
@@ -518,8 +531,8 @@ def test_updates_and_split_schedule_preserve_invariants(full_project: PipelineCo
         checkpoints = sorted((model / "iterations").iterdir())
         assert checkpoints, f"no per-pass checkpoints for {stage}"
         for checkpoint in checkpoints:
-            _assert_normalized_model(checkpoint)
-        _assert_normalized_model(model)
+            _assert_bw_model(checkpoint)
+        _assert_bw_model(model)
 
     for density in (1, 2, 4, 8):
         model = full_project.model_dir(f"cd-{density}g")
