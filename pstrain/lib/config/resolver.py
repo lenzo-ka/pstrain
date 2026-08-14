@@ -61,6 +61,18 @@ class ResolvedConfig:
     def as_dict(self) -> dict[str, Any]:
         return self.profile.model_dump(mode="json")
 
+    def benchmark_document(self) -> dict[str, Any]:
+        """Return a deterministic snapshot of values and winning source kinds."""
+        return {
+            "profile": self.as_dict(),
+            "profile_name": self.profile_name,
+            "config_version": self.config_version,
+            "field_source_kinds": {
+                path: explanation.winner.source_kind
+                for path, explanation in sorted(self.fields.items())
+            },
+        }
+
 
 # Registration is intentionally explicit data, not schema-derived convention.
 # CONSUMER_TOUCHES names the concrete PipelineContext attribute touched by each

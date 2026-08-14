@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 import urllib.error
 import urllib.request
 import warnings
@@ -280,6 +281,16 @@ PIN_CONFIGS: dict[str, dict[str, Any]] = {
 }
 
 
+def _complete_pin_profiles() -> dict[str, dict[str, Any]]:
+    """Materialize every schema default so benchmark profiles are fully frozen."""
+    from pstrain.lib.config.models import Profile
+
+    return {
+        mode: Profile.model_validate(config).model_dump(mode="json")
+        for mode, config in PIN_CONFIGS.items()
+    }
+
+
 def sha256(path: Path) -> str:
     """Hash a file without loading it into memory."""
     digest = hashlib.sha256()
@@ -380,7 +391,9 @@ def engine_identity(dictionary: Path | None = None) -> dict[str, str]:
     return identity
 
 
-def benchmark_conditions(band: str = "pin") -> dict[str, Any]:
+def benchmark_conditions(
+    band: str = "pin", *, resolved_configs: dict[str, dict[str, Any]] | None = None
+) -> dict[str, Any]:
     """Return every pinned benchmark condition that comparison authenticates."""
     from pstrain.lib.pipeline.context import FeatParams, TrainParams
 
@@ -396,9 +409,33 @@ def benchmark_conditions(band: str = "pin") -> dict[str, Any]:
             missing = set(frozen_fields[section]) - set(config[section])
             if missing:
                 raise RuntimeError(f"PIN config {mode}/{section} leaves knobs unfrozen: {missing}")
+    if resolved_configs is None:
+        from pstrain.lib.config.resolver import resolve_config
+
+        with tempfile.TemporaryDirectory(prefix="pstrain-benchmark-conditions-") as directory:
+            project = Path(directory)
+            (project / "etc").mkdir(parents=True)
+            (project / "etc" / "configs.yaml").write_text(
+                yaml.safe_dump(
+                    {"config_version": 1, "profiles": _complete_pin_profiles()},
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            resolved_configs = {
+                mode: resolve_config(
+                    project,
+                    profile_name=mode,
+                    user_config_path=project / "absent-user.yaml",
+                ).benchmark_document()
+                for mode in ("off", "on")
+            }
     return {
         "band": "BM1" if band == "pin" else "BM1-pip-en-us-alternative",
-        "pin_conditions": PIN_CONFIGS,
+        "pin_conditions": {mode: resolved_configs[mode]["profile"] for mode in ("off", "on")},
+        "pin_condition_source_kinds": {
+            mode: resolved_configs[mode]["field_source_kinds"] for mode in ("off", "on")
+        },
         "decoder": DECODER_CONDITIONS,
         "bootstrap": {
             "method": "matched-pair percentile",
@@ -430,6 +467,7 @@ def configuration_provenance(
     source_kind: str,
     source_name: str | None = None,
     override_reason: str | None = None,
+    field_source_kinds: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Describe a resolved profile relative to the shipped schema defaults."""
     from pstrain.lib.config.models import SEMANTIC_BLOCKS, Profile, default_profile
@@ -452,6 +490,11 @@ def configuration_provenance(
             "setting": setting,
             "shipped_default": shipped_leaves[setting],
             "value": actual_leaves[setting],
+            **(
+                {"source": {"kind": field_source_kinds[setting]}}
+                if field_source_kinds is not None
+                else {}
+            ),
         }
         for setting in sorted(actual_leaves)
         if actual_leaves[setting] != shipped_leaves[setting]
@@ -464,6 +507,16 @@ def configuration_provenance(
         },
         "diff_from_shipped_defaults": diff,
     }
+
+
+def resolved_configuration_provenance(document: dict[str, Any]) -> dict[str, Any]:
+    """Describe the exact resolved configuration surfaced by a build child."""
+    return configuration_provenance(
+        document["profile"],
+        source_kind="named benchmark profile",
+        source_name=document["profile_name"],
+        field_source_kinds=document["field_source_kinds"],
+    )
 
 
 def _markdown_value(value: Any) -> str:
@@ -483,20 +536,27 @@ def render_configuration_provenance(provenance: dict[str, Any]) -> str:
     if not diff:
         lines.extend(["", "Diff from shipped schema defaults: (empty)"])
         return "\n".join(lines)
-    lines.extend(
-        [
-            "",
-            "Diff from shipped schema defaults:",
-            "",
-            "| Setting | Shipped default | Cell value |",
-            "|---|---:|---:|",
-        ]
-    )
-    lines.extend(
-        f"| `{row['setting']}` | {_markdown_value(row['shipped_default'])} | "
-        f"{_markdown_value(row['value'])} |"
-        for row in diff
-    )
+    includes_sources = all(isinstance(row.get("source"), dict) for row in diff)
+    lines.extend(["", "Diff from shipped schema defaults:", ""])
+    if includes_sources:
+        lines.extend(
+            [
+                "| Setting | Shipped default | Cell value | Winning source kind |",
+                "|---|---:|---:|---|",
+            ]
+        )
+        lines.extend(
+            f"| `{row['setting']}` | {_markdown_value(row['shipped_default'])} | "
+            f"{_markdown_value(row['value'])} | `{row['source']['kind']}` |"
+            for row in diff
+        )
+    else:
+        lines.extend(["| Setting | Shipped default | Cell value |", "|---|---:|---:|"])
+        lines.extend(
+            f"| `{row['setting']}` | {_markdown_value(row['shipped_default'])} | "
+            f"{_markdown_value(row['value'])} |"
+            for row in diff
+        )
     return "\n".join(lines)
 
 
@@ -814,7 +874,10 @@ def write_project(project: Path, corpus: Path, dictionary: Path) -> None:
     )
     (project / "shared" / "filler.dict").write_text(FILLER_DICTIONARY, encoding="utf-8")
     (project / "etc" / "configs.yaml").write_text(
-        yaml.safe_dump(PIN_CONFIGS, sort_keys=False), encoding="utf-8"
+        yaml.safe_dump(
+            {"config_version": 1, "profiles": _complete_pin_profiles()}, sort_keys=False
+        ),
+        encoding="utf-8",
     )
     audio = project / "audio"
     if not audio.exists():
@@ -1083,6 +1146,13 @@ def validate_record(record: dict[str, Any]) -> None:
         or not isinstance(bootstrap.get("seed"), int)
     ):
         raise RuntimeError("benchmark record has invalid bootstrap conditions")
+    pin_conditions = record["conditions"].get("pin_conditions")
+    source_kinds = record["conditions"].get("pin_condition_source_kinds")
+    has_resolved_conditions = pin_conditions is not None or source_kinds is not None
+    if has_resolved_conditions and (
+        not isinstance(pin_conditions, dict) or not isinstance(source_kinds, dict)
+    ):
+        raise RuntimeError("benchmark record has invalid resolved configuration conditions")
     for mode in ("off", "on"):
         if not isinstance(record["results"].get(mode), dict):
             raise RuntimeError(f"benchmark record missing result mode: {mode}")
@@ -1090,6 +1160,19 @@ def validate_record(record: dict[str, Any]) -> None:
             if dataset not in record["results"][mode]:
                 raise RuntimeError(f"benchmark record missing result cell: {mode}/{dataset}")
             _validate_cell(record["results"][mode][dataset], f"{mode}/{dataset}", recorded=True)
+            if has_resolved_conditions:
+                expected_provenance = resolved_configuration_provenance(
+                    {
+                        "profile": pin_conditions[mode],
+                        "profile_name": mode,
+                        "field_source_kinds": source_kinds[mode],
+                    }
+                )
+                _require_equal(
+                    f"{mode}/{dataset} provenance/conditions consistency",
+                    record["results"][mode][dataset]["configuration_provenance"],
+                    expected_provenance,
+                )
 
 
 def authenticate_conditions(actual: dict[str, Any], recorded: dict[str, Any]) -> list[str]:
@@ -1289,6 +1372,7 @@ def run(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     actual: dict[str, Any] = {}
+    resolved_configs: dict[str, dict[str, Any]] = {}
     audio_roots = {
         voice: corpus / f"cmu_us_{voice}_arctic" / "wav" for voice in ("slt", "bdl", "rms", "clb")
     }
@@ -1306,6 +1390,8 @@ def run(
             "--config",
             mode,
             "--force",
+            "--resolved-config-output",
+            str(project / "resolved-config.json"),
         ]
         if jobs is not None:
             command.extend(["--jobs", str(jobs)])
@@ -1322,6 +1408,9 @@ def run(
                 env=env,
             )
         known_skips = audit_monotonicity(project)
+        resolved_configs[mode] = json.loads(
+            (project / "resolved-config.json").read_text(encoding="utf-8")
+        )
         model = project / "shared" / "models" / "cd-8g" / mode
         slt = load_transcripts(DATA_DIR / "slt55.transcription")
         big = load_transcripts(DATA_DIR / "big.transcription")
@@ -1329,9 +1418,7 @@ def run(
             "slt55": score_model(model, audio_roots, slt, dictionary, lm),
             "big": score_model(model, audio_roots, big, dictionary, lm),
         }
-        provenance = configuration_provenance(
-            PIN_CONFIGS[mode], source_kind="named benchmark profile", source_name=mode
-        )
+        provenance = resolved_configuration_provenance(resolved_configs[mode])
         for cell in actual[mode].values():
             cell["known_skips"] = known_skips
             cell["bootstrap_ci_95"] = bootstrap_ci(cell["matched_pairs"])
@@ -1341,7 +1428,7 @@ def run(
         "results": actual,
         "resources": manifest,
         "engine": engine_identity(dictionary),
-        "conditions": benchmark_conditions(band),
+        "conditions": benchmark_conditions(band, resolved_configs=resolved_configs),
         "resource_manifest": str(work_dir / "resource-manifest.json"),
     }
     if emit_record is not None:

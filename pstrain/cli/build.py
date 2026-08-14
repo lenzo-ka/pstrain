@@ -14,7 +14,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+from pathlib import Path
 
 from pstrain.cli.base import Command, CommandContext, CommandResult
 from pstrain.lib.pipeline import PipelineContext, UnknownTargetError
@@ -87,6 +89,11 @@ everything, even if up to date.
             help="Parallel workers (default: CPU count minus 2; explicit N may use full machine)",
         )
         parser.add_argument(
+            "--resolved-config-output",
+            type=Path,
+            help=argparse.SUPPRESS,
+        )
+        parser.add_argument(
             "--experiment",
             type=str,
             default="default",
@@ -135,6 +142,22 @@ everything, even if up to date.
         except ValueError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return CommandResult.fail(str(exc))
+
+        if ctx.args.resolved_config_output is not None:
+            output = ctx.args.resolved_config_output
+            resolved_config = pipeline_ctx.resolved_config
+            if resolved_config is None:
+                return CommandResult.fail("resolved configuration unavailable")
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(
+                json.dumps(
+                    resolved_config.benchmark_document(),
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
 
         try:
             pipeline = build_pipeline(pipeline_ctx)

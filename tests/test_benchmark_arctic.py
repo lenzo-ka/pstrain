@@ -36,6 +36,8 @@ from pstrain.benchmarks.arctic import (
     paired_delta_ci,
     render_configuration_provenance,
     resolve_data_dir,
+    resolved_configuration_provenance,
+    run,
     sha256,
     training_corpus_identity,
     validate_record,
@@ -265,6 +267,94 @@ def test_configuration_provenance_renders_default_and_non_default_cells() -> Non
     assert "Source: explicit overrides" in rendered
     assert "Reason: isolate directional-question behavior" in rendered
     assert "| `training.tree_directional_questions` | `true` | `false` |" in rendered
+
+
+def test_cell_provenance_includes_resolved_cli_override(tmp_path: Path) -> None:
+    project = tmp_path / "benchmark-project"
+    write_project(project, tmp_path / "corpus", DATA_DIR / "cmu_arctic_slt.dict")
+    resolved = resolve_config(
+        project,
+        profile_name="off",
+        user_config_path=tmp_path / "absent-user.yaml",
+        cli_overrides={"runner": {"jobs": 3}},
+    )
+
+    provenance = resolved_configuration_provenance(resolved.benchmark_document())
+    jobs = next(
+        row for row in provenance["diff_from_shipped_defaults"] if row["setting"] == "runner.jobs"
+    )
+    assert jobs["value"] == resolved.profile.runner.jobs == 3
+    assert jobs["source"]["kind"] == resolved.fields["runner.jobs"].winner.source_kind == "cli"
+
+
+def test_emitted_record_uses_child_resolved_cli_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    dictionary = tmp_path / "dictionary.dict"
+    lm = tmp_path / "language-model.lm"
+    dictionary.write_text("WORD W ER D\n")
+    lm.write_text("language model\n")
+    monkeypatch.setattr("pstrain.benchmarks.arctic.ARCHIVES", ())
+    monkeypatch.setattr("pstrain.benchmarks.arctic.band_resources", lambda _band: (dictionary, lm))
+    monkeypatch.setattr("pstrain.benchmarks.arctic.authenticate_pin_resources", lambda *_args: None)
+    monkeypatch.setattr("pstrain.benchmarks.arctic.training_corpus_identity", lambda: {})
+    monkeypatch.setattr("pstrain.benchmarks.arctic.audit_monotonicity", lambda _project: [])
+    monkeypatch.setattr(
+        "pstrain.benchmarks.arctic.score_model", lambda *_args: _cell((1,), recorded=False)
+    )
+    monkeypatch.setattr("pstrain.benchmarks.arctic.engine_identity", lambda _dictionary: {})
+
+    def surface_resolved(command: list[str], **_kwargs: object) -> None:
+        project = Path(command[command.index("--project-dir") + 1])
+        mode = command[command.index("--config") + 1]
+        jobs = int(command[command.index("--jobs") + 1])
+        output = Path(command[command.index("--resolved-config-output") + 1])
+        resolved = resolve_config(
+            project,
+            profile_name=mode,
+            user_config_path=tmp_path / "absent-user.yaml",
+            cli_overrides={"runner": {"jobs": jobs}},
+        )
+        output.write_text(json.dumps(resolved.benchmark_document()))
+
+    monkeypatch.setattr("pstrain.benchmarks.arctic._run_trusted_child", surface_resolved)
+    emitted = tmp_path / "record.json"
+    run(tmp_path / "work", None, 3, emit_record=emitted)
+    record = json.loads(emitted.read_text())
+
+    for mode in ("off", "on"):
+        assert record["conditions"]["pin_conditions"][mode]["runner"]["jobs"] == 3
+        for dataset in ("slt55", "big"):
+            rows = record["results"][mode][dataset]["configuration_provenance"][
+                "diff_from_shipped_defaults"
+            ]
+            jobs = next(row for row in rows if row["setting"] == "runner.jobs")
+            assert jobs == {
+                "setting": "runner.jobs",
+                "shipped_default": None,
+                "value": 3,
+                "source": {"kind": "cli"},
+            }
+
+
+def test_record_rejects_provenance_that_disagrees_with_conditions() -> None:
+    actual, _record = _comparison_documents()
+    actual["conditions"] = benchmark_conditions()
+    for mode in ("off", "on"):
+        document = {
+            "profile": actual["conditions"]["pin_conditions"][mode],
+            "profile_name": mode,
+            "field_source_kinds": actual["conditions"]["pin_condition_source_kinds"][mode],
+        }
+        provenance = resolved_configuration_provenance(document)
+        for dataset in ("slt55", "big"):
+            actual["results"][mode][dataset]["configuration_provenance"] = provenance
+    record = make_record(actual)
+    record["results"]["off"]["slt55"]["configuration_provenance"][
+        "diff_from_shipped_defaults"
+    ].pop()
+    with pytest.raises(RuntimeError, match="provenance/conditions consistency"):
+        validate_record(record)
 
 
 def _cell(errors: tuple[int, ...], *, recorded: bool) -> dict[str, object]:
