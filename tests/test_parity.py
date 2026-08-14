@@ -212,11 +212,16 @@ class TestSphinxFeParity:
 
     @pytest.mark.skipif(not binary_available("sphinx_fe"), reason="sphinx_fe not found")
     def test_feature_extraction(self, test_data_dir: Path) -> None:
-        """CFFI and sphinx_fe produce identical features with matched parameters.
+        """Gate pstrain CFFI features against its ``sphinx_fe`` shell-out.
 
-        Validated on macOS. On Linux, a live symbol collision can make both calls
-        resolve to PocketSphinx's front end, so a passing Linux result alone does
-        not establish that the two implementations are equal.
+        REFERENCE: the shell binary built from pstrain's SphinxTrain-lineage
+        front end; both arms share the matched parameters and audio apparatus.
+        On Linux, symbol mis-binding can make both arms resolve to the pinned
+        PocketSphinx v5.1.1 front end, turning the reference into the candidate
+        itself. AXIS: shell-out versus CFFI entry path. SILENT ON: defects shared
+        by both arms, model/aligner/decoder/scorer behavior, architecture, and
+        arithmetic; a passing mis-bound run does not establish implementation
+        equality.
         """
         # Create a simple audio file (sine wave)
         import wave

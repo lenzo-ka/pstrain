@@ -28,6 +28,15 @@ from pstrain.lib.steps.train import (
     shard_counts=(1, 2),
 )
 def test_model_comparison_surfaces_effective_bw_shard_count(tmp_path: Path) -> None:
+    """Gate shard-count provenance against two synthetic pstrain records.
+
+    REFERENCE: the one-shard synthetic ``provenance.json`` parsed and compared
+    by pstrain's model-comparison apparatus; no live model, aligner, decoder, or
+    scorer is used. AXIS: declared effective shard count (one versus two), with
+    requested jobs held at two. SILENT ON: training correctness, provenance
+    fields not varied here, architecture, arithmetic, and defects shared by the
+    record writer and comparison path.
+    """
     one = tmp_path / "one"
     two = tmp_path / "two"
     one.mkdir()
@@ -64,7 +73,13 @@ def test_model_comparison_surfaces_effective_bw_shard_count(tmp_path: Path) -> N
 def test_multipron_multiple_shards_falls_back_loudly(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Certify fallback_senone safety; this is blind to multipron model correctness."""
+    """Gate multipron shard selection against pstrain's serial fallback.
+
+    REFERENCE: the declared pstrain ``fallback_senone`` policy, with no live
+    model, aligner, decoder, or scorer. AXIS: multipron disabled versus enabled
+    at four requested shards. SILENT ON: multipron model correctness, execution
+    after selection, architecture, arithmetic, and defects shared with serial.
+    """
     with caplog.at_level("WARNING"):
         assert _effective_bw_shard_count(4, multipron=True) == 1
     assert "fallback_senone" in caplog.text
@@ -72,6 +87,14 @@ def test_multipron_multiple_shards_falls_back_loudly(
 
 
 def test_partition_manifest_varies_boundaries_and_keeps_empty_shards() -> None:
+    """Gate pstrain's partitioner against explicit synthetic manifests.
+
+    REFERENCE: literal expected contiguous manifests; no model, aligner,
+    decoder, scorer, or numeric apparatus participates. AXIS: shard count
+    (one, three, and five) for a fixed ordered identity list. SILENT ON: BW
+    execution and reduction, other list sizes/orderings, architecture, and
+    arithmetic.
+    """
     fileids = ["early", "skip", "middle", "late"]
     assert _partition_manifest(fileids, 1) == [fileids]
     assert _partition_manifest(fileids, 3) == [["early", "skip"], ["middle"], ["late"]]
@@ -135,6 +158,14 @@ def _validate(directories: list[Path], common: dict[str, Any]) -> None:
 def test_artifacts_reject_missing_or_stale_payload(
     tmp_path: Path, mutation: Callable[[list[Path]], object], match: str
 ) -> None:
+    """Gate shard validation against pstrain-authored synthetic artifacts.
+
+    REFERENCE: intact metadata and payload digests emitted by pstrain's artifact
+    writer; no live model, aligner, decoder, or scorer. AXIS: intact versus
+    missing metadata or a stale accumulator payload. SILENT ON: unmutated
+    fields, BW numerical correctness, architecture, arithmetic, and defects
+    shared by writer and validator.
+    """
     directories, common = _artifacts(tmp_path)
     mutation(directories)
     with pytest.raises(RuntimeError, match=match):
@@ -154,6 +185,13 @@ def test_artifacts_reject_missing_or_stale_payload(
 def test_artifacts_reject_wrong_pass_or_incompatible_metadata(
     tmp_path: Path, field: str, value: object, match: str
 ) -> None:
+    """Gate shard metadata against pstrain-authored compatible metadata.
+
+    REFERENCE: intact synthetic metadata emitted by pstrain's artifact writer;
+    no live model, aligner, decoder, or scorer. AXIS: one pass, fingerprint, or
+    shape field changed at a time. SILENT ON: unvaried fields, BW numerical
+    correctness, architecture, arithmetic, and writer/validator shared defects.
+    """
     directories, common = _artifacts(tmp_path)
     path = directories[0] / "artifact.json"
     row = json.loads(path.read_text())
@@ -164,6 +202,14 @@ def test_artifacts_reject_wrong_pass_or_incompatible_metadata(
 
 
 def test_artifacts_reject_duplicate_overlap_and_missing_coverage(tmp_path: Path) -> None:
+    """Gate shard coverage against pstrain-authored complete coverage.
+
+    REFERENCE: two intact synthetic shards covering the declared manifest once;
+    no live model, aligner, decoder, or scorer. AXIS: duplicate shard identity,
+    overlapping utterance assignment, or missing shard coverage. SILENT ON:
+    payload numerics, other coverage defects, architecture, arithmetic, and
+    writer/validator shared defects.
+    """
     directories, common = _artifacts(tmp_path)
     duplicate = directories[1] / "artifact.json"
     row = json.loads(duplicate.read_text())
@@ -187,6 +233,13 @@ def test_artifacts_reject_duplicate_overlap_and_missing_coverage(tmp_path: Path)
 
 
 def test_duplicate_manifest_identity_is_rejected(tmp_path: Path) -> None:
+    """Gate manifest identity against a unique synthetic pstrain manifest.
+
+    REFERENCE: the unique ``a,b`` manifest expected by pstrain's shard validator;
+    no live model, aligner, decoder, or scorer. AXIS: unique versus duplicated
+    utterance identity. SILENT ON: other manifest defects, BW numerics,
+    architecture, arithmetic, and defects shared by producers and validator.
+    """
     directories, common = _artifacts(tmp_path)
     with pytest.raises(RuntimeError, match="duplicate utterance IDs"):
         _validate_shard_artifacts(directories, fileids=["a", "a"], **common)

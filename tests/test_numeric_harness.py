@@ -375,7 +375,16 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
 
 @requires_c_library
 def test_feature_frames_finiteness_and_golden_checksum(flat_project: PipelineContext) -> None:
-    """Choke point A: portable feature shape/envelope, plus optional bytes."""
+    """Gate current pstrain features against a pstrain-regenerated snapshot.
+
+    REFERENCE: ``numeric_bw.json`` records this repository's own feature path at
+    regeneration time (pstrain model/feature apparatus, no aligner, decoder, or
+    scorer), under the declared ``-ffp-contract=off`` policy and its portable or
+    strict tolerance tier. AXIS: current versus regeneration-time output, with
+    strictness selected by ``PSTRAIN_GOLDEN_STRICT``. SILENT ON: defects shared
+    with regeneration, model/aligner/decoder/scorer behavior, architecture, and
+    arithmetic beyond the selected contraction and tolerance policy.
+    """
     expected = json.loads(GOLDEN.read_text())["feature"]
     paths = sorted(flat_project.features_dir.glob("*.mfc"))
     assert len(paths) == 10
@@ -406,7 +415,16 @@ def test_feature_frames_finiteness_and_golden_checksum(flat_project: PipelineCon
 def test_bw_golden_trajectory_and_accounting(
     flat_project: PipelineContext, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Choke points B/C: BW numerics and utterance conservation cannot drift."""
+    """Gate current pstrain BW against a pstrain-regenerated trajectory.
+
+    REFERENCE: ``numeric_bw.json`` records this repository's own model and BW
+    apparatus at regeneration time (no decoder or scorer), under the declared
+    ``-ffp-contract=off`` policy and its portable or strict tolerance tier.
+    AXIS: current versus regeneration-time output, with strictness selected by
+    ``PSTRAIN_GOLDEN_STRICT``. SILENT ON: defects shared with regeneration,
+    aligner/decoder/scorer behavior, architecture, and arithmetic beyond the
+    selected contraction and tolerance policy.
+    """
     expected = json.loads(GOLDEN.read_text())
     output_dir = tmp_path / "trained"
     caplog.set_level("INFO", logger="pstrain.lib.steps.train")
@@ -1235,7 +1253,15 @@ def test_bw_discrete_contract_negative_control_rejects_dropped_identity() -> Non
 def test_seeded_bw_shards_are_reproducible_and_discrete_state_is_partition_independent(
     flat_project: PipelineContext, tmp_path: Path
 ) -> None:
-    """Certify our one-shard serial reference; defects shared with it remain invisible."""
+    """Gate seeded BW against this run's own one-shard reducer path.
+
+    REFERENCE: the same pstrain model, BW driver, native accumulator, reducer,
+    and telemetry apparatus at one shard; no aligner, decoder, or scorer is in
+    either arm. AXIS: fixed-count repeatability at two shards and discrete state
+    across one versus two shards. SILENT ON: defects shared by shard counts,
+    floating parameters across shard counts, architecture, arithmetic, and
+    upstream mathematical correctness.
+    """
     assert flat_project.split.seed == SEED
     fileids, transcription = write_golden_subset(flat_project)
     outputs = [tmp_path / "one", tmp_path / "two-a", tmp_path / "two-b"]
@@ -1297,7 +1323,15 @@ def test_seeded_bw_shards_are_reproducible_and_discrete_state_is_partition_indep
 def test_one_shard_reducer_matches_established_in_process_bw(
     flat_project: PipelineContext, tmp_path: Path
 ) -> None:
-    """Gate dump/restore/reduction against the pre-sharding accumulation path."""
+    """Gate one-shard reduction against pstrain's pre-sharding serial path.
+
+    REFERENCE: the same pstrain input model, BW driver, and native accumulator
+    with in-process normalization; the candidate adds dump/restore/reduction,
+    and neither arm uses an aligner, decoder, or scorer. AXIS: established
+    in-process serial apparatus versus one-shard reducer apparatus. SILENT ON:
+    defects shared with serial BW, architecture, arithmetic, and upstream
+    mathematical correctness.
+    """
     fileids, transcription = write_golden_subset(flat_project)
     common = {
         "model_dir": flat_project.model_dir("flat"),
