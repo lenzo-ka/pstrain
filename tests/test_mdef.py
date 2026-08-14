@@ -136,6 +136,20 @@ class TestGenerateAllTriphonesMdef:
         mdef.generate_alltriphones_mdef(phone_list, dictionary, output)
         assert output.exists()
 
+    def test_alltriphones_mdef_is_byte_reproducible(
+        self, phone_list: Path, dictionary: Path, tmp_path: Path
+    ) -> None:
+        """Identical inputs produce identical mdef bytes across wall-clock seconds."""
+        first = tmp_path / "first.mdef"
+        second = tmp_path / "second.mdef"
+
+        mdef.generate_alltriphones_mdef(phone_list, dictionary, first)
+        time.sleep(1.1)
+        mdef.generate_alltriphones_mdef(phone_list, dictionary, second)
+
+        assert first.read_bytes() == second.read_bytes()
+        assert first.read_text().splitlines()[0] == "0.3"
+
     def test_alltriphones_has_triphones(
         self, phone_list: Path, dictionary: Path, tmp_path: Path
     ) -> None:
@@ -188,6 +202,29 @@ class TestGenerateUntiedMdef:
             phone_list, dictionary, transcripts, output, filler_dict=filler_dict
         )
         assert output.exists()
+
+    def test_untied_mdef_is_byte_reproducible(
+        self,
+        phone_list: Path,
+        dictionary: Path,
+        filler_dict: Path,
+        transcripts: Path,
+        tmp_path: Path,
+    ) -> None:
+        """Identical inputs produce identical mdef bytes across wall-clock seconds."""
+        first = tmp_path / "first.mdef"
+        second = tmp_path / "second.mdef"
+
+        mdef.generate_untied_mdef(
+            phone_list, dictionary, transcripts, first, filler_dict=filler_dict
+        )
+        time.sleep(1.1)
+        mdef.generate_untied_mdef(
+            phone_list, dictionary, transcripts, second, filler_dict=filler_dict
+        )
+
+        assert first.read_bytes() == second.read_bytes()
+        assert first.read_text().splitlines()[0] == "0.3"
 
     def test_transcript_reachable_matches_multipron_graph_domain(self, tmp_path: Path) -> None:
         """Reachable inventory includes both sides of variant boundaries."""
