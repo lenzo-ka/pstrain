@@ -52,6 +52,9 @@ that the contraction-specific values are unchanged.
 `scripts/check_fp_contract.py build` disassembles the executable, static-library,
 and shared-library artifacts in a CMake build's canonical `bin/` and `lib/`
 directories. The Tests workflow applies that check to its own CMake build trees.
+Model and benchmark provenance declare contraction only for `native_library`; standalone native
+program identities record their SHA-256 but no contraction declaration. The emitted-code scan, not
+those provenance records, certifies the standalone programs' contraction policy.
 The Build workflow separately runs `scripts/check_fp_contract.py --wheels
 wheelhouse` after cibuildwheel finishes. That mode extracts every wheel, finds
 every ELF, Mach-O, and native archive by file signature, and checks each
