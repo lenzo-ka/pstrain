@@ -1,4 +1,6 @@
-/* Contract coverage for conditional stream reset and failure propagation. */
+/* Contract coverage for conditional stream reset and failure propagation.
+ * This stub models direct no-feat.params configuration only.  It does not
+ * model feat.params precedence or PocketSphinx's real front-end state. */
 
 #include <stdio.h>
 #include <stdlib.h>

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import cast
 
 from pstrain.lib.config.models import FeatureConfig
+from pstrain.lib.model import require_complete_model
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,8 @@ class Decoder:
             beam: Main beam width (None = auto-detect based on model type)
             wbeam: Word beam width (None = auto-detect based on model type)
             pl_window: Phone lookahead window (None = use default 5)
-            feature_config: Canonical schema-owned acoustic front-end settings.
+            feature_config: Schema profile used only for settings not overridden by
+                the trained model's authoritative ``feat.params`` record.
 
         Raises:
             ImportError: If PocketSphinx not available
@@ -112,6 +114,7 @@ class Decoder:
         # Validate paths - don't silently ignore missing files
         if not self.model_dir.exists():
             raise FileNotFoundError(f"Model directory not found: {model_dir}")
+        require_complete_model(self.model_dir)
         if not self.dict_file.exists():
             raise FileNotFoundError(f"Dictionary not found: {dict_file}")
         if self.filler_dict and not self.filler_dict.exists():

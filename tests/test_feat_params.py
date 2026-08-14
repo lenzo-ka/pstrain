@@ -104,7 +104,13 @@ def test_packaging_requires_trained_feat_params(tmp_path: Path) -> None:
     model_dir = tmp_path / "model"
     model_dir.mkdir()
 
-    with pytest.raises(FileNotFoundError, match=r"trained model directory lacks feat\.params"):
+    with pytest.raises(
+        FileNotFoundError,
+        match=(
+            rf"feat\.params.*{model_dir}.*decode-time front end.*"
+            r"silently differ.*feature shape and basis"
+        ),
+    ):
         package_model(model_dir, tmp_path / "dist")
 
 

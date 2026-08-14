@@ -110,7 +110,7 @@ def align_utterance(
             are tolerated and stripped.
         model_dir: Acoustic model directory containing ``mdef``,
             ``means``, ``variances``, ``mixture_weights``,
-            ``transition_matrices``, and ideally ``feat.params``.
+            ``transition_matrices``, and ``feat.params``.
         dict_path: Pronunciation dictionary.
         filler_dict: Filler / non-speech dictionary (optional).
         include_phones: Return phone-level segments in the result.

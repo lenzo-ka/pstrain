@@ -15,17 +15,22 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 
-# Required model files (needed for training/BW)
+# Required while constructing and updating a model during training/BW.
 MODEL_FILES_REQUIRED = ["mdef", "means", "variances", "mixture_weights", "transition_matrices"]
 
-# Optional model files (for deployment/decoding)
-MODEL_FILES_OPTIONAL = ["sendump", "feat.params", "noisedict"]
+# A complete model consumed for decoding, alignment, packaging, or deployment
+# additionally requires the training-time front-end record.
+MODEL_FILES_COMPLETE_REQUIRED = [*MODEL_FILES_REQUIRED, "feat.params"]
+
+# Optional acceleration and dictionary files for deployment/decoding.
+MODEL_FILES_OPTIONAL = ["sendump", "noisedict"]
 
 # All known model files
-MODEL_FILES_ALL = MODEL_FILES_REQUIRED + MODEL_FILES_OPTIONAL
+MODEL_FILES_ALL = MODEL_FILES_COMPLETE_REQUIRED + MODEL_FILES_OPTIONAL
 
 __all__ = [
     "MODEL_FILES_REQUIRED",
+    "MODEL_FILES_COMPLETE_REQUIRED",
     "MODEL_FILES_OPTIONAL",
     "MODEL_FILES_ALL",
     "Model",
@@ -33,7 +38,21 @@ __all__ = [
     "CDModel",
     "create_model",
     "get_model_class",
+    "require_complete_model",
 ]
+
+
+def require_complete_model(model_dir: str | Path) -> Path:
+    """Require the front-end record expected by complete-model consumers."""
+    model_dir = Path(model_dir)
+    feat_params = model_dir / "feat.params"
+    if not feat_params.is_file():
+        raise FileNotFoundError(
+            f"Missing feat.params ({feat_params}) from complete model directory {model_dir}. "
+            "Without it, the decode-time front end is undefined and can silently differ "
+            "from the training front end in feature shape and basis."
+        )
+    return feat_params
 
 
 class Model(ABC):

@@ -10,7 +10,7 @@ import logging
 import shutil
 from pathlib import Path
 
-from pstrain.lib.model import MODEL_FILES_REQUIRED
+from pstrain.lib.model import MODEL_FILES_REQUIRED, require_complete_model
 
 logger = logging.getLogger(__name__)
 
@@ -91,11 +91,7 @@ def package_model(
     """
     model_dir = Path(model_dir)
     output_dir = Path(output_dir)
-    source_feat_params = model_dir / "feat.params"
-    if not source_feat_params.is_file():
-        raise FileNotFoundError(
-            f"cannot package model: trained model directory lacks feat.params: {source_feat_params}"
-        )
+    source_feat_params = require_complete_model(model_dir)
 
     package_dir = output_dir / model_name if model_name else output_dir
 
