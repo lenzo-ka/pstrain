@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from pstrain.lib import _pstrainc
-from pstrain.lib.bw import BWConfig, BWTrainer
+from pstrain.lib.bw import HMM, BWConfig, BWTrainer
 from pstrain.lib.contract_docs import contract_check_fields, contract_check_files, contract_scope
 from pstrain.lib.features import read_sphinx_mfc
 from pstrain.lib.pipeline import PipelineContext
@@ -136,16 +136,68 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
     _pstrainc.write_gau(str(model / "means"), prior_means)
     mixw = _pstrainc.read_mixw(str(model / "mixture_weights"))[0]
     mixw = np.repeat(mixw.reshape(-1, 1, 1), n_density, axis=2)
-    mixw.fill(np.float32(1.0 / n_density))
+    # Raw upstream norm output contains occupancy counts, not probabilities.
+    # Give every row a distinct, non-unit sum so a runtime-normalized copy is
+    # observably different from retaining the serialized input.
+    row = np.arange(mixw.shape[0], dtype=np.float32).reshape(-1, 1)
+    mixw[:, 0, 0] = np.float32(3.0) + row[:, 0]
+    mixw[:, 0, 1] = np.float32(11.0) + np.float32(2.0) * row[:, 0]
     _pstrainc.write_mixw(str(model / "mixture_weights"), mixw)
+    # Preserve the transition topology while likewise turning each emitting
+    # row into a distinct raw-count row whose sum is well away from one.
+    tmat_scale = (
+        np.float32(17.0)
+        + np.arange(prior_tmat.shape[0], dtype=np.float32)[:, None, None]
+        + np.float32(3.0) * np.arange(prior_tmat.shape[1], dtype=np.float32)[None, :, None]
+    )
+    prior_tmat = prior_tmat * tmat_scale
+    tmat_with_exit = np.concatenate(
+        [prior_tmat, np.zeros((prior_tmat.shape[0], 1, prior_tmat.shape[2]), dtype=np.float32)],
+        axis=1,
+    )
+    _pstrainc.write_tmat(str(model / "transition_matrices"), tmat_with_exit)
     # Exercise both sides of the evaluation floor on every codebook. Retain
     # must serialize these exact input floats for cells with zero occupancy.
     prior_vars[..., 0::2] = np.float32(5e-5)
     prior_vars[..., 1::2] = np.float32(0.0)
     _pstrainc.write_gau(str(model / "variances"), prior_vars)
+
+    # Public HMM loading remains a probability API even though BW artifacts
+    # now store upstream-compatible raw occupancy counts.
+    hmm = HMM.load(model)
+    np.testing.assert_allclose(hmm.mixw.sum(axis=-1), np.float32(1.0), rtol=1e-6)
+    nonzero_tmat_rows = prior_tmat.sum(axis=-1) > 0
+    np.testing.assert_allclose(hmm.tmat.sum(axis=-1)[nonzero_tmat_rows], np.float32(1.0), rtol=1e-6)
+
+    # Saving without a pass must be a byte-representation-preserving model
+    # container operation for upstream raw-count inputs.
+    untouched = BWTrainer(
+        model / "mdef",
+        model / "means",
+        model / "variances",
+        model / "mixture_weights",
+        model / "transition_matrices",
+        BWConfig(pass2var=False, unobserved_gaussian_policy="retain", multipron=False),
+    )
+    untouched_dir = tmp_path / "untouched"
+    untouched_dir.mkdir()
+    assert untouched.save(
+        untouched_dir / "means",
+        untouched_dir / "variances",
+        untouched_dir / "mixture_weights",
+        untouched_dir / "transition_matrices",
+    )
+    np.testing.assert_array_equal(
+        _pstrainc.read_mixw(str(untouched_dir / "mixture_weights"))[0], mixw
+    )
+    np.testing.assert_array_equal(
+        _pstrainc.read_tmat(str(untouched_dir / "transition_matrices"))[0], prior_tmat
+    )
+
     features = np.full((60, 39), 0.25, dtype=np.float32)
     phones = np.array([0], dtype=np.uint32)
     outputs: dict[str, dict[str, np.ndarray[Any, Any]]] = {}
+    accumulators: dict[str, dict[str, np.ndarray[Any, Any]]] = {}
 
     policies: tuple[Literal["zero", "retain"], ...] = ("zero", "retain")
     for policy in policies:
@@ -164,7 +216,16 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
             ),
         )
         assert trainer.process_utterance(features, phones)
+        # Two identical updates make raw occupancy row sums observably differ
+        # from normalized probabilities even for a one-state path.
+        assert trainer.process_utterance(features, phones)
         assert trainer.count_active_fallback_senones() == 0
+        accum_dir = tmp_path / f"{policy}-accum"
+        trainer.dump_accumulators(accum_dir)
+        accumulators[policy] = {
+            "mixture_weights": _pstrainc.read_mixw(str(accum_dir / "mixw_counts"))[0],
+            "transition_matrices": _pstrainc.read_tmat(str(accum_dir / "tmat_counts"))[0],
+        }
         assert trainer.normalize()
         out = tmp_path / policy
         out.mkdir()
@@ -177,6 +238,41 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
         outputs[policy] = read_model_arrays(out)
         outputs[policy]["means"] = outputs[policy]["means"].reshape(n_cb, n_density, veclen)
         outputs[policy]["variances"] = outputs[policy]["variances"].reshape(n_cb, n_density, veclen)
+
+    # A pass with mixw/tmat re-estimation disabled must also carry the raw
+    # incoming representation through normalization and serialization.
+    disabled = BWTrainer(
+        model / "mdef",
+        model / "means",
+        model / "variances",
+        model / "mixture_weights",
+        model / "transition_matrices",
+        BWConfig(
+            pass2var=False,
+            unobserved_gaussian_policy="retain",
+            a_beam=1e-200,
+            topn=n_density - 1,
+            mixw_reest=False,
+            tmat_reest=False,
+            multipron=False,
+        ),
+    )
+    assert disabled.process_utterance(features, phones)
+    assert disabled.normalize()
+    disabled_dir = tmp_path / "disabled-reest"
+    disabled_dir.mkdir()
+    assert disabled.save(
+        disabled_dir / "means",
+        disabled_dir / "variances",
+        disabled_dir / "mixture_weights",
+        disabled_dir / "transition_matrices",
+    )
+    np.testing.assert_array_equal(
+        _pstrainc.read_mixw(str(disabled_dir / "mixture_weights"))[0], mixw
+    )
+    np.testing.assert_array_equal(
+        _pstrainc.read_tmat(str(disabled_dir / "transition_matrices"))[0], prior_tmat
+    )
 
     occupied = np.any(outputs["zero"]["means"] != 0.0, axis=-1)
     assert occupied.any()
@@ -201,6 +297,7 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
     np.testing.assert_array_equal(retain_mixw[mixw_empty], mixw[mixw_empty])
     mixw_occupied = ~mixw_empty
     np.testing.assert_array_equal(zero_mixw[mixw_occupied], retain_mixw[mixw_occupied])
+    np.testing.assert_array_equal(zero_mixw, accumulators["zero"]["mixture_weights"])
 
     zero_tmat = outputs["zero"]["transition_matrices"]
     retain_tmat = outputs["retain"]["transition_matrices"]
@@ -210,6 +307,7 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
     np.testing.assert_array_equal(retain_tmat[tmat_empty], prior_tmat[tmat_empty])
     tmat_occupied = ~tmat_empty
     np.testing.assert_array_equal(zero_tmat[tmat_occupied], retain_tmat[tmat_occupied])
+    np.testing.assert_array_equal(zero_tmat, accumulators["zero"]["transition_matrices"])
 
     # Every occupied cell saw the same value, so direct one-pass V/N-E[x]^2
     # is exactly zero in float32.  The saved artifact must not contain the
@@ -246,7 +344,9 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
     assert scores["zero"] == scores["retain"]
 
     # The training loader matches upstream senone loading: an all-zero row is
-    # floored cell-wise and normalized, producing a uniform evaluation PDF.
+    # floored cell-wise and normalized for evaluation. Saving without a new BW
+    # pass preserves the serialized raw row rather than leaking that runtime
+    # normalization back into the artifact.
     reloaded = BWTrainer(
         model / "mdef",
         tmp_path / "zero" / "means",
@@ -269,9 +369,7 @@ def test_bw_unobserved_policy_and_raw_variance_artifact(
         reloaded_dir / "transition_matrices",
     )
     reloaded_mixw = _pstrainc.read_mixw(str(reloaded_dir / "mixture_weights"))[0]
-    np.testing.assert_array_equal(
-        reloaded_mixw[mixw_empty], np.full_like(reloaded_mixw[mixw_empty], 0.5)
-    )
+    assert np.count_nonzero(reloaded_mixw[mixw_empty]) == 0
 
 
 @requires_c_library
@@ -473,17 +571,18 @@ def test_real_training_retry_is_accounted_once_and_conserves_stats(
     assert row.total_log_lik == pytest.approx(expected.total_log_lik, rel=1e-14, abs=1e-8)
 
 
-def _assert_normalized_model(model_dir: Path) -> None:
+def _assert_bw_model(model_dir: Path) -> None:
     arrays = read_model_arrays(model_dir)
     for name, values in arrays.items():
         assert np.isfinite(values).all(), name
-    # BW artifacts intentionally contain direct, unfloored normalization
-    # output.  The next engine load applies the evaluation floor.
+    # Gaussian artifacts contain direct, unfloored normalization output.  Mixw
+    # and tmat artifacts follow upstream and retain raw BW accumulators; the
+    # next engine load normalizes and applies the evaluation floors.
     assert (np.maximum(arrays["variances"], np.float32(1e-4)) >= 1e-4).all()
     mixw_sums = arrays["mixture_weights"].sum(axis=-1)
-    np.testing.assert_allclose(mixw_sums[mixw_sums > 0], 1.0, rtol=1e-6, atol=1e-6)
     tmat_sums = arrays["transition_matrices"].sum(axis=-1)
-    np.testing.assert_allclose(tmat_sums[tmat_sums > 0], 1.0, rtol=1e-6, atol=1e-6)
+    assert np.any(mixw_sums > 1.0)
+    assert np.any(tmat_sums > 1.0)
 
 
 @requires_c_library
@@ -538,8 +637,8 @@ def test_updates_and_split_schedule_preserve_invariants(full_project: PipelineCo
         checkpoints = sorted((model / "iterations").iterdir())
         assert checkpoints, f"no per-pass checkpoints for {stage}"
         for checkpoint in checkpoints:
-            _assert_normalized_model(checkpoint)
-        _assert_normalized_model(model)
+            _assert_bw_model(checkpoint)
+        _assert_bw_model(model)
 
     for density in (1, 2, 4, 8):
         model = full_project.model_dir(f"cd-{density}g")
@@ -858,6 +957,13 @@ def test_withheld_context_uses_live_ci_fallback_across_passes(
         )
     )
     assert fallback_senones.size
+    fallback_raw_mixw = _pstrainc.read_mixw(str(initial / "mixture_weights"))[0]
+    fallback_scale = (
+        np.float32(29.0) + np.arange(fallback_raw_mixw.shape[0], dtype=np.float32)[:, None, None]
+    )
+    fallback_raw_mixw = fallback_raw_mixw * fallback_scale
+    _pstrainc.write_mixw(str(initial / "mixture_weights"), fallback_raw_mixw)
+    assert np.all(fallback_raw_mixw.sum(axis=-1) > np.float32(1.0))
     initial_arrays = read_model_arrays(initial)
     output = tmp_path / "trained"
     monkeypatch.setenv("PSTRAIN_BW_CHECKPOINTS", "1")
@@ -907,6 +1013,7 @@ def test_withheld_context_uses_live_ci_fallback_across_passes(
             if name == "mixture_weights":
                 zero_current = checkpoint_arrays[name].reshape(-1, 2)[zero_mass_senones]
                 zero_previous = previous[name].reshape(-1, 2)[zero_mass_senones]
+                assert np.all(zero_previous.sum(axis=-1) > np.float32(1.0))
                 np.testing.assert_array_equal(zero_current, zero_previous)
             else:
                 zero_current = checkpoint_arrays[name].reshape(-1, 2, 39)[zero_mass_senones]

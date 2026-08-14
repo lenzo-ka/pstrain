@@ -118,6 +118,8 @@ struct pstrain_bw_context_s {
     int32 pass2var;  /* Use 2-pass variance estimation for numerical stability */
     pstrain_bw_unobserved_gaussian_policy_t unobserved_gaussian_policy;
     vector_t ***raw_var; /* Lossless normalized/serialized variances. */
+    float32 ***raw_mixw; /* Upstream-format mixture occupancy accumulators. */
+    float32 ***raw_tmat; /* Upstream-format transition accumulators. */
     int32 multipron; /* Multi-pron training: build wide utterance graphs */
     char *fallback_senone; /* CI senones used as primary models this pass */
 
@@ -241,6 +243,23 @@ pstrain_bw_init(const char *mdef_path,
         goto error;
     }
 
+    /* Keep the serialized representation separate from the normalized model
+     * used for evaluation.  This also makes save-before-first-pass a lossless
+     * copy for callers that use BWTrainer as a model container. */
+    {
+        uint32 n_mixw, n_feat, n_density, n_tmat, n_state_pm;
+        if (s3mixw_read(mixw_path, &ctx->raw_mixw, &n_mixw, &n_feat,
+                        &n_density) != S3_SUCCESS ||
+            n_mixw != ctx->inv->n_mixw || n_feat != ctx->inv->n_feat ||
+            n_density != ctx->inv->n_density ||
+            s3tmat_read(tmat_path, &ctx->raw_tmat, &n_tmat,
+                        &n_state_pm) != S3_SUCCESS ||
+            n_tmat != ctx->inv->n_tmat || n_state_pm != ctx->inv->n_state_pm) {
+            E_ERROR("Failed to retain serialized mixture/transition parameters\n");
+            goto error;
+        }
+    }
+
     /* Larger topn evaluates more densities.  Upstream uses every density for
      * CI and CD-tied BW, and one density for CD-untied BW. */
     E_INFO("Reading Gaussians from %s and %s\n", means_path, vars_path);
@@ -325,6 +344,8 @@ pstrain_bw_free(pstrain_bw_context_t *ctx)
     if (ctx->mdef) model_def_free(ctx->mdef);
     if (ctx->feat) feat_free(ctx->feat);
     if (ctx->raw_var) gauden_free_param(ctx->raw_var);
+    if (ctx->raw_mixw) ckd_free_3d((void ***)ctx->raw_mixw);
+    if (ctx->raw_tmat) ckd_free_3d((void ***)ctx->raw_tmat);
     ckd_free(ctx->fallback_senone);
 
     ckd_free(ctx);
@@ -829,6 +850,30 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
     uint32 n_density = g->n_density;
     uint32 *veclen = g->veclen;
     uint32 i, j, k, l;
+    float32 ***previous_raw_mixw = ctx->raw_mixw;
+    float32 ***previous_raw_tmat = ctx->raw_tmat;
+    char *preserve_raw_mixw = ckd_calloc(ctx->inv->n_mixw * ctx->inv->n_feat,
+                                         sizeof(*preserve_raw_mixw));
+
+    ctx->raw_mixw = (float32 ***)ckd_calloc_3d(ctx->inv->n_mixw,
+                                               ctx->inv->n_feat,
+                                               ctx->inv->n_density,
+                                               sizeof(float32));
+    ctx->raw_tmat = (float32 ***)ckd_calloc_3d(ctx->inv->n_tmat,
+                                               ctx->inv->n_state_pm - 1,
+                                               ctx->inv->n_state_pm,
+                                               sizeof(float32));
+
+    if (!ctx->mixw_reest)
+        for (i = 0; i < ctx->inv->n_mixw; ++i)
+            for (j = 0; j < ctx->inv->n_feat; ++j)
+                memcpy(ctx->raw_mixw[i][j], previous_raw_mixw[i][j],
+                       ctx->inv->n_density * sizeof(float32));
+    if (!ctx->tmat_reest)
+        for (i = 0; i < ctx->inv->n_tmat; ++i)
+            for (j = 0; j < ctx->inv->n_state_pm - 1; ++j)
+                memcpy(ctx->raw_tmat[i][j], previous_raw_tmat[i][j],
+                       ctx->inv->n_state_pm * sizeof(float32));
 
     /* A missing CD model resolves to its CI senones. Once such a senone has
      * occupancy, keep one observation of its previous CI distribution in the
@@ -857,6 +902,11 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
                 if (!observed) continue;
                 seeded[cb] = 1;
                 for (j = 0; j < n_feat; ++j) {
+                    float32 posterior_sum = 0;
+                    for (k = 0; k < n_density; ++k)
+                        posterior_sum += ctx->inv->mixw_acc[tied_state][j][k];
+                    if (posterior_sum == 0)
+                        preserve_raw_mixw[tied_state * n_feat + j] = 1;
                     for (k = 0; k < n_density; ++k) {
                         float32 prior = ctx->inv->mixw[tied_state][j][k];
                         g->dnom[cb][j][k] += prior;
@@ -921,7 +971,7 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
 
     /* Normalize mixture weights */
     E_INFO("Normalizing mixture weights...\n");
-    for (i = 0; i < ctx->inv->n_mixw; i++) {
+    for (i = 0; ctx->mixw_reest && i < ctx->inv->n_mixw; i++) {
         for (j = 0; j < ctx->inv->n_feat; j++) {
             float32 sum = 0;
             for (k = 0; k < ctx->inv->n_density; k++) {
@@ -929,6 +979,10 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
             }
             if (sum > 0) {
                 for (k = 0; k < ctx->inv->n_density; k++) {
+                    ctx->raw_mixw[i][j][k] =
+                        preserve_raw_mixw[i * ctx->inv->n_feat + j]
+                        ? previous_raw_mixw[i][j][k]
+                        : ctx->inv->mixw_acc[i][j][k];
                     ctx->inv->mixw[i][j][k] = ctx->inv->mixw_acc[i][j][k] / sum;
                 }
             } else {
@@ -939,6 +993,11 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
                     memset(ctx->inv->mixw[i][j], 0,
                            ctx->inv->n_density * sizeof(float32));
                 }
+                else {
+                    memcpy(ctx->raw_mixw[i][j],
+                           previous_raw_mixw[i][j],
+                           ctx->inv->n_density * sizeof(float32));
+                }
                 E_WARN("mixw %u feat %u has no data, %s values\n", i, j,
                        ctx->unobserved_gaussian_policy ==
                        PSTRAIN_BW_UNOBSERVED_GAUSSIAN_ZERO && !fallback_tracked
@@ -946,10 +1005,12 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
             }
         }
     }
+    ckd_free_3d((void ***)previous_raw_mixw);
+    ckd_free(preserve_raw_mixw);
 
     /* Normalize transition matrices */
     E_INFO("Normalizing transition matrices...\n");
-    for (i = 0; i < ctx->inv->n_tmat; i++) {
+    for (i = 0; ctx->tmat_reest && i < ctx->inv->n_tmat; i++) {
         for (j = 0; j < ctx->inv->n_state_pm - 1; j++) {  /* n_state_pm-1 emitting states */
             float32 sum = 0;
             for (k = 0; k < ctx->inv->n_state_pm; k++) {
@@ -957,12 +1018,17 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
             }
             if (sum > 0) {
                 for (k = 0; k < ctx->inv->n_state_pm; k++) {
+                    ctx->raw_tmat[i][j][k] = ctx->inv->tmat_acc[i][j][k];
                     ctx->inv->tmat[i][j][k] = ctx->inv->tmat_acc[i][j][k] / sum;
                 }
             } else {
                 if (ctx->unobserved_gaussian_policy ==
                     PSTRAIN_BW_UNOBSERVED_GAUSSIAN_ZERO) {
                     memset(ctx->inv->tmat[i][j], 0,
+                           ctx->inv->n_state_pm * sizeof(float32));
+                }
+                else {
+                    memcpy(ctx->raw_tmat[i][j], previous_raw_tmat[i][j],
                            ctx->inv->n_state_pm * sizeof(float32));
                 }
                 E_WARN("tmat %u state %u has no data, %s values\n", i, j,
@@ -972,6 +1038,7 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
             }
         }
     }
+    ckd_free_3d((void ***)previous_raw_tmat);
 
     /* Recompute Gaussian precomputation values */
     E_INFO("Recomputing Gaussian precomputation values...\n");
@@ -1109,9 +1176,9 @@ pstrain_bw_save(pstrain_bw_context_t *ctx,
         return -1;
     }
 
-    E_INFO("Saving mixture weights to %s\n", mixw_path);
+    E_INFO("Saving raw mixture accumulators to %s\n", mixw_path);
     if (s3mixw_write(mixw_path,
-                     ctx->inv->mixw,
+                     ctx->raw_mixw,
                      ctx->inv->n_mixw,
                      ctx->inv->n_feat,
                      ctx->inv->n_density) != S3_SUCCESS) {
@@ -1119,9 +1186,9 @@ pstrain_bw_save(pstrain_bw_context_t *ctx,
         return -1;
     }
 
-    E_INFO("Saving transition matrices to %s\n", tmat_path);
+    E_INFO("Saving raw transition accumulators to %s\n", tmat_path);
     if (s3tmat_write(tmat_path,
-                     ctx->inv->tmat,
+                     ctx->raw_tmat,
                      ctx->inv->n_tmat,
                      ctx->inv->n_state_pm) != S3_SUCCESS) {
         E_ERROR("Failed to write transition matrices\n");

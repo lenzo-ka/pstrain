@@ -167,8 +167,8 @@ acoustic/       - Acoustic model files for Sphinx decoders
   mdef          - Model definition (phones, states, triphones)
   means         - Gaussian means
   variances     - Gaussian variances
-  mixture_weights - Mixture weights
-  transition_matrices - HMM state transition probabilities
+  mixture_weights - Raw mixture occupancy accumulators (normalized on load)
+  transition_matrices - Raw HMM transition accumulators (normalized on load)
   noisedict     - Filler/noise dictionary for decoding
 
 dict/           - Dictionary files
