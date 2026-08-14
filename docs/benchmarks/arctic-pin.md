@@ -38,6 +38,32 @@ when the acoustic-model bytes are identical.
 | Decoder | `beam=pbeam=lpbeam=lponlybeam=fwdflatbeam=1e-80`; `wbeam=fwdflatwbeam=1e-40`; `pl_window=5`, `lw=10`, `wip=0.2` |
 | Bootstrap | Matched-pair percentile, 100,000 resamples, seed 7; big cells speaker-stratified |
 
+### Configuration provenance by result cell
+
+Both `off/slt55` and `off/big` come from the named benchmark profile `off`;
+both `on/slt55` and `on/big` come from the named benchmark profile `on`. There
+are no run-time overrides. These are the complete differences from the shipped
+schema defaults; an unlisted setting equals its shipped default.
+
+| Cells | Setting | Shipped default | Cell value |
+|---|---|---:|---:|
+| off/slt55, off/big | `split.test_count` | `null` | `0` |
+| off/slt55, off/big | `training.accept_arctic_a0587_known_skip` | `false` | `true` |
+| off/slt55, off/big | `training.ci.convergence_ratio` | `0.001` | `0.1` |
+| off/slt55, off/big | `training.multipron_training` | `true` | `false` |
+| off/slt55, off/big | `training.tied.convergence_ratio` | `0.001` | `0.1` |
+| off/slt55, off/big | `training.tree_directional_questions` | `true` | `false` |
+| off/slt55, off/big | `training.tree_rotate_state_weights` | `true` | `false` |
+| off/slt55, off/big | `training.untied.convergence_ratio` | `0.001` | `0.1` |
+| off/slt55, off/big | `training.untied_inventory` | `"all-triphone"` | `"linear"` |
+| on/slt55, on/big | `split.test_count` | `null` | `0` |
+| on/slt55, on/big | `training.accept_arctic_a0587_known_skip` | `false` | `true` |
+| on/slt55, on/big | `training.arctic_a0302_zero_codebook_band` | `null` | `[4548,4623]` |
+| on/slt55, on/big | `training.tree_directional_questions` | `true` | `false` |
+| on/slt55, on/big | `training.tree_rotate_state_weights` | `true` | `false` |
+| on/slt55, on/big | `training.untied.max_iterations` | `6` | `10` |
+| on/slt55, on/big | `training.untied_inventory` | `"all-triphone"` | `"transcript-reachable"` |
+
 The corpus archive identities are BDL
 `26b91aaf48b2799b2956792b4632c2f926cd0542f402b5452d5adecb60942904`,
 CLB `3f16dc3f3b97955ea22623efb33b444341013fc660677b2e170efdcc959fa7c6`,

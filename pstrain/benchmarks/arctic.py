@@ -37,7 +37,7 @@ def resolve_data_dir(*, package_root: Path | None = None, repo_root: Path | None
 
 
 DATA_DIR = resolve_data_dir()
-RECORD_SCHEMA_VERSION = 3
+RECORD_SCHEMA_VERSION = 4
 BOOTSTRAP_RESAMPLES = 100_000
 BOOTSTRAP_SEED = 7
 DECODER_CONDITIONS: dict[str, Any] = {
@@ -410,6 +410,110 @@ def benchmark_conditions(band: str = "pin") -> dict[str, Any]:
         "known_skips": KNOWN_SKIPS,
         "frozen_dataclass_fields": frozen_fields,
     }
+
+
+def _configuration_leaves(value: Any, prefix: str = "") -> dict[str, Any]:
+    if isinstance(value, dict):
+        return {
+            path: leaf
+            for key, child in value.items()
+            for path, leaf in _configuration_leaves(
+                child, f"{prefix}.{key}" if prefix else key
+            ).items()
+        }
+    return {prefix: value}
+
+
+def configuration_provenance(
+    profile: Any,
+    *,
+    source_kind: str,
+    source_name: str | None = None,
+    override_reason: str | None = None,
+) -> dict[str, Any]:
+    """Describe a resolved profile relative to the shipped schema defaults."""
+    from pstrain.lib.config.models import SEMANTIC_BLOCKS, Profile, default_profile
+
+    if not isinstance(profile, Profile):
+        profile = Profile.model_validate(profile)
+    if source_kind not in {"shipped defaults", "named benchmark profile", "explicit overrides"}:
+        raise ValueError(f"unknown configuration source kind: {source_kind!r}")
+    if source_kind == "named benchmark profile" and not source_name:
+        raise ValueError("named benchmark profile provenance requires source_name")
+    if source_kind == "explicit overrides" and not override_reason:
+        raise ValueError("explicit override provenance requires override_reason")
+
+    actual = profile.model_dump(mode="json", include=set(SEMANTIC_BLOCKS))
+    shipped = default_profile().model_dump(mode="json", include=set(SEMANTIC_BLOCKS))
+    actual_leaves = _configuration_leaves(actual)
+    shipped_leaves = _configuration_leaves(shipped)
+    diff = [
+        {
+            "setting": setting,
+            "shipped_default": shipped_leaves[setting],
+            "value": actual_leaves[setting],
+        }
+        for setting in sorted(actual_leaves)
+        if actual_leaves[setting] != shipped_leaves[setting]
+    ]
+    return {
+        "source": {
+            "kind": source_kind,
+            **({"name": source_name} if source_name is not None else {}),
+            **({"reason": override_reason} if override_reason is not None else {}),
+        },
+        "diff_from_shipped_defaults": diff,
+    }
+
+
+def _markdown_value(value: Any) -> str:
+    return f"`{json.dumps(value, sort_keys=True, separators=(',', ':'))}`"
+
+
+def render_configuration_provenance(provenance: dict[str, Any]) -> str:
+    """Render configuration provenance beside a result a human will read."""
+    source = provenance["source"]
+    label = str(source["kind"])
+    if source.get("name"):
+        label += f": {source['name']}"
+    lines = [f"Source: {label}"]
+    if source.get("reason"):
+        lines.append(f"Reason: {source['reason']}")
+    diff = provenance["diff_from_shipped_defaults"]
+    if not diff:
+        lines.extend(["", "Diff from shipped schema defaults: (empty)"])
+        return "\n".join(lines)
+    lines.extend(
+        [
+            "",
+            "Diff from shipped schema defaults:",
+            "",
+            "| Setting | Shipped default | Cell value |",
+            "|---|---:|---:|",
+        ]
+    )
+    lines.extend(
+        f"| `{row['setting']}` | {_markdown_value(row['shipped_default'])} | "
+        f"{_markdown_value(row['value'])} |"
+        for row in diff
+    )
+    return "\n".join(lines)
+
+
+def render_results_report(output: dict[str, Any]) -> str:
+    """Render the measured cells with configuration provenance in reading order."""
+    sections = ["# Arctic BM1 measurement report"]
+    for mode, cells in output["results"].items():
+        for dataset, cell in cells.items():
+            sections.extend(
+                [
+                    f"## {mode}/{dataset}",
+                    f"WER: {float(cell['wer']) * 100:.4f}% "
+                    f"({cell['errors']} errors / {cell['ref_words']} reference words)",
+                    render_configuration_provenance(cell["configuration_provenance"]),
+                ]
+            )
+    return "\n\n".join(sections) + "\n"
 
 
 def _wav_manifest(destination: Path) -> list[dict[str, Any]]:
@@ -887,19 +991,31 @@ def _validate_cell(cell: Any, label: str, *, recorded: bool) -> None:
         "decoded",
         "oov_tokens",
         "known_skips",
+        "configuration_provenance",
     }
     if recorded:
         required.add("utterance_rows")
     if not isinstance(cell, dict) or not required <= set(cell):
         missing = sorted(required - set(cell) if isinstance(cell, dict) else required)
         raise RuntimeError(f"benchmark record has invalid result cell {label}: missing {missing}")
+    provenance = cell["configuration_provenance"]
+    if (
+        not isinstance(provenance, dict)
+        or not isinstance(provenance.get("source"), dict)
+        or not isinstance(provenance.get("diff_from_shipped_defaults"), list)
+    ):
+        raise RuntimeError(f"benchmark record has invalid configuration provenance: {label}")
     integer_fields = ("errors", "ref_words", "utterances", "decoded", "oov_tokens")
     if any(not isinstance(cell[key], int) or cell[key] < 0 for key in integer_fields):
         raise RuntimeError(f"benchmark record has invalid counts in result cell: {label}")
     if cell["ref_words"] <= 0 or cell["decoded"] > cell["utterances"]:
         raise RuntimeError(f"benchmark record has impossible counts in result cell: {label}")
     if not isinstance(cell["known_skips"], list) or any(
-        item not in KNOWN_SKIPS for item in cell["known_skips"]
+        not isinstance(item, dict)
+        or not all(
+            isinstance(item.get(key), str) and item[key] for key in ("mode", "stage", "utterance")
+        )
+        for item in cell["known_skips"]
     ):
         raise RuntimeError(f"benchmark record has invalid known skips in result cell: {label}")
     expected_wer = cell["errors"] / cell["ref_words"]
@@ -1070,6 +1186,11 @@ def compare_results(
                 actual_cell["known_skips"],
                 record_cell["known_skips"],
             )
+            _require_equal(
+                f"{mode}/{dataset} configuration_provenance",
+                actual_cell["configuration_provenance"],
+                record_cell["configuration_provenance"],
+            )
             observed = float(actual_cell["wer"]) * 100
             expected = float(record_cell["wer"])
             delta = observed - expected
@@ -1208,9 +1329,13 @@ def run(
             "slt55": score_model(model, audio_roots, slt, dictionary, lm),
             "big": score_model(model, audio_roots, big, dictionary, lm),
         }
+        provenance = configuration_provenance(
+            PIN_CONFIGS[mode], source_kind="named benchmark profile", source_name=mode
+        )
         for cell in actual[mode].values():
             cell["known_skips"] = known_skips
             cell["bootstrap_ci_95"] = bootstrap_ci(cell["matched_pairs"])
+            cell["configuration_provenance"] = provenance
     output: dict[str, Any] = {
         "schema_version": RECORD_SCHEMA_VERSION,
         "results": actual,
@@ -1233,6 +1358,9 @@ def run(
         )
         if not all(row["pass"] for row in output["comparison"]):
             raise RuntimeError("benchmark comparison failed")
+    report_path = work_dir / "report.md"
+    report_path.write_text(render_results_report(output), encoding="utf-8")
+    output["report"] = str(report_path)
     (work_dir / "results.json").write_text(
         json.dumps(output, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )

@@ -12,15 +12,15 @@
       "slt55": "same-speaker held-out cell"
     },
     "decoder": {
-      "beam": 1e-80,
-      "fwdflatbeam": 1e-80,
-      "fwdflatwbeam": 1e-40,
-      "lpbeam": 1e-80,
-      "lponlybeam": 1e-80,
+      "beam": 1E-80,
+      "fwdflatbeam": 1E-80,
+      "fwdflatwbeam": 1E-40,
+      "lpbeam": 1E-80,
+      "lponlybeam": 1E-80,
       "lw": 10.0,
-      "pbeam": 1e-80,
+      "pbeam": 1E-80,
       "pl_window": 5,
-      "wbeam": 1e-40,
+      "wbeam": 1E-40,
       "wip": 0.2
     },
     "frozen_dataclass_fields": {
@@ -85,7 +85,24 @@
         "utterance": "arctic_a0587"
       },
       {
-        "mechanism": "beam failure on a known-hard utterance after permitted retry in the multipron posture \u2014 the recorded on-mode remainder class (V7-era: a0302/b0486; set shifted with the reachable inventory: b0320 now trains); deep diagnosis deferred per banked Q6, tracked as an open item",
+        "mechanism": "beam failure on a known-hard utterance after permitted retry in the multipron posture — the recorded on-mode remainder class (V7-era: a0302/b0486; set shifted with the reachable inventory: b0320 now trains); deep diagnosis deferred per banked Q6, tracked as an open item",
+        "mode": "on",
+        "passes": [
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10
+        ],
+        "recorded-in": "on-mode parity anchor",
+        "stage": "cd-untied",
+        "utterance": "arctic_a0302"
+      },
+      {
+        "mechanism": "beam failure on a known-hard utterance after permitted retry in the multipron posture — the recorded on-mode remainder class (V7-era: a0302/b0486; set shifted with the reachable inventory: b0320 now trains); deep diagnosis deferred per banked Q6, tracked as an open item",
         "mode": "on",
         "pass": 6,
         "recorded-in": "on-mode parity anchor",
@@ -17315,7 +17332,60 @@
         "utterances": 3395,
         "wer": 76.63931692348743,
         "wil": 0.9122638007111672,
-        "wip": 0.0877361992888328
+        "wip": 0.0877361992888328,
+        "configuration_provenance": {
+          "source": {
+            "kind": "named benchmark profile",
+            "name": "off"
+          },
+          "diff_from_shipped_defaults": [
+            {
+              "setting": "split.test_count",
+              "shipped_default": null,
+              "value": 0
+            },
+            {
+              "setting": "training.accept_arctic_a0587_known_skip",
+              "shipped_default": false,
+              "value": true
+            },
+            {
+              "setting": "training.ci.convergence_ratio",
+              "shipped_default": 0.001,
+              "value": 0.1
+            },
+            {
+              "setting": "training.multipron_training",
+              "shipped_default": true,
+              "value": false
+            },
+            {
+              "setting": "training.tied.convergence_ratio",
+              "shipped_default": 0.001,
+              "value": 0.1
+            },
+            {
+              "setting": "training.tree_directional_questions",
+              "shipped_default": true,
+              "value": false
+            },
+            {
+              "setting": "training.tree_rotate_state_weights",
+              "shipped_default": true,
+              "value": false
+            },
+            {
+              "setting": "training.untied.convergence_ratio",
+              "shipped_default": 0.001,
+              "value": 0.1
+            },
+            {
+              "setting": "training.untied_inventory",
+              "shipped_default": "all-triphone",
+              "value": "linear"
+            }
+          ]
+        }
       },
       "slt55": {
         "accuracy": 0.7115009746588694,
@@ -17624,7 +17694,60 @@
         "utterances": 55,
         "wer": 28.84990253411306,
         "wil": 0.4473330503678551,
-        "wip": 0.5526669496321449
+        "wip": 0.5526669496321449,
+        "configuration_provenance": {
+          "source": {
+            "kind": "named benchmark profile",
+            "name": "off"
+          },
+          "diff_from_shipped_defaults": [
+            {
+              "setting": "split.test_count",
+              "shipped_default": null,
+              "value": 0
+            },
+            {
+              "setting": "training.accept_arctic_a0587_known_skip",
+              "shipped_default": false,
+              "value": true
+            },
+            {
+              "setting": "training.ci.convergence_ratio",
+              "shipped_default": 0.001,
+              "value": 0.1
+            },
+            {
+              "setting": "training.multipron_training",
+              "shipped_default": true,
+              "value": false
+            },
+            {
+              "setting": "training.tied.convergence_ratio",
+              "shipped_default": 0.001,
+              "value": 0.1
+            },
+            {
+              "setting": "training.tree_directional_questions",
+              "shipped_default": true,
+              "value": false
+            },
+            {
+              "setting": "training.tree_rotate_state_weights",
+              "shipped_default": true,
+              "value": false
+            },
+            {
+              "setting": "training.untied.convergence_ratio",
+              "shipped_default": 0.001,
+              "value": 0.1
+            },
+            {
+              "setting": "training.untied_inventory",
+              "shipped_default": "all-triphone",
+              "value": "linear"
+            }
+          ]
+        }
       }
     },
     "on": {
@@ -17643,7 +17766,24 @@
         "insertions": 1708,
         "known_skips": [
           {
-            "mechanism": "beam failure on a known-hard utterance after permitted retry in the multipron posture \u2014 the recorded on-mode remainder class (V7-era: a0302/b0486; set shifted with the reachable inventory: b0320 now trains); deep diagnosis deferred per banked Q6, tracked as an open item",
+            "mechanism": "beam failure on a known-hard utterance after permitted retry in the multipron posture — the recorded on-mode remainder class (V7-era: a0302/b0486; set shifted with the reachable inventory: b0320 now trains); deep diagnosis deferred per banked Q6, tracked as an open item",
+            "mode": "on",
+            "passes": [
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10
+            ],
+            "recorded-in": "on-mode parity anchor",
+            "stage": "cd-untied",
+            "utterance": "arctic_a0302"
+          },
+          {
+            "mechanism": "beam failure on a known-hard utterance after permitted retry in the multipron posture — the recorded on-mode remainder class (V7-era: a0302/b0486; set shifted with the reachable inventory: b0320 now trains); deep diagnosis deferred per banked Q6, tracked as an open item",
             "mode": "on",
             "pass": 6,
             "recorded-in": "on-mode parity anchor",
@@ -34635,7 +34775,53 @@
         "utterances": 3395,
         "wer": 76.21572943766259,
         "wil": 0.9094349727226482,
-        "wip": 0.09056502727735183
+        "wip": 0.09056502727735183,
+        "configuration_provenance": {
+          "source": {
+            "kind": "named benchmark profile",
+            "name": "on"
+          },
+          "diff_from_shipped_defaults": [
+            {
+              "setting": "split.test_count",
+              "shipped_default": null,
+              "value": 0
+            },
+            {
+              "setting": "training.accept_arctic_a0587_known_skip",
+              "shipped_default": false,
+              "value": true
+            },
+            {
+              "setting": "training.arctic_a0302_zero_codebook_band",
+              "shipped_default": null,
+              "value": [
+                4548,
+                4623
+              ]
+            },
+            {
+              "setting": "training.tree_directional_questions",
+              "shipped_default": true,
+              "value": false
+            },
+            {
+              "setting": "training.tree_rotate_state_weights",
+              "shipped_default": true,
+              "value": false
+            },
+            {
+              "setting": "training.untied.max_iterations",
+              "shipped_default": 6,
+              "value": 10
+            },
+            {
+              "setting": "training.untied_inventory",
+              "shipped_default": "all-triphone",
+              "value": "transcript-reachable"
+            }
+          ]
+        }
       },
       "slt55": {
         "accuracy": 0.6998050682261209,
@@ -34652,7 +34838,24 @@
         "insertions": 9,
         "known_skips": [
           {
-            "mechanism": "beam failure on a known-hard utterance after permitted retry in the multipron posture \u2014 the recorded on-mode remainder class (V7-era: a0302/b0486; set shifted with the reachable inventory: b0320 now trains); deep diagnosis deferred per banked Q6, tracked as an open item",
+            "mechanism": "beam failure on a known-hard utterance after permitted retry in the multipron posture — the recorded on-mode remainder class (V7-era: a0302/b0486; set shifted with the reachable inventory: b0320 now trains); deep diagnosis deferred per banked Q6, tracked as an open item",
+            "mode": "on",
+            "passes": [
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10
+            ],
+            "recorded-in": "on-mode parity anchor",
+            "stage": "cd-untied",
+            "utterance": "arctic_a0302"
+          },
+          {
+            "mechanism": "beam failure on a known-hard utterance after permitted retry in the multipron posture — the recorded on-mode remainder class (V7-era: a0302/b0486; set shifted with the reachable inventory: b0320 now trains); deep diagnosis deferred per banked Q6, tracked as an open item",
             "mode": "on",
             "pass": 6,
             "recorded-in": "on-mode parity anchor",
@@ -34944,9 +35147,55 @@
         "utterances": 55,
         "wer": 30.01949317738791,
         "wil": 0.4623535530385139,
-        "wip": 0.5376464469614861
+        "wip": 0.5376464469614861,
+        "configuration_provenance": {
+          "source": {
+            "kind": "named benchmark profile",
+            "name": "on"
+          },
+          "diff_from_shipped_defaults": [
+            {
+              "setting": "split.test_count",
+              "shipped_default": null,
+              "value": 0
+            },
+            {
+              "setting": "training.accept_arctic_a0587_known_skip",
+              "shipped_default": false,
+              "value": true
+            },
+            {
+              "setting": "training.arctic_a0302_zero_codebook_band",
+              "shipped_default": null,
+              "value": [
+                4548,
+                4623
+              ]
+            },
+            {
+              "setting": "training.tree_directional_questions",
+              "shipped_default": true,
+              "value": false
+            },
+            {
+              "setting": "training.tree_rotate_state_weights",
+              "shipped_default": true,
+              "value": false
+            },
+            {
+              "setting": "training.untied.max_iterations",
+              "shipped_default": 6,
+              "value": 10
+            },
+            {
+              "setting": "training.untied_inventory",
+              "shipped_default": "all-triphone",
+              "value": "transcript-reachable"
+            }
+          ]
+        }
       }
     }
   },
-  "schema_version": 3
+  "schema_version": 4
 }

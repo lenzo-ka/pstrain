@@ -278,6 +278,9 @@ def _cell(errors: tuple[int, ...], *, recorded: bool) -> dict[str, object]:
         "decoded": len(errors),
         "oov_tokens": 0,
         "known_skips": [],
+        "configuration_provenance": configuration_provenance(
+            Profile(), source_kind="shipped defaults"
+        ),
     }
     if recorded:
         cell["utterance_rows"] = rows

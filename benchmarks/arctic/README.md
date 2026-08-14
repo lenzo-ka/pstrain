@@ -28,6 +28,11 @@ Install the project with its test dependencies, then run:
 python scripts/bench_arctic.py --record docs/benchmarks/<record>.json
 ```
 
+Each run writes `results.json` and a human-readable `report.md` in the work
+directory. Every result cell in both files names its configuration source and
+shows only its differences from the shipped schema defaults; an empty diff is
+rendered explicitly.
+
 The committed record is produced by the PIN run with
 `--emit-record docs/benchmarks/<record>.json`. Until that pin run has been
 performed, use `--no-compare` for an exploratory run or `--emit-record` for the
