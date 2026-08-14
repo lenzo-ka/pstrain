@@ -87,17 +87,24 @@ add_boundary_bypass(state_t *old, uint32 n_state,
     uint32 *next_state, *prior_state;
     float32 *next_tprob, *prior_tprob;
     uint32 *offset;
+    uint8 *bypass_pred;
     uint32 i, total_next = 0, total_prior = 0, noff = 0, poff = 0;
     uint32 final_slot, final_exit, n_bypass;
 
     if (graph->n < 3)
         return old;
     offset = ckd_calloc(graph->n, sizeof(*offset));
+    bypass_pred = ckd_calloc(n_state, sizeof(*bypass_pred));
     for (i = 1; i < graph->n; ++i)
         offset[i] = offset[i - 1] + mdef->defn[graph->phone[i - 1]].n_state;
     final_slot = graph->n - 1;
     final_exit = offset[final_slot] + mdef->defn[graph->phone[final_slot]].n_state - 1;
     n_bypass = graph->n_prior[final_slot];
+    for (i = 0; i < n_bypass; ++i) {
+        uint32 pred = graph->prior_idx[final_slot][i];
+        uint32 pred_exit = offset[pred] + mdef->defn[graph->phone[pred]].n_state - 1;
+        bypass_pred[pred_exit] = TRUE;
+    }
 
     for (i = 0; i < n_state; ++i) {
         total_next += old[i].n_next;
@@ -112,15 +119,6 @@ add_boundary_bypass(state_t *old, uint32 n_state,
     prior_tprob = ckd_calloc(total_prior, sizeof(*prior_tprob));
 
     for (i = 0; i < n_state; ++i) {
-        uint32 slot, is_final_pred = FALSE;
-        for (slot = 0; slot < n_bypass; ++slot) {
-            uint32 pred = graph->prior_idx[final_slot][slot];
-            uint32 pred_exit = offset[pred] + mdef->defn[graph->phone[pred]].n_state - 1;
-            if (i == pred_exit) {
-                is_final_pred = TRUE;
-                break;
-            }
-        }
         state[i] = old[i];
         state[i].next_state = next_state + noff;
         state[i].next_tprob = next_tprob + noff;
@@ -129,11 +127,16 @@ add_boundary_bypass(state_t *old, uint32 n_state,
                    old[i].n_next * sizeof(*next_state));
             memcpy(state[i].next_tprob, old[i].next_tprob,
                    old[i].n_next * sizeof(*next_tprob));
+            if (bypass_pred[i]) {
+                uint32 slot;
+                for (slot = 0; slot < old[i].n_next; ++slot)
+                    state[i].next_tprob[slot] *= 0.5f;
+            }
         }
         noff += old[i].n_next;
-        if (is_final_pred) {
+        if (bypass_pred[i]) {
             state[i].next_state[old[i].n_next] = final_exit;
-            state[i].next_tprob[old[i].n_next] = 1.0f;
+            state[i].next_tprob[old[i].n_next] = 0.5f;
             state[i].n_next++;
             ++noff;
         }
@@ -145,6 +148,13 @@ add_boundary_bypass(state_t *old, uint32 n_state,
                    old[i].n_prior * sizeof(*prior_state));
             memcpy(state[i].prior_tprob, old[i].prior_tprob,
                    old[i].n_prior * sizeof(*prior_tprob));
+            {
+                uint32 slot;
+                for (slot = 0; slot < old[i].n_prior; ++slot) {
+                    if (bypass_pred[old[i].prior_state[slot]])
+                        state[i].prior_tprob[slot] *= 0.5f;
+                }
+            }
         }
         poff += old[i].n_prior;
         if (i == final_exit) {
@@ -153,21 +163,22 @@ add_boundary_bypass(state_t *old, uint32 n_state,
                 uint32 pred = graph->prior_idx[final_slot][slot];
                 state[i].prior_state[old[i].n_prior + slot] =
                     offset[pred] + mdef->defn[graph->phone[pred]].n_state - 1;
-                state[i].prior_tprob[old[i].n_prior + slot] = 1.0f;
+                state[i].prior_tprob[old[i].n_prior + slot] = 0.5f;
             }
             state[i].n_prior += n_bypass;
             poff += n_bypass;
         }
     }
 
-    state[0].flags |= STATE_FLAG_INITIAL | (1 << STATE_INITIAL_FANOUT_SHIFT);
+    state[0].flags |= STATE_FLAG_INITIAL | (2 << STATE_INITIAL_FANOUT_SHIFT);
     for (i = 0; i < graph->n_next[0]; ++i) {
         uint32 entry = offset[graph->next_idx[0][i]];
         state[entry].flags |= STATE_FLAG_INITIAL
-            | (graph->n_next[0] << STATE_INITIAL_FANOUT_SHIFT);
+            | (2 * graph->n_next[0] << STATE_INITIAL_FANOUT_SHIFT);
     }
     state_seq_free(old, n_state);
     ckd_free(offset);
+    ckd_free(bypass_pred);
     return state;
 }
 

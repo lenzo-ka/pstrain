@@ -604,10 +604,8 @@ forward(float64 **active_alpha,
 	    if (bp && state_seq[j].mixw == TYING_NON_EMITTING) {
 		E_INFO("After non-emitting state update, best path to %d(%d) = %d(%d)\n",
 		       j, amap[j], next_active[bp[t][s]], bp[t][s]);
-		/* Assumptions about topology that might not be valid
-		 * but are useful for debugging. */
-		assert(next_active[bp[t][s]] <= j);
-		assert(j - next_active[bp[t][s]] <= 2);
+			/* The predecessor came from j's actual incoming graph arc.
+			 * Optional boundary bypasses may span several state slots. */
 	    }
 	}
 #endif

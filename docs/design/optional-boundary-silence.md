@@ -34,10 +34,13 @@ sentence exit. The ordinary arcs through both `SIL` HMMs remain available.
 The added alternatives consume zero frames; interior optional silence behavior
 is unchanged.
 
-The retained initial `SIL` path has virtual-start weight 1. The zero-frame
-bypass also has total virtual-start weight 1, distributed uniformly across the
-initial phone graph's successors. This preserves the graph builder's existing
-`1 / n_next` pronunciation fan-out convention.
+The bypass is a probabilistic alternative, not an unnormalized free path. The
+retained initial `SIL` path and the zero-frame entry bypass each receive half of
+the virtual-start mass. The bypass half is distributed uniformly across the
+initial phone graph's successors. Likewise, each last-spoken exit splits half
+of its outgoing mass across its retained successors and assigns half to the
+direct final-exit bypass. Total entry and exit mass is therefore one, matching
+the graph builder's existing normalized fan-out convention.
 
 ## Scope
 
