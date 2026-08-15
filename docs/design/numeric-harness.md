@@ -69,6 +69,20 @@ shipped gate to reject the fused instruction. This proves the detector's red
 path on the test host; it does not reproduce the separate training trajectory
 or benchmark measurements reported separately.
 
+The dispatch-only, diagnostic-never-gating Windows probe checks a narrower
+platform boundary. The dispatcher uses a unique tag and verifies the run SHA;
+through repository-owned refs and workflows, probe checks never attach to a PR
+head. A third party can later point a branch at the probe SHA, and that external
+branch aliasing is outside this boundary. In the
+current staged population (x64), contraction cannot be expressed at the
+production ISA, so a green production-object scan is vacuous; a no-`/arch`
+contraction-enabled canary records that fact. The persistent gate enumerates
+the architectures in the staged production objects. For every staged
+architecture that can express FMA (x64 with `/arch:AVX2`, or ARM64 at its
+baseline ISA), it requires a contraction-enabled canary of that same
+architecture which the scanner rejects. Staging a new architecture without a
+discriminating canary of the same machine architecture fails the probe.
+
 Regenerate from the repository root with:
 
 ```console

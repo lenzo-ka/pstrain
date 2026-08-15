@@ -131,6 +131,8 @@ def _find_lib_path() -> Path | None:
     5. System library paths
     """
     lib_names = ["libpstrainc.dylib", "libpstrainc.so"]
+    if sys.platform == "win32":
+        lib_names.append("pstrainc.dll")
 
     # 1. Environment variable override
     if "PSTRAIN_LIB_PATH" in os.environ:
@@ -142,7 +144,7 @@ def _find_lib_path() -> Path | None:
     #    GNUInstallDirs, macOS/others to lib — check both.
     bundled = _get_bundled_lib_dir()
     if bundled:
-        for libdir in ("lib", "lib64"):
+        for libdir in ("lib", "lib64", "bin"):
             for name in lib_names:
                 candidate = bundled / libdir / name
                 if candidate.exists():
@@ -160,17 +162,28 @@ def _find_lib_path() -> Path | None:
     ]
     for vendored in vendored_dirs:
         if vendored.is_dir():
-            for pattern in ("libpstrainc*.so", "libpstrainc*.dylib"):
+            patterns = ["libpstrainc*.so", "libpstrainc*.dylib"]
+            if sys.platform == "win32":
+                patterns.append("pstrainc*.dll")
+            for pattern in patterns:
                 hits = sorted(vendored.glob(pattern))
                 if hits:
                     return hits[0]
 
     # 3. Development build. On Windows the shared library is a RUNTIME
-    #    artifact and lands in build/bin (CMAKE_RUNTIME_OUTPUT_DIRECTORY),
-    #    not build/lib, so search there too.
+    #    artifact. Multi-config generators append the selected configuration
+    #    to CMAKE_RUNTIME_OUTPUT_DIRECTORY, so search those directories before
+    #    the unsuffixed runtime directory.
     project_root = _get_project_root()
     if project_root:
-        for subdir in ["build/lib", "build/bin", "build"]:
+        subdirs = ["build/lib"]
+        if sys.platform == "win32":
+            subdirs.extend(
+                f"build/bin/{configuration}"
+                for configuration in ("Release", "Debug", "RelWithDebInfo", "MinSizeRel")
+            )
+        subdirs.extend(["build/bin", "build"])
+        for subdir in subdirs:
             for name in lib_names:
                 candidate = project_root / subdir / name
                 if candidate.exists():

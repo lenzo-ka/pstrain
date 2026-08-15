@@ -1,9 +1,31 @@
 #!/usr/bin/env python3
-"""Reject fused multiply-add instructions in build trees or built wheels."""
+"""Reject FP instructions that multiply and accumulate without intermediate rounding.
+
+That criterion follows the fused-operation semantics in the Arm Architecture
+Reference Manual.  The enumerated boundary covers x86 FMA3/FMA4 and Arm
+scalar, AdvSIMD, SVE, and SVE2 families: ordinary and negated multiply-add or
+subtract; destructive multiplicand forms; widening FP16/BF16 long forms;
+complex FCMLA; and floating-point FMMLA/BFMMLA matrix operations.  Operand and
+element-width forms share mnemonic roots in disassembly.  It also covers the
+x86 VDPBF16PS and Arm BFDOT families, whose dot products accumulate unrounded
+products.
+
+Integer matrix operations such as SMMLA and UMMLA are outside the boundary
+because they do not compute floating-point results.  X86 DPPS/DPPD are outside
+the boundary because each multiplication is rounded before its products are
+summed.  Arm SDOT, UDOT, USDOT, and SUDOT are integer operations.  Arm BFDOT,
+BFMMLALB/BFMMLALT, and BFMMLA are retained because their products are not
+rounded before accumulation.
+
+GitHub's ubuntu-latest runner supplies versioned LLVM toolsets, including
+llvm-objdump, alongside GNU binutils. COFF scans prefer LLVM because GNU
+objdump may not include support for a COFF object's target architecture.
+"""
 
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import shutil
 import subprocess
@@ -12,7 +34,17 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-FMA = re.compile(r"\b(?:v?f(?:n?madd|n?msub|mla|mls)[a-z0-9.]*)\b", re.IGNORECASE)
+FMA = re.compile(
+    r"\b(?:"
+    r"v?f(?:madd|msub|nmadd|nmsub)[a-z0-9.]*"
+    r"|f(?:mad|msb|nmad|nmsb|nmla|nmls)[a-z0-9.]*"
+    r"|f(?:mla|mls)(?:l2?|lb|lt)?[a-z0-9.]*"
+    r"|fcmla[a-z0-9.]*|fmmla[a-z0-9.]*"
+    r"|bf(?:dot|mla|mmla)[a-z0-9.]*"
+    r"|vdpbf16ps[a-z0-9.]*"
+    r")\b",
+    re.IGNORECASE,
+)
 REQUIRED = ("bw", "norm", "sphinx_fe")
 NATIVE_MAGICS = {
     b"\x7fELF",
@@ -22,6 +54,11 @@ NATIVE_MAGICS = {
     b"\xce\xfa\xed\xfe",
     b"\xfe\xed\xfa\xcf",
     b"\xcf\xfa\xed\xfe",
+}
+COFF_MACHINES = {
+    b"\x4c\x01",  # i386
+    b"\x64\x86",  # amd64
+    b"\x64\xaa",  # arm64
 }
 
 
@@ -45,7 +82,15 @@ def _is_native(path: Path) -> bool:
         start = path.read_bytes()[:8]
     except OSError:
         return False
-    return start[:4] in NATIVE_MAGICS or start == b"!<arch>\n"
+    return start[:4] in NATIVE_MAGICS or start == b"!<arch>\n" or start[:2] in COFF_MACHINES
+
+
+def object_artifacts(object_dir: Path) -> list[Path]:
+    """Return COFF object files recursively from an extracted CI artifact."""
+    found = sorted(path.resolve() for path in object_dir.rglob("*.obj") if path.is_file())
+    if not found:
+        raise RuntimeError(f"unchecked object set: no .obj files found in {object_dir}")
+    return found
 
 
 def _require_training_artifacts(found: set[Path], source: Path) -> None:
@@ -78,9 +123,35 @@ def _run(command: list[str], path: Path) -> str:
     return result.stdout
 
 
+def _llvm_objdumps() -> list[str]:
+    """Return the bare LLVM disassembler, or its versioned PATH alternatives."""
+    bare = shutil.which("llvm-objdump")
+    if bare is not None:
+        return [bare]
+
+    versioned: set[Path] = set()
+    for directory in os.get_exec_path():
+        try:
+            versioned.update(Path(directory).glob("llvm-objdump-*"))
+        except OSError:
+            continue
+    return [str(path) for path in sorted(versioned, reverse=True) if os.access(path, os.X_OK)]
+
+
+def _objdumps(path: Path) -> list[str]:
+    """Return disassemblers in the preferred order for this file."""
+    llvm = _llvm_objdumps()
+    generic = shutil.which("objdump")
+    if path.read_bytes()[:2] in COFF_MACHINES:
+        candidates = llvm + ([generic] if generic is not None else [])
+    else:
+        candidates = ([generic] if generic is not None else []) + llvm
+    return list(dict.fromkeys(candidates))
+
+
 def disassemblies(path: Path) -> list[tuple[str, str]]:
     """Return an explicit architecture label and disassembly for each slice."""
-    if sys.platform == "darwin":
+    if sys.platform == "darwin" and path.read_bytes()[:2] not in COFF_MACHINES:
         lipo = shutil.which("lipo")
         otool = shutil.which("otool")
         if lipo is None or otool is None:
@@ -93,27 +164,41 @@ def disassemblies(path: Path) -> list[tuple[str, str]]:
             for architecture in architectures
         ]
 
-    objdump = shutil.which("objdump")
-    if objdump is None:
-        raise RuntimeError(f"unchecked {path}: objdump is required")
-    headers = _run([objdump, "-f", str(path)], path)
-    architectures = sorted(set(re.findall(r"architecture:\s*([^,\n]+)", headers)))
-    if not architectures:
-        raise RuntimeError(f"unchecked {path}: objdump reported no architecture")
-    return [("+".join(architectures), _run([objdump, "-d", str(path)], path))]
-
-
-def check(paths: list[tuple[str, Path]]) -> int:
-    """Check labelled artifacts and report every inspected architecture."""
     failures: list[str] = []
+    for objdump in _objdumps(path):
+        try:
+            headers = _run([objdump, "-f", str(path)], path)
+            architectures = sorted(set(re.findall(r"architecture:\s*([^,\n]+)", headers)))
+            if not architectures:
+                raise RuntimeError(f"unchecked {path}: {objdump} reported no architecture")
+            assembly = _run([objdump, "-d", str(path)], path)
+        except RuntimeError as error:
+            failures.append(str(error))
+            continue
+        return [("+".join(architectures), assembly)]
+
+    reason = "; ".join(failures) or "no objdump or llvm-objdump executable found"
+    raise RuntimeError(f"unchecked {path}: no available disassembler could read file: {reason}")
+
+
+def inspect(paths: list[tuple[str, Path]]) -> tuple[list[str], dict[str, list[str]]]:
+    """Return inspected labels and fused instructions grouped by architecture."""
     checked: list[str] = []
+    fused: dict[str, list[str]] = {}
     for source, path in paths:
         for architecture, assembly in disassemblies(path):
             label = f"{source}:{path.name}[{architecture}]"
             checked.append(label)
             matches = sorted({match.group(0) for match in FMA.finditer(assembly)})
             if matches:
-                failures.append(f"{label}: {', '.join(matches)}")
+                fused.setdefault(architecture, []).append(f"{label}: {', '.join(matches)}")
+    return checked, fused
+
+
+def check(paths: list[tuple[str, Path]]) -> int:
+    """Check labelled artifacts and report every inspected architecture."""
+    checked, fused = inspect(paths)
+    failures = [failure for architecture in sorted(fused) for failure in fused[architecture]]
     if failures:
         print("FP contraction gate failed; fused instructions found:", file=sys.stderr)
         print("\n".join(failures), file=sys.stderr)
@@ -124,11 +209,56 @@ def check(paths: list[tuple[str, Path]]) -> int:
     return 0
 
 
+def check_population(production_dir: Path, canary_dir: Path) -> int:
+    """Require clean production objects and a rejecting canary for every architecture."""
+    production = [(str(production_dir), path) for path in object_artifacts(production_dir)]
+    canaries = [(str(canary_dir), path) for path in object_artifacts(canary_dir)]
+    checked, production_fused = inspect(production)
+    canary_checked, canary_fused = inspect(canaries)
+    production_architectures = {label.rsplit("[", 1)[1][:-1] for label in checked}
+    canary_architectures = {label.rsplit("[", 1)[1][:-1] for label in canary_checked}
+
+    failures: list[str] = []
+    for architecture in sorted(production_fused):
+        failures.extend(production_fused[architecture])
+    missing = sorted(production_architectures - canary_architectures)
+    nondiscriminating = sorted(production_architectures - set(canary_fused))
+    if missing:
+        failures.append("missing same-architecture canary: " + ", ".join(missing))
+    if nondiscriminating:
+        failures.append("canary did not trigger scanner: " + ", ".join(nondiscriminating))
+    if failures:
+        print("FP contraction population gate failed:", file=sys.stderr)
+        print("\n".join(failures), file=sys.stderr)
+        return 1
+
+    architectures = ", ".join(sorted(production_architectures))
+    print(
+        "FP contraction population gate passed: "
+        f"{len(checked)} production object architectures; canary evidence for {architectures}"
+    )
+    for architecture in sorted(production_architectures):
+        print(f"canary rejected [{architecture}]: {'; '.join(canary_fused[architecture])}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("build_dir", nargs="?", type=Path, default=Path("build"))
     parser.add_argument("--wheels", type=Path)
+    parser.add_argument("--objects", type=Path)
+    parser.add_argument("--canaries", type=Path)
     args = parser.parse_args()
+
+    if args.objects is not None:
+        if args.wheels is not None:
+            parser.error("--objects and --wheels are mutually exclusive")
+        if args.canaries is not None:
+            return check_population(args.objects, args.canaries)
+        return check([(str(args.objects), path) for path in object_artifacts(args.objects)])
+
+    if args.canaries is not None:
+        parser.error("--canaries requires --objects")
 
     if args.wheels is None:
         return check([(str(args.build_dir), path) for path in build_artifacts(args.build_dir)])
