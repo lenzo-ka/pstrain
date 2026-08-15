@@ -221,7 +221,16 @@ models_init(cmd_ln_t *config)
 			 agc_type_from_str(cmd_ln_str_r(config, "-agc")), 1,
 			 cmd_ln_int32_r(config, "-ceplen"));
 
+    if (kbc->fcb == NULL)
+        E_FATAL("feat_init() failed\n");
+    if (cmd_ln_exists_r(config, "-cmninit"))
+        set_cmninit(kbc->fcb, cmd_ln_str_r(config, "-cmninit"));
+
     s3_am_init(kbc);
+
+    if (kbc->mgau && feat_dimension(kbc->fcb) != mgau_veclen(kbc->mgau))
+        E_FATAL("Feature dimension %d does not match Gaussian dimension %d\n",
+                feat_dimension(kbc->fcb), mgau_veclen(kbc->mgau));
 
     /* Initialize the front end if -adcin is specified */
     if (cmd_ln_exists_r(config, "-adcin") && cmd_ln_boolean_r(config, "-adcin")) {

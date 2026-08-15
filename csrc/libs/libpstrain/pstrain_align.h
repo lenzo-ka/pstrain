@@ -36,6 +36,9 @@ typedef struct pstrain_align_config_s {
     int     lts_mismatch;    /**< Use LTS rules for OOV.    Default 0.    */
 } pstrain_align_config_t;
 
+#define PSTRAIN_ABI_VERSION 1
+
+uint32 pstrain_abi_version(void);
 void pstrain_align_config_default(pstrain_align_config_t *config);
 
 typedef struct pstrain_align_context_s pstrain_align_context_t;

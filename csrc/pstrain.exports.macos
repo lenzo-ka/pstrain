@@ -7,6 +7,7 @@ _mllr_transform_mean
 _model_def_free
 _model_def_read
 _model_def_write
+_pstrain_abi_version
 _pstrain_agg_seg
 _pstrain_align_config_default
 _pstrain_align_free

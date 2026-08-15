@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from pstrain.lib._cffi import read_gau, write_gau
 from pstrain.lib.alignment import (
     AlignedSegment,
     Aligner,
@@ -223,22 +224,50 @@ class TestAligner:
         ):
             Aligner(model, dict_path)
 
-    def test_real_alignment_honors_12_cepstral_record(self, tmp_path: Path) -> None:
+    def test_real_alignment_rejects_12_cepstral_record_with_39d_model(self, tmp_path: Path) -> None:
         model = _alignment_model(tmp_path, **{"-ncep": "12", "-ceplen": "12"})
 
-        with Aligner(
-            model,
-            _FIXTURES / "mini_arctic" / "dictionary.dict",
-            filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
-            beam=1e-200,
-        ) as aligner:
-            result = aligner.align_audio(
-                _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
-                _ALIGNMENT_TRANSCRIPT,
+        with pytest.raises(
+            RuntimeError,
+            match=r"Feature dimension 36 does not match Gaussian dimension 39",
+        ):
+            Aligner(
+                model,
+                _FIXTURES / "mini_arctic" / "dictionary.dict",
+                filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
+                beam=1e-200,
             )
 
-        assert result.words
-        assert result.n_frames > 0
+    def test_real_alignment_live_cmninit_changes_score(self, tmp_path: Path) -> None:
+        """Exercise live CMN against a score-sensitive real model path.
+
+        The copied one-density fixture is made score-sensitive without changing
+        its topology or dimensions: all 39-D means are zeroed, then codebooks
+        are spread from -1 to 1 on coefficient zero.  Existing variances and
+        mixture weights are retained coherently.
+        """
+        model = _alignment_model(tmp_path)
+        means = read_gau(str(model / "means"))[0]
+        means.fill(0.0)
+        means[:, 0, 0, 0] = np.linspace(-1.0, 1.0, means.shape[0])
+        assert write_gau(str(model / "means"), means) == 0
+        scores = []
+        for cmninit in ("0,0,0", "40,3,-1"):
+            with Aligner(
+                model,
+                _FIXTURES / "mini_arctic" / "dictionary.dict",
+                filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
+                beam=1e-200,
+                cmn="live",
+                cmninit=cmninit,
+            ) as aligner:
+                result = aligner.align_audio(
+                    _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
+                    _ALIGNMENT_TRANSCRIPT,
+                )
+            scores.append(result.total_score)
+
+        assert scores[0] != scores[1]
 
     def test_real_alignment_honors_8khz_profile(self, tmp_path: Path) -> None:
         model = _alignment_model(

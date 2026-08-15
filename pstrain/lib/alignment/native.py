@@ -60,6 +60,7 @@ class Aligner:
         cmn: Cepstral mean normalization mode. ``"batch"`` matches the
             way SphinxTrain trains models; ``"current"`` matches the
             sphinx3_align CLI default.
+        cmninit: Initial mean vector used when ``cmn="live"``.
         agc: Automatic gain control mode (default ``"none"``).
         varnorm: Apply cepstral variance normalization.
         feat_type: Feature stream spec (default ``"1s_c_d_dd"``).
@@ -80,6 +81,7 @@ class Aligner:
         include_phones: bool = True,
         include_states: bool = False,
         cmn: str = _DEFAULT_CMN,
+        cmninit: str = "40,3,-1",
         agc: str = _DEFAULT_AGC,
         varnorm: bool = False,
         feat_type: str = _DEFAULT_FEAT_TYPE,
@@ -118,6 +120,7 @@ class Aligner:
                     "include_phones": include_phones,
                     "include_states": include_states,
                     "cmn": cmn,
+                    "cmninit": cmninit,
                     "agc": agc,
                     "varnorm": varnorm,
                     "feat_type": feat_type,
@@ -150,8 +153,8 @@ class Aligner:
         cfg.lts_mismatch = 1 if lts_mismatch else 0
 
         self._feat_type_b = feat_record["-feat"].encode()
-        self._cmn_b = feat_record["-cmn"].encode()
-        self._cmninit_b = feat_record["-cmninit"].encode()
+        self._cmn_b = cmn.encode()
+        self._cmninit_b = cmninit.encode()
         self._agc_b = feat_record["-agc"].encode()
         cfg.feat_type = ffi.cast("const char *", ffi.from_buffer(self._feat_type_b))
         cfg.cmn = ffi.cast("const char *", ffi.from_buffer(self._cmn_b))

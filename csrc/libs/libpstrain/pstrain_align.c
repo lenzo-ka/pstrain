@@ -89,6 +89,12 @@ struct pstrain_align_context_s {
 static pstrain_align_context_t *g_ctx = NULL;
 static char g_last_error[1024];
 
+uint32
+pstrain_abi_version(void)
+{
+    return PSTRAIN_ABI_VERSION;
+}
+
 static void
 set_error(const char *fmt, ...)
 {
