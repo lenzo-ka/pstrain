@@ -45,6 +45,10 @@ pstrain/lib/
 ├── features.py     ✅ FeatureExtractor: pstrain_fe_create
 ├── agg_seg.py      ✅ agg_seg(): pstrain_agg_seg
 ├── commands.py     ✅ core command paths: param_cnt, map_adapt, kdtree, delint
+├── param_cnt.py    ✅ contained, declared capability (not pipeline-wired)
+├── map_adapt.py    ✅ contained, declared capability (not pipeline-wired)
+├── kdtree.py       ✅ contained, declared capability (not pipeline-wired)
+├── delint.py       ✅ contained, declared capability (not pipeline-wired)
 └── _cffi/io.py     ✅ read_gau, write_gau, read_mixw, write_mixw,
                        read_tmat, write_tmat, read_dnom, write_dnom
 ```
@@ -165,11 +169,11 @@ def run_ci_training(
 - [x] State tying (`pstrain_tie_states`)
 - [x] Model I/O (`read_gau`, `write_gau`, `read_mixw`, etc.)
 - [x] K-means (`pstrain_kmeans`, `pstrain_kmeans_init`)
-- [x] Parameter counting (core `param_cnt` command)
+- [x] Parameter counting (contained capability and core `param_cnt` command)
 - [x] Segment aggregation (`pstrain_agg_seg`)
-- [x] MAP adaptation (core `map_adapt` command)
-- [x] KD-tree building (core `kdtree` command)
-- [x] Deleted interpolation (core `delint` command)
+- [x] MAP adaptation (contained capability and core `map_adapt` command)
+- [x] KD-tree building (contained capability and core `kdtree` command)
+- [x] Deleted interpolation (contained capability and core `delint` command)
 
 ### Orchestration Layer
 - [x] Pipeline runner with all tasks registered (`pstrain.lib.pipeline`)

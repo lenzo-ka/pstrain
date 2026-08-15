@@ -2,18 +2,19 @@
 
 Decision date: 2026-08-14.
 
-The native-worker boundary is part of the supported behavior of retained CFFI operations. A retained
-wrapper is therefore a deliberate divergence from the upstream command boundary even when its numeric
-implementation is equivalent to the core program.
+All six surfaces are **keep and declare**. An uncalled implementation is not residue when it correctly
+preserves a capability represented by a vendored core program. The in-process wrappers retain the PR
+#92 containment boundary, typed Python exceptions, and direct in-process array handling; they do not
+replace the upstream command position.
 
-| ID | Operation | Disposition | Declaration | Upstream-compatible position |
+| ID | Capability and core program | User-facing wiring | Why keep the in-process wrapper | Upstream-compatible position |
 | --- | --- | --- | --- | --- |
-| R04 | Deleted interpolation | Delete and use core | The uncalled `pstrain_delint` and Python wrapper were removed. `CommandBuilder.delint()` invokes the core program, so failures use its process exit and stderr contract. | Core is the only supported position. |
-| R07 | Flat initialization | Keep and declare | The live flat pipeline keeps `pstrain_flat_tmat`, `pstrain_flat_mixw`, `pstrain_init_gau`, and `pstrain_norm_gau` behind `@contained`. This preserves one in-process-shaped workflow, typed containment failures, and direct model-array assembly. | The shipped `mk_flat`, `init_gau`, and `norm` programs remain callable; no additional compatibility position is owed because the retained path adds a boundary without changing the established model semantics. |
-| R08 | Gaussian splitting | Keep and declare | The live density-growth step keeps `pstrain_inc_comp` behind `@contained`. This preserves typed containment failures and direct use of the retained density-count path. | The shipped `inc_comp` program remains callable; no additional compatibility position is owed because both positions implement the same split semantics. |
-| R09 | KD-tree builder | Delete and use core | The uncalled `pstrain_kdtree_build` and Python wrapper were removed. `CommandBuilder.kdtree()` invokes the core program. | Core is the only supported position. |
-| R11 | MAP adaptation | Delete and use core | The uncalled `pstrain_map_adapt` and Python wrapper were removed. `CommandBuilder.map_adapt()` invokes the core program. | Core is the only supported position. |
-| R13 | Parameter counting | Delete and use core | The uncalled `pstrain_param_cnt` and Python wrapper were removed. `CommandBuilder.param_cnt()` invokes the core program. The removed wrapper wrote the core text format and returned `None`; it did not return typed counts to Python. | Core is the only supported position. |
+| R04 | Deleted interpolation (`delint`) | Unwired. A semi-continuous-model final smoothing pipeline step plus CLI/config would wire it. | `pstrain_delint` remains behind `@contained`, preserving typed failures and in-process accumulator/path arrays without a subprocess boundary. | Exists by construction: core `delint` and `CommandBuilder.delint()` remain callable. |
+| R07 | Flat initialization (`mk_flat`, `init_gau`, `norm`) | Wired through the `pstrain flat` CLI and flat-model pipeline task. | The live `pstrain_flat_tmat`, `pstrain_flat_mixw`, `pstrain_init_gau`, and `pstrain_norm_gau` calls remain behind `@contained`, preserving typed failures and direct model-array assembly. | Exists by construction: all three core programs remain callable. |
+| R08 | Gaussian splitting (`inc_comp`) | Wired through the Gaussian-splitting CLI and density-growth training step. | The live `pstrain_inc_comp` call remains behind `@contained`, preserving typed failures and direct density-count/model-array handling. | Exists by construction: core `inc_comp` remains callable. |
+| R09 | KD-tree construction (`kdtree`) | Unwired. A semi-continuous-model packaging/decoder-acceleration step plus CLI/config would wire it. | `pstrain_kdtree_build` remains behind `@contained`, preserving typed failures and in-process model data handling without a subprocess boundary. | Exists by construction: core `kdtree` and `CommandBuilder.kdtree()` remain callable. |
+| R11 | MAP adaptation (`map_adapt`) | Unwired. An adaptation pipeline/CLI stage consuming adaptation-data BW accumulators would wire it. | `pstrain_map_adapt` remains behind `@contained`, preserving typed failures and in-process accumulator/model arrays without a subprocess boundary. | Exists by construction: core `map_adapt` and `CommandBuilder.map_adapt()` remain callable. |
+| R13 | Corpus parameter counting (`param_cnt`) | Unwired. A corpus-diagnostics/state-tying preparation step plus CLI/config would wire it. | `pstrain_param_cnt` remains behind `@contained`, preserving typed failures and the in-process native data boundary. Its current Python contract writes the core text count format and returns `None`; it does not return typed counts. | Exists by construction: core `param_cnt` and `CommandBuilder.param_cnt()` remain callable. |
 
-The containment-routing gate is unchanged. No deleted operation required an exception: its Python-to-CFFI
-callsite and native symbol were removed together. The retained R07 and R08 callsites remain `@contained`.
+The containment-routing gate is unchanged. Each Python-to-CFFI entry point above remains `@contained`;
+no declared exception is added or weakened.

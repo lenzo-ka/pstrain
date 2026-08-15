@@ -1,12 +1,56 @@
 {
   "decision_date": "2026-08-14",
+  "disposition": "keep_and_declare",
   "items": [
-    {"id": "R04", "operation": "deleted interpolation", "decision": "delete_and_use_core", "core_programs": ["delint"], "compatibility_position": "core_only"},
-    {"id": "R07", "operation": "flat initialization", "decision": "keep_and_declare", "core_programs": ["mk_flat", "init_gau", "norm"], "reason": ["containment", "typed_errors", "in_process_arrays"], "compatibility_position": "core_programs_remain_callable"},
-    {"id": "R08", "operation": "Gaussian splitting", "decision": "keep_and_declare", "core_programs": ["inc_comp"], "reason": ["containment", "typed_errors", "retained_count_input"], "compatibility_position": "core_program_remains_callable"},
-    {"id": "R09", "operation": "kd-tree builder", "decision": "delete_and_use_core", "core_programs": ["kdtree"], "compatibility_position": "core_only"},
-    {"id": "R11", "operation": "MAP adaptation", "decision": "delete_and_use_core", "core_programs": ["map_adapt"], "compatibility_position": "core_only"},
-    {"id": "R13", "operation": "parameter counting", "decision": "delete_and_use_core", "core_programs": ["param_cnt"], "compatibility_position": "core_only", "correction": "removed wrapper returned None and emitted core text; it did not return typed counts"}
+    {
+      "id": "R04",
+      "operation": "deleted interpolation",
+      "core_programs": ["delint"],
+      "wiring": {"status": "unwired", "would_wire": "a semi-continuous-model final smoothing pipeline step and its CLI/config surface"},
+      "wrapper_position": ["PR #92 containment gate", "typed exceptions", "in-process arrays"],
+      "compatibility_position": {"status": "exists_by_construction", "basis": "the delint core program and CommandBuilder.delint() remain callable"}
+    },
+    {
+      "id": "R07",
+      "operation": "flat initialization",
+      "core_programs": ["mk_flat", "init_gau", "norm"],
+      "wiring": {"status": "wired", "paths": ["pstrain flat CLI", "flat-model pipeline task"]},
+      "wrapper_position": ["PR #92 containment gate", "typed exceptions", "in-process arrays"],
+      "compatibility_position": {"status": "exists_by_construction", "basis": "the mk_flat, init_gau, and norm core programs remain callable"}
+    },
+    {
+      "id": "R08",
+      "operation": "Gaussian splitting",
+      "core_programs": ["inc_comp"],
+      "wiring": {"status": "wired", "paths": ["Gaussian-splitting CLI", "density-growth training step"]},
+      "wrapper_position": ["PR #92 containment gate", "typed exceptions", "in-process arrays"],
+      "compatibility_position": {"status": "exists_by_construction", "basis": "the inc_comp core program remains callable"}
+    },
+    {
+      "id": "R09",
+      "operation": "kd-tree builder",
+      "core_programs": ["kdtree"],
+      "wiring": {"status": "unwired", "would_wire": "a semi-continuous-model packaging/decoder-acceleration step and its CLI/config surface"},
+      "wrapper_position": ["PR #92 containment gate", "typed exceptions", "in-process arrays"],
+      "compatibility_position": {"status": "exists_by_construction", "basis": "the kdtree core program and CommandBuilder.kdtree() remain callable"}
+    },
+    {
+      "id": "R11",
+      "operation": "MAP adaptation",
+      "core_programs": ["map_adapt"],
+      "wiring": {"status": "unwired", "would_wire": "an adaptation pipeline/CLI stage consuming adaptation-data BW accumulators"},
+      "wrapper_position": ["PR #92 containment gate", "typed exceptions", "in-process arrays"],
+      "compatibility_position": {"status": "exists_by_construction", "basis": "the map_adapt core program and CommandBuilder.map_adapt() remain callable"}
+    },
+    {
+      "id": "R13",
+      "operation": "parameter counting",
+      "core_programs": ["param_cnt"],
+      "wiring": {"status": "unwired", "would_wire": "a corpus-diagnostics/state-tying preparation step and its CLI/config surface"},
+      "wrapper_position": ["PR #92 containment gate", "typed exceptions", "in-process arrays"],
+      "compatibility_position": {"status": "exists_by_construction", "basis": "the param_cnt core program and CommandBuilder.param_cnt() remain callable"},
+      "return_contract": "writes the core text count format and returns None; it does not return typed counts"
+    }
   ],
-  "totals": {"keep_and_declare": 2, "delete_and_use_core": 4}
+  "totals": {"keep_and_declare": 6, "wired": 2, "unwired": 4}
 }

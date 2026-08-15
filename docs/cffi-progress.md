@@ -136,7 +136,7 @@ Build triphone models with state tying.
 | Component | C Program | CFFI Status | Priority | Notes |
 |-----------|-----------|-------------|----------|-------|
 | Aggregate segments | `pstrain_agg_seg` | ✅ | - | `agg_seg.aggregate_segments()` |
-| Parameter counting | core `param_cnt` | ✅ | - | `commands.CommandBuilder.param_cnt()`; CFFI re-roll removed 2026-08-14 |
+| Parameter counting | `param_cnt` / `pstrain_param_cnt` | ✅ | - | Unwired contained capability; core command remains callable |
 | BW for CD | `bw` | ✅ | - | Same as CI |
 | Norm for CD | `norm` | ✅ | - | Same as CI |
 
@@ -161,7 +161,7 @@ Build triphone models with state tying.
 [x] s3ts2cb_*() - Tied-state to codebook mapping
 [x] pstrain_prune_tree() - Prune decision tree
 [x] pstrain_agg_seg() - Aggregate segmentation statistics
-[x] core param_cnt command path - Parameter counting
+[x] pstrain_param_cnt() and core command path - Parameter counting
 ```
 
 ---
@@ -172,7 +172,7 @@ Speaker/environment adaptation.
 
 | Component | C Program | CFFI Status | Priority | Notes |
 |-----------|-----------|-------------|----------|-------|
-| MAP adaptation | core `map_adapt` | ✅ | - | `commands.CommandBuilder.map_adapt()`; CFFI re-roll removed 2026-08-14 |
+| MAP adaptation | `map_adapt` / `pstrain_map_adapt` | ✅ | - | Unwired contained capability; core command remains callable |
 | MLLR classes | `mllr_class_read/write` | ✅ | - | Class mapping I/O |
 | MLLR solve | `compute_mllr` | ✅ | - | Compute MLLR matrices |
 | MLLR transform | `mllr_transform_mean` | ✅ | - | Apply transform to means |
@@ -190,9 +190,9 @@ Speaker/environment adaptation.
 | Forced alignment | `sphinx3_align` | ✅ | LOW | Shell-out for parity checking only |
 | View cepstra | `sphinx_cepview` | ✅ | - | Native Python + shell-out for parity |
 | Print params | `printp` | ✅ | - | Native Python + shell-out for parity |
-| Delint | core `delint` | ✅ | - | `commands.CommandBuilder.delint()`; CFFI re-roll removed 2026-08-14 |
-| KD-tree | core `kdtree` | ✅ | - | `commands.CommandBuilder.kdtree()`; CFFI re-roll removed 2026-08-14 |
-| MAP adaptation | core `map_adapt` | ✅ | - | `commands.CommandBuilder.map_adapt()`; CFFI re-roll removed 2026-08-14 |
+| Delint | `delint` / `pstrain_delint` | ✅ | - | Unwired contained capability; core command remains callable |
+| KD-tree | `kdtree` / `pstrain_kdtree_build` | ✅ | - | Unwired contained capability; core command remains callable |
+| MAP adaptation | `map_adapt` / `pstrain_map_adapt` | ✅ | - | Unwired contained capability; core command remains callable |
 
 ### Alignment Notes
 - **PocketSphinx** (preferred): Python bindings, `pip install pocketsphinx`
