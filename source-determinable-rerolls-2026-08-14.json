@@ -8,7 +8,7 @@
       "core_programs": ["delint"],
       "wiring": {"status": "unwired", "would_wire": "a semi-continuous-model final smoothing pipeline step and its CLI/config surface"},
       "wrapper_position": ["PR #92 containment gate", "typed exceptions", "in-process arrays"],
-      "compatibility_position": {"status": "exists_by_construction", "basis": "the delint core program and CommandBuilder.delint() remain callable"}
+      "compatibility_position": {"status": "parser_flag_names_gated", "basis": "the built delint parser accepts every fixed flag name emitted by CommandBuilder.delint(); tests/test_commands.py derives this check from all Command-returning builder methods"}
     },
     {
       "id": "R07",
@@ -16,7 +16,7 @@
       "core_programs": ["mk_flat", "init_gau", "norm"],
       "wiring": {"status": "wired", "paths": ["pstrain flat CLI", "flat-model pipeline task"]},
       "wrapper_position": ["PR #92 containment gate", "typed exceptions", "in-process arrays"],
-      "compatibility_position": {"status": "exists_by_construction", "basis": "the mk_flat, init_gau, and norm core programs remain callable"}
+      "compatibility_position": {"status": "retained_with_partial_parser_gate", "basis": "the mk_flat and init_gau core programs are retained; the built norm parser accepts every fixed flag name emitted by CommandBuilder.norm() under the derived gate"}
     },
     {
       "id": "R08",
@@ -24,7 +24,7 @@
       "core_programs": ["inc_comp"],
       "wiring": {"status": "wired", "paths": ["Gaussian-splitting CLI", "density-growth training step"]},
       "wrapper_position": ["PR #92 containment gate", "typed exceptions", "in-process arrays"],
-      "compatibility_position": {"status": "exists_by_construction", "basis": "the inc_comp core program remains callable"}
+      "compatibility_position": {"status": "parser_flag_names_gated", "basis": "the built inc_comp parser accepts every fixed flag name emitted by CommandBuilder.inc_comp() under the derived gate"}
     },
     {
       "id": "R09",
@@ -32,7 +32,7 @@
       "core_programs": ["kdtree"],
       "wiring": {"status": "unwired", "would_wire": "a semi-continuous-model packaging/decoder-acceleration step and its CLI/config surface"},
       "wrapper_position": ["PR #92 containment gate", "typed exceptions", "in-process arrays"],
-      "compatibility_position": {"status": "exists_by_construction", "basis": "the kdtree core program and CommandBuilder.kdtree() remain callable"}
+      "compatibility_position": {"status": "parser_flag_names_gated", "basis": "the built kdtree parser accepts every fixed flag name emitted by CommandBuilder.kdtree() under the derived gate"}
     },
     {
       "id": "R11",
@@ -40,7 +40,7 @@
       "core_programs": ["map_adapt"],
       "wiring": {"status": "unwired", "would_wire": "an adaptation pipeline/CLI stage consuming adaptation-data BW accumulators"},
       "wrapper_position": ["PR #92 containment gate", "typed exceptions", "in-process arrays"],
-      "compatibility_position": {"status": "exists_by_construction", "basis": "the map_adapt core program and CommandBuilder.map_adapt() remain callable"}
+      "compatibility_position": {"status": "parser_flag_names_gated", "basis": "the built map_adapt parser accepts every fixed flag name emitted by CommandBuilder.map_adapt() under the derived gate"}
     },
     {
       "id": "R13",
@@ -48,7 +48,7 @@
       "core_programs": ["param_cnt"],
       "wiring": {"status": "unwired", "would_wire": "a corpus-diagnostics/state-tying preparation step and its CLI/config surface"},
       "wrapper_position": ["PR #92 containment gate", "typed exceptions", "in-process arrays"],
-      "compatibility_position": {"status": "exists_by_construction", "basis": "the param_cnt core program and CommandBuilder.param_cnt() remain callable"},
+      "compatibility_position": {"status": "parser_flag_names_gated", "basis": "the built param_cnt parser accepts every fixed flag name emitted by CommandBuilder.param_cnt() under the derived gate"},
       "return_contract": "writes the core text count format and returns None; it does not return typed counts"
     }
   ],

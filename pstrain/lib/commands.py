@@ -19,6 +19,16 @@ from pstrain.lib.paths import get_bin_dir
 
 logger = logging.getLogger(__name__)
 
+
+def _reject_comma_path(path: Path, flag: str) -> None:
+    """Reject paths unrepresentable by the core ARG_STRING_LIST parser."""
+    if "," in str(path):
+        raise ValueError(
+            f"{flag} paths cannot contain ',' because the core string-list parser "
+            f"has no escaping: {path!r}"
+        )
+
+
 __all__ = [
     "Command",
     "CommandBuilder",
@@ -278,6 +288,7 @@ class CommandBuilder:
         **kwargs: Any,
     ) -> Command:
         """Build norm command."""
+        _reject_comma_path(accumdir, "norm -accumdir")
         args = [
             "-accumdir",
             str(accumdir),
@@ -308,9 +319,9 @@ class CommandBuilder:
     ) -> Command:
         """Build mk_mdef_gen command."""
         args = [
-            "-phnlistfn",
+            "-phnlstfn",
             str(phnlist),
-            "-moddeffn",
+            "-ocimdef",
             str(output),
             "-n_state_pm",
             str(n_state),
@@ -430,9 +441,9 @@ class CommandBuilder:
     ) -> Command:
         """Build prunetree command."""
         args = [
-            "-itreefn",
+            "-itreedir",
             str(itreefn),
-            "-otreefn",
+            "-otreedir",
             str(otreefn),
             "-psetfn",
             str(psetfn),
@@ -588,6 +599,7 @@ class CommandBuilder:
         **kwargs: Any,
     ) -> Command:
         """Build map_adapt command."""
+        _reject_comma_path(accumdir, "map_adapt -accumdir")
         args = [
             "-meanfn",
             str(meanfn),
@@ -620,15 +632,20 @@ class CommandBuilder:
         mixwfn: Path,
         **kwargs: Any,
     ) -> Command:
-        """Build delint command."""
+        """Build delint command.
+
+        The core ``ARG_STRING_LIST`` syntax uses commas as unescapable
+        separators, so accumulator paths containing commas cannot be represented.
+        """
+        for path in accumdirs:
+            _reject_comma_path(path, "delint -accumdirs")
         args = [
             "-moddeffn",
             str(moddeffn),
             "-mixwfn",
             str(mixwfn),
         ]
-        for d in accumdirs:
-            args.extend(["-accumdir", str(d)])
+        args.extend(["-accumdirs", ",".join(str(d) for d in accumdirs)])
         for k, v in kwargs.items():
             args.extend([f"-{k}", str(v)])
 
