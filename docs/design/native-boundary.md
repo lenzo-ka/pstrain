@@ -15,7 +15,15 @@ whenever it dies. Its address space is the blast radius. See
 
 ## Phase contract: `contained-all-operations`
 
-All supported Python operations that enter CFFI are routed through the helper.
+Supported Python operations implemented by pstrain route their literal direct CFFI call
+expressions through the helper, except for the decoder described below. The static gate
+certifies literal name and attribute-chain calls to `_init`, `get_lib`, and `pstrain_*`,
+plus `getattr` calls with literal/module-constant names and literal-key dictionary selections.
+It is silent when a callee name or selected value depends on runtime data.
+The shipped PocketSphinx decoder in `pstrain.lib.testing.decoder` remains in-process and
+is used by benchmark, CLI testing, and decode-shard paths; decoder containment is not
+certified and decoder behavior is unchanged. This decoder-exemption wording is
+documentation-only; the exempt path and enforcement are unchanged.
 The original three operations retain their individual protocol names:
 
 | Python entry point | native entry point |
@@ -34,6 +42,17 @@ opaque object handles. Raw model I/O is exposed only through coarse complete
 read/write operations, and feature extraction through its complete operation;
 raw C pointers never cross the process boundary. Direct access through the
 private `_pstrainc` implementation module is not a supported public operation.
+
+## Complete-model value validation
+
+`require_complete_model()` does not claim that every Python rejection is also a native
+parser rejection. Its range and enumeration checks are a conservative subset of observed
+native rejection, but its numeric spelling check is deliberately stricter. Native command-line
+conversion accepts a numeric prefix and truncates fractional spellings supplied to integer
+options (for example, `-ncep 13.5` becomes `13`). The complete-model boundary rejects such
+tokens because accepting them would let the recorded front end differ from the value actually
+used. Native parsing and feature-layout acceptance remain authoritative outside this stated
+exception.
 
 Across every phase there is one standing rule: **one native call at a time per
 process.** Multi-threaded use of the library is unsupported and undefined —

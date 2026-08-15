@@ -174,6 +174,9 @@ class Aligner:
         Aligner._active = self
 
     def _last_error(self) -> str | None:
+        if hasattr(self, "_proxy"):
+            result = self._proxy.call("_last_error")
+            return str(result) if result is not None else None
         ptr = self._lib.pstrain_align_last_error()
         if ptr == self._ffi.NULL:
             return None

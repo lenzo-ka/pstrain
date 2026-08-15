@@ -125,6 +125,9 @@ class FeatureExtractor:
 
     def _init_fe(self) -> None:
         """Initialize the front-end with configuration."""
+        if hasattr(self, "_proxy"):
+            self._proxy.call("_init_fe")
+            return
         cfg = self._config
 
         # Use pstrain_fe_create for simplified initialization (bypasses cmd_ln)
