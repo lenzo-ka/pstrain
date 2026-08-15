@@ -39,6 +39,13 @@ def test_literal_parameter_types_list_admissible_values() -> None:
     assert parameter.type == "recover | abort | omit"
 
 
+def test_sharding_partition_positions_are_declared_and_default_unchanged() -> None:
+    parameter = get_parameter("sharding.partition_position")
+    assert parameter is not None
+    assert parameter.type == "remainder-first | remainder-last"
+    assert Profile().sharding.partition_position == "remainder-first"
+
+
 def test_tree_state_weight_count_must_match_emitting_states() -> None:
     with pytest.raises(ValueError, match="expected 4, got 3"):
         TrainingConfig(n_state=4)

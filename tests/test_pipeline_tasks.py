@@ -20,7 +20,14 @@ import pytest
 import yaml
 
 from pstrain.lib.pipeline import PipelineContext
-from pstrain.lib.pipeline.context import DEFAULT_CONFIGS, FeatParams, RunnerParams, SplitParams
+from pstrain.lib.pipeline.context import (
+    DEFAULT_CONFIGS,
+    FINGERPRINT_COMPOSITION,
+    FeatParams,
+    RunnerParams,
+    ShardingParams,
+    SplitParams,
+)
 from pstrain.lib.pipeline.feat_params import (
     feat_params_lines,
     feature_extractor_config_from_record,
@@ -320,17 +327,232 @@ def test_stage_fingerprints_cover_only_effective_relevant_values(empty_project: 
         base, train=replace(base.train, ci=replace(base.train.ci, max_iterations=3))
     )
     split_change = replace(base, split=SplitParams(seed=99))
+    sharding_change = replace(base, sharding=ShardingParams(partition_position="remainder-last"))
 
     assert feature_change.provenance_path("features") != base.provenance_path("features")
     assert training_change.provenance_path("features") == base.provenance_path("features")
     assert split_change.provenance_path("features") == base.provenance_path("features")
     assert split_change.provenance_path("split") != base.provenance_path("split")
     assert training_change.provenance_path("split") == base.provenance_path("split")
-    for changed in (feature_change, training_change, split_change):
+    for changed in (feature_change, training_change, split_change, sharding_change):
         assert changed.provenance_path("training") != base.provenance_path("training")
 
     document = base.provenance_document("training")
     assert document["fingerprint"] in base.provenance_path("training").name
+
+
+def test_project_sharding_policy_changes_training_provenance(empty_project: Path) -> None:
+    config = empty_project / "etc" / "config.yaml"
+    config.write_text("config_version: 1\nsharding:\n  partition_position: remainder-first\n")
+    remainder_first = PipelineContext.from_config(empty_project)
+
+    config.write_text("config_version: 1\nsharding:\n  partition_position: remainder-last\n")
+    remainder_last = PipelineContext.from_config(empty_project)
+
+    assert remainder_first.resolved_config is not None
+    assert remainder_last.resolved_config is not None
+    assert (
+        remainder_first.resolved_config.fields["sharding.partition_position"].winner.source_kind
+        == "project"
+    )
+    assert (
+        remainder_last.resolved_config.fields["sharding.partition_position"].winner.source_kind
+        == "project"
+    )
+    assert remainder_first.provenance_path("training") != remainder_last.provenance_path("training")
+    assert remainder_first.provenance_document("training") != remainder_last.provenance_document(
+        "training"
+    )
+
+
+def test_training_fingerprint_excludes_config_source_metadata(empty_project: Path) -> None:
+    schema_default = PipelineContext.from_config(empty_project)
+
+    config = empty_project / "etc" / "config.yaml"
+    config.write_text("config_version: 1\nsharding:\n  partition_position: remainder-first\n")
+    explicit_project_value = PipelineContext.from_config(empty_project)
+
+    assert schema_default.sharding == explicit_project_value.sharding
+    assert schema_default.resolved_config is not None
+    assert explicit_project_value.resolved_config is not None
+    assert (
+        schema_default.resolved_config.fields["sharding.partition_position"].winner.source_kind
+        == "schema-default"
+    )
+    assert (
+        explicit_project_value.resolved_config.fields[
+            "sharding.partition_position"
+        ].winner.source_kind
+        == "project"
+    )
+    schema_payload = schema_default.provenance_payload("training")
+    explicit_payload = explicit_project_value.provenance_payload("training")
+    schema_sources = schema_payload.pop("config_sources")
+    explicit_sources = explicit_payload.pop("config_sources")
+
+    assert schema_payload == explicit_payload
+    assert schema_default.provenance_path("training") == explicit_project_value.provenance_path(
+        "training"
+    )
+    assert schema_sources != explicit_sources
+    assert schema_default.provenance_document("training")["config_sources"] == schema_sources
+    assert (
+        explicit_project_value.provenance_document("training")["config_sources"] == explicit_sources
+    )
+
+
+def test_training_fingerprint_payload_composition_is_pinned(empty_project: Path) -> None:
+    """Make additions anywhere in the cache key fail until their role is declared."""
+    ctx = PipelineContext.from_config(empty_project)
+    payload = ctx.fingerprint_payload("training")
+
+    composition = FINGERPRINT_COMPOSITION["training"]
+    assert composition["resolved"] == (
+        "config_version",
+        "features",
+        "training",
+        "split",
+        "sharding",
+        "execution.requested_jobs",
+        "execution.bw_shard_count",
+    )
+    assert composition["structural"] == ("stage",)
+    assert composition["identity"] == (
+        "tool_version",
+        "execution.architecture",
+        "native_library",
+        "native_programs",
+    )
+
+    def leaf_paths(value: Any, path: tuple[str, ...] = ()) -> set[str]:
+        if isinstance(value, dict):
+            if not value:
+                return {".".join(path)}
+            return {
+                leaf
+                for key, child in value.items()
+                for leaf in leaf_paths(child, (*path, str(key)))
+            }
+        if isinstance(value, (list, tuple)):
+            if not value:
+                return {f"{'.'.join(path)}[]"}
+            return {
+                leaf for child in value for leaf in leaf_paths(child, (*path[:-1], f"{path[-1]}[]"))
+            }
+        return {".".join(path)}
+
+    classified = {
+        classification: tuple(
+            sorted(
+                leaf
+                for leaf in leaf_paths(payload)
+                if any(
+                    leaf == declared
+                    or leaf.startswith(f"{declared}.")
+                    or leaf.startswith(f"{declared}[]")
+                    for declared in declarations
+                )
+            )
+        )
+        for classification, declarations in composition.items()
+    }
+    assert classified == {
+        "resolved": (
+            "config_version",
+            "execution.bw_shard_count",
+            "execution.requested_jobs",
+            "features.agc",
+            "features.alpha",
+            "features.cmn",
+            "features.cmninit",
+            "features.dither",
+            "features.feat_type",
+            "features.frate",
+            "features.lifter",
+            "features.lowerf",
+            "features.ncep",
+            "features.nfft",
+            "features.nfilt",
+            "features.remove_dc",
+            "features.remove_noise",
+            "features.samprate",
+            "features.transform",
+            "features.upperf",
+            "features.varnorm",
+            "features.wlen",
+            "sharding.partition_position",
+            "split.seed",
+            "split.test_count",
+            "split.train_ratio",
+            "training.a_beam",
+            "training.accept_arctic_a0587_known_skip",
+            "training.arctic_a0302_zero_codebook_band",
+            "training.b_beam",
+            "training.bw_checkpoint_iterations",
+            "training.ci.convergence_ratio",
+            "training.ci.max_iterations",
+            "training.ci.min_iterations",
+            "training.exclusion_schedule",
+            "training.failed_alignment",
+            "training.max_skip_fraction",
+            "training.multipron_training",
+            "training.n_senones",
+            "training.n_state",
+            "training.optional_final_silence",
+            "training.question_niter",
+            "training.question_npermute",
+            "training.question_quests_per_state",
+            "training.retry_beam_factor",
+            "training.tied.convergence_ratio",
+            "training.tied.max_iterations",
+            "training.tied.min_iterations",
+            "training.tree_csplitmax",
+            "training.tree_csplitthr",
+            "training.tree_directional_questions",
+            "training.tree_intermediate_dumps",
+            "training.tree_mwfloor",
+            "training.tree_rotate_state_weights",
+            "training.tree_ssplitmax",
+            "training.tree_ssplitthr",
+            "training.tree_state_weights[]",
+            "training.untied.convergence_ratio",
+            "training.untied.max_iterations",
+            "training.untied.min_iterations",
+            "training.untied_inventory",
+        ),
+        "structural": ("stage",),
+        "identity": (
+            "execution.architecture",
+            "native_library.fp_contract_declared",
+            "native_library.sha256",
+            "native_programs.agg_seg.sha256",
+            "native_programs.bldtree.sha256",
+            "native_programs.bw.sha256",
+            "native_programs.delint.sha256",
+            "native_programs.inc_comp.sha256",
+            "native_programs.init_gau.sha256",
+            "native_programs.kdtree.sha256",
+            "native_programs.kmeans_init.sha256",
+            "native_programs.make_quests.sha256",
+            "native_programs.map_adapt.sha256",
+            "native_programs.mk_flat.sha256",
+            "native_programs.mk_mdef_gen.sha256",
+            "native_programs.mk_ts2cb.sha256",
+            "native_programs.mllr_solve.sha256",
+            "native_programs.mllr_transform.sha256",
+            "native_programs.norm.sha256",
+            "native_programs.param_cnt.sha256",
+            "native_programs.printp.sha256",
+            "native_programs.prunetree.sha256",
+            "native_programs.sphinx3_align.sha256",
+            "native_programs.sphinx_cepview.sha256",
+            "native_programs.sphinx_fe.sha256",
+            "native_programs.tiestate.sha256",
+            "tool_version",
+        ),
+    }
+    assert set().union(*map(set, classified.values())) == leaf_paths(payload)
+    assert "host" in ctx.provenance_payload("training")["execution"]
 
 
 @pytest.mark.parametrize(

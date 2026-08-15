@@ -41,6 +41,43 @@ from pstrain.lib.config.resolver import ResolvedConfig, resolve_config
 from pstrain.lib.paths import get_lib_path
 from pstrain.lib.runtime import fp_contract_policy
 
+# This is the three-way fingerprint contract: resolved configuration,
+# structural discriminators, and declared identities. A model produced by another
+# pstrain version, architecture, or native binary/library can follow a
+# different numeric trajectory. For a parity-focused trainer, conservative
+# one-time retraining is safer than silently reusing a model with a different
+# provenance identity. Host and config_sources remain diagnostic provenance.
+FINGERPRINT_COMPOSITION: dict[str, dict[str, tuple[str, ...]]] = {
+    "features": {
+        "resolved": ("config_version", "features"),
+        "structural": ("stage",),
+        "identity": ("tool_version", "native_library", "native_programs"),
+    },
+    "split": {
+        "resolved": ("config_version", "split"),
+        "structural": ("stage",),
+        "identity": ("tool_version", "native_library", "native_programs"),
+    },
+    "training": {
+        "resolved": (
+            "config_version",
+            "features",
+            "training",
+            "split",
+            "sharding",
+            "execution.requested_jobs",
+            "execution.bw_shard_count",
+        ),
+        "structural": ("stage",),
+        "identity": (
+            "tool_version",
+            "execution.architecture",
+            "native_library",
+            "native_programs",
+        ),
+    },
+}
+
 
 @cache
 def _sha256_file(path: Path, size: int, mtime_ns: int) -> str:
@@ -241,6 +278,15 @@ class RunnerParams:
     nice: int = field(default_factory=lambda: Profile().runner.nice)
 
 
+@dataclass(frozen=True)
+class ShardingParams:
+    """Baum-Welch shard construction policy."""
+
+    partition_position: Literal["remainder-first", "remainder-last"] = field(
+        default_factory=lambda: Profile().sharding.partition_position
+    )
+
+
 DEFAULT_CONFIGS: dict[str, dict[str, Any]] = {
     "default": {
         "description": "Default wideband configuration",
@@ -350,7 +396,9 @@ def load_configs(project_dir: Path) -> dict[str, dict[str, Any]]:
     return profiles
 
 
-def _runtime_values(profile: Profile) -> tuple[FeatParams, TrainParams, SplitParams, RunnerParams]:
+def _runtime_values(
+    profile: Profile,
+) -> tuple[FeatParams, TrainParams, SplitParams, RunnerParams, ShardingParams]:
     values = profile.model_dump(mode="python")
     training = values["training"]
     for stage in ("ci", "untied", "tied"):
@@ -360,6 +408,7 @@ def _runtime_values(profile: Profile) -> tuple[FeatParams, TrainParams, SplitPar
         TrainParams(**training),
         SplitParams(**values["split"]),
         RunnerParams(**values["runner"]),
+        ShardingParams(**values["sharding"]),
     )
 
 
@@ -374,6 +423,7 @@ class PipelineContext:
     train: TrainParams = field(default_factory=lambda: _runtime_values(Profile())[1])
     split: SplitParams = field(default_factory=lambda: _runtime_values(Profile())[2])
     runner: RunnerParams = field(default_factory=lambda: _runtime_values(Profile())[3])
+    sharding: ShardingParams = field(default_factory=lambda: _runtime_values(Profile())[4])
     description: str = ""
     resolved_config: ResolvedConfig | None = field(default=None, repr=False, compare=False)
 
@@ -394,7 +444,7 @@ class PipelineContext:
             experiment=experiment,
             cli_overrides=cli_overrides,
         )
-        feat, train, split, runner = _runtime_values(resolved.profile)
+        feat, train, split, runner, sharding = _runtime_values(resolved.profile)
         return cls(
             project_dir=project_dir,
             experiment=experiment,
@@ -404,6 +454,7 @@ class PipelineContext:
             train=train,
             split=split,
             runner=runner,
+            sharding=sharding,
             resolved_config=resolved,
         )
 
@@ -474,6 +525,7 @@ class PipelineContext:
                 features=asdict(self.feat),
                 training=asdict(self.train),
                 split=asdict(self.split),
+                sharding=asdict(self.sharding),
                 execution={
                     "host": socket.gethostname(),
                     "architecture": platform.machine(),
@@ -487,8 +539,9 @@ class PipelineContext:
 
     def provenance_path(self, stage: str) -> Path:
         """Content-addressed path for a stage's effective configuration."""
+        fingerprint_payload = self.fingerprint_payload(stage)
         canonical = json.dumps(
-            self.provenance_payload(stage),
+            fingerprint_payload,
             sort_keys=True,
             separators=(",", ":"),
             allow_nan=False,
@@ -502,6 +555,27 @@ class PipelineContext:
             / self.config_name
             / f"{stage}-{fingerprint}.json"
         )
+
+    def fingerprint_payload(self, stage: str) -> dict[str, Any]:
+        """Return the explicitly declared resolved values and identity keys."""
+        provenance = self.provenance_payload(stage)
+        composition = FINGERPRINT_COMPOSITION.get(stage)
+        if composition is None:
+            raise ValueError(f"unknown provenance stage: {stage!r}")
+        keys = {
+            path.partition(".")[0]
+            for classification in composition.values()
+            for path in classification
+        }
+        payload = {key: provenance[key] for key in keys}
+        if stage == "training":
+            execution = provenance["execution"]
+            payload["execution"] = {
+                "architecture": execution["architecture"],
+                "requested_jobs": execution["requested_jobs"],
+                "bw_shard_count": execution["bw_shard_count"],
+            }
+        return payload
 
     def provenance_document(self, stage: str) -> dict[str, Any]:
         """Serializable provenance, including its effective-config fingerprint."""

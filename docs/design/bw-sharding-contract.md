@@ -45,9 +45,13 @@ re-estimation amplifies that difference. No tolerance is offered for cross-count
 comparisons.
 
 Effective BW shard count is an experimental variable recorded in training provenance beside the
-requested job count, host, and architecture. A run comparison that does not pin the effective count
-is invalid: downstream tree construction can amplify flat-direction parameter differences into
-different senone compositions.
+requested job count, host, and architecture. The training fingerprint hashes the requested and
+effective counts as resolved execution values, but retains host only as diagnostic provenance.
+Its declared identity keys are the pstrain version, execution architecture, native library
+identity, and standalone native-program identities. Version, architecture, or native-artifact
+changes conservatively invalidate the cache because they can change the numeric trajectory; a run
+comparison that does not pin the effective count is invalid because downstream tree construction
+can amplify flat-direction parameter differences into different senone compositions.
 
 The cross-count discrete-state gate uses the one-shard reducer path. Together with the separate
 in-process comparison it exposes a defect shared by all reducer shard counts, but neither gate

@@ -135,6 +135,15 @@ runner
    :Description: Worker niceness increment
 
 
+sharding
+--------
+
+``sharding.partition_position``
+   :Type: ``remainder-first | remainder-last``
+   :Default: ``'remainder-first'``
+   :Description: Position of uneven Baum-Welch partition capacity: ``remainder-first`` distributes one extra utterance to each leading shard (the pstrain policy); ``remainder-last`` gives the entire remainder to the final shard (the upstream SphinxTrain policy)
+
+
 split
 -----
 

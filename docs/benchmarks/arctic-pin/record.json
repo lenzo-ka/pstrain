@@ -126,6 +126,7 @@
         "features.wlen": "project-profile",
         "runner.jobs": "project-profile",
         "runner.nice": "project-profile",
+        "sharding.partition_position": "project-profile",
         "split.seed": "project-profile",
         "split.test_count": "project-profile",
         "split.train_ratio": "project-profile",
@@ -196,6 +197,9 @@
         "runner": {
           "jobs": null,
           "nice": 5
+        },
+        "sharding": {
+          "partition_position": "remainder-first"
         },
         "split": {
           "seed": 42,

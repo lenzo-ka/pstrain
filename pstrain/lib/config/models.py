@@ -290,6 +290,22 @@ class RunnerConfig(StrictModel):
     nice: Annotated[int, Field(ge=0, description="Worker niceness increment")] = 5
 
 
+class ShardingConfig(StrictModel):
+    """Baum-Welch shard construction policy."""
+
+    partition_position: Annotated[
+        Literal["remainder-first", "remainder-last"],
+        Field(
+            description=(
+                "Position of uneven Baum-Welch partition capacity: ``remainder-first`` "
+                "distributes one extra utterance to each leading shard (the pstrain policy); "
+                "``remainder-last`` gives the entire remainder to the final shard (the "
+                "upstream SphinxTrain policy)"
+            )
+        ),
+    ] = "remainder-first"
+
+
 class AlignmentConfig(StrictModel):
     """Forced-alignment transcript policy."""
 
@@ -314,6 +330,7 @@ class Profile(StrictModel):
     training: TrainingConfig = Field(default_factory=TrainingConfig)
     split: SplitConfig = Field(default_factory=SplitConfig)
     runner: RunnerConfig = Field(default_factory=RunnerConfig)
+    sharding: ShardingConfig = Field(default_factory=ShardingConfig)
     alignment: AlignmentConfig = Field(default_factory=AlignmentConfig)
 
 
@@ -326,6 +343,7 @@ class ProfileDefinition(StrictModel):
     training: dict[str, Any] | None = None
     split: dict[str, Any] | None = None
     runner: dict[str, Any] | None = None
+    sharding: dict[str, Any] | None = None
     alignment: dict[str, Any] | None = None
 
 
@@ -345,10 +363,11 @@ class OverlayDocument(StrictModel):
     training: dict[str, Any] | None = None
     split: dict[str, Any] | None = None
     runner: dict[str, Any] | None = None
+    sharding: dict[str, Any] | None = None
     alignment: dict[str, Any] | None = None
 
 
-SEMANTIC_BLOCKS = ("features", "training", "split", "runner", "alignment")
+SEMANTIC_BLOCKS = ("features", "training", "split", "runner", "sharding", "alignment")
 
 
 def default_profile() -> Profile:
