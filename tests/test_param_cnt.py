@@ -98,12 +98,27 @@ class TestCountParamsValidation:
                 ts2cb_path=None,
             )
 
-    def test_phone_does_not_require_seg_dir(self) -> None:
-        """Test that PHONE mode does not require seg_dir - validates argument only."""
-        # This just tests that the validation doesn't raise for PHONE mode
-        # when seg_dir is None. The actual C call would fail due to invalid files.
-        # We're testing Python-side validation only.
-        pass
+    @pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
+    def test_phone_does_not_require_seg_dir(self, tmp_path: Path) -> None:
+        """Test PHONE counting through the C library without segmentations."""
+        fixture = Path(__file__).parent / "fixtures" / "multipron_final_state"
+        ctl = tmp_path / "test.ctl"
+        ctl.write_text("test\n")
+        lsn = tmp_path / "test.lsn"
+        lsn.write_text("a\n")
+        output = tmp_path / "phone.counts"
+
+        count_params(
+            mdef_path=fixture / "model" / "mdef",
+            dict_path=fixture / "dictionary.dict",
+            ctl_path=ctl,
+            lsn_path=lsn,
+            output_path=output,
+            param_type=ParamType.PHONE,
+            seg_dir=None,
+        )
+
+        assert output.read_text().splitlines()
 
 
 class TestCountParamsStringConversion:

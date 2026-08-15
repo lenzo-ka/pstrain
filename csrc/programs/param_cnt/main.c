@@ -70,10 +70,17 @@ initialize_from_cmd_ln(lexicon_t **out_lex,
     model_def_t *mdef;
     const char *fdictfn;
     const char *dictfn;
+    const char *segdir;
     const char *ts2cbfn;
     uint32 n_ts;
 
-    corpus_set_seg_dir(cmd_ln_str("-segdir"));
+    segdir = cmd_ln_str("-segdir");
+    if (segdir)
+	corpus_set_seg_dir(segdir);
+    else if (strcmp(cmd_ln_str("-paramtype"), "phone") != 0) {
+	E_ERROR("You must specify a segmentation directory using -segdir\n");
+	return S3_ERROR;
+    }
     corpus_set_seg_ext(cmd_ln_str("-segext"));
 
     if (cmd_ln_str("-lsnfn"))
