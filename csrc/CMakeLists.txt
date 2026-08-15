@@ -114,10 +114,6 @@ set(LIB_SRCS
   libs/libpstrain/pstrain_mdef_gen.c
   libs/libpstrain/pstrain_dtree.c
   libs/libpstrain/pstrain_agg_seg.c
-  libs/libpstrain/pstrain_param_cnt.c
-  libs/libpstrain/pstrain_kdtree.c
-  libs/libpstrain/pstrain_delint.c
-  libs/libpstrain/pstrain_map_adapt.c
   libs/libpstrain/pstrain_align.c
   libs/libpstrain/pstrain_decode.c
 
@@ -187,23 +183,6 @@ set(LIB_SRCS
   programs/agg_seg/cnt_st_seg.c
   programs/agg_seg/mk_seg.c
 
-  # param_cnt helpers (for parameter counting)
-  programs/param_cnt/main.c
-  programs/param_cnt/parse_cmd_ln.c
-  programs/param_cnt/param_cnt.c
-  programs/param_cnt/enum_corpus.c
-  programs/param_cnt/ts_cnt.c
-  programs/param_cnt/cb_cnt.c
-  programs/param_cnt/phone_cnt.c
-
-  # delint helpers (for deleted interpolation)
-  programs/delint/main.c
-  programs/delint/interp_fn.c
-
-  # map_adapt helpers (for MAP adaptation)
-  programs/map_adapt/main.c
-  programs/map_adapt/cmd_ln.c
-
 )
 
 # Internal LAPACK (used if system LAPACK not found)
@@ -268,9 +247,6 @@ target_include_directories(pstrainc
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/programs/tiestate
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/programs/prunetree
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/programs/agg_seg
-  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/programs/param_cnt
-  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/programs/delint
-  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/programs/map_adapt
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/programs/sphinx3_align
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
@@ -284,9 +260,6 @@ target_include_directories(pstrainc_shared
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/programs/tiestate
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/programs/prunetree
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/programs/agg_seg
-  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/programs/param_cnt
-  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/programs/delint
-  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/programs/map_adapt
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/programs/sphinx3_align
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
 )

@@ -528,31 +528,6 @@ int pstrain_agg_seg(const char *mdef_path,
                 int32 cachesz);
 
 // ============================================================
-// PARAMETER COUNTING (pstrain_param_cnt.h)
-// ============================================================
-
-// Parameter count types
-#define PARAM_CNT_STATE 0
-#define PARAM_CNT_CB    1
-#define PARAM_CNT_PHONE 2
-
-// Count parameter occurrences in the training corpus
-int pstrain_param_cnt(const char *mdef_path,
-                  const char *dict_path,
-                  const char *fdict_path,
-                  const char *ctl_path,
-                  const char *lsn_path,
-                  const char *ts2cb_path,
-                  const char *seg_dir,
-                  const char *seg_ext,
-                  const char *output_path,
-                  int32 param_type,
-                  uint32 n_skip,
-                  int32 run_len,
-                  uint32 part,
-                  uint32 n_part);
-
-// ============================================================
 // TIED-STATE TO CODEBOOK MAPPING (ts2cb.h, s3ts2cb_io.h)
 // ============================================================
 
@@ -642,52 +617,6 @@ int s3cb2mllr_write(const char *fn,
                     int32 *cb2mllr,
                     uint32 n_cb,
                     uint32 n_mllr);
-
-// ============================================================
-// KD-TREE FUNCTIONS (pstrain_kdtree.h)
-// ============================================================
-
-// Build KD-trees for fast Gaussian selection
-int pstrain_kdtree_build(const char *meanfn,
-                     const char *varfn,
-                     const char *outfn,
-                     float32 threshold,
-                     int32 depth,
-                     int32 absolute);
-
-// ============================================================
-// DELETED INTERPOLATION (pstrain_delint.h)
-// ============================================================
-
-// Perform deleted interpolation to smooth mixture weights
-int pstrain_delint(const char *moddeffn,
-               const char *mixwfn,
-               const char **accumdirs,
-               float32 cilambda,
-               int32 maxiter);
-
-// ============================================================
-// MAP ADAPTATION (pstrain_map_adapt.h)
-// ============================================================
-
-// Perform MAP adaptation of acoustic models
-int pstrain_map_adapt(const char *meanfn,
-                  const char *varfn,
-                  const char *mixwfn,
-                  const char *tmatfn,
-                  const char **accumdirs,
-                  const char *mapmeanfn,
-                  const char *mapvarfn,
-                  const char *mapmixwfn,
-                  const char *maptmatfn,
-                  const char *moddeffn,
-                  const char *ts2cbfn,
-                  float32 tau,
-                  int32 fixed_tau,
-                  int32 bayes_mean,
-                  float32 mwfloor,
-                  float32 varfloor,
-                  float32 tpfloor);
 
 // ============================================================
 // FORCED ALIGNMENT (pstrain_align.h)

@@ -499,6 +499,35 @@ class CommandBuilder:
         self.add(cmd)
         return cmd
 
+    def param_cnt(
+        self,
+        moddeffn: Path,
+        dictfn: Path,
+        ctlfn: Path,
+        lsnfn: Path,
+        paramtype: str = "state",
+        **kwargs: Any,
+    ) -> Command:
+        """Build a core ``param_cnt`` command."""
+        args = [
+            "-moddeffn",
+            str(moddeffn),
+            "-dictfn",
+            str(dictfn),
+            "-ctlfn",
+            str(ctlfn),
+            "-lsnfn",
+            str(lsnfn),
+            "-paramtype",
+            paramtype,
+        ]
+        for key, value in kwargs.items():
+            args.extend([f"-{key}", str(value)])
+
+        cmd = Command(self._get_binary("param_cnt"), args)
+        self.add(cmd)
+        return cmd
+
     def sphinx3_align(
         self,
         mdef: Path,

@@ -57,7 +57,6 @@ _pstrain_decoder_free
 _pstrain_decoder_hyp
 _pstrain_decoder_process_raw
 _pstrain_decoder_start_utt
-_pstrain_delint
 _pstrain_fe_create
 _pstrain_fe_create_default
 _pstrain_flat_mixw
@@ -67,17 +66,14 @@ _pstrain_free_pset
 _pstrain_inc_comp
 _pstrain_init_gau
 _pstrain_init_mixw
-_pstrain_kdtree_build
 _pstrain_kmeans
 _pstrain_kmeans_init
 _pstrain_make_quests
-_pstrain_map_adapt
 _pstrain_mdef_count_triphones
 _pstrain_mdef_gen_alltriphones
 _pstrain_mdef_gen_ci
 _pstrain_mdef_gen_untied
 _pstrain_norm_gau
-_pstrain_param_cnt
 _pstrain_pocketsphinx_version
 _pstrain_prune_tree
 _pstrain_read_pset
