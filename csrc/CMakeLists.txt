@@ -241,7 +241,12 @@ if(WIN32)
   # distinct name so single-output generators can represent both targets.
   set_target_properties(pstrainc PROPERTIES ARCHIVE_OUTPUT_NAME pstrainc_static)
 endif()
-if(APPLE)
+if(WIN32)
+  target_sources(pstrainc_shared PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/pstrain.exports.def")
+  set_target_properties(pstrainc_shared PROPERTIES
+    LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/pstrain.exports.def")
+elseif(APPLE)
   set_target_properties(pstrainc_shared PROPERTIES
     INSTALL_RPATH "@loader_path"
     LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/pstrain.exports.macos")

@@ -246,6 +246,13 @@ target_include_directories(pocketsphinx BEFORE PUBLIC
   PRIVATE "${pocketsphinx_source_BINARY_DIR}"
 )
 target_compile_definitions(pocketsphinx PRIVATE HAVE_CONFIG_H)
+if(WIN32)
+  # Mirror PocketSphinx's own top-level shared-library build. Its export.h
+  # selects dllexport/dllimport only when SPHINX_DLL is visible to both the
+  # library and its consumers; src/CMakeLists.txt already supplies
+  # POCKETSPHINX_EXPORTS privately while compiling the DLL.
+  target_compile_definitions(pocketsphinx PUBLIC SPHINX_DLL)
+endif()
 set_target_properties(pocketsphinx PROPERTIES
   POSITION_INDEPENDENT_CODE ON
   VERSION "${PSTRAIN_POCKETSPHINX_VERSION}"
