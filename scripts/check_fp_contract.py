@@ -16,11 +16,16 @@ the boundary because each multiplication is rounded before its products are
 summed.  Arm SDOT, UDOT, USDOT, and SUDOT are integer operations.  Arm BFDOT,
 BFMMLALB/BFMMLALT, and BFMMLA are retained because their products are not
 rounded before accumulation.
+
+GitHub's ubuntu-latest runner supplies versioned LLVM toolsets, including
+llvm-objdump, alongside GNU binutils. COFF scans prefer LLVM because GNU
+objdump may not include support for a COFF object's target architecture.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import shutil
 import subprocess
@@ -118,6 +123,32 @@ def _run(command: list[str], path: Path) -> str:
     return result.stdout
 
 
+def _llvm_objdumps() -> list[str]:
+    """Return the bare LLVM disassembler, or its versioned PATH alternatives."""
+    bare = shutil.which("llvm-objdump")
+    if bare is not None:
+        return [bare]
+
+    versioned: set[Path] = set()
+    for directory in os.get_exec_path():
+        try:
+            versioned.update(Path(directory).glob("llvm-objdump-*"))
+        except OSError:
+            continue
+    return [str(path) for path in sorted(versioned, reverse=True) if os.access(path, os.X_OK)]
+
+
+def _objdumps(path: Path) -> list[str]:
+    """Return disassemblers in the preferred order for this file."""
+    llvm = _llvm_objdumps()
+    generic = shutil.which("objdump")
+    if path.read_bytes()[:2] in COFF_MACHINES:
+        candidates = llvm + ([generic] if generic is not None else [])
+    else:
+        candidates = ([generic] if generic is not None else []) + llvm
+    return list(dict.fromkeys(candidates))
+
+
 def disassemblies(path: Path) -> list[tuple[str, str]]:
     """Return an explicit architecture label and disassembly for each slice."""
     if sys.platform == "darwin" and path.read_bytes()[:2] not in COFF_MACHINES:
@@ -133,14 +164,21 @@ def disassemblies(path: Path) -> list[tuple[str, str]]:
             for architecture in architectures
         ]
 
-    objdump = shutil.which("objdump")
-    if objdump is None:
-        raise RuntimeError(f"unchecked {path}: objdump is required")
-    headers = _run([objdump, "-f", str(path)], path)
-    architectures = sorted(set(re.findall(r"architecture:\s*([^,\n]+)", headers)))
-    if not architectures:
-        raise RuntimeError(f"unchecked {path}: objdump reported no architecture")
-    return [("+".join(architectures), _run([objdump, "-d", str(path)], path))]
+    failures: list[str] = []
+    for objdump in _objdumps(path):
+        try:
+            headers = _run([objdump, "-f", str(path)], path)
+            architectures = sorted(set(re.findall(r"architecture:\s*([^,\n]+)", headers)))
+            if not architectures:
+                raise RuntimeError(f"unchecked {path}: {objdump} reported no architecture")
+            assembly = _run([objdump, "-d", str(path)], path)
+        except RuntimeError as error:
+            failures.append(str(error))
+            continue
+        return [("+".join(architectures), assembly)]
+
+    reason = "; ".join(failures) or "no objdump or llvm-objdump executable found"
+    raise RuntimeError(f"unchecked {path}: no available disassembler could read file: {reason}")
 
 
 def inspect(paths: list[tuple[str, Path]]) -> tuple[list[str], dict[str, list[str]]]:

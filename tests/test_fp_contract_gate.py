@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import platform
 import shutil
 import subprocess
@@ -120,6 +121,42 @@ def test_contraction_enabled_coff_object_makes_gate_red(tmp_path: Path) -> None:
     assert result.returncode == 1
     assert "fp-contract-canary.obj" in result.stderr
     assert "FP contraction gate failed; fused instructions found" in result.stderr
+
+
+def test_coff_object_without_capable_disassembler_is_unchecked(tmp_path: Path) -> None:
+    """An object remains a hard failure when no disassembler can inspect it."""
+    compiler = shutil.which("clang")
+    if compiler is None:
+        pytest.skip("COFF fail-closed control requires clang")
+
+    objects = tmp_path / "objects"
+    objects.mkdir()
+    source = objects / "clean.c"
+    source.write_text("double clean(double value){return value + 1.0;}\n")
+    artifact = objects / "clean.obj"
+    subprocess.run(
+        [
+            compiler,
+            "--target=x86_64-pc-windows-msvc",
+            "-c",
+            str(source),
+            "-o",
+            str(artifact),
+        ],
+        check=True,
+    )
+
+    environment = os.environ.copy()
+    environment["PATH"] = ""
+    result = subprocess.run(
+        [sys.executable, "scripts/check_fp_contract.py", "--objects", str(objects)],
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    assert result.returncode != 0
+    assert "unchecked" in result.stderr
+    assert "no available disassembler could read file" in result.stderr
 
 
 def test_vdpbf16ps_coff_object_makes_gate_red(tmp_path: Path) -> None:
