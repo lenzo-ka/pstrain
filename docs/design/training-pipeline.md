@@ -43,11 +43,8 @@ pstrain/lib/
 ├── flat.py         ✅ init_flat_model(): pstrain_flat_tmat, pstrain_flat_mixw,
 │                      pstrain_init_gau, pstrain_norm_gau
 ├── features.py     ✅ FeatureExtractor: pstrain_fe_create
-├── param_cnt.py    ✅ param_cnt(): pstrain_param_cnt
 ├── agg_seg.py      ✅ agg_seg(): pstrain_agg_seg
-├── map_adapt.py    ✅ map_adapt(): pstrain_map_adapt
-├── kdtree.py       ✅ build_kdtree(): pstrain_kdtree_build
-├── delint.py       ✅ delint(): pstrain_delint
+├── commands.py     ✅ core command paths: param_cnt, map_adapt, kdtree, delint
 └── _cffi/io.py     ✅ read_gau, write_gau, read_mixw, write_mixw,
                        read_tmat, write_tmat, read_dnom, write_dnom
 ```
@@ -168,11 +165,11 @@ def run_ci_training(
 - [x] State tying (`pstrain_tie_states`)
 - [x] Model I/O (`read_gau`, `write_gau`, `read_mixw`, etc.)
 - [x] K-means (`pstrain_kmeans`, `pstrain_kmeans_init`)
-- [x] Parameter counting (`pstrain_param_cnt`)
+- [x] Parameter counting (core `param_cnt` command)
 - [x] Segment aggregation (`pstrain_agg_seg`)
-- [x] MAP adaptation (`pstrain_map_adapt`)
-- [x] KD-tree building (`pstrain_kdtree_build`)
-- [x] Deleted interpolation (`pstrain_delint`)
+- [x] MAP adaptation (core `map_adapt` command)
+- [x] KD-tree building (core `kdtree` command)
+- [x] Deleted interpolation (core `delint` command)
 
 ### Orchestration Layer
 - [x] Pipeline runner with all tasks registered (`pstrain.lib.pipeline`)
