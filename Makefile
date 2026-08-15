@@ -64,7 +64,7 @@ lint:
 # Canonical local merge-gate verification. Keep the Ruff format scope aligned
 # with the blocking lint job in .github/workflows/tests.yml.
 .PHONY: verified
-verified: verified-test config-check lint
+verified: build-c verified-test config-check lint
 	ruff format --check pstrain tests
 
 .PHONY: format

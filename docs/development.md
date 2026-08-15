@@ -2,19 +2,20 @@
 
 ## Canonical verification command
 
-Build the C library, then run the complete local verification verdict:
+Run the complete local verification verdict:
 
 ```bash
-make build-c
 make verified
 ```
 
 `make verified` is **the** command to cite when reporting a branch as green. It
-runs the subject-identity-aware runtime suite (`verified-test`), configuration
-and generated-file checks (`config-check`), Ruff lint, mypy, and the Ruff format
-check. Ruff deliberately covers `pstrain` and `tests`, matching the blocking CI
-lint job; repository-wide Ruff also includes pre-existing vendored and utility
-scripts outside that scope.
+first brings the native build up to date, then runs the subject-identity-aware
+runtime suite (`verified-test`), configuration and generated-file checks
+(`config-check`), Ruff lint, mypy, and the Ruff format check. The aggregate is
+fail-fast: a red verdict identifies the first failing constituent, not every
+failure that may be present. Ruff deliberately covers `pstrain` and `tests`,
+matching the blocking CI lint job; repository-wide Ruff also includes
+pre-existing vendored and utility scripts outside that scope.
 
 The aggregate invokes the checks directly instead of running pre-commit. This
 keeps verification non-mutating and avoids hook-environment setup and unrelated
