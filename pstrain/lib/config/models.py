@@ -125,7 +125,12 @@ class TrainingConfig(StrictModel):
     ] = None
     accept_arctic_a0587_known_skip: Annotated[
         bool,
-        Field(description="Honor only the two ratified Arctic a0587 stage/pass skip events"),
+        Field(
+            description=(
+                "Deprecated for live profiles: retained solely for the Arctic pin's retired "
+                "off-profile provenance; live benchmark cells run exception-free"
+            )
+        ),
     ] = False
     tree_state_weights: Annotated[
         tuple[float, ...], Field(min_length=1, description="Decision-tree state weights")

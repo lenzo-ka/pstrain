@@ -30,8 +30,36 @@ def main() -> int:
         action="store_true",
         help="add live-only condition fields; never change existing pins or benchmark results",
     )
+    parser.add_argument(
+        "--adopt-record",
+        type=Path,
+        metavar="CANDIDATE",
+        help="adopt a freshly emitted record while preserving retired historical measurements",
+    )
     args = parser.parse_args()
     record = json.loads(args.record.read_text(encoding="utf-8"))
+    if args.adopt_record:
+        candidate = json.loads(args.adopt_record.read_text(encoding="utf-8"))
+        validate_record(candidate)
+        actual = benchmark_conditions()
+        uncovered = authenticate_conditions(actual, candidate["conditions"])
+        if uncovered:
+            raise RuntimeError(f"candidate leaves live conditions uncovered: {uncovered}")
+        for dataset in ("slt55", "big"):
+            old = record["results"]["off"][dataset]
+            new = candidate["results"]["off"][dataset]
+            if new != old:
+                raise RuntimeError(
+                    f"retired off/{dataset} full-cell historical drift: "
+                    "every serialized field must remain exactly equal"
+                )
+        temporary = args.record.with_suffix(args.record.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps(candidate, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        temporary.replace(args.record)
+        print("adopted fresh MULTIPRON-ONLY Arctic benchmark record")
+        return 0
     validate_record(record)
     actual = benchmark_conditions()
     uncovered = authenticate_conditions(actual, record["conditions"])
@@ -39,7 +67,8 @@ def main() -> int:
         record["conditions"] = adopt_uncovered_conditions(actual, record["conditions"])
         pin_conditions = record["conditions"]["pin_conditions"]
         source_kinds = record["conditions"]["pin_condition_source_kinds"]
-        for mode, datasets in record["results"].items():
+        for mode in pin_conditions:
+            datasets = record["results"][mode]
             provenance = resolved_configuration_provenance(
                 {
                     "profile": pin_conditions[mode],

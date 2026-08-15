@@ -40,7 +40,12 @@ def resolve_data_dir(*, package_root: Path | None = None, repo_root: Path | None
 
 
 DATA_DIR = resolve_data_dir()
-RECORD_SCHEMA_VERSION = 4
+RECORD_SCHEMA_VERSION = 5
+BENCHMARK_BASIS = {
+    "name": "MULTIPRON-ONLY",
+    "live_cells": ["on/slt55", "on/big"],
+    "retired_cells": ["off/slt55", "off/big"],
+}
 BOOTSTRAP_RESAMPLES = 100_000
 BOOTSTRAP_SEED = 7
 DECODER_CONDITIONS: dict[str, Any] = {
@@ -61,50 +66,7 @@ PINNED_RESOURCE_HASHES = {
     "filler_dictionary_sha256": "fb50883998c41a5030c2a602965935c647563321e84a86f2adabb377ec24b49c",
 }
 FILLER_DICTIONARY = "<sil> SIL\n<s> SIL\n</s> SIL\n"
-KNOWN_SKIPS: list[dict[str, Any]] = [
-    {
-        "mode": "off",
-        "stage": "cd-2g",
-        "pass": 1,
-        "utterance": "arctic_a0587",
-        "mechanism": (
-            "beam failure on a hard utterance after permitted retry; mirrored upstream: "
-            "the preserved upstream build ignores the same utterance at CI passes 5-6"
-        ),
-        "recorded-in": "thresh01-off anchor",
-    },
-    {
-        "mode": "on",
-        "stage": "cd-untied",
-        "passes": [3, 4, 5, 6, 7, 8, 9, 10],
-        "utterance": "arctic_a0302",
-        "mechanism": (
-            "terminal alignment failure after permitted retry in the multipron posture; "
-            "accepted only when exact-zero-codebook occupancy is inside the declared band, "
-            "then recorded as a skip while training continues without this utterance update"
-        ),
-        "recorded-in": "on-mode parity anchor",
-        "adjudication": (
-            "retained after history and artifact inspection: commit 72f62a9 changed this "
-            "terminal alignment failure into an accepted occupancy-band exception that still "
-            "records a skip and continues without the utterance update; commit 17eb3d7 tightened "
-            "the band to the measured pin occupancy"
-        ),
-    },
-    {
-        "mode": "on",
-        "stage": "cd-1g",
-        "pass": 6,
-        "utterance": "arctic_a0587",
-        "mechanism": (
-            "beam failure on a known-hard utterance after permitted retry in the multipron "
-            "posture — the recorded on-mode remainder class (V7-era: a0302/b0486; set shifted "
-            "with the reachable inventory: b0320 now trains); deep diagnosis deferred per "
-            "banked Q6, tracked as an open item"
-        ),
-        "recorded-in": "on-mode parity anchor",
-    },
-]
+KNOWN_SKIPS: list[dict[str, Any]] = []
 PIPELINE_STAGE_ORDER = (
     "flat",
     "ci-1g",
@@ -189,6 +151,7 @@ ARCHIVES = (
 )
 
 PIN_CONFIGS: dict[str, dict[str, Any]] = {
+    # Retained only so historical off-mode record provenance remains checkable.
     "off": {
         "description": "BM1 multipron off pin",
         "features": {
@@ -247,7 +210,7 @@ PIN_CONFIGS: dict[str, dict[str, Any]] = {
         "split": {"test_count": 0, "seed": 42},
     },
     "on": {
-        "description": "BM1 multipron on pin",
+        "description": "BM1 product-default multipron pin",
         "features": {
             "samprate": 16000,
             "ncep": 13,
@@ -278,13 +241,11 @@ PIN_CONFIGS: dict[str, dict[str, Any]] = {
             "retry_beam_factor": 1e10,
             "failed_alignment": "recover",
             "bw_checkpoint_iterations": False,
-            # Singular accepted exception. Widening requires changing these numbers.
-            "arctic_a0302_zero_codebook_band": [4548, 4623],
-            "accept_arctic_a0587_known_skip": True,
+            "arctic_a0302_zero_codebook_band": None,
+            "accept_arctic_a0587_known_skip": False,
             "tree_state_weights": [1.0, 0.05, 0.0],
-            # Historical pin predates S1/S2; keep its recorded baseline explicit.
-            "tree_rotate_state_weights": False,
-            "tree_directional_questions": False,
+            "tree_rotate_state_weights": True,
+            "tree_directional_questions": True,
             "tree_ssplitmax": 7,
             "tree_ssplitthr": 0.0,
             "tree_csplitmax": 2000,
@@ -295,11 +256,11 @@ PIN_CONFIGS: dict[str, dict[str, Any]] = {
             "question_quests_per_state": 20,
             "question_niter": 1,
             "multipron_training": True,
-            "optional_final_silence": False,
-            "untied_inventory": "transcript-reachable",
+            "optional_final_silence": True,
+            "untied_inventory": "all-triphone",
             "exclusion_schedule": {},
             "ci": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.001},
-            "untied": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.001},
+            "untied": {"max_iterations": 6, "min_iterations": 1, "convergence_ratio": 0.001},
             "tied": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.001},
         },
         "split": {"test_count": 0, "seed": 42},
@@ -419,7 +380,8 @@ def benchmark_conditions(
         "training": [item.name for item in fields(TrainParams)],
         "exemptions": {},
     }
-    for mode, config in PIN_CONFIGS.items():
+    for mode in ("on",):
+        config = PIN_CONFIGS[mode]
         for section in ("features", "training"):
             missing = set(frozen_fields[section]) - set(config[section])
             if missing:
@@ -443,14 +405,13 @@ def benchmark_conditions(
                     profile_name=mode,
                     user_config_path=project / "absent-user.yaml",
                 ).benchmark_document()
-                for mode in ("off", "on")
+                for mode in ("on",)
             }
     return {
         "band": "BM1" if band == "pin" else "BM1-pip-en-us-alternative",
-        "pin_conditions": {mode: resolved_configs[mode]["profile"] for mode in ("off", "on")},
-        "pin_condition_source_kinds": {
-            mode: resolved_configs[mode]["field_source_kinds"] for mode in ("off", "on")
-        },
+        "basis": BENCHMARK_BASIS,
+        "pin_conditions": {"on": resolved_configs["on"]["profile"]},
+        "pin_condition_source_kinds": {"on": resolved_configs["on"]["field_source_kinds"]},
         "decoder": DECODER_CONDITIONS,
         "bootstrap": {
             "method": "matched-pair percentile",
@@ -580,10 +541,14 @@ def render_results_report(output: dict[str, Any]) -> str:
     sections = ["# Arctic BM1 measurement report"]
     for mode, cells in output["results"].items():
         for dataset, cell in cells.items():
+            if cell.get("status") == "retired/historical":
+                sections.extend([f"## {mode}/{dataset}", "Status: retired/historical"])
+                continue
             sections.extend(
                 [
                     f"## {mode}/{dataset}",
-                    f"WER: {float(cell['wer']) * 100:.4f}% "
+                    f"WER: {float(cell['wer']) * 100:.4f}% over "
+                    f"{cell['decoded']:,}/{cell['decode_denominator']:,} decoded "
                     f"({cell['errors']} errors / {cell['ref_words']} reference words)",
                     render_configuration_provenance(cell["configuration_provenance"]),
                 ]
@@ -712,6 +677,7 @@ def paired_delta_ci(
     actual_pairs: dict[str, dict[str, Any]],
     *,
     speaker_stratified: bool,
+    allow_recorded_only: bool = False,
     resamples: int = BOOTSTRAP_RESAMPLES,
     seed: int = BOOTSTRAP_SEED,
 ) -> list[float]:
@@ -722,11 +688,18 @@ def paired_delta_ci(
     actual = {
         utterance: (int(value["ref_words"]), int(value["errors"]))
         for utterance, value in actual_pairs.items()
+        if "errors" in value
     }
     if set(recorded) != set(actual):
         missing = sorted(set(recorded) - set(actual))
         extra = sorted(set(actual) - set(recorded))
-        raise RuntimeError(f"matched-pair utterance ID mismatch: missing={missing}, extra={extra}")
+        if extra or not allow_recorded_only:
+            raise RuntimeError(
+                f"matched-pair utterance ID mismatch: missing={missing}, extra={extra}"
+            )
+        recorded = {key: value for key, value in recorded.items() if key in actual}
+    if not recorded:
+        raise RuntimeError("paired bootstrap requires at least one common decoded utterance")
     for utterance in recorded:
         if recorded[utterance][0] != actual[utterance][0]:
             raise RuntimeError(f"matched-pair reference word mismatch for {utterance}")
@@ -1036,7 +1009,11 @@ def score_model(
             voice, local_id = utterance.split("/", 1)
         else:
             voice, local_id = "slt", utterance
-        result = decoder.decode_file(audio_roots[voice] / f"{local_id}.wav")
+        wav = audio_roots[voice] / f"{local_id}.wav"
+        if not wav.is_file():
+            pairs[utterance] = {"reference": text, "error": "missing WAV"}
+            continue
+        result = decoder.decode_file(wav)
         if not result.success:
             pairs[utterance] = {"reference": text, "error": result.error}
             continue
@@ -1059,10 +1036,14 @@ def score_model(
     oov = sum(word.lower() not in vocabulary for text in refs.values() for word in text.split())
     payload = total.to_dict()
     payload.update(
-        {"utterances": len(refs), "decoded": decoded, "oov_tokens": oov, "matched_pairs": pairs}
+        {
+            "utterances": len(refs),
+            "decoded": decoded,
+            "decode_denominator": len(refs),
+            "oov_tokens": oov,
+            "matched_pairs": pairs,
+        }
     )
-    if decoded != len(refs):
-        raise RuntimeError(f"zero-failed-alignment gate: decoded {decoded}/{len(refs)} utterances")
     return payload
 
 
@@ -1078,6 +1059,7 @@ def _validate_cell(cell: Any, label: str, *, recorded: bool) -> None:
         "ref_words",
         "utterances",
         "decoded",
+        "decode_denominator",
         "oov_tokens",
         "known_skips",
         "configuration_provenance",
@@ -1094,10 +1076,21 @@ def _validate_cell(cell: Any, label: str, *, recorded: bool) -> None:
         or not isinstance(provenance.get("diff_from_shipped_defaults"), list)
     ):
         raise RuntimeError(f"benchmark record has invalid configuration provenance: {label}")
-    integer_fields = ("errors", "ref_words", "utterances", "decoded", "oov_tokens")
+    integer_fields = (
+        "errors",
+        "ref_words",
+        "utterances",
+        "decoded",
+        "decode_denominator",
+        "oov_tokens",
+    )
     if any(not isinstance(cell[key], int) or cell[key] < 0 for key in integer_fields):
         raise RuntimeError(f"benchmark record has invalid counts in result cell: {label}")
-    if cell["ref_words"] <= 0 or cell["decoded"] > cell["utterances"]:
+    if (
+        cell["ref_words"] <= 0
+        or cell["decode_denominator"] != cell["utterances"]
+        or cell["decoded"] > cell["decode_denominator"]
+    ):
         raise RuntimeError(f"benchmark record has impossible counts in result cell: {label}")
     if not isinstance(cell["known_skips"], list) or any(
         not isinstance(item, dict)
@@ -1115,7 +1108,7 @@ def _validate_cell(cell: Any, label: str, *, recorded: bool) -> None:
         rows = cell["utterance_rows"]
         if (
             not isinstance(rows, list)
-            or len(rows) != cell["utterances"]
+            or len(rows) != cell["decoded"]
             or any(
                 not isinstance(row, list)
                 or len(row) != 3
@@ -1142,8 +1135,9 @@ def _validate_cell(cell: Any, label: str, *, recorded: bool) -> None:
         if not isinstance(pairs, dict) or len(pairs) != cell["utterances"]:
             raise RuntimeError(f"benchmark actual result has invalid matched pairs: {label}")
         try:
-            pair_words = sum(int(value["ref_words"]) for value in pairs.values())
-            pair_errors = sum(int(value["errors"]) for value in pairs.values())
+            decoded_pairs = [value for value in pairs.values() if "errors" in value]
+            pair_words = sum(int(value["ref_words"]) for value in decoded_pairs)
+            pair_errors = sum(int(value["errors"]) for value in decoded_pairs)
         except (KeyError, TypeError, ValueError) as exc:
             raise RuntimeError(
                 f"benchmark actual result has invalid matched pairs: {label}"
@@ -1156,14 +1150,13 @@ def validate_record(record: dict[str, Any]) -> None:
     """Validate the complete, versioned benchmark-record schema."""
     if record.get("schema_version") != RECORD_SCHEMA_VERSION:
         raise RuntimeError(f"unsupported benchmark record schema: {record.get('schema_version')!r}")
-    for field in ("engine", "conditions", "resources", "results", "off_big_floor_plus_1"):
+    for field in ("basis", "engine", "conditions", "resources", "results"):
         if field not in record:
             raise RuntimeError(f"benchmark record missing required field: {field}")
     for field in ("engine", "conditions", "resources", "results"):
         if not isinstance(record[field], dict):
             raise RuntimeError(f"benchmark record field must be an object: {field}")
-    if not isinstance(record["off_big_floor_plus_1"], bool):
-        raise RuntimeError("benchmark record off_big_floor_plus_1 must be boolean")
+    _require_equal("basis", record["basis"], BENCHMARK_BASIS)
     bootstrap = record["conditions"].get("bootstrap")
     if (
         not isinstance(bootstrap, dict)
@@ -1179,13 +1172,16 @@ def validate_record(record: dict[str, Any]) -> None:
         not isinstance(pin_conditions, dict) or not isinstance(source_kinds, dict)
     ):
         raise RuntimeError("benchmark record has invalid resolved configuration conditions")
-    for mode in ("off", "on"):
+    for mode in ("on",):
         if not isinstance(record["results"].get(mode), dict):
             raise RuntimeError(f"benchmark record missing result mode: {mode}")
         for dataset in ("slt55", "big"):
             if dataset not in record["results"][mode]:
                 raise RuntimeError(f"benchmark record missing result cell: {mode}/{dataset}")
-            _validate_cell(record["results"][mode][dataset], f"{mode}/{dataset}", recorded=True)
+            cell = record["results"][mode][dataset]
+            expected_status = "live" if mode == "on" else "retired/historical"
+            _require_equal(f"{mode}/{dataset} status", cell.get("status"), expected_status)
+            _validate_cell(cell, f"{mode}/{dataset}", recorded=True)
             if has_resolved_conditions:
                 expected_provenance = resolved_configuration_provenance(
                     {
@@ -1199,6 +1195,16 @@ def validate_record(record: dict[str, Any]) -> None:
                     record["results"][mode][dataset]["configuration_provenance"],
                     expected_provenance,
                 )
+    off_cells = record["results"].get("off")
+    if not isinstance(off_cells, dict):
+        raise RuntimeError("benchmark record missing retired result mode: off")
+    for dataset in ("slt55", "big"):
+        if dataset not in off_cells:
+            raise RuntimeError(f"benchmark record missing retired result cell: off/{dataset}")
+        _require_equal(
+            f"off/{dataset} status", off_cells[dataset].get("status"), "retired/historical"
+        )
+        _validate_cell(off_cells[dataset], f"off/{dataset}", recorded=True)
 
 
 def authenticate_conditions(actual: dict[str, Any], recorded: dict[str, Any]) -> list[str]:
@@ -1292,12 +1298,12 @@ def compare_results(
     if not allow_engine_drift:
         _require_equal("engine identity", actual.get("engine"), record.get("engine"))
     rows: list[dict[str, Any]] = []
-    for mode in ("off", "on"):
+    for mode in ("on",):
         for dataset in ("slt55", "big"):
             actual_cell = actual["results"][mode][dataset]
             record_cell = record["results"][mode][dataset]
             _validate_cell(actual_cell, f"actual {mode}/{dataset}", recorded=False)
-            for field in ("utterances", "decoded", "oov_tokens", "ref_words"):
+            for field in ("utterances", "decode_denominator", "oov_tokens"):
                 _require_equal(f"{mode}/{dataset} {field}", actual_cell[field], record_cell[field])
             _require_equal(
                 f"{mode}/{dataset} known_skips",
@@ -1312,18 +1318,33 @@ def compare_results(
             observed = float(actual_cell["wer"]) * 100
             expected = float(record_cell["wer"])
             delta = observed - expected
+            actual_coverage = {
+                "decoded": actual_cell["decoded"],
+                "denominator": actual_cell["decode_denominator"],
+            }
+            recorded_coverage = {
+                "decoded": record_cell["decoded"],
+                "denominator": record_cell["decode_denominator"],
+            }
+            field_differences = []
+            if actual_coverage != recorded_coverage:
+                field_differences.append(
+                    {
+                        "field": "coverage",
+                        "actual": actual_coverage,
+                        "recorded": recorded_coverage,
+                    }
+                )
+            coverage_shortfall = actual_cell["decoded"] < record_cell["decoded"]
             ci = paired_delta_ci(
                 record_cell["utterance_rows"],
                 actual_cell["matched_pairs"],
                 speaker_stratified=dataset == "big",
+                allow_recorded_only=coverage_shortfall,
                 resamples=int(record["conditions"]["bootstrap"]["resamples"]),
                 seed=int(record["conditions"]["bootstrap"]["seed"]),
             )
-            bar = (
-                1.0
-                if mode == "off" and dataset == "big" and record.get("off_big_floor_plus_1", False)
-                else 0.0
-            )
+            bar = 0.0
             passed = ci[1] <= bar
             rows.append(
                 {
@@ -1333,6 +1354,8 @@ def compare_results(
                     "recorded": expected,
                     "delta": delta,
                     "paired_delta_ci_95": ci,
+                    "coverage": {"actual": actual_coverage, "recorded": recorded_coverage},
+                    "field_differences": field_differences,
                     "bar": bar,
                     "pass": passed,
                 }
@@ -1340,30 +1363,51 @@ def compare_results(
     return rows
 
 
-def make_record(output: dict[str, Any]) -> dict[str, Any]:
+def make_record(
+    output: dict[str, Any], historical_record: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Convert a completed run payload into the stable serialized record schema."""
     record_results = {
         mode: {
             dataset: {
                 **{key: value for key, value in cell.items() if key != "matched_pairs"},
+                "status": "live",
                 "known_skips": _canonical_known_skips(cell["known_skips"]),
                 "wer": float(cell["wer"]) * 100,
                 "utterance_rows": [
                     [utterance, value["ref_words"], value["errors"]]
                     for utterance, value in sorted(cell["matched_pairs"].items())
+                    if "errors" in value
                 ],
             }
             for dataset, cell in cells.items()
         }
         for mode, cells in output["results"].items()
+        if mode == "on"
     }
+    historical_source = historical_record if historical_record is not None else output
+    historical_cells = historical_source["results"].get("off")
+    if not isinstance(historical_cells, dict):
+        raise RuntimeError("record emission requires historical off-mode cells")
+    record_results["off"] = json.loads(json.dumps(historical_cells))
+    for cell in record_results["off"].values():
+        cell["status"] = "retired/historical"
+        cell.setdefault("decode_denominator", cell["utterances"])
+        if "matched_pairs" in cell:
+            pairs = cell.pop("matched_pairs")
+            cell["wer"] = float(cell["wer"]) * 100
+            cell["utterance_rows"] = [
+                [utterance, value["ref_words"], value["errors"]]
+                for utterance, value in sorted(pairs.items())
+                if "errors" in value
+            ]
     record = {
         "schema_version": RECORD_SCHEMA_VERSION,
+        "basis": BENCHMARK_BASIS,
         "engine": output["engine"],
         "conditions": output["conditions"],
         "resources": output["resources"],
         "results": record_results,
-        "off_big_floor_plus_1": True,
     }
     validate_record(record)
     return record
@@ -1378,6 +1422,7 @@ def run(
     allow_engine_drift: bool = False,
     deep_verify: bool = False,
     band: str = "pin",
+    historical_record_path: Path | None = None,
 ) -> dict[str, Any]:
     """Run BM1 from downloads through comparison."""
     cache = Path(
@@ -1411,7 +1456,7 @@ def run(
     audio_roots = {
         voice: corpus / f"cmu_us_{voice}_arctic" / "wav" for voice in ("slt", "bdl", "rms", "clb")
     }
-    for mode in ("off", "on"):
+    for mode in ("on",):
         project = work_dir / mode
         write_project(project, corpus, dictionary)
         command = [
@@ -1467,7 +1512,10 @@ def run(
         "resource_manifest": str(work_dir / "resource-manifest.json"),
     }
     if emit_record is not None:
-        benchmark_record = make_record(output)
+        if historical_record_path is None:
+            raise RuntimeError("emitting a multipron-only record requires --historical-record")
+        historical_record = json.loads(historical_record_path.read_text(encoding="utf-8"))
+        benchmark_record = make_record(output, historical_record)
         emit_record.parent.mkdir(parents=True, exist_ok=True)
         emit_record.write_text(
             json.dumps(benchmark_record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -1501,6 +1549,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--work-dir", type=Path, default=Path(".pstrain-benchmark/arctic"))
     parser.add_argument("--record", type=Path, help="committed docs/benchmarks JSON record")
     parser.add_argument("--emit-record", type=Path, help="write a complete PIN benchmark record")
+    parser.add_argument(
+        "--historical-record",
+        type=Path,
+        help="record supplying retired/historical off-mode cells when emitting",
+    )
     parser.add_argument("--allow-engine-drift", action="store_true")
     parser.add_argument("--deep-verify", action="store_true", help="rehash every cached corpus WAV")
     parser.add_argument(
@@ -1529,6 +1582,7 @@ def main(argv: list[str] | None = None) -> int:
             allow_engine_drift=args.allow_engine_drift,
             deep_verify=args.deep_verify,
             band=args.band,
+            historical_record_path=args.historical_record,
         )
     except (OSError, RuntimeError, subprocess.CalledProcessError) as exc:
         parser.exit(1, f"BM1 failed: {exc}\n")

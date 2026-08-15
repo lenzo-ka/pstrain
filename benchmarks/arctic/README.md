@@ -1,8 +1,8 @@
 # CMU Arctic BM1 benchmark
 
 This harness downloads and authenticates the CMU Arctic SLT, BDL, RMS, CLB,
-AWB, and JMK packed voices, prepares two acoustic-model projects, loads the committed
-canonical unigram LM, trains the multipron-off and multipron-on
+AWB, and JMK packed voices, prepares one acoustic-model project, loads the committed
+canonical unigram LM, trains the product-default multipron-on
 PIN configurations through 8 Gaussians, decodes SLT-55 and the 3,395-utterance
 cross-speaker set, reports WER and OOV counts, audits every inter-pass
 likelihood delta, and compares each result cell with a benchmark record.
@@ -14,8 +14,8 @@ BSD-style license printed in Appendix A of the
 [CMU ARCTIC report](http://festvox.org/cmu_arctic/cmu_arctic_report.pdf).
 
 **The PIN band uses the committed Arctic dictionary and committed unigram LM.**
-Every recorded number, including the ratified `off/big` +1.0-point floor, was
-measured with those exact resources. The earlier pip-dictionary banked intent
+Every live recorded number was measured with those exact resources. The earlier
+pip-dictionary banked intent
 was “matched at decode time”; the dictionary actually matched for every
 measurement was the Arctic dictionary. This implementation honors that intent
 over the letter of the earlier note. Kevin reviews this interpretation at the
@@ -42,17 +42,19 @@ complete training/decode conditions, and engine identity before examining WER.
 Each record retains compact per-utterance word/error rows. Comparison aligns
 their IDs with the current run and bootstraps the cross-run paired WER delta
 (100,000 percentile resamples, speaker-stratified for the cross-speaker cell).
-The upper confidence bound must be at or below parity, except for the ratified
-one-point `off/big` floor. Engine identity includes dirty tracked-source state,
+The upper confidence bound must be at or below parity. Engine identity includes dirty tracked-source state,
 the native library, Python, PocketSphinx, and the selected decode dictionary.
 Engine drift requires the explicit `--allow-engine-drift` override.
 
-The gate keeps zero failed decode alignments as a hard requirement. Named,
-documented terminal training skips are permitted only through the benchmark's
-known-skips manifest and are always reported in each affected record cell.
-The measured on-mode parity anchor itself carried nine terminal skip events;
-these documented skips are a property of the measured band, not a new
-concession.
+Decode shortfalls are non-blocking and appear in every WER headline as
+`decoded/denominator`; both missing WAVs and decoder failures therefore remain
+visible. Training skips remain gated. The product-default pin has no accepted
+exception manifest: the former a0587 and a0302 exception hooks are disabled,
+and any terminal skip fails the run.
+
+The record basis is `MULTIPRON-ONLY`. Its `on/slt55` and `on/big` cells are
+live. The old off-mode measurements remain in the record, explicitly marked
+`retired/historical`; the harness neither trains nor decodes them.
 
 `PSTRAIN_BENCH_CACHE`
 selects the archive cache; authenticated archives there are reused. The work

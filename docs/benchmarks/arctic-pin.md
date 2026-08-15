@@ -1,8 +1,9 @@
 # Arctic benchmark pin
 
 This pins the from-checkout, turnkey Arctic benchmark run by
-`scripts/bench_arctic.py` at engine commit `740f112`. It covers multipron
-training off and on in the SLT-55 same-speaker and big cross-speaker cells. The
+`scripts/bench_arctic.py` on current main. Its basis is `MULTIPRON-ONLY`: the
+live cells are multipron-on SLT-55 and big; the two off-mode cells are retained
+as `retired/historical` and are neither trained nor decoded. The
 machine-readable [record](arctic-pin/record.json) and upstream-oracle
 [sidecar](arctic-pin/oracle-sidecar.json) preserve the per-utterance rows and
 the complete engine, model, corpus, transcript, language-model, dictionary,
@@ -18,7 +19,8 @@ The decode path is a defining condition of this measurement. Audio is decoded
 from WAV through pinned PocketSphinx 5.1.1 using Python 3.12.12 and native
 library SHA-256
 `6a5da2377c3b2b033b35d93a12a57bb869413bbc98f045d6c3f3652585792be3`.
-The engine is pstrain 0.1.0 at `740f112`, with no tracked modifications. A
+The engine is pstrain 0.1.0. Its exact commit and artifact hashes are recorded
+in the machine-readable record. A
 result obtained through another decode path is not the same measurement even
 when the acoustic-model bytes are identical.
 
@@ -31,41 +33,27 @@ when the acoustic-model bytes are identical.
 | Decode dictionary | SHA-256 `24ff2852a707b63f499fd968294d5e4c02d44e0eb1ec511e40be1f380d785846` |
 | Filler dictionary | SHA-256 `fb50883998c41a5030c2a602965935c647563321e84a86f2adabb377ec24b49c` |
 | Shared training | 3 states, 200 senones, `a_beam=1e-90`, `b_beam=1e-10`, maximum skip fraction 0.05, retry beam factor `1e10`, tree state weights `[1.0, 0.05, 0.0]`, `ssplitmax=7`, `ssplitthr=0`, `csplitmax=2000`, `csplitthr=0`, `mwfloor=1e-8`, 12 question permutations, 20 questions/state, 1 question iteration |
-| Multipron off training | `multipron_training=false`, linear untied inventory; CI/tied convergence 0.1, 1–10 iterations; untied convergence 0.1, 1–6 iterations |
-| Multipron on training | `multipron_training=true`, transcript-reachable untied inventory; CI/tied/untied convergence 0.001, 1–10 iterations |
+| Basis | `MULTIPRON-ONLY`; off cells retained as retired history |
+| Multipron on training | Product defaults: `multipron_training=true`, all-triphone untied inventory, optional final silence, one retry at a beam widened by `1e10`; CI/tied 1–10 iterations and untied 1–6, convergence 0.001 |
 | Acoustic features | 16 kHz, 13 cepstra, 25 filters, 512-point FFT, 130–6800 Hz, alpha 0.97, `1s_c_d_dd`, lifter 22, DCT, no AGC, batch CMN, no variance normalization |
-| Split | Seed 42, test count 0, both modes |
+| Split | Seed 42, test count 0 |
 | Decoder | `beam=pbeam=lpbeam=lponlybeam=fwdflatbeam=1e-80`; `wbeam=fwdflatwbeam=1e-40`; `pl_window=5`, `lw=10`, `wip=0.2` |
 | Bootstrap | Matched-pair percentile, 100,000 resamples, seed 7; big cells speaker-stratified |
 
 ### Configuration provenance by result cell
 
-Both `off/slt55` and `off/big` come from the named benchmark profile `off`;
-both `on/slt55` and `on/big` come from the named benchmark profile `on`. There
+The live cells `on/slt55` and `on/big` come from the named benchmark profile
+`on`. There
 are no run-time overrides. These are the complete differences from the shipped
 schema defaults; an unlisted setting equals its shipped default. The record's
 conditions and each cell's provenance come from the same resolved build-child
-snapshot, and validation rejects disagreement between them. The off profile has
-9 differences and the on profile has 7.
+snapshot, and validation rejects disagreement between them. Its only semantic
+difference from shipped product defaults is `split.test_count=0`, which keeps
+the established external evaluation cells intact.
 
 | Cells | Setting | Shipped default | Cell value | Winning source kind |
 |---|---|---:|---:|---|
-| off/slt55, off/big | `split.test_count` | `null` | `0` | `project-profile` |
-| off/slt55, off/big | `training.accept_arctic_a0587_known_skip` | `false` | `true` | `project-profile` |
-| off/slt55, off/big | `training.ci.convergence_ratio` | `0.001` | `0.1` | `project-profile` |
-| off/slt55, off/big | `training.multipron_training` | `true` | `false` | `project-profile` |
-| off/slt55, off/big | `training.tied.convergence_ratio` | `0.001` | `0.1` | `project-profile` |
-| off/slt55, off/big | `training.tree_directional_questions` | `true` | `false` | `project-profile` |
-| off/slt55, off/big | `training.tree_rotate_state_weights` | `true` | `false` | `project-profile` |
-| off/slt55, off/big | `training.untied.convergence_ratio` | `0.001` | `0.1` | `project-profile` |
-| off/slt55, off/big | `training.untied_inventory` | `"all-triphone"` | `"linear"` | `project-profile` |
 | on/slt55, on/big | `split.test_count` | `null` | `0` | `project-profile` |
-| on/slt55, on/big | `training.accept_arctic_a0587_known_skip` | `false` | `true` | `project-profile` |
-| on/slt55, on/big | `training.arctic_a0302_zero_codebook_band` | `null` | `[4548,4623]` | `project-profile` |
-| on/slt55, on/big | `training.tree_directional_questions` | `true` | `false` | `project-profile` |
-| on/slt55, on/big | `training.tree_rotate_state_weights` | `true` | `false` | `project-profile` |
-| on/slt55, on/big | `training.untied.max_iterations` | `6` | `10` | `project-profile` |
-| on/slt55, on/big | `training.untied_inventory` | `"all-triphone"` | `"transcript-reachable"` | `project-profile` |
 
 The corpus archive identities are BDL
 `26b91aaf48b2799b2956792b4632c2f926cd0542f402b5452d5adecb60942904`,
@@ -92,10 +80,10 @@ observations. The big cells therefore resample within speaker strata.
 
 | Mode | Cell | pstrain WER | Oracle WER | Delta pp | Paired 95% CI | Interpretation |
 |---|---|---:|---:|---:|---:|---|
-| off | SLT-55 | 28.8499 | 28.8499 | +0.0000 | [-4.7059, +4.7619] | statistical parity |
-| on | SLT-55 | 30.0195 | 26.9006 | +3.1189 | [-0.3906, +6.6667] | statistical parity |
-| off | big | 76.6393 | 74.7915 | +1.8478 | [+1.3257, +2.3646] | documented baseline gap |
-| on | big | 76.2157 | 75.0017 | +1.2141 | [+0.6922, +1.7350] | documented baseline gap |
+| off (retired) | SLT-55 | 28.8499 | 28.8499 | +0.0000 | [-4.7059, +4.7619] | historical only |
+| on | SLT-55 | 26.9006 | 26.9006 | +0.0000 | — | current product pin |
+| off (retired) | big | 76.6393 | 74.7915 | +1.8478 | [+1.3257, +2.3646] | historical only |
+| on | big | 75.2685 | 75.0017 | +0.2668 | — | current product pin |
 
 ### Gap composition
 
@@ -132,15 +120,17 @@ byte-identical acoustic model shifts by 0.50–0.60 pp WER between the two paths
 This pin consequently records its full decode identity. Future comparisons
 must either hold that identity fixed or cross-decode the compared models.
 
-## Known training skips
+## Training skips and decode coverage
 
-These are documented training-set composition facts, not decode failures:
-
-| Mode | Utterance | Stage and pass | Mechanism |
-|---|---|---|---|
-| off | `arctic_a0587` | `cd-2g`, pass 1 | Beam failure on a hard utterance after the permitted retry; mirrored upstream, whose preserved build ignores it at CI passes 5–6. |
-| on | `arctic_a0302` | `cd-untied`, passes 3–10 | Terminal alignment failure after the permitted retry. Commit `72f62a9` made this an accepted occupancy-band exception, which still records a skip and continues without this utterance update; `17eb3d7` tightened the band to the measured pin occupancy. |
-| on | `arctic_a0587` | `cd-1g`, pass 6 | Beam failure on a known-hard utterance after the permitted retry in the multipron posture; part of the same recorded on-mode remainder mechanism. |
+The live pin has no accepted training skips. In particular, `arctic_a0587`
+trains under product defaults and neither former exception fires. The
+`training.accept_arctic_a0587_known_skip` knob is retained solely to describe
+the retired `off` profile's provenance; that profile carries the true value,
+while the live `on` profile disables it (and the a0302 exception band). Thus
+all live cells run exception-free. Decode shortfalls are not gates: coverage
+is a recorded comparison field, and drift from its pinned
+`decoded/denominator` is surfaced in `field_differences` for deliberate record
+adoption without raising or failing the WER gate.
 
 ## Condition contract maintenance
 
@@ -149,6 +139,11 @@ a live field added after the record was written is reported as uncovered but doe
 as benchmark drift. `make config-check` runs this authentication in the ordinary suite. Adopt
 newly added fields deliberately, without changing existing pins or any measured result, with
 `python scripts/check_arctic_pin.py --adopt-uncovered`.
+
+Fresh-record adoption also requires exact full-cell equality for both retired
+`off` cells. Every serialized field in each retired cell—including bootstrap
+summaries and any future field—is stable; any addition, removal, or value
+change is refused.
 
 ## Replicability
 
