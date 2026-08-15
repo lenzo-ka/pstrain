@@ -488,6 +488,7 @@ class PipelineContext:
                 features=asdict(self.feat),
                 training=asdict(self.train),
                 split=asdict(self.split),
+                sharding=asdict(self.sharding),
                 execution={
                     "host": socket.gethostname(),
                     "architecture": platform.machine(),

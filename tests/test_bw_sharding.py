@@ -14,7 +14,6 @@ from pstrain.lib.contract_docs import contract_scope
 from pstrain.lib.steps.train import (
     _ACCUMULATOR_FILES,
     _effective_bw_shard_count,
-    _ordered_shard_results,
     _partition_manifest,
     _ShardResult,
     _validate_shard_artifacts,
@@ -134,28 +133,105 @@ def test_upstream_partition_manifest_matches_stock_reference_bytes() -> None:
     assert serialize(pstrain) == serialize(stock)
 
 
-def test_out_of_order_completion_is_reduced_in_shard_index_order(tmp_path: Path) -> None:
+def test_production_reducer_receives_shard_dirs_in_index_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from pstrain.lib.bw import BWConfig
+    from pstrain.lib.model import MODEL_FILES_REQUIRED
+    from pstrain.lib.steps.train import run_bw_training
+
+    class ReductionObserved(Exception):
+        pass
+
+    restored: list[Path] = []
+
+    class Trainer:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def set_dict(self, *_args: object) -> None:
+            pass
+
+        def restore_accumulators(self, directories: list[Path]) -> None:
+            restored.extend(directories)
+            raise ReductionObserved
+
     class CompletedFuture:
-        def __init__(self, shard: int) -> None:
+        def __init__(self, shard: int, accum_dir: Path) -> None:
             self.shard = shard
+            self.accum_dir = accum_dir
 
         def result(self) -> _ShardResult:
             return _ShardResult(
                 shard=self.shard,
-                assigned_ids=(),
-                processed_ids=(),
+                assigned_ids=(f"utt-{self.shard}",),
+                processed_ids=(f"utt-{self.shard}",),
                 retried_ids=(),
                 skipped=(),
-                total_log_lik=0.0,
-                total_frames=0,
-                accum_dir=tmp_path / f"shard-{self.shard:05d}",
+                total_log_lik=-1.0,
+                total_frames=1,
+                accum_dir=self.accum_dir,
             )
 
-    completed_out_of_order = [CompletedFuture(2), CompletedFuture(0), CompletedFuture(1)]
-    ordered = _ordered_shard_results(completed_out_of_order)
+    class ImmediatePool:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
 
-    assert [result.shard for result in ordered] == [0, 1, 2]
-    assert [result.accum_dir.name for result in ordered] == [
+        def __enter__(self) -> ImmediatePool:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            pass
+
+        def submit(self, _fn: object, *args: object) -> CompletedFuture:
+            return CompletedFuture(int(args[0]), Path(args[11]))
+
+    model = tmp_path / "model"
+    model.mkdir()
+    for filename in MODEL_FILES_REQUIRED:
+        (model / filename).write_bytes(b"model")
+    fileids = tmp_path / "train.fileids"
+    fileids.write_text("utt-0\nutt-1\nutt-2\n")
+    transcription = tmp_path / "train.transcription"
+    transcription.write_text("utt-0 ZERO\nutt-1 ONE\nutt-2 TWO\n")
+    dictionary = tmp_path / "dictionary.dict"
+    dictionary.write_text("ZERO Z\nONE W\nTWO T\n")
+
+    monkeypatch.setattr("pstrain.lib.steps.train.BWTrainer", Trainer)
+    monkeypatch.setattr("pstrain.lib.steps.train.ProcessPoolExecutor", ImmediatePool)
+    monkeypatch.setattr("pstrain.lib.steps.train._write_shard_metadata", lambda *a, **k: None)
+    monkeypatch.setattr("pstrain.lib.steps.train._validate_shard_artifacts", lambda *a, **k: [])
+    monkeypatch.setattr("pstrain.lib.steps.train._fingerprint_model", lambda _model: "model")
+    monkeypatch.setattr("pstrain.lib.steps.train._fingerprint_config", lambda _config: "config")
+    monkeypatch.setattr("pstrain.lib.steps.train._fingerprint_manifest", lambda _ids: "manifest")
+    arrays = SimpleNamespace(shape=(1,))
+    monkeypatch.setattr(
+        "pstrain.lib.steps.train.HMM.load",
+        lambda _model: SimpleNamespace(means=arrays, variances=arrays, mixw=arrays, tmat=arrays),
+    )
+
+    with pytest.raises(ReductionObserved):
+        run_bw_training(
+            model_dir=model,
+            output_dir=tmp_path / "output",
+            features_dir=tmp_path / "features",
+            train_fileids=fileids,
+            transcription=transcription,
+            dictionary=dictionary,
+            first_pass_2passvar=False,
+            config=BWConfig(
+                pass2var=False,
+                unobserved_gaussian_policy="zero",
+                multipron=False,
+            ),
+            multipron=False,
+            n_iter=1,
+            n_shards=3,
+        )
+
+    assert [directory.name for directory in restored] == [
         "shard-00000",
         "shard-00001",
         "shard-00002",

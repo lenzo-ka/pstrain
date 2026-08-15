@@ -20,7 +20,13 @@ import pytest
 import yaml
 
 from pstrain.lib.pipeline import PipelineContext
-from pstrain.lib.pipeline.context import DEFAULT_CONFIGS, FeatParams, RunnerParams, SplitParams
+from pstrain.lib.pipeline.context import (
+    DEFAULT_CONFIGS,
+    FeatParams,
+    RunnerParams,
+    ShardingParams,
+    SplitParams,
+)
 from pstrain.lib.pipeline.feat_params import (
     feat_params_lines,
     feature_extractor_config_from_record,
@@ -320,17 +326,42 @@ def test_stage_fingerprints_cover_only_effective_relevant_values(empty_project: 
         base, train=replace(base.train, ci=replace(base.train.ci, max_iterations=3))
     )
     split_change = replace(base, split=SplitParams(seed=99))
+    sharding_change = replace(base, sharding=ShardingParams(partition_position="remainder-last"))
 
     assert feature_change.provenance_path("features") != base.provenance_path("features")
     assert training_change.provenance_path("features") == base.provenance_path("features")
     assert split_change.provenance_path("features") == base.provenance_path("features")
     assert split_change.provenance_path("split") != base.provenance_path("split")
     assert training_change.provenance_path("split") == base.provenance_path("split")
-    for changed in (feature_change, training_change, split_change):
+    for changed in (feature_change, training_change, split_change, sharding_change):
         assert changed.provenance_path("training") != base.provenance_path("training")
 
     document = base.provenance_document("training")
     assert document["fingerprint"] in base.provenance_path("training").name
+
+
+def test_project_sharding_policy_changes_training_provenance(empty_project: Path) -> None:
+    config = empty_project / "etc" / "config.yaml"
+    config.write_text("config_version: 1\nsharding:\n  partition_position: remainder-first\n")
+    remainder_first = PipelineContext.from_config(empty_project)
+
+    config.write_text("config_version: 1\nsharding:\n  partition_position: remainder-last\n")
+    remainder_last = PipelineContext.from_config(empty_project)
+
+    assert remainder_first.resolved_config is not None
+    assert remainder_last.resolved_config is not None
+    assert (
+        remainder_first.resolved_config.fields["sharding.partition_position"].winner.source_kind
+        == "project"
+    )
+    assert (
+        remainder_last.resolved_config.fields["sharding.partition_position"].winner.source_kind
+        == "project"
+    )
+    assert remainder_first.provenance_path("training") != remainder_last.provenance_path("training")
+    assert remainder_first.provenance_document("training") != remainder_last.provenance_document(
+        "training"
+    )
 
 
 @pytest.mark.parametrize(
