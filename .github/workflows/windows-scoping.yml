@@ -85,8 +85,12 @@ jobs:
           $artifact = "coff-${{ matrix.compiler }}"
           $production = Join-Path $artifact "production"
           New-Item -ItemType Directory -Force $production | Out-Null
-          Get-ChildItem "build-${{ matrix.compiler }}" -Recurse -Filter *.obj |
-              Where-Object { $_.FullName -like '*\\Release\\*' } | ForEach-Object {
+          $objects = Get-ChildItem "build-${{ matrix.compiler }}" -Recurse -Filter *.obj |
+            Where-Object { $_.FullName -like '*\Release\*' }
+          if (-not $objects) {
+            throw "No Release production objects were found to stage"
+          }
+          $objects | ForEach-Object {
             $relative = [IO.Path]::GetRelativePath("build-${{ matrix.compiler }}", $_.FullName)
             $destination = Join-Path $production $relative
             New-Item -ItemType Directory -Force (Split-Path $destination) | Out-Null
