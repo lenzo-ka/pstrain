@@ -57,8 +57,8 @@ class Aligner:
         include_phones: Return phone segmentation in the result.
         include_states: Return per-frame state segmentation.
         cmn: Cepstral mean normalization mode. ``"batch"`` matches the
-            way SphinxTrain trains models; ``"current"`` matches the
-            sphinx3_align CLI default.
+            way SphinxTrain trains models. The native parser accepts
+            ``"current"`` as an exact alias for ``"batch"``.
         agc: Automatic gain control mode (default ``"none"``).
         varnorm: Apply cepstral variance normalization.
         feat_type: Feature stream spec (default ``"1s_c_d_dd"``).

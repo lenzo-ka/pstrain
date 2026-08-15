@@ -131,6 +131,15 @@ pstrain_agg_seg(const char *mdef_path,
         { "-ceplen", ARG_INT32, "13", "Cepstrum length" },
         { "-stride", ARG_INT32, "1", "Frame stride" },
         { "-cachesz", ARG_INT32, "200", "Cache size in MB" },
+        /* Keep agg_seg's inherited live default: cmn_live subtracts the
+         * running mean that existed before the current frames, then updates
+         * its accumulated/windowed mean.  The shipped CFFI aggregation API
+         * reaches this path but exposes no CMN argument, while the standalone
+         * agg_seg command can override -cmn.  No comparative evidence is
+         * known for this default; in particular, the stage-2 TIMIT result was
+         * for forced alignment's batch/current aliases, not aggregation or
+         * live CMN.  Its effect on aggregated training data, later models,
+         * decoding, and other corpora or conditions is not established. */
         { "-cmn", ARG_STRING, "live", "CMN type" },
         { "-varnorm", ARG_BOOLEAN, "no", "Variance normalization" },
         { "-agc", ARG_STRING, "none", "AGC type" },
