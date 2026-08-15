@@ -15,7 +15,13 @@ whenever it dies. Its address space is the blast radius. See
 
 ## Phase contract: `contained-all-operations`
 
-All supported Python operations that enter CFFI are routed through the helper.
+Supported Python operations implemented by pstrain route their literal direct CFFI call
+expressions through the helper, except for the decoder described below. The static gate
+certifies literal name and attribute-chain calls to `_init`, `get_lib`, and `pstrain_*`;
+it is silent on dynamically constructed callees such as `getattr(module, expression)`.
+The shipped PocketSphinx decoder in `pstrain.lib.testing.decoder` remains in-process and
+is used by benchmark, CLI testing, and decode-shard paths; decoder containment is not
+certified and decoder behavior is unchanged.
 The original three operations retain their individual protocol names:
 
 | Python entry point | native entry point |

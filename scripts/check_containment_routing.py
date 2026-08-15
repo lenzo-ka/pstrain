@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Statically enforce containment of Python-to-CFFI routing callsites."""
+"""Statically enforce containment of literal Python-to-CFFI call expressions.
+
+This scanner certifies calls whose callee is a literal name or attribute chain. It is
+silent on dynamically constructed callees such as ``getattr(module, expression)``.
+"""
 
 from __future__ import annotations
 
@@ -17,8 +21,8 @@ INFRASTRUCTURE = {
 }
 DECLARED_EXCEPTIONS = {
     "pstrain/lib/testing/decoder.py": (
-        "The test-only PocketSphinx decoder deliberately remains in-process; changing its "
-        "lifecycle is outside the containment-routing lane."
+        "The PocketSphinx decoder used by shipped benchmark, CLI testing, and decode-shard "
+        "paths deliberately remains in-process; changing its lifecycle is outside this gate."
     )
 }
 
@@ -56,12 +60,24 @@ def _worker_test(node: ast.AST) -> bool | None:
     return None
 
 
+def _proxy_test(node: ast.AST) -> bool:
+    """Recognize the proxy branch used at the start of stateful-object methods."""
+    return (
+        isinstance(node, ast.Call)
+        and _name(node.func) == "hasattr"
+        and len(node.args) == 2
+        and isinstance(node.args[0], ast.Name)
+        and node.args[0].id == "self"
+        and isinstance(node.args[1], ast.Constant)
+        and node.args[1].value == "_proxy"
+    )
+
+
 class Scanner(ast.NodeVisitor):
     def __init__(self, path: str) -> None:
         self.path = path
         self.callsites: list[Callsite] = []
         self.functions: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
-        self.classes: list[ast.ClassDef] = []
         self.worker_depth = 0
 
     def _decorated(self) -> bool:
@@ -69,19 +85,6 @@ class Scanner(ast.NodeVisitor):
             any(_name(decorator).endswith("contained") for decorator in function.decorator_list)
             for function in self.functions
         )
-
-    def _proxied_class(self) -> bool:
-        if not self.classes:
-            return False
-        return any(
-            isinstance(node, ast.Call) and _name(node.func).endswith("NativeObjectProxy")
-            for node in ast.walk(self.classes[-1])
-        )
-
-    def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        self.classes.append(node)
-        self.generic_visit(node)
-        self.classes.pop()
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self.functions.append(node)
@@ -110,6 +113,12 @@ class Scanner(ast.NodeVisitor):
                     continue
             self.visit(statement)
             self.worker_depth = prior
+            if (
+                isinstance(statement, ast.If)
+                and _proxy_test(statement.test)
+                and _terminates(statement.body)
+            ):
+                worker_only = True
 
     def visit_Call(self, node: ast.Call) -> None:
         symbol = _name(node.func)
@@ -123,11 +132,6 @@ class Scanner(ast.NodeVisitor):
                 disposition, reason = "contained", "enclosing callable has @contained"
             elif self.worker_depth:
                 disposition, reason = "worker_only", "control flow requires in_worker()"
-            elif self._proxied_class() and symbol.startswith("self._lib."):
-                disposition, reason = (
-                    "proxied",
-                    "enclosing class is constructed via NativeObjectProxy",
-                )
             else:
                 disposition, reason = "violation", "CFFI is reachable in the caller process"
             function = self.functions[-1].name if self.functions else "<module>"

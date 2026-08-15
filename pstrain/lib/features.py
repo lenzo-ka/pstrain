@@ -125,6 +125,8 @@ class FeatureExtractor:
 
     def _init_fe(self) -> None:
         """Initialize the front-end with configuration."""
+        if hasattr(self, "_proxy"):
+            raise RuntimeError("native feature initialization is only available in the worker")
         cfg = self._config
 
         # Use pstrain_fe_create for simplified initialization (bypasses cmd_ln)

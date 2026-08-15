@@ -174,6 +174,8 @@ class Aligner:
         Aligner._active = self
 
     def _last_error(self) -> str | None:
+        if hasattr(self, "_proxy"):
+            raise RuntimeError("native error state is only available in the worker")
         ptr = self._lib.pstrain_align_last_error()
         if ptr == self._ffi.NULL:
             return None
