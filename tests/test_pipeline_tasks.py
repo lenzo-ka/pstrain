@@ -402,24 +402,12 @@ def test_training_fingerprint_excludes_config_source_metadata(empty_project: Pat
 
 
 def test_training_fingerprint_payload_composition_is_pinned(empty_project: Path) -> None:
-    """Make additions to the cache key fail until their role is declared."""
+    """Make additions anywhere in the cache key fail until their role is declared."""
     ctx = PipelineContext.from_config(empty_project)
     payload = ctx.fingerprint_payload("training")
 
-    assert set(payload) == {
-        "stage",
-        "config_version",
-        "features",
-        "training",
-        "split",
-        "sharding",
-        "execution",
-        "tool_version",
-        "native_library",
-        "native_programs",
-    }
-    assert FINGERPRINT_COMPOSITION["training"]["resolved_values"] == (
-        "stage",
+    composition = FINGERPRINT_COMPOSITION["training"]
+    assert composition["resolved"] == (
         "config_version",
         "features",
         "training",
@@ -428,17 +416,142 @@ def test_training_fingerprint_payload_composition_is_pinned(empty_project: Path)
         "execution.requested_jobs",
         "execution.bw_shard_count",
     )
-    assert FINGERPRINT_COMPOSITION["training"]["declared_identities"] == (
+    assert composition["structural"] == ("stage",)
+    assert composition["identity"] == (
         "tool_version",
         "execution.architecture",
         "native_library",
         "native_programs",
     )
-    assert set(payload["execution"]) == {
-        "architecture",
-        "requested_jobs",
-        "bw_shard_count",
+
+    def leaf_paths(value: Any, path: tuple[str, ...] = ()) -> set[str]:
+        if isinstance(value, dict):
+            if not value:
+                return {".".join(path)}
+            return {
+                leaf
+                for key, child in value.items()
+                for leaf in leaf_paths(child, (*path, str(key)))
+            }
+        if isinstance(value, (list, tuple)):
+            if not value:
+                return {f"{'.'.join(path)}[]"}
+            return {
+                leaf for child in value for leaf in leaf_paths(child, (*path[:-1], f"{path[-1]}[]"))
+            }
+        return {".".join(path)}
+
+    classified = {
+        classification: tuple(
+            sorted(
+                leaf
+                for leaf in leaf_paths(payload)
+                if any(
+                    leaf == declared
+                    or leaf.startswith(f"{declared}.")
+                    or leaf.startswith(f"{declared}[]")
+                    for declared in declarations
+                )
+            )
+        )
+        for classification, declarations in composition.items()
     }
+    assert classified == {
+        "resolved": (
+            "config_version",
+            "execution.bw_shard_count",
+            "execution.requested_jobs",
+            "features.agc",
+            "features.alpha",
+            "features.cmn",
+            "features.cmninit",
+            "features.dither",
+            "features.feat_type",
+            "features.frate",
+            "features.lifter",
+            "features.lowerf",
+            "features.ncep",
+            "features.nfft",
+            "features.nfilt",
+            "features.remove_dc",
+            "features.remove_noise",
+            "features.samprate",
+            "features.transform",
+            "features.upperf",
+            "features.varnorm",
+            "features.wlen",
+            "sharding.partition_position",
+            "split.seed",
+            "split.test_count",
+            "split.train_ratio",
+            "training.a_beam",
+            "training.accept_arctic_a0587_known_skip",
+            "training.arctic_a0302_zero_codebook_band",
+            "training.b_beam",
+            "training.bw_checkpoint_iterations",
+            "training.ci.convergence_ratio",
+            "training.ci.max_iterations",
+            "training.ci.min_iterations",
+            "training.exclusion_schedule",
+            "training.failed_alignment",
+            "training.max_skip_fraction",
+            "training.multipron_training",
+            "training.n_senones",
+            "training.n_state",
+            "training.optional_final_silence",
+            "training.question_niter",
+            "training.question_npermute",
+            "training.question_quests_per_state",
+            "training.retry_beam_factor",
+            "training.tied.convergence_ratio",
+            "training.tied.max_iterations",
+            "training.tied.min_iterations",
+            "training.tree_csplitmax",
+            "training.tree_csplitthr",
+            "training.tree_directional_questions",
+            "training.tree_intermediate_dumps",
+            "training.tree_mwfloor",
+            "training.tree_rotate_state_weights",
+            "training.tree_ssplitmax",
+            "training.tree_ssplitthr",
+            "training.tree_state_weights[]",
+            "training.untied.convergence_ratio",
+            "training.untied.max_iterations",
+            "training.untied.min_iterations",
+            "training.untied_inventory",
+        ),
+        "structural": ("stage",),
+        "identity": (
+            "execution.architecture",
+            "native_library.fp_contract_declared",
+            "native_library.sha256",
+            "native_programs.agg_seg.sha256",
+            "native_programs.bldtree.sha256",
+            "native_programs.bw.sha256",
+            "native_programs.delint.sha256",
+            "native_programs.inc_comp.sha256",
+            "native_programs.init_gau.sha256",
+            "native_programs.kdtree.sha256",
+            "native_programs.kmeans_init.sha256",
+            "native_programs.make_quests.sha256",
+            "native_programs.map_adapt.sha256",
+            "native_programs.mk_flat.sha256",
+            "native_programs.mk_mdef_gen.sha256",
+            "native_programs.mk_ts2cb.sha256",
+            "native_programs.mllr_solve.sha256",
+            "native_programs.mllr_transform.sha256",
+            "native_programs.norm.sha256",
+            "native_programs.param_cnt.sha256",
+            "native_programs.printp.sha256",
+            "native_programs.prunetree.sha256",
+            "native_programs.sphinx3_align.sha256",
+            "native_programs.sphinx_cepview.sha256",
+            "native_programs.sphinx_fe.sha256",
+            "native_programs.tiestate.sha256",
+            "tool_version",
+        ),
+    }
+    assert set().union(*map(set, classified.values())) == leaf_paths(payload)
     assert "host" in ctx.provenance_payload("training")["execution"]
 
 

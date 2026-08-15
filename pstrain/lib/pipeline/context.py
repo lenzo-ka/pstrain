@@ -41,23 +41,25 @@ from pstrain.lib.config.resolver import ResolvedConfig, resolve_config
 from pstrain.lib.paths import get_lib_path
 from pstrain.lib.runtime import fp_contract_policy
 
-# This is the complete fingerprint contract. A model produced by another
+# This is the three-way fingerprint contract: resolved configuration,
+# structural discriminators, and declared identities. A model produced by another
 # pstrain version, architecture, or native binary/library can follow a
 # different numeric trajectory. For a parity-focused trainer, conservative
 # one-time retraining is safer than silently reusing a model with a different
 # provenance identity. Host and config_sources remain diagnostic provenance.
 FINGERPRINT_COMPOSITION: dict[str, dict[str, tuple[str, ...]]] = {
     "features": {
-        "resolved_values": ("stage", "config_version", "features"),
-        "declared_identities": ("tool_version", "native_library", "native_programs"),
+        "resolved": ("config_version", "features"),
+        "structural": ("stage",),
+        "identity": ("tool_version", "native_library", "native_programs"),
     },
     "split": {
-        "resolved_values": ("stage", "config_version", "split"),
-        "declared_identities": ("tool_version", "native_library", "native_programs"),
+        "resolved": ("config_version", "split"),
+        "structural": ("stage",),
+        "identity": ("tool_version", "native_library", "native_programs"),
     },
     "training": {
-        "resolved_values": (
-            "stage",
+        "resolved": (
             "config_version",
             "features",
             "training",
@@ -66,7 +68,8 @@ FINGERPRINT_COMPOSITION: dict[str, dict[str, tuple[str, ...]]] = {
             "execution.requested_jobs",
             "execution.bw_shard_count",
         ),
-        "declared_identities": (
+        "structural": ("stage",),
+        "identity": (
             "tool_version",
             "execution.architecture",
             "native_library",
