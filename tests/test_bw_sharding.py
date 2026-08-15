@@ -14,6 +14,7 @@ from pstrain.lib.contract_docs import contract_scope
 from pstrain.lib.steps.train import (
     _ACCUMULATOR_FILES,
     _effective_bw_shard_count,
+    _ordered_shard_results,
     _partition_manifest,
     _ShardResult,
     _validate_shard_artifacts,
@@ -104,6 +105,60 @@ def test_partition_manifest_varies_boundaries_and_keeps_empty_shards() -> None:
         ["middle"],
         ["late"],
         [],
+    ]
+
+
+def test_partition_positions_reproduce_measured_1042_item_shapes() -> None:
+    fileids = [f"utt-{index:04d}" for index in range(1042)]
+
+    pstrain = _partition_manifest(fileids, 8, "remainder-first")
+    upstream = _partition_manifest(fileids, 8, "remainder-last")
+
+    assert [len(part) for part in pstrain] == [131, 131, 130, 130, 130, 130, 130, 130]
+    assert [len(part) for part in upstream] == [130, 130, 130, 130, 130, 130, 130, 132]
+    assert [item for part in pstrain for item in part] == fileids
+    assert [item for part in upstream for item in part] == fileids
+
+
+def test_upstream_partition_manifest_matches_stock_reference_bytes() -> None:
+    fileids = [f"utt-{index:04d}" for index in range(1042)]
+    part_len = len(fileids) // 8
+    stock = [fileids[index * part_len : (index + 1) * part_len] for index in range(7)]
+    stock.append(fileids[7 * part_len :])
+
+    pstrain = _partition_manifest(fileids, 8, "remainder-last")
+    serialize = lambda parts: b"".join(  # noqa: E731
+        f"{shard}\t{fileid}\n".encode() for shard, part in enumerate(parts) for fileid in part
+    )
+
+    assert serialize(pstrain) == serialize(stock)
+
+
+def test_out_of_order_completion_is_reduced_in_shard_index_order(tmp_path: Path) -> None:
+    class CompletedFuture:
+        def __init__(self, shard: int) -> None:
+            self.shard = shard
+
+        def result(self) -> _ShardResult:
+            return _ShardResult(
+                shard=self.shard,
+                assigned_ids=(),
+                processed_ids=(),
+                retried_ids=(),
+                skipped=(),
+                total_log_lik=0.0,
+                total_frames=0,
+                accum_dir=tmp_path / f"shard-{self.shard:05d}",
+            )
+
+    completed_out_of_order = [CompletedFuture(2), CompletedFuture(0), CompletedFuture(1)]
+    ordered = _ordered_shard_results(completed_out_of_order)
+
+    assert [result.shard for result in ordered] == [0, 1, 2]
+    assert [result.accum_dir.name for result in ordered] == [
+        "shard-00000",
+        "shard-00001",
+        "shard-00002",
     ]
 
 

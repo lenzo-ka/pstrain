@@ -241,6 +241,15 @@ class RunnerParams:
     nice: int = field(default_factory=lambda: Profile().runner.nice)
 
 
+@dataclass(frozen=True)
+class ShardingParams:
+    """Baum-Welch shard construction policy."""
+
+    partition_position: Literal["remainder-first", "remainder-last"] = field(
+        default_factory=lambda: Profile().sharding.partition_position
+    )
+
+
 DEFAULT_CONFIGS: dict[str, dict[str, Any]] = {
     "default": {
         "description": "Default wideband configuration",
@@ -350,7 +359,9 @@ def load_configs(project_dir: Path) -> dict[str, dict[str, Any]]:
     return profiles
 
 
-def _runtime_values(profile: Profile) -> tuple[FeatParams, TrainParams, SplitParams, RunnerParams]:
+def _runtime_values(
+    profile: Profile,
+) -> tuple[FeatParams, TrainParams, SplitParams, RunnerParams, ShardingParams]:
     values = profile.model_dump(mode="python")
     training = values["training"]
     for stage in ("ci", "untied", "tied"):
@@ -360,6 +371,7 @@ def _runtime_values(profile: Profile) -> tuple[FeatParams, TrainParams, SplitPar
         TrainParams(**training),
         SplitParams(**values["split"]),
         RunnerParams(**values["runner"]),
+        ShardingParams(**values["sharding"]),
     )
 
 
@@ -374,6 +386,7 @@ class PipelineContext:
     train: TrainParams = field(default_factory=lambda: _runtime_values(Profile())[1])
     split: SplitParams = field(default_factory=lambda: _runtime_values(Profile())[2])
     runner: RunnerParams = field(default_factory=lambda: _runtime_values(Profile())[3])
+    sharding: ShardingParams = field(default_factory=lambda: _runtime_values(Profile())[4])
     description: str = ""
     resolved_config: ResolvedConfig | None = field(default=None, repr=False, compare=False)
 
@@ -394,7 +407,7 @@ class PipelineContext:
             experiment=experiment,
             cli_overrides=cli_overrides,
         )
-        feat, train, split, runner = _runtime_values(resolved.profile)
+        feat, train, split, runner, sharding = _runtime_values(resolved.profile)
         return cls(
             project_dir=project_dir,
             experiment=experiment,
@@ -404,6 +417,7 @@ class PipelineContext:
             train=train,
             split=split,
             runner=runner,
+            sharding=sharding,
             resolved_config=resolved,
         )
 

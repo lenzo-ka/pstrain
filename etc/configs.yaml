@@ -61,6 +61,8 @@ profiles:
     runner:
       jobs: null
       nice: 5
+    sharding:
+      partition_position: remainder-first
     alignment:
       verbatim_tokens: false
   wideband:

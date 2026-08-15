@@ -14,6 +14,7 @@ import resource
 import shutil
 import time
 import uuid
+from collections.abc import Iterable
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import suppress
 from dataclasses import asdict, dataclass
@@ -375,18 +376,33 @@ def _config_for_iteration(
     return resolved
 
 
-def _partition_manifest(fileids: list[str], n_shards: int) -> list[list[str]]:
-    """Match upstream corpus partitions: contiguous ranges in manifest order."""
+def _partition_manifest(
+    fileids: list[str],
+    n_shards: int,
+    partition_position: Literal["remainder-first", "remainder-last"] = "remainder-first",
+) -> list[list[str]]:
+    """Construct contiguous ranges using the declared remainder position."""
     if n_shards < 1:
         raise ValueError("n_shards must be at least 1")
     quotient, remainder = divmod(len(fileids), n_shards)
     partitions: list[list[str]] = []
     start = 0
+    if partition_position not in {"remainder-first", "remainder-last"}:
+        raise ValueError(f"unknown partition position: {partition_position}")
     for shard in range(n_shards):
-        width = quotient + (1 if shard < remainder else 0)
+        if partition_position == "remainder-first":
+            width = quotient + (1 if shard < remainder else 0)
+        else:
+            width = quotient + (remainder if shard == n_shards - 1 else 0)
         partitions.append(fileids[start : start + width])
         start += width
     return partitions
+
+
+def _ordered_shard_results(futures: Iterable[object]) -> list[_ShardResult]:
+    """Collect worker results and pin every downstream merge to shard index."""
+    results = [future.result() for future in futures]  # type: ignore[attr-defined]
+    return sorted(results, key=lambda result: result.shard)
 
 
 def _effective_bw_shard_count(n_shards: int, *, multipron: bool) -> int:
@@ -527,6 +543,7 @@ def run_bw_training(
     arctic_a0302_zero_codebook_band: tuple[int, int] | None = None,
     accept_arctic_a0587_pass: int | None = None,
     n_shards: int = 1,
+    partition_position: Literal["remainder-first", "remainder-last"] = "remainder-first",
     _in_process_reference: bool = False,
 ) -> TrainingResult:
     """Run Baum-Welch training iterations.
@@ -668,7 +685,7 @@ def run_bw_training(
             pass_root = output_dir / ".bw-accum" / f"pass-{iteration:02d}"
             shutil.rmtree(pass_root, ignore_errors=True)
             pass_root.mkdir(parents=True)
-            partitions = _partition_manifest(fileids, n_shards)
+            partitions = _partition_manifest(fileids, n_shards, partition_position)
             shard_dirs = [pass_root / f"shard-{index:05d}" for index in range(n_shards)]
             arguments = [
                 (
@@ -696,8 +713,7 @@ def run_bw_training(
                 initializer=_initialize_bw_pool_worker,
             ) as pool:
                 futures = [pool.submit(_run_bw_shard, *argument) for argument in arguments]
-                shard_results = [future.result() for future in futures]
-            shard_results.sort(key=lambda result: result.shard)
+                shard_results = _ordered_shard_results(futures)
             model_fingerprint = _fingerprint_model(current_model)
             config_fingerprint = _fingerprint_config(iter_config)
             manifest_fingerprint = _fingerprint_manifest(fileids)

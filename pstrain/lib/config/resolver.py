@@ -138,6 +138,7 @@ CONSUMERS: dict[str, tuple[str, str]] = {
     "split.seed": ("pipeline.split", "split"),
     "runner.jobs": ("pipeline.runner", "runner"),
     "runner.nice": ("pipeline.runner", "runner"),
+    "sharding.partition_position": ("pipeline.baum_welch", "sharding"),
     "alignment.verbatim_tokens": ("cli.align", "alignment"),
 }
 
@@ -212,6 +213,7 @@ CONSUMER_TOUCHES: dict[str, str] = {
     "split.seed": "split.seed",
     "runner.jobs": "runner.jobs",
     "runner.nice": "runner.nice",
+    "sharding.partition_position": "sharding.partition_position",
     "alignment.verbatim_tokens": "resolved_config.profile.alignment.verbatim_tokens",
 }
 
