@@ -114,6 +114,10 @@ initialize_from_cmd_ln(lexicon_t **out_lex,
     }
 
     ts2cbfn = cmd_ln_str("-ts2cbfn");
+    if (strcmp(cmd_ln_str("-paramtype"), "cb") == 0 && ts2cbfn == NULL) {
+	E_ERROR("CB parameter counting requires -ts2cbfn\n");
+	return S3_ERROR;
+    }
     if (ts2cbfn) {
 	E_INFO("Reading %s\n", cmd_ln_str("-ts2cbfn"));
 
@@ -254,12 +258,18 @@ main(int argc, char *argv[])
 	out_fp = fopen(outfn, "w");
 	if (out_fp == NULL) {
 	    E_ERROR_SYSTEM("Couldn't open %s for writing\n", outfn);
+	    return 1;
 	}
     }
 
     if (param_cnt(out_fp, lex, mdef, type) != S3_SUCCESS) {
+	if (outfn != NULL && out_fp != stdout)
+	    fclose(out_fp);
 	return 1;
     }
+
+    if (outfn != NULL && out_fp != stdout)
+	fclose(out_fp);
 
     return 0;
 }
