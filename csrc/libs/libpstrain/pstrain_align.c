@@ -113,6 +113,14 @@ pstrain_align_config_default(pstrain_align_config_t *config)
     config->compute_phones = 1;
     config->compute_states = 0;
     config->feat_type = "1s_c_d_dd";
+    /* Keep the historical aligner spelling "current".  Vendored cmn.c maps
+     * it to CMN_BATCH, which computes and subtracts the complete utterance's
+     * mean (excluding negative-c0 frames), so this is not a different native
+     * mode from "batch".  Direct cmn_type_from_str execution confirms both
+     * spellings select CMN_BATCH.  A batch/current output comparison is thus
+     * tautological and supplies no evidence for this default or mode behavior.
+     * A constructed feat.params live setting also left the wrapper's explicit
+     * batch setting effective. */
     config->cmn = "current";
     config->cmninit = "40,3,-1";
     config->agc = "none";

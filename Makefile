@@ -48,6 +48,8 @@ test: check-c
 # subject identity gate prove both the Python and native artifact paths.
 .PHONY: verified-test
 verified-test: check-c
+	ctest --test-dir $(BUILD_DIR) --output-on-failure --no-tests=error
+	python scripts/check_fp_contract.py $(BUILD_DIR)
 	PSTRAIN_REQUIRE_CLIB=1 python scripts/run_verified_tests.py
 
 .PHONY: fp-contract-check
@@ -58,6 +60,12 @@ fp-contract-check: check-c
 lint:
 	ruff check pstrain tests
 	mypy pstrain
+
+# Canonical local merge-gate verification. Keep the Ruff format scope aligned
+# with the blocking lint job in .github/workflows/tests.yml.
+.PHONY: verified
+verified: build-c verified-test config-check lint
+	ruff format --check pstrain tests
 
 .PHONY: format
 format:

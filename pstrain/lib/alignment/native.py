@@ -59,7 +59,8 @@ class Aligner:
         include_states: Return per-frame state segmentation.
         cmn: Cepstral mean normalization mode. When omitted, use the
             validated model ``feat.params`` value. An explicit value
-            deliberately overrides the model record.
+            deliberately overrides the model record. The native parser treats
+            ``"current"`` as an exact alias for ``"batch"``.
         cmninit: Initial mean vector used when ``cmn="live"``. When omitted,
             use the validated model ``feat.params`` value; an explicit value
             deliberately overrides the model record.

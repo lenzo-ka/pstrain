@@ -110,7 +110,7 @@ const char *pstrain_pocketsphinx_version(void);
 const char *pstrain_fp_contract_policy(void);
 
 // Enum types (must come before functions that use them)
-typedef enum { CMN_NONE, CMN_LIVE, CMN_BATCH } cmn_type_t;
+typedef enum { CMN_NONE, CMN_BATCH, CMN_LIVE } cmn_type_t;
 typedef enum { AGC_NONE, AGC_MAX, AGC_EMAX, AGC_NOISE } agc_type_t;
 
 // ============================================================
