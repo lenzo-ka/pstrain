@@ -748,8 +748,9 @@ cmd_ln_parse(const arg_t * defn, int32 argc, char *argv[], int strict)
 
     cmdln = cmd_ln_parse_r(global_cmdln, defn, argc, argv, strict);
     if (cmdln == NULL) {
-        E_ERROR("Failed to parse arguments list\n");
-        return -1;
+        /* Old, bogus behaviour... */
+        E_ERROR("Failed to parse arguments list, forced exit\n");
+        exit(-1);
     }
     /* Initialize global_cmdln if not present. */
     if (global_cmdln == NULL) {

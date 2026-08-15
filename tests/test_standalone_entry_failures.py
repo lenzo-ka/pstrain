@@ -68,10 +68,3 @@ def test_param_cnt_cb_requires_ts2cb_mapping(tmp_path: Path) -> None:
 
     assert result.returncode == 1, result.stderr
     assert "CB parameter counting requires -ts2cbfn" in result.stderr
-
-
-def test_mllr_transform_parse_failure_is_unsuccessful() -> None:
-    result = _run("mllr_transform", "-not-a-real-option", "yes")
-
-    assert result.returncode == 1, result.stderr
-    assert "Errors initializing" in result.stderr

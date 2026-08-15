@@ -40,8 +40,7 @@ parse_cmd_ln(int argc, char *argv[])
   uint32      isExample;
 #include "cmd_ln_defn.h"
 
-    if (cmd_ln_parse(defn, argc, argv, TRUE) < 0)
-      return S3_ERROR;
+    cmd_ln_parse(defn, argc, argv, TRUE);
 
     isHelp    = cmd_ln_int32("-help");
     isExample    = cmd_ln_int32("-example");

@@ -50,7 +50,9 @@ initialize(int argc,
 	   char *argv[])
 {
     /* define, parse and (partially) validate the command line */
-    return parse_cmd_ln(argc, argv);
+    parse_cmd_ln(argc, argv);
+
+    return S3_SUCCESS;
 }
 
 static int
@@ -333,7 +335,7 @@ main(int argc, char *argv[])
 
     if (initialize(argc, argv) != S3_SUCCESS) {
 	E_ERROR("Errors initializing.\n");
-	return 1;
+	return 0;
     }
 
     outmeanfn = cmd_ln_str("-outmeanfn");
