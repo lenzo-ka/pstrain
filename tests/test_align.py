@@ -238,28 +238,27 @@ class TestAligner:
                 beam=1e-200,
             )
 
-    def test_real_alignment_live_cmninit_changes_score(self, tmp_path: Path) -> None:
-        """Exercise live CMN against a score-sensitive real model path.
+    def test_real_alignment_defaults_to_recorded_live_cmn(self, tmp_path: Path) -> None:
+        """Exercise CMN precedence against a score-sensitive real model path.
 
         The copied one-density fixture is made score-sensitive without changing
         its topology or dimensions: all 39-D means are zeroed, then codebooks
         are spread from -1 to 1 on coefficient zero.  Existing variances and
         mixture weights are retained coherently.
         """
-        model = _alignment_model(tmp_path)
+        model = _alignment_model(tmp_path, **{"-cmn": "live", "-cmninit": "0,0,0"})
         means = read_gau(str(model / "means"))[0]
         means.fill(0.0)
         means[:, 0, 0, 0] = np.linspace(-1.0, 1.0, means.shape[0])
         assert write_gau(str(model / "means"), means) == 0
         scores = []
-        for cmninit in ("0,0,0", "40,3,-1"):
+        for overrides in ({}, {"cmn": "live", "cmninit": "0,0,0"}, {"cmninit": "40,3,-1"}):
             with Aligner(
                 model,
                 _FIXTURES / "mini_arctic" / "dictionary.dict",
                 filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
                 beam=1e-200,
-                cmn="live",
-                cmninit=cmninit,
+                **overrides,
             ) as aligner:
                 result = aligner.align_audio(
                     _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
@@ -267,7 +266,27 @@ class TestAligner:
                 )
             scores.append(result.total_score)
 
-        assert scores[0] != scores[1]
+        assert scores[0] == scores[1] == -773494
+        assert scores[2] != scores[0]
+
+    def test_real_alignment_batch_record_preserves_previous_defaults(self, tmp_path: Path) -> None:
+        model = _alignment_model(tmp_path)
+        scores = []
+        for overrides in ({}, {"cmn": "batch", "cmninit": "40,3,-1"}):
+            with Aligner(
+                model,
+                _FIXTURES / "mini_arctic" / "dictionary.dict",
+                filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
+                beam=1e-200,
+                **overrides,
+            ) as aligner:
+                result = aligner.align_audio(
+                    _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
+                    _ALIGNMENT_TRANSCRIPT,
+                )
+            scores.append(result.total_score)
+
+        assert scores[0] == scores[1]
 
     def test_real_alignment_honors_8khz_profile(self, tmp_path: Path) -> None:
         model = _alignment_model(

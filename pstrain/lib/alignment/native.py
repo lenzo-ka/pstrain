@@ -57,10 +57,12 @@ class Aligner:
         insert_sil: Insert optional inter-word silences (default ``True``).
         include_phones: Return phone segmentation in the result.
         include_states: Return per-frame state segmentation.
-        cmn: Cepstral mean normalization mode. ``"batch"`` matches the
-            way SphinxTrain trains models; ``"current"`` matches the
-            sphinx3_align CLI default.
-        cmninit: Initial mean vector used when ``cmn="live"``.
+        cmn: Cepstral mean normalization mode. When omitted, use the
+            validated model ``feat.params`` value. An explicit value
+            deliberately overrides the model record.
+        cmninit: Initial mean vector used when ``cmn="live"``. When omitted,
+            use the validated model ``feat.params`` value; an explicit value
+            deliberately overrides the model record.
         agc: Automatic gain control mode (default ``"none"``).
         varnorm: Apply cepstral variance normalization.
         feat_type: Feature stream spec (default ``"1s_c_d_dd"``).
@@ -80,8 +82,8 @@ class Aligner:
         insert_sil: bool = True,
         include_phones: bool = True,
         include_states: bool = False,
-        cmn: str = _DEFAULT_CMN,
-        cmninit: str = "40,3,-1",
+        cmn: str | None = None,
+        cmninit: str | None = None,
         agc: str = _DEFAULT_AGC,
         varnorm: bool = False,
         feat_type: str = _DEFAULT_FEAT_TYPE,
@@ -105,6 +107,10 @@ class Aligner:
         feat_record = read_complete_model_feat_params(model_dir)
         feat_params = model_dir / "feat.params"
         self._fe_config = feature_extractor_config_from_record(feat_record)
+        if cmn is None:
+            cmn = feat_record["-cmn"]
+        if cmninit is None:
+            cmninit = feat_record["-cmninit"]
         if not dict_path.exists():
             raise FileNotFoundError(f"Dictionary not found: {dict_path}")
 
