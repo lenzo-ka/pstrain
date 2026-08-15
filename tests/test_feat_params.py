@@ -21,10 +21,11 @@ def test_default_feat_params_contains_complete_training_front_end() -> None:
     assert params == {
         "-samprate": "16000",
         "-ncep": "13",
+        "-ceplen": "13",
         "-nfilt": "25",
         "-nfft": "512",
-        "-lowerf": "130",
-        "-upperf": "6800",
+        "-lowerf": "130.0",
+        "-upperf": "6800.0",
         "-alpha": "0.97",
         "-dither": "yes",
         "-remove_dc": "yes",

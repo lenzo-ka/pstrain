@@ -11,10 +11,33 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from cffi import FFI
+
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from pstrain.lib._cffi.cdef import CDEF  # noqa: E402
+
+
+def _cffi_function_names() -> frozenset[str]:
+    """Derive every callable native leaf from the ABI-mode CFFI surface."""
+    ffi = FFI()
+    ffi.cdef(CDEF)
+    return frozenset(
+        key.removeprefix("function ")
+        for key in ffi._parser._declarations  # type: ignore[attr-defined]
+        if key.startswith("function ")
+    )
+
+
+CFFI_FUNCTION_NAMES = _cffi_function_names()
+# These Python helpers reach ``dlopen`` directly or transitively.  They are not
+# C functions, so they do not occur in CDEF, but they are native-entry leaves.
+NATIVE_ENTRY_NAMES = CFFI_FUNCTION_NAMES | {"_init", "get_ffi", "get_lib", "path_or_null"}
 INFRASTRUCTURE = {
     "pstrain/lib/_cffi/core.py",
     "pstrain/lib/_pstrainc.py",
@@ -177,7 +200,7 @@ class Scanner(ast.NodeVisitor):
     def visit_Call(self, node: ast.Call) -> None:
         symbol = self._callee(node.func)
         leaf = symbol.rsplit(".", 1)[-1]
-        if leaf in {"get_lib", "_init"} or leaf.startswith("pstrain_"):
+        if leaf in NATIVE_ENTRY_NAMES:
             if self.path in INFRASTRUCTURE:
                 disposition, reason = "infrastructure", "implements the low-level worker boundary"
             elif self.path in DECLARED_EXCEPTIONS:

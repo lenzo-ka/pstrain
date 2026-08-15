@@ -1,10 +1,11 @@
 {
   "contract": "pstrain complete-model feat.params",
-  "required_count": 21,
+  "required_count": 22,
   "optional_fields": [],
   "fields": [
     {"name": "-samprate", "basis": "training field", "effect": "input sample rate"},
     {"name": "-ncep", "basis": "training field", "effect": "cepstral vector width"},
+    {"name": "-ceplen", "basis": "native feature-layout field", "effect": "input cepstral vector width"},
     {"name": "-nfilt", "basis": "training field", "effect": "mel filter-bank width"},
     {"name": "-nfft", "basis": "training field", "effect": "FFT size"},
     {"name": "-lowerf", "basis": "training field", "effect": "lower filter-bank frequency"},

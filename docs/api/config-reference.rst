@@ -57,8 +57,8 @@ features
    :Description: Cepstral lifter window
 
 ``features.lowerf``
-   :Type: ``int``
-   :Default: ``130``
+   :Type: ``float``
+   :Default: ``130.0``
    :Description: Lower filter-bank frequency in Hz
 
 ``features.ncep``
@@ -97,8 +97,8 @@ features
    :Description: Filter-bank transform
 
 ``features.upperf``
-   :Type: ``int``
-   :Default: ``6800``
+   :Type: ``float``
+   :Default: ``6800.0``
    :Description: Upper filter-bank frequency in Hz
 
 ``features.varnorm``

@@ -45,6 +45,7 @@ COMPLETE_MODEL_FEAT_PARAMS_REQUIRED = frozenset(
         "-alpha",
         "-cmn",
         "-cmninit",
+        "-ceplen",
         "-dither",
         "-feat",
         "-frate",
@@ -68,7 +69,7 @@ COMPLETE_MODEL_FEAT_PARAMS_REQUIRED = frozenset(
 _BOOLEAN_FEAT_PARAMS = frozenset(
     {"-dither", "-remove_dc", "-remove_noise", "-unit_area", "-round_filters", "-varnorm"}
 )
-_POSITIVE_INTEGER_FEAT_PARAMS = frozenset({"-ncep", "-nfilt", "-nfft", "-frate"})
+_POSITIVE_INTEGER_FEAT_PARAMS = frozenset({"-ceplen", "-ncep", "-nfilt", "-nfft", "-frate"})
 _NONNEGATIVE_INTEGER_FEAT_PARAMS = frozenset({"-lifter"})
 _NONNEGATIVE_FLOAT_FEAT_PARAMS = frozenset({"-lowerf"})
 _POSITIVE_FLOAT_FEAT_PARAMS = frozenset({"-samprate", "-upperf", "-wlen"})
@@ -178,6 +179,13 @@ def _validate_complete_feat_params(feat_params: Path, parsed: dict[str, str]) ->
     if numbers["-upperf"] <= numbers["-lowerf"]:
         raise _invalid_feat_param(
             feat_params, "-upperf", parsed["-upperf"], "must be greater than -lowerf"
+        )
+    if numbers["-ceplen"] != numbers["-ncep"]:
+        raise _invalid_feat_param(
+            feat_params,
+            "-ceplen",
+            parsed["-ceplen"],
+            "must match -ncep so the native waveform and feature initializers agree",
         )
     if numbers["-upperf"] > numbers["-samprate"] / 2 + 1.0:
         raise _invalid_feat_param(

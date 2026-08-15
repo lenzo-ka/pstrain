@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ast
 
-from scripts.check_containment_routing import Scanner, scan
+from scripts.check_containment_routing import CFFI_FUNCTION_NAMES, Scanner, scan
 
 
 def test_every_literal_cffi_callsite_is_contained_or_declared() -> None:
@@ -45,6 +45,24 @@ getattr(lib, CALLEE)(ctx)
         ("lib.pstrain_bw_free", "violation"),
         ("lib.pstrain_bw_free", "violation"),
         ("lib.pstrain_bw_free", "violation"),
+    ]
+
+
+def test_native_leaf_population_is_derived_from_cffi_not_a_name_prefix() -> None:
+    assert {"s3mixw_read", "semi_ts2cb", "cont_ts2cb"} <= CFFI_FUNCTION_NAMES
+
+    source = """
+lib.s3mixw_read(path, out, n_mixw, n_feat, n_density)
+lib.semi_ts2cb(n_tied_state)
+lib.cont_ts2cb(n_tied_state)
+"""
+    scanner = Scanner("pstrain/_construction.py")
+    scanner.visit(ast.parse(source))
+
+    assert [(item.symbol, item.disposition) for item in scanner.callsites] == [
+        ("lib.s3mixw_read", "violation"),
+        ("lib.semi_ts2cb", "violation"),
+        ("lib.cont_ts2cb", "violation"),
     ]
 
 

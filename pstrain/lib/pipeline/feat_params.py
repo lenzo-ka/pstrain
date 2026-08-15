@@ -29,6 +29,9 @@ def feat_params_lines(feat: FeatParams) -> list[str]:
     return [
         f"-samprate {feat.samprate}\n",
         f"-ncep {feat.ncep}\n",
+        # The waveform front end reads -ncep; feat_init independently reads
+        # -ceplen.  Keep both native consumers on the recorded cepstral width.
+        f"-ceplen {feat.ncep}\n",
         f"-nfilt {feat.nfilt}\n",
         f"-nfft {feat.nfft}\n",
         f"-lowerf {feat.lowerf}\n",
