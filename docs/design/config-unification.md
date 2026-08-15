@@ -81,7 +81,7 @@ There is no single precedence chain today; there are separate consumers:
 | Individual command and `pstrain step` flags | their command implementations | Direct per-command values. They bypass profile resolution and may have defaults different from the active profile (for example split flags). |
 | Global `--dry-run` and JSON flags | CLI framework | Invocation behavior and output only; they are not training configuration. |
 | `PSTRAIN_BIN_DIR`, `PSTRAIN_LIB_PATH`, `PSTRAIN_INCLUDE_DIR`, and platform library-path variables | native path discovery | Process environment overrides installation discovery, not model configuration. |
-| `PSTRAIN_BW_CHECKPOINTS` | Baum-Welch training | Debug artifact switch read directly by the engine wrapper. |
+| `PSTRAIN_BW_CHECKPOINTS` | Baum-Welch training | Deprecated enable-only fallback for declared `training.bw_checkpoint_iterations`. |
 | `PSTRAIN_REQUIRE_CLIB`, `PSTRAIN_TIMINGS_FAULT`, `PSTRAIN_GOLDEN_X86_64_STRICT`, and `PSTRAIN_BENCH_CACHE` | tests, fault injection, or benchmark harness | Operational/test controls outside ordinary project configuration. |
 
 The old `pstrain/lib/dictionary.py` module no longer exists. Dictionary code is

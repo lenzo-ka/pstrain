@@ -168,6 +168,11 @@ training
    :Default: ``1e-10``
    :Description: Backward alignment beam
 
+``training.bw_checkpoint_iterations``
+   :Type: ``bool``
+   :Default: ``False``
+   :Description: Retain the compact model files from every completed Baum-Welch pass under ``iterations/NN``; costs roughly one additional model copy per pass and does not retain the much larger ``.bw-accum`` shard accumulators. The deprecated ``PSTRAIN_BW_CHECKPOINTS=1`` environment variable can also enable retention, but cannot disable a true profile setting
+
 ``training.ci.convergence_ratio``
    :Type: ``float``
    :Default: ``0.001``

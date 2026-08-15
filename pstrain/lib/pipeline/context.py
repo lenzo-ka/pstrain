@@ -172,6 +172,9 @@ class TrainParams:
     failed_alignment: Literal["recover", "abort", "omit"] = field(
         default_factory=lambda: Profile().training.failed_alignment
     )
+    bw_checkpoint_iterations: bool = field(
+        default_factory=lambda: Profile().training.bw_checkpoint_iterations
+    )
     arctic_a0302_zero_codebook_band: tuple[int, int] | None = field(
         default_factory=lambda: Profile().training.arctic_a0302_zero_codebook_band
     )

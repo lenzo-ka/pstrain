@@ -380,6 +380,7 @@ def _make_bw_train_task(
             max_skip_fraction=ctx.train.max_skip_fraction,
             retry_beam_factor=ctx.train.retry_beam_factor,
             failed_alignment=ctx.train.failed_alignment,
+            checkpoint_iterations=ctx.train.bw_checkpoint_iterations,
             first_pass_2passvar=first_pass_2passvar,
             exclusion_schedule=ctx.train.exclusion_schedule.get(out_model),
             arctic_a0302_zero_codebook_band=(
@@ -461,6 +462,7 @@ def _make_split_and_train_task(
             max_skip_fraction=ctx.train.max_skip_fraction,
             retry_beam_factor=ctx.train.retry_beam_factor,
             failed_alignment=ctx.train.failed_alignment,
+            checkpoint_iterations=ctx.train.bw_checkpoint_iterations,
             first_pass_2passvar=first_pass_2passvar,
             n_shards=ctx.runner.jobs or 1,
             exclusion_schedule=ctx.train.exclusion_schedule.get(out_model),
