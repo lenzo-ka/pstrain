@@ -1,10 +1,9 @@
 name: Windows scoping probe
 
-# Diagnostic only: branch pushes and manual dispatch keep this probe out of PR
-# checks, so its intentionally tolerant population pass cannot become a gate.
+# Diagnostic only. This workflow is dispatch-only and scripts/dispatch_windows_probe.sh
+# targets an empty commit on a probe ref. That distinct SHA cannot be any PR's head,
+# so this intentionally tolerant population pass cannot attach as a PR check.
 on:
-  push:
-    branches: [win/**]
   workflow_dispatch:
 
 jobs:
@@ -60,22 +59,31 @@ jobs:
           cmake --build "build-${{ matrix.compiler }}" --config Release --parallel -- `
             /p:ContinueOnError=WarnAndContinue
 
-      - name: Compile contraction-enabled COFF canary (${{ matrix.compiler }})
+      # At the current production x64 ISA, contraction cannot be expressed as
+      # FMA. The no-/arch canary documents that vacuity; the FMA-ISA canary
+      # proves scanner discrimination, and the production scan detects ISA drift.
+      - name: Compile production-ISA and FMA-ISA canaries (${{ matrix.compiler }})
         shell: pwsh
         run: |
           $artifact = "coff-${{ matrix.compiler }}"
           New-Item -ItemType Directory -Force $artifact | Out-Null
           Set-Content "$artifact/fp-contract-canary.c" `
             'double fp_contract_canary(double a, double b, double c) { return a * b + c; }'
-          $releaseFlags = @("/O2", "/Ob2", "/DNDEBUG", "/MD", "/arch:AVX2")
+          $releaseFlags = @("/O2", "/Ob2", "/DNDEBUG", "/MD")
           if ("${{ matrix.compiler }}" -eq "clang-cl") {
             clang-cl /nologo /c @releaseFlags /clang:-ffp-contract=fast `
               "$artifact/fp-contract-canary.c" `
-              "/Fo$artifact/fp-contract-canary.obj"
+              "/Fo$artifact/production-isa-canary.obj"
+            clang-cl /nologo /c @releaseFlags /arch:AVX2 /clang:-ffp-contract=fast `
+              "$artifact/fp-contract-canary.c" `
+              "/Fo$artifact/fma-isa-canary.obj"
           } else {
             cl /nologo /c @releaseFlags /fp:precise /fp:contract `
               "$artifact/fp-contract-canary.c" `
-              "/Fo$artifact/fp-contract-canary.obj"
+              "/Fo$artifact/production-isa-canary.obj"
+            cl /nologo /c @releaseFlags /arch:AVX2 /fp:precise /fp:contract `
+              "$artifact/fp-contract-canary.c" `
+              "/Fo$artifact/fma-isa-canary.obj"
           }
 
       - name: Stage COFF objects (${{ matrix.compiler }})
@@ -96,6 +104,41 @@ jobs:
             New-Item -ItemType Directory -Force (Split-Path $destination) | Out-Null
             Copy-Item $_.FullName $destination
           }
+
+      - name: Verify production-ISA vacuity boundary (${{ matrix.compiler }})
+        shell: pwsh
+        run: |
+          $artifact = "coff-${{ matrix.compiler }}"
+          $canary = Join-Path $artifact "production-isa"
+          New-Item -ItemType Directory -Force $canary | Out-Null
+          Copy-Item "$artifact/production-isa-canary.obj" $canary
+          python scripts/check_fp_contract.py --objects $canary
+          if ($LASTEXITCODE -ne 0) {
+            throw "Production-ISA contraction canary unexpectedly emitted a fused instruction"
+          }
+          Write-Host "Production-ISA canary: PASS (no fused instruction at default x64 ISA; contraction is not expressible)."
+
+      - name: Verify scanner discrimination at FMA ISA (${{ matrix.compiler }})
+        shell: pwsh
+        run: |
+          $artifact = "coff-${{ matrix.compiler }}"
+          $canary = Join-Path $artifact "fma-isa"
+          New-Item -ItemType Directory -Force $canary | Out-Null
+          Copy-Item "$artifact/fma-isa-canary.obj" $canary
+          python scripts/check_fp_contract.py --objects $canary
+          if ($LASTEXITCODE -ne 1) {
+            throw "FMA-ISA canary did not exercise the scanner's red path"
+          }
+          Write-Host "FMA-ISA canary: PASS (scanner rejected the fused instruction)."
+
+      - name: Detect FMA ISA drift in production objects (${{ matrix.compiler }})
+        shell: pwsh
+        run: |
+          python scripts/check_fp_contract.py --objects "coff-${{ matrix.compiler }}/production"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Production objects use an FMA-class instruction; re-establish the contraction boundary"
+          }
+          Write-Host "Production ISA-drift detector: PASS (no FMA-class instructions)."
 
       - name: Upload COFF objects (${{ matrix.compiler }})
         if: always()

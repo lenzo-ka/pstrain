@@ -2,10 +2,12 @@
 """Reject fused multiply-add instructions in build trees or built wheels.
 
 The mnemonic boundary covers x86 FMA3/FMA4, Arm scalar/AdvSIMD, and Arm
-SVE/SVE2 fused multiply-add/subtract families.  The list was derived from the
-Intel and Arm instruction indexes, including the predicated SVE spellings;
-operand forms do not need separate patterns because disassemblers emit the
-same mnemonic before their predicate operands.
+SVE/SVE2 fused multiply-add/subtract families.  It is derived by enumerating
+the fused operations in the Arm A64 instruction-set index (DDI 0602, SVE
+instructions: https://developer.arm.com/documentation/ddi0602/latest/SVE-Instructions),
+including all four destructive multiplicand forms: FMAD, FMSB, FNMAD, and
+FNMSB.  Operand forms do not need separate patterns because disassemblers emit
+the same mnemonic before their predicate operands.
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ from pathlib import Path
 
 FMA = re.compile(
     r"\b(?:"
-    r"v?f(?:madd|msub|nmadd|nmsub|mad|mla|mls|nmad|nmla|nmls)[a-z0-9.]*"
+    r"v?f(?:madd|msub|nmadd|nmsub|mad|msb|mla|mls|nmad|nmsb|nmla|nmls)[a-z0-9.]*"
     r"|bfml(?:al|sl)[bt][a-z0-9.]*"
     r")\b",
     re.IGNORECASE,

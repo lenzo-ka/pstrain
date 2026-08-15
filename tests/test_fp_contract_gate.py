@@ -122,8 +122,9 @@ def test_contraction_enabled_coff_object_makes_gate_red(tmp_path: Path) -> None:
     assert "FP contraction gate failed; fused instructions found" in result.stderr
 
 
-def test_sve_fmad_coff_arm64_object_makes_gate_red(tmp_path: Path) -> None:
-    """The ARM64 COFF scanner must reject a predicated SVE fmad instruction."""
+@pytest.mark.parametrize("mnemonic", ["fmad", "fmsb", "fnmad", "fnmsb"])
+def test_sve_multiplicand_coff_arm64_object_makes_gate_red(tmp_path: Path, mnemonic: str) -> None:
+    """The scanner rejects every SVE fused destructive-multiplicand form."""
     compiler = shutil.which("clang")
     objdump = shutil.which("objdump")
     if compiler is None or objdump is None:
@@ -131,9 +132,9 @@ def test_sve_fmad_coff_arm64_object_makes_gate_red(tmp_path: Path) -> None:
 
     objects = tmp_path / "objects"
     objects.mkdir()
-    source = objects / "fmad.s"
-    source.write_text(".text\n.globl fused\nfused:\n  fmad z0.d, p0/m, z1.d, z2.d\n  ret\n")
-    artifact = objects / "sve-fmad.obj"
+    source = objects / f"{mnemonic}.s"
+    source.write_text(f".text\n.globl fused\nfused:\n  {mnemonic} z0.d, p0/m, z1.d, z2.d\n  ret\n")
+    artifact = objects / f"sve-{mnemonic}.obj"
     subprocess.run(
         [
             compiler,
@@ -153,5 +154,5 @@ def test_sve_fmad_coff_arm64_object_makes_gate_red(tmp_path: Path) -> None:
         text=True,
     )
     assert result.returncode == 1
-    assert "sve-fmad.obj" in result.stderr
-    assert "fmad" in result.stderr
+    assert f"sve-{mnemonic}.obj" in result.stderr
+    assert mnemonic in result.stderr

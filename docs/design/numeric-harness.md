@@ -69,6 +69,14 @@ shipped gate to reject the fused instruction. This proves the detector's red
 path on the test host; it does not reproduce the separate training trajectory
 or benchmark measurements reported separately.
 
+The dispatch-only Windows probe checks a narrower platform boundary. At the
+current default production x64 ISA, contraction cannot be expressed as an FMA,
+so a green production-object scan alone would be vacuous. Its no-`/arch`
+contraction-enabled canary records that boundary, its AVX2/FMA canary proves
+that the scanner discriminates, and its production-object ISA-drift detector
+turns the current vacuity into an enforced boundary: any future FMA-class
+instruction requires the contraction story to be re-established.
+
 Regenerate from the repository root with:
 
 ```console
