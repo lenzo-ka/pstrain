@@ -5,11 +5,10 @@
     "is_reachable": "[read] yes; training feat.params and the in-process decoder consume FeatureConfig.cmn",
     "evidence_exists": [
       "[read] vendored cmn.c computes the complete-utterance mean while skipping negative-c0 frames, then subtracts it from every frame",
-      "[read] the schema exposes features.cmn, and the same resolved feature field feeds training artifacts and decoder evaluation",
-      "[measured] the supplied stage-2 TIMIT forced-alignment run found batch and current boundary outputs bit-for-bit identical: 17.545/14.812 ms, 100% coverage, 0/0/0 edits, and identical F1 at every band"
+      "[read] the schema exposes features.cmn, and the same resolved feature field feeds training artifacts and decoder evaluation"
     ],
     "not_established": [
-      "[measured] the TIMIT measurement did not exercise training or decoding",
+      "[context] the supplied stage-2 TIMIT forced-alignment run compared the batch/current aliases and is non-evidence for training, decoding, default selection, or mode behavior",
       "[inference] effects on trained parameters, decoded hypotheses, other corpora or conditions, and live CMN remain unestablished"
     ]
   },
@@ -19,11 +18,12 @@
     "is_reachable": "[read] yes through the public C API when its config is omitted or cmn is null/empty; shipped Python Aligner instead explicitly defaults and passes batch",
     "evidence_exists": [
       "[read] vendored cmn.c maps current and batch to the same CMN_BATCH enum and implementation",
-      "[read] the explicit aligner cmn setting is independently configurable through both the C config struct and Python Aligner constructor; the supplied feat.params path does not override it in this wrapper's initialization path",
-      "[measured] the supplied stage-2 TIMIT run aligned the same models with current and batch and produced bit-for-bit identical per-utterance boundaries: 17.545/14.812 ms, 100% coverage, 0/0/0 edits, and identical F1 at every band"
+      "[measured] direct cmn_type_from_str execution returned batch=current=CMN_BATCH",
+      "[measured] a constructed feat.params live setting did not override the wrapper's explicit batch setting; initialization reported effective CMN='batch'",
+      "[read] aggregate_segments and its C API expose no CMN parameter"
     ],
     "not_established": [
-      "[measured] the comparison covered one corpus and condition with exact-phone targets only",
+      "[context] the supplied stage-2 TIMIT forced-alignment run compared two spellings of the same enum; its identical outputs are tautological and are non-evidence for the default or mode behavior",
       "[inference] effects for other material and any comparison with live CMN remain unestablished"
     ]
   },

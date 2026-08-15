@@ -42,11 +42,10 @@ class FeatureConfig(StrictModel):
     # consume this field, so it preserves the established matched front end.
     # Vendored cmn.c computes one mean from the complete utterance (skipping
     # negative-c0 frames) and subtracts it from every frame; "current" is an
-    # exact parser alias for the same native mode.  The stage-2 TIMIT forced-
-    # alignment comparison found bit-for-bit identical boundaries for batch
-    # and current, but did not test training, decoding, other corpora or
-    # conditions, or the distinct live mode.  There is therefore no evidence
-    # here for changing this compatibility default.
+    # exact parser alias for the same native mode.  A batch/current output
+    # comparison is therefore tautological and supplies no evidence for this
+    # default or the native mode's behavior.  There is no evidence here for
+    # changing this compatibility default.
     cmn: Annotated[str, Field(description="Cepstral mean-normalization mode")] = "batch"
     cmninit: Annotated[str, Field(description="Initial cepstral mean vector for live CMN")] = (
         "40,3,-1"

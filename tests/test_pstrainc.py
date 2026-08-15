@@ -1,5 +1,6 @@
 """Test low-level C bindings."""
 
+import re
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -113,10 +114,12 @@ def test_logmath_different_bases(lib: Any) -> None:
 
 
 def test_enum_constants(lib: Any) -> None:
-    """Test that enum constants are accessible."""
-    assert lib.CMN_NONE == 0
-    assert lib.CMN_LIVE == 1
-    assert lib.CMN_BATCH == 2
+    """Test that enum constants match their native header declarations."""
+    header = (Path(__file__).parents[1] / "csrc/include/sphinxbase/cmn.h").read_text()
+    declaration = re.search(r"typedef enum cmn_type_e \{(.*?)\} cmn_type_t;", header, re.DOTALL)
+    assert declaration is not None
+    native_names = re.findall(r"\bCMN_[A-Z]+\b", declaration.group(1))
+    assert [getattr(lib, name) for name in native_names] == list(range(len(native_names)))
 
     assert lib.AGC_NONE == 0
     assert lib.AGC_MAX == 1
