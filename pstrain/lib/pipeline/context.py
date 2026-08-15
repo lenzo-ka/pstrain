@@ -502,8 +502,10 @@ class PipelineContext:
 
     def provenance_path(self, stage: str) -> Path:
         """Content-addressed path for a stage's effective configuration."""
+        fingerprint_payload = self.provenance_payload(stage)
+        fingerprint_payload.pop("config_sources", None)
         canonical = json.dumps(
-            self.provenance_payload(stage),
+            fingerprint_payload,
             sort_keys=True,
             separators=(",", ":"),
             allow_nan=False,

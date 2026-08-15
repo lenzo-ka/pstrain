@@ -364,6 +364,42 @@ def test_project_sharding_policy_changes_training_provenance(empty_project: Path
     )
 
 
+def test_training_fingerprint_excludes_config_source_metadata(empty_project: Path) -> None:
+    schema_default = PipelineContext.from_config(empty_project)
+
+    config = empty_project / "etc" / "config.yaml"
+    config.write_text("config_version: 1\nsharding:\n  partition_position: remainder-first\n")
+    explicit_project_value = PipelineContext.from_config(empty_project)
+
+    assert schema_default.sharding == explicit_project_value.sharding
+    assert schema_default.resolved_config is not None
+    assert explicit_project_value.resolved_config is not None
+    assert (
+        schema_default.resolved_config.fields["sharding.partition_position"].winner.source_kind
+        == "schema-default"
+    )
+    assert (
+        explicit_project_value.resolved_config.fields[
+            "sharding.partition_position"
+        ].winner.source_kind
+        == "project"
+    )
+    schema_payload = schema_default.provenance_payload("training")
+    explicit_payload = explicit_project_value.provenance_payload("training")
+    schema_sources = schema_payload.pop("config_sources")
+    explicit_sources = explicit_payload.pop("config_sources")
+
+    assert schema_payload == explicit_payload
+    assert schema_default.provenance_path("training") == explicit_project_value.provenance_path(
+        "training"
+    )
+    assert schema_sources != explicit_sources
+    assert schema_default.provenance_document("training")["config_sources"] == schema_sources
+    assert (
+        explicit_project_value.provenance_document("training")["config_sources"] == explicit_sources
+    )
+
+
 @pytest.mark.parametrize(
     ("multipron", "effective_shards"),
     [(False, 3), (True, 1)],
