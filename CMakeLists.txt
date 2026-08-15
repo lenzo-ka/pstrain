@@ -246,6 +246,14 @@ target_include_directories(pocketsphinx BEFORE PUBLIC
   PRIVATE "${pocketsphinx_source_BINARY_DIR}"
 )
 target_compile_definitions(pocketsphinx PRIVATE HAVE_CONFIG_H)
+if(WIN32)
+  # Mirror PocketSphinx's own top-level shared-library build. Its export.h
+  # selects dllexport while src/CMakeLists.txt supplies POCKETSPHINX_EXPORTS.
+  # Keep SPHINX_DLL private: pstrain intentionally compiles overlapping
+  # sphinxbase sources, so applying upstream's dllimport side to those sources
+  # produces __imp_* references to definitions in the same target.
+  target_compile_definitions(pocketsphinx PRIVATE SPHINX_DLL)
+endif()
 set_target_properties(pocketsphinx PROPERTIES
   POSITION_INDEPENDENT_CODE ON
   VERSION "${PSTRAIN_POCKETSPHINX_VERSION}"

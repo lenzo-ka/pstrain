@@ -27,14 +27,18 @@ def cffi_functions() -> list[str]:
 
 
 def rendered_exports() -> dict[Path, str]:
-    """Render ELF and Mach-O allowlists from the same symbol set."""
+    """Render ELF, Mach-O, and PE/COFF allowlists from one symbol set."""
     names = cffi_functions()
     elf = "{\n  global:\n" + "".join(f"    {name};\n" for name in names)
     elf += "  local:\n    *;\n};\n"
     macos = "".join(f"_{name}\n" for name in names)
+    windows = "LIBRARY pstrainc\nEXPORTS\n" + "".join(
+        f"    {name}\n" for name in names
+    )
     return {
         ROOT / "csrc" / "pstrain.exports.elf": elf,
         ROOT / "csrc" / "pstrain.exports.macos": macos,
+        ROOT / "csrc" / "pstrain.exports.def": windows,
     }
 
 
