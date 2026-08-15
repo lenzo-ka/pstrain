@@ -490,7 +490,7 @@ class TestCliDryRun:
 
         assert "make_quests" in shell_cmd
         assert "-moddeffn /model/mdef" in shell_cmd
-        assert "-questsfn /output/questions.txt" in shell_cmd
+        assert "-questfn /output/questions.txt" in shell_cmd
 
 
 # =============================================================================

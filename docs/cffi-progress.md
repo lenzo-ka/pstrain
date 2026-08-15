@@ -85,7 +85,7 @@ Increase from 1 Gaussian per state to N Gaussians (typically 8-64).
 | Component | C Program | CFFI Status | Priority | Notes |
 |-----------|-----------|-------------|----------|-------|
 | K-means clustering | `k_means` (in lib) | ✅ | - | `split.kmeans()` |
-| Increase components | `pstrain_inc_comp` | ✅ | - | `split.split_gaussians()` |
+| Increase components | `pstrain_inc_comp` | ✅ | - | `split.split_gaussians()`; retained for contained live training |
 | Denom read/write | `s3gaudnom_*` | ✅ | - | `_pstrainc.read/write_dnom()` |
 | K-means init | `pstrain_kmeans_init` | ✅ | - | `split.kmeans_init_gaussians()` |
 
@@ -136,7 +136,7 @@ Build triphone models with state tying.
 | Component | C Program | CFFI Status | Priority | Notes |
 |-----------|-----------|-------------|----------|-------|
 | Aggregate segments | `pstrain_agg_seg` | ✅ | - | `agg_seg.aggregate_segments()` |
-| Parameter counting | `pstrain_param_cnt` | ✅ | - | `param_cnt.count_params()` |
+| Parameter counting | `param_cnt` / `pstrain_param_cnt` | ✅ | - | Unwired contained capability; its fixed Python-emitted flag names are checked against the core parser |
 | BW for CD | `bw` | ✅ | - | Same as CI |
 | Norm for CD | `norm` | ✅ | - | Same as CI |
 
@@ -161,7 +161,7 @@ Build triphone models with state tying.
 [x] s3ts2cb_*() - Tied-state to codebook mapping
 [x] pstrain_prune_tree() - Prune decision tree
 [x] pstrain_agg_seg() - Aggregate segmentation statistics
-[x] pstrain_param_cnt() - Parameter counting
+[x] pstrain_param_cnt() and core command path - Parameter counting
 ```
 
 ---
@@ -172,7 +172,7 @@ Speaker/environment adaptation.
 
 | Component | C Program | CFFI Status | Priority | Notes |
 |-----------|-----------|-------------|----------|-------|
-| MAP adaptation | `pstrain_map_adapt` | ✅ | - | `map_adapt.map_adapt()` |
+| MAP adaptation | `map_adapt` / `pstrain_map_adapt` | ✅ | - | Unwired contained capability; its fixed Python-emitted flag names are checked against the core parser |
 | MLLR classes | `mllr_class_read/write` | ✅ | - | Class mapping I/O |
 | MLLR solve | `compute_mllr` | ✅ | - | Compute MLLR matrices |
 | MLLR transform | `mllr_transform_mean` | ✅ | - | Apply transform to means |
@@ -190,9 +190,9 @@ Speaker/environment adaptation.
 | Forced alignment | `sphinx3_align` | ✅ | LOW | Shell-out for parity checking only |
 | View cepstra | `sphinx_cepview` | ✅ | - | Native Python + shell-out for parity |
 | Print params | `printp` | ✅ | - | Native Python + shell-out for parity |
-| Delint | `pstrain_delint` | ✅ | - | `delint.deleted_interpolation()` |
-| KD-tree | `pstrain_kdtree_build` | ✅ | - | `kdtree.build_kdtree()` |
-| MAP adaptation | `pstrain_map_adapt` | ✅ | - | `map_adapt.map_adapt()` |
+| Delint | `delint` / `pstrain_delint` | ✅ | - | Unwired contained capability; its fixed Python-emitted flag names are checked against the core parser |
+| KD-tree | `kdtree` / `pstrain_kdtree_build` | ✅ | - | Unwired contained capability; its fixed Python-emitted flag names are checked against the core parser |
+| MAP adaptation | `map_adapt` / `pstrain_map_adapt` | ✅ | - | Unwired contained capability; its fixed Python-emitted flag names are checked against the core parser |
 
 ### Alignment Notes
 - **PocketSphinx** (preferred): Python bindings, `pip install pocketsphinx`

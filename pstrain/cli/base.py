@@ -258,6 +258,14 @@ class PstrainAction(Action):
         )
 
 
+def _reject_string_list_comma(path: Path, flag: str) -> None:
+    if "," in str(path):
+        raise ValueError(
+            f"{flag} paths cannot contain ',' because the core string-list parser "
+            f"has no escaping: {path!r}"
+        )
+
+
 @dataclass
 class FeatureExtractAction(PstrainAction):
     """Extract features from audio file."""
@@ -345,6 +353,7 @@ class NormAction(PstrainAction):
     tmatfn: Path
 
     def _get_shell_cmd(self) -> list[str]:
+        _reject_string_list_comma(self.accumdir, "norm -accumdir")
         return [
             "norm",
             "-accumdir",
@@ -410,7 +419,7 @@ class MakeQuestsAction(PstrainAction):
             str(self.varfn),
             "-mixwfn",
             str(self.mixwfn),
-            "-questsfn",
+            "-questfn",
             str(self.questsfn),
         ]
 
