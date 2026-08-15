@@ -125,10 +125,15 @@ jobs:
           $canary = Join-Path $artifact "fma-isa"
           New-Item -ItemType Directory -Force $canary | Out-Null
           Copy-Item "$artifact/fma-isa-canary.obj" $canary
+          $nativeErrors = $PSNativeCommandUseErrorActionPreference
+          $PSNativeCommandUseErrorActionPreference = $false
           python scripts/check_fp_contract.py --objects $canary
-          if ($LASTEXITCODE -ne 1) {
+          $scannerExit = $LASTEXITCODE
+          $PSNativeCommandUseErrorActionPreference = $nativeErrors
+          if ($scannerExit -ne 1) {
             throw "FMA-ISA canary did not exercise the scanner's red path"
           }
+          $global:LASTEXITCODE = 0
           Write-Host "FMA-ISA canary: PASS (scanner rejected the fused instruction)."
 
       - name: Detect FMA ISA drift in production objects (${{ matrix.compiler }})
