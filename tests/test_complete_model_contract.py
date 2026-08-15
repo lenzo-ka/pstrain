@@ -89,6 +89,8 @@ def test_complete_model_rejects_float_spelled_nfft_as_an_integer_error(tmp_path:
 @pytest.mark.parametrize(
     "updates",
     [
+        {"-samprate": "16000.5"},
+        {"-lowerf": "130.5"},
         {"-dither": "Y"},
         {"-dither": "false"},
         {"-feat": "1s_3c"},

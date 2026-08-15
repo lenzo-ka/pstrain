@@ -62,9 +62,10 @@ COMPLETE_MODEL_FEAT_PARAMS_REQUIRED = frozenset(
 _BOOLEAN_FEAT_PARAMS = frozenset(
     {"-dither", "-remove_dc", "-remove_noise", "-unit_area", "-round_filters", "-varnorm"}
 )
-_POSITIVE_INTEGER_FEAT_PARAMS = frozenset({"-samprate", "-ncep", "-nfilt", "-nfft", "-frate"})
-_NONNEGATIVE_INTEGER_FEAT_PARAMS = frozenset({"-lowerf", "-lifter"})
-_POSITIVE_FLOAT_FEAT_PARAMS = frozenset({"-upperf", "-wlen"})
+_POSITIVE_INTEGER_FEAT_PARAMS = frozenset({"-ncep", "-nfilt", "-nfft", "-frate"})
+_NONNEGATIVE_INTEGER_FEAT_PARAMS = frozenset({"-lifter"})
+_NONNEGATIVE_FLOAT_FEAT_PARAMS = frozenset({"-lowerf"})
+_POSITIVE_FLOAT_FEAT_PARAMS = frozenset({"-samprate", "-upperf", "-wlen"})
 
 
 def _invalid_feat_param(feat_params: Path, name: str, value: str, requirement: str) -> ValueError:
@@ -106,6 +107,13 @@ def _validate_complete_feat_params(feat_params: Path, parsed: dict[str, str]) ->
         float_number = _parse_finite_float(feat_params, name, value)
         if float_number <= 0:
             raise _invalid_feat_param(feat_params, name, value, "must be > 0")
+        numbers[name] = float_number
+
+    for name in _NONNEGATIVE_FLOAT_FEAT_PARAMS:
+        value = parsed[name]
+        float_number = _parse_finite_float(feat_params, name, value)
+        if float_number < 0:
+            raise _invalid_feat_param(feat_params, name, value, "must be >= 0")
         numbers[name] = float_number
 
     for name in _BOOLEAN_FEAT_PARAMS:

@@ -32,7 +32,7 @@ def _assert_path_in_checkout(*, subject: str, actual: Path) -> None:
 
 
 def _assert_test_subject_identity() -> None:
-    """Prove that Python and selected native artifacts belong to this checkout."""
+    """Prove that Python and resolved native artifacts belong to this checkout."""
     package_file = getattr(pstrain, "__file__", None)
     if package_file is None:
         raise pytest.UsageError(
@@ -52,6 +52,21 @@ def _assert_test_subject_identity() -> None:
     except RuntimeError:
         return
     _assert_path_in_checkout(subject="native library 'libpstrainc'", actual=library_path)
+
+    # Resolve commands through the same default route used by CommandBuilder.
+    # PSTRAIN_BIN_DIR remains a supported override, but test runs may only select
+    # an override (or PATH entry) whose binary belongs to this checkout.
+    from pstrain.lib.commands import PSTRAIN_BINARIES, resolve_binary
+
+    for binary_name in sorted(set(PSTRAIN_BINARIES.values())):
+        binary_path = resolve_binary(binary_name)
+        if binary_path is None:
+            raise pytest.UsageError(
+                f"SUBJECT IDENTITY GATE FAILED (core command '{binary_name}'):\n"
+                f"  expected repository root: {_PROJECT_ROOT.resolve()}\n"
+                "  actual resolved path:     <not found>"
+            )
+        _assert_path_in_checkout(subject=f"core command '{binary_name}'", actual=binary_path)
 
 
 _assert_test_subject_identity()
