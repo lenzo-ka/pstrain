@@ -31,12 +31,56 @@ class Escape:
     ]
 
 
-def test_dynamic_callees_are_an_explicitly_silent_axis() -> None:
+def test_statically_resolvable_indirect_callees_are_detected() -> None:
     source = """
-getattr(_pstrainc, "_" + "init")()
-getattr(lib, "pstrain_" + "bw_free")(None)
+CALLEE = "pstrain_bw_free"
+getattr(lib, "pstrain_" + "bw_free")(ctx)
+getattr(lib, CALLEE)(ctx)
+{"free": lib.pstrain_bw_free}["free"](ctx)
 """
     scanner = Scanner("pstrain/_construction.py")
     scanner.visit(ast.parse(source))
 
+    assert [(item.symbol, item.disposition) for item in scanner.callsites] == [
+        ("lib.pstrain_bw_free", "violation"),
+        ("lib.pstrain_bw_free", "violation"),
+        ("lib.pstrain_bw_free", "violation"),
+    ]
+
+
+def test_unresolvable_indirect_callee_is_an_explicitly_silent_axis() -> None:
+    scanner = Scanner("pstrain/_construction.py")
+    scanner.visit(ast.parse("getattr(lib, runtime_name)(ctx)"))
     assert scanner.callsites == []
+
+
+def test_proxy_branch_must_forward_before_native_fallback_is_worker_only() -> None:
+    source = """
+class Escape:
+    def close(self):
+        if hasattr(self, "_proxy"):
+            return None
+        return self._lib.pstrain_bw_free(self._ctx)
+"""
+    scanner = Scanner("pstrain/_construction.py")
+    scanner.visit(ast.parse(source))
+    assert [(item.symbol, item.disposition) for item in scanner.callsites] == [
+        ("self._lib.pstrain_bw_free", "violation")
+    ]
+
+
+def test_nested_function_does_not_inherit_worker_or_proxy_depth() -> None:
+    source = """
+class Escape:
+    def method(self):
+        if hasattr(self, "_proxy"):
+            return self._proxy.call("method")
+        def thunk():
+            return self._lib.pstrain_bw_free(self._ctx)
+        return thunk
+"""
+    scanner = Scanner("pstrain/_construction.py")
+    scanner.visit(ast.parse(source))
+    assert [(item.symbol, item.disposition) for item in scanner.callsites] == [
+        ("self._lib.pstrain_bw_free", "violation"),
+    ]

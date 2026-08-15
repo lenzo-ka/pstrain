@@ -29,20 +29,82 @@ def test_decoder_rejects_feat_params_missing_front_end_field(tmp_path: Path) -> 
         require_complete_model(model)
 
 
-@pytest.mark.parametrize("invalid_field", sorted(COMPLETE_MODEL_FEAT_PARAMS_REQUIRED))
+@pytest.mark.parametrize(
+    "invalid_field", sorted(COMPLETE_MODEL_FEAT_PARAMS_REQUIRED - {"-alpha", "-cmninit"})
+)
 def test_complete_model_rejects_invalid_value_in_each_required_field(
     tmp_path: Path, invalid_field: str
 ) -> None:
-    """Each of the 21 required values has a semantic or representation check."""
+    """Fields native rejects syntactically retain a construction-based check."""
     model = tmp_path / "model"
     model.mkdir()
     feat_params = model / "feat.params"
-    valid = dict(line.split(maxsplit=1) for line in feat_params_lines(FeatParams()))
-    valid[invalid_field] = "invalid-value\n"
-    feat_params.write_text("".join(f"{name} {value}" for name, value in valid.items()))
+    valid = dict(line.rstrip("\n").split(maxsplit=1) for line in feat_params_lines(FeatParams()))
+    valid[invalid_field] = "invalid-value"
+    feat_params.write_text("".join(f"{name} {value}\n" for name, value in valid.items()))
 
     with pytest.raises(ValueError, match=r"Invalid feat\.params field"):
         require_complete_model(model)
+
+
+def _write_feat_params(model: Path, **updates: str) -> None:
+    valid = dict(line.rstrip("\n").split(maxsplit=1) for line in feat_params_lines(FeatParams()))
+    valid.update(updates)
+    (model / "feat.params").write_text(
+        "".join(f"{name} {value}\n" for name, value in valid.items())
+    )
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"-nfft": "513"},
+        {"-samprate": "16000", "-frate": "12000"},
+        {"-samprate": "16000", "-frate": "16001"},
+        {"-samprate": "16000", "-frate": "100", "-wlen": "0.005"},
+    ],
+)
+def test_complete_model_rejects_native_front_end_failures(
+    tmp_path: Path, updates: dict[str, str]
+) -> None:
+    model = tmp_path / "model"
+    model.mkdir()
+    _write_feat_params(model, **updates)
+    with pytest.raises(ValueError, match=r"Invalid feat\.params field"):
+        require_complete_model(model)
+
+
+def test_complete_model_rejects_float_spelled_nfft_as_an_integer_error(tmp_path: Path) -> None:
+    model = tmp_path / "model"
+    model.mkdir()
+    _write_feat_params(model, **{"-nfft": "512.0"})
+
+    with pytest.raises(
+        ValueError,
+        match=r"Invalid feat\.params field -nfft='512\.0'.*: must be an integer",
+    ):
+        require_complete_model(model)
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"-dither": "Y"},
+        {"-dither": "false"},
+        {"-feat": "1s_3c"},
+        {"-feat": "1s_4c"},
+        {"-upperf": "8001"},
+        {"-alpha": "native-atof-compatible"},
+        {"-cmninit": "native,does,not,reject,or,check,length"},
+    ],
+)
+def test_complete_model_does_not_reject_native_accepted_values(
+    tmp_path: Path, updates: dict[str, str]
+) -> None:
+    model = tmp_path / "model"
+    model.mkdir()
+    _write_feat_params(model, **updates)
+    assert require_complete_model(model) == model / "feat.params"
 
 
 def _literal_decoder_constructions(tree: ast.AST) -> list[ast.AST]:

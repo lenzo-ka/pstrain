@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Statically enforce containment of literal Python-to-CFFI call expressions.
 
-This scanner certifies calls whose callee is a literal name or attribute chain. It is
-silent on dynamically constructed callees such as ``getattr(module, expression)``.
+This scanner certifies calls whose callee is a literal name or attribute chain, a
+literal/module-constant ``getattr`` name, or a literal-key dictionary selection. It
+is silent on callees whose target name or selected value cannot be resolved statically.
 """
 
 from __future__ import annotations
@@ -73,12 +74,22 @@ def _proxy_test(node: ast.AST) -> bool:
     )
 
 
+def _proxy_forward(statements: list[ast.stmt]) -> bool:
+    """Require the guarded branch to actually invoke the object's proxy."""
+    return any(
+        isinstance(item, ast.Call) and _name(item.func).startswith("self._proxy.")
+        for statement in statements
+        for item in ast.walk(statement)
+    )
+
+
 class Scanner(ast.NodeVisitor):
     def __init__(self, path: str) -> None:
         self.path = path
         self.callsites: list[Callsite] = []
         self.functions: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
         self.worker_depth = 0
+        self.constants: dict[str, str] = {}
 
     def _decorated(self) -> bool:
         return any(
@@ -87,9 +98,12 @@ class Scanner(ast.NodeVisitor):
         )
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        prior = self.worker_depth
+        self.worker_depth = 0
         self.functions.append(node)
         self._visit_statements(node.body)
         self.functions.pop()
+        self.worker_depth = prior
 
     visit_AsyncFunctionDef = visit_FunctionDef
 
@@ -117,11 +131,51 @@ class Scanner(ast.NodeVisitor):
                 isinstance(statement, ast.If)
                 and _proxy_test(statement.test)
                 and _terminates(statement.body)
+                and _proxy_forward(statement.body)
             ):
                 worker_only = True
 
+    def visit_Assign(self, node: ast.Assign) -> None:
+        if (
+            not self.functions
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    self.constants[target.id] = node.value.value
+        self.generic_visit(node)
+
+    def _string(self, node: ast.AST) -> str | None:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        if isinstance(node, ast.Name):
+            return self.constants.get(node.id)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            left, right = self._string(node.left), self._string(node.right)
+            return left + right if left is not None and right is not None else None
+        return None
+
+    def _callee(self, node: ast.AST) -> str:
+        literal = _name(node)
+        if literal:
+            return literal
+        if isinstance(node, ast.Call) and _name(node.func) == "getattr" and len(node.args) >= 2:
+            attribute = self._string(node.args[1])
+            base = _name(node.args[0])
+            if base and attribute is not None:
+                return f"{base}.{attribute}"
+        if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Dict):
+            key = self._string(node.slice)
+            for candidate_key, candidate_value in zip(
+                node.value.keys, node.value.values, strict=True
+            ):
+                if candidate_key is not None and self._string(candidate_key) == key:
+                    return _name(candidate_value)
+        return ""
+
     def visit_Call(self, node: ast.Call) -> None:
-        symbol = _name(node.func)
+        symbol = self._callee(node.func)
         leaf = symbol.rsplit(".", 1)[-1]
         if leaf in {"get_lib", "_init"} or leaf.startswith("pstrain_"):
             if self.path in INFRASTRUCTURE:

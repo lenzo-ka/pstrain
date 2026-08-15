@@ -44,6 +44,12 @@ test: check-c
 	python scripts/check_fp_contract.py $(BUILD_DIR)
 	PSTRAIN_REQUIRE_CLIB=1 pytest
 
+# Disable any shared pstrain editable-install finder, then let the suite's
+# subject identity gate prove both the Python and native artifact paths.
+.PHONY: verified-test
+verified-test: check-c
+	PSTRAIN_REQUIRE_CLIB=1 python scripts/run_verified_tests.py
+
 .PHONY: fp-contract-check
 fp-contract-check: check-c
 	python scripts/check_fp_contract.py $(BUILD_DIR)
@@ -71,7 +77,7 @@ clean-c:
 
 .PHONY: docs-gen
 docs-gen:
-	python -c "from pstrain.lib.config import generate_rst_docs; open('docs/api/config-reference.rst', 'w').write(generate_rst_docs())"
+	python scripts/run_verified_tests.py --exec "from pstrain.lib.config import generate_rst_docs; open('docs/api/config-reference.rst', 'w').write(generate_rst_docs())"
 
 .PHONY: cffi-exports-gen
 cffi-exports-gen:
@@ -83,7 +89,7 @@ cffi-exports-check:
 
 .PHONY: config-check
 config-check: cffi-exports-check
-	pytest tests/test_config.py \
+	python scripts/run_verified_tests.py tests/test_config.py \
 		tests/test_pipeline_runner.py::test_config_reference_names_runner_keys_used_by_context \
 		tests/test_decoder_config.py \
 		tests/test_features.py::TestFeatureExtractor::test_new_front_end_options_change_produced_features

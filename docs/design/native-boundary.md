@@ -17,11 +17,13 @@ whenever it dies. Its address space is the blast radius. See
 
 Supported Python operations implemented by pstrain route their literal direct CFFI call
 expressions through the helper, except for the decoder described below. The static gate
-certifies literal name and attribute-chain calls to `_init`, `get_lib`, and `pstrain_*`;
-it is silent on dynamically constructed callees such as `getattr(module, expression)`.
+certifies literal name and attribute-chain calls to `_init`, `get_lib`, and `pstrain_*`,
+plus `getattr` calls with literal/module-constant names and literal-key dictionary selections.
+It is silent when a callee name or selected value depends on runtime data.
 The shipped PocketSphinx decoder in `pstrain.lib.testing.decoder` remains in-process and
 is used by benchmark, CLI testing, and decode-shard paths; decoder containment is not
-certified and decoder behavior is unchanged.
+certified and decoder behavior is unchanged. This decoder-exemption wording is
+documentation-only; the exempt path and enforcement are unchanged.
 The original three operations retain their individual protocol names:
 
 | Python entry point | native entry point |

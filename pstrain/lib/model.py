@@ -82,8 +82,12 @@ def _parse_finite_float(feat_params: Path, name: str, value: str) -> float:
 
 
 def _validate_complete_feat_params(feat_params: Path, parsed: dict[str, str]) -> None:
-    """Validate every required value against the native front-end contract."""
-    numbers: dict[str, float | int] = {}
+    """Reject a conservative subset of values the native front end rejects.
+
+    This deliberately does not claim to reproduce all native validation.  In
+    particular, native parsing and feature-layout acceptance remain authoritative.
+    """
+    integer_numbers: dict[str, int] = {}
     for name in _POSITIVE_INTEGER_FEAT_PARAMS | _NONNEGATIVE_INTEGER_FEAT_PARAMS:
         value = parsed[name]
         try:
@@ -93,7 +97,9 @@ def _validate_complete_feat_params(feat_params: Path, parsed: dict[str, str]) ->
         minimum = 0 if name in _NONNEGATIVE_INTEGER_FEAT_PARAMS else 1
         if number < minimum:
             raise _invalid_feat_param(feat_params, name, value, f"must be >= {minimum}")
-        numbers[name] = number
+        integer_numbers[name] = number
+
+    numbers: dict[str, float | int] = dict(integer_numbers)
 
     for name in _POSITIVE_FLOAT_FEAT_PARAMS:
         value = parsed[name]
@@ -102,15 +108,11 @@ def _validate_complete_feat_params(feat_params: Path, parsed: dict[str, str]) ->
             raise _invalid_feat_param(feat_params, name, value, "must be > 0")
         numbers[name] = float_number
 
-    alpha = _parse_finite_float(feat_params, "-alpha", parsed["-alpha"])
-    if not 0 <= alpha <= 1:
-        raise _invalid_feat_param(
-            feat_params, "-alpha", parsed["-alpha"], "must be between 0 and 1"
-        )
-
     for name in _BOOLEAN_FEAT_PARAMS:
-        if parsed[name] not in {"yes", "no"}:
-            raise _invalid_feat_param(feat_params, name, parsed[name], "must be 'yes' or 'no'")
+        if not parsed[name] or parsed[name][0] not in "ytYT1nfNF0":
+            raise _invalid_feat_param(
+                feat_params, name, parsed[name], "must begin with a native boolean alias"
+            )
 
     enums = {
         "-transform": {"dct", "legacy", "htk"},
@@ -130,7 +132,16 @@ def _validate_complete_feat_params(feat_params: Path, parsed: dict[str, str]) ->
     feature_type = parsed["-feat"]
     known_feature_type = feature_type in {"s2_4x", "s3_1x39", "1s_12c_12d_3p_12dd"} or any(
         feature_type.startswith(prefix)
-        for prefix in ("1s_c_d_dd", "1s_c_d_ld_dd", "cep_dcep", "1s_c_d", "cep", "1s_c")
+        for prefix in (
+            "1s_c_d_dd",
+            "1s_c_d_ld_dd",
+            "cep_dcep",
+            "1s_c_d",
+            "cep",
+            "1s_c",
+            "1s_3c",
+            "1s_4c",
+        )
     )
     generic_feature_type = re.fullmatch(r"[1-9]\d*(?:,[1-9]\d*)*(?::\d+)?", feature_type)
     if generic_feature_type:
@@ -143,21 +154,29 @@ def _validate_complete_feat_params(feat_params: Path, parsed: dict[str, str]) ->
     if feature_type in {"s2_4x", "s3_1x39", "1s_12c_12d_3p_12dd"} and numbers["-ncep"] != 13:
         raise _invalid_feat_param(feat_params, "-feat", feature_type, "requires -ncep 13")
 
-    cmninit = parsed["-cmninit"].split(",")
-    if not cmninit or any(not item.strip() for item in cmninit):
-        raise _invalid_feat_param(
-            feat_params, "-cmninit", parsed["-cmninit"], "must be comma-separated finite numbers"
-        )
-    for item in cmninit:
-        _parse_finite_float(feat_params, "-cmninit", item.strip())
-
     if numbers["-upperf"] <= numbers["-lowerf"]:
         raise _invalid_feat_param(
             feat_params, "-upperf", parsed["-upperf"], "must be greater than -lowerf"
         )
-    if numbers["-upperf"] > numbers["-samprate"] / 2:
+    if numbers["-upperf"] > numbers["-samprate"] / 2 + 1.0:
         raise _invalid_feat_param(
             feat_params, "-upperf", parsed["-upperf"], "must not exceed the Nyquist frequency"
+        )
+    if integer_numbers["-nfft"] & (integer_numbers["-nfft"] - 1):
+        raise _invalid_feat_param(feat_params, "-nfft", parsed["-nfft"], "must be a power of two")
+    if numbers["-frate"] > numbers["-samprate"]:
+        raise _invalid_feat_param(
+            feat_params, "-frate", parsed["-frate"], "must not exceed -samprate"
+        )
+    frame_shift = int(numbers["-samprate"] / numbers["-frate"] + 0.5)
+    frame_size = int(numbers["-wlen"] * numbers["-samprate"] + 0.5)
+    if frame_shift <= 1:
+        raise _invalid_feat_param(
+            feat_params, "-frate", parsed["-frate"], "must yield native frame_shift > 1"
+        )
+    if frame_size < frame_shift:
+        raise _invalid_feat_param(
+            feat_params, "-wlen", parsed["-wlen"], "must yield frame_size >= frame_shift"
         )
     if numbers["-nfft"] < numbers["-wlen"] * numbers["-samprate"]:
         raise _invalid_feat_param(
@@ -183,8 +202,9 @@ __all__ = [
 def require_complete_model(model_dir: str | Path) -> Path:
     """Require and validate the complete pstrain front-end record.
 
-    This validates the serialized front-end fields and their cross-field consistency.
-    It does not prove compatibility between the record and the model's binary tensors.
+    This rejects a conservative subset of values known to fail the native front end; native
+    parsing remains authoritative. It does not prove compatibility between the record and the
+    model's binary tensors.
     """
     model_dir = Path(model_dir)
     feat_params = model_dir / "feat.params"
