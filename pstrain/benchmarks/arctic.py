@@ -677,6 +677,7 @@ def paired_delta_ci(
     actual_pairs: dict[str, dict[str, Any]],
     *,
     speaker_stratified: bool,
+    allow_recorded_only: bool = False,
     resamples: int = BOOTSTRAP_RESAMPLES,
     seed: int = BOOTSTRAP_SEED,
 ) -> list[float]:
@@ -687,11 +688,18 @@ def paired_delta_ci(
     actual = {
         utterance: (int(value["ref_words"]), int(value["errors"]))
         for utterance, value in actual_pairs.items()
+        if "errors" in value
     }
     if set(recorded) != set(actual):
         missing = sorted(set(recorded) - set(actual))
         extra = sorted(set(actual) - set(recorded))
-        raise RuntimeError(f"matched-pair utterance ID mismatch: missing={missing}, extra={extra}")
+        if extra or not allow_recorded_only:
+            raise RuntimeError(
+                f"matched-pair utterance ID mismatch: missing={missing}, extra={extra}"
+            )
+        recorded = {key: value for key, value in recorded.items() if key in actual}
+    if not recorded:
+        raise RuntimeError("paired bootstrap requires at least one common decoded utterance")
     for utterance in recorded:
         if recorded[utterance][0] != actual[utterance][0]:
             raise RuntimeError(f"matched-pair reference word mismatch for {utterance}")
@@ -1295,13 +1303,7 @@ def compare_results(
             actual_cell = actual["results"][mode][dataset]
             record_cell = record["results"][mode][dataset]
             _validate_cell(actual_cell, f"actual {mode}/{dataset}", recorded=False)
-            for field in (
-                "utterances",
-                "decoded",
-                "decode_denominator",
-                "oov_tokens",
-                "ref_words",
-            ):
+            for field in ("utterances", "decode_denominator", "oov_tokens"):
                 _require_equal(f"{mode}/{dataset} {field}", actual_cell[field], record_cell[field])
             _require_equal(
                 f"{mode}/{dataset} known_skips",
@@ -1316,10 +1318,29 @@ def compare_results(
             observed = float(actual_cell["wer"]) * 100
             expected = float(record_cell["wer"])
             delta = observed - expected
+            actual_coverage = {
+                "decoded": actual_cell["decoded"],
+                "denominator": actual_cell["decode_denominator"],
+            }
+            recorded_coverage = {
+                "decoded": record_cell["decoded"],
+                "denominator": record_cell["decode_denominator"],
+            }
+            field_differences = []
+            if actual_coverage != recorded_coverage:
+                field_differences.append(
+                    {
+                        "field": "coverage",
+                        "actual": actual_coverage,
+                        "recorded": recorded_coverage,
+                    }
+                )
+            coverage_shortfall = actual_cell["decoded"] < record_cell["decoded"]
             ci = paired_delta_ci(
                 record_cell["utterance_rows"],
                 actual_cell["matched_pairs"],
                 speaker_stratified=dataset == "big",
+                allow_recorded_only=coverage_shortfall,
                 resamples=int(record["conditions"]["bootstrap"]["resamples"]),
                 seed=int(record["conditions"]["bootstrap"]["seed"]),
             )
@@ -1333,6 +1354,8 @@ def compare_results(
                     "recorded": expected,
                     "delta": delta,
                     "paired_delta_ci_95": ci,
+                    "coverage": {"actual": actual_coverage, "recorded": recorded_coverage},
+                    "field_differences": field_differences,
                     "bar": bar,
                     "pass": passed,
                 }

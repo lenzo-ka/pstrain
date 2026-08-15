@@ -482,6 +482,34 @@ def test_adopt_uncovered_refuses_existing_drift(
     assert path.read_bytes() == before
 
 
+def test_adopt_record_refuses_any_retired_cell_drift(tmp_path: Path) -> None:
+    record = json.loads(Path("docs/benchmarks/arctic-pin/record.json").read_text())
+    candidate = json.loads(json.dumps(record))
+    candidate["results"]["off"]["big"]["bootstrap_ci_95"][0] += 0.01
+    target = tmp_path / "record.json"
+    source = tmp_path / "candidate.json"
+    target.write_text(json.dumps(record))
+    source.write_text(json.dumps(candidate))
+    before = target.read_bytes()
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/check_arctic_pin.py",
+            "--record",
+            str(target),
+            "--adopt-record",
+            str(source),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode != 0
+    assert "retired off/big full-cell historical drift" in completed.stderr
+    assert target.read_bytes() == before
+
+
 def _cell(errors: tuple[int, ...], *, recorded: bool) -> dict[str, object]:
     rows = [[f"voice/u{index}", 10, error] for index, error in enumerate(errors)]
     total_errors = sum(errors)
@@ -551,6 +579,33 @@ def test_comparison_uses_true_cross_run_matched_pairs() -> None:
     rows = compare_results(actual, record)
     assert rows[-1]["paired_delta_ci_95"] == [10.0, 10.0]
     assert not rows[-1]["pass"]
+
+
+def test_comparison_records_decode_shortfall_without_blocking() -> None:
+    actual, record = _comparison_documents()
+    cell = actual["results"]["on"]["big"]
+    pairs = cell["matched_pairs"]
+    for utterance in ("voice/u2", "voice/u3"):
+        pairs[utterance] = {"reference": "ten words", "error": "missing WAV"}
+    cell["decoded"] = 2
+    cell["ref_words"] = 20
+    cell["errors"] = 2
+    cell["wer"] = 0.1
+
+    row = compare_results(actual, record)[-1]
+
+    assert row["pass"] is True
+    assert row["coverage"] == {
+        "actual": {"decoded": 2, "denominator": 4},
+        "recorded": {"decoded": 4, "denominator": 4},
+    }
+    assert row["field_differences"] == [
+        {
+            "field": "coverage",
+            "actual": {"decoded": 2, "denominator": 4},
+            "recorded": {"decoded": 4, "denominator": 4},
+        }
+    ]
 
 
 def test_comparison_authenticates_inputs_and_pair_ids() -> None:

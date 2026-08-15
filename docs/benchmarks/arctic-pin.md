@@ -123,9 +123,14 @@ must either hold that identity fixed or cross-decode the compared models.
 ## Training skips and decode coverage
 
 The live pin has no accepted training skips. In particular, `arctic_a0587`
-trains under product defaults and neither former exception fires. Decode
-shortfalls are not gates: each published WER line carries its explicit
-`decoded/denominator`, making missing WAVs and failed decodes visible.
+trains under product defaults and neither former exception fires. The
+`training.accept_arctic_a0587_known_skip` knob is retained solely to describe
+the retired `off` profile's provenance; that profile carries the true value,
+while the live `on` profile disables it (and the a0302 exception band). Thus
+all live cells run exception-free. Decode shortfalls are not gates: coverage
+is a recorded comparison field, and drift from its pinned
+`decoded/denominator` is surfaced in `field_differences` for deliberate record
+adoption without raising or failing the WER gate.
 
 ## Condition contract maintenance
 
@@ -134,6 +139,11 @@ a live field added after the record was written is reported as uncovered but doe
 as benchmark drift. `make config-check` runs this authentication in the ordinary suite. Adopt
 newly added fields deliberately, without changing existing pins or any measured result, with
 `python scripts/check_arctic_pin.py --adopt-uncovered`.
+
+Fresh-record adoption also requires exact full-cell equality for both retired
+`off` cells. Every serialized field in each retired cell—including bootstrap
+summaries and any future field—is stable; any addition, removal, or value
+change is refused.
 
 ## Replicability
 

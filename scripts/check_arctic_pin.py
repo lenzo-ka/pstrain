@@ -45,26 +45,14 @@ def main() -> int:
         uncovered = authenticate_conditions(actual, candidate["conditions"])
         if uncovered:
             raise RuntimeError(f"candidate leaves live conditions uncovered: {uncovered}")
-        stable_fields = (
-            "wer",
-            "errors",
-            "ref_words",
-            "utterances",
-            "decoded",
-            "oov_tokens",
-            "known_skips",
-            "utterance_rows",
-            "configuration_provenance",
-        )
         for dataset in ("slt55", "big"):
             old = record["results"]["off"][dataset]
             new = candidate["results"]["off"][dataset]
-            for field in stable_fields:
-                if new.get(field) != old.get(field):
-                    raise RuntimeError(
-                        f"retired off/{dataset} historical drift in {field}: "
-                        f"recorded={old.get(field)!r}, candidate={new.get(field)!r}"
-                    )
+            if new != old:
+                raise RuntimeError(
+                    f"retired off/{dataset} full-cell historical drift: "
+                    "every serialized field must remain exactly equal"
+                )
         temporary = args.record.with_suffix(args.record.suffix + ".tmp")
         temporary.write_text(
             json.dumps(candidate, indent=2, sort_keys=True) + "\n", encoding="utf-8"

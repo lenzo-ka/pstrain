@@ -165,7 +165,7 @@ training
 ``training.accept_arctic_a0587_known_skip``
    :Type: ``bool``
    :Default: ``False``
-   :Description: Honor only the two ratified Arctic a0587 stage/pass skip events
+   :Description: Deprecated for live profiles: retained solely for the Arctic pin's retired off-profile provenance; live benchmark cells run exception-free
 
 ``training.arctic_a0302_zero_codebook_band``
    :Type: ``tuple[int, int] | None``
