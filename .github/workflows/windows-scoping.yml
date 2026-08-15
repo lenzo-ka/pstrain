@@ -1,0 +1,49 @@
+name: Windows scoping probe
+
+# Diagnostic only: enumerate the native Windows portability work without gating.
+on:
+  pull_request:
+    branches: [master, main]
+    paths:
+      - csrc/**
+      - CMakeLists.txt
+      - pyproject.toml
+      - .github/workflows/windows-scoping.yml
+  workflow_dispatch:
+
+jobs:
+  windows-scoping:
+    name: Windows scoping (${{ matrix.compiler }})
+    runs-on: windows-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [msvc, clang-cl]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Enter the MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure (${{ matrix.compiler }})
+        shell: pwsh
+        run: |
+          $build = "build-${{ matrix.compiler }}"
+          $compilerArgs = @()
+          if ("${{ matrix.compiler }}" -eq "clang-cl") {
+            $compilerArgs += "-DCMAKE_C_COMPILER=clang-cl"
+            $compilerArgs += "-DCMAKE_C_FLAGS=/clang:-ferror-limit=0"
+          }
+          cmake -S . -B $build -G Ninja `
+            -DBUILD_SHARED_LIBS=ON `
+            -DBUILD_CLI=ON `
+            @compilerArgs
+
+      - name: Compile broadly (${{ matrix.compiler }})
+        shell: pwsh
+        run: |
+          # Ninja's unlimited keep-going mode attempts every target that is not
+          # blocked by a failed dependency, exposing more than the first error.
+          cmake --build "build-${{ matrix.compiler }}" --parallel -- -k 0
