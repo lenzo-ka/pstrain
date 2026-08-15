@@ -74,15 +74,47 @@ def test_complete_model_rejects_native_front_end_failures(
         require_complete_model(model)
 
 
-def test_complete_model_rejects_float_spelled_nfft_as_an_integer_error(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("field", "spelling"),
+    [
+        ("-nfft", "512.0"),
+        ("-ncep", "13.5"),
+        ("-nfilt", "25.5"),
+        ("-frate", "100.5"),
+        ("-lifter", "22.5"),
+    ],
+)
+def test_complete_model_deliberately_rejects_native_truncated_integer_spellings(
+    tmp_path: Path, field: str, spelling: str
+) -> None:
     model = tmp_path / "model"
     model.mkdir()
-    _write_feat_params(model, **{"-nfft": "512.0"})
+    _write_feat_params(model, **{field: spelling})
 
     with pytest.raises(
         ValueError,
-        match=r"Invalid feat\.params field -nfft='512\.0'.*: must be an integer",
+        match=r"must use an exact integer spelling \(native truncation is not accepted\)",
     ):
+        require_complete_model(model)
+
+
+@pytest.mark.parametrize(
+    ("field", "spelling"),
+    [
+        ("-samprate", "16000junk"),
+        ("-lowerf", "130.5junk"),
+        ("-upperf", "6800.5junk"),
+        ("-wlen", "0.025625junk"),
+    ],
+)
+def test_complete_model_deliberately_requires_whole_float_tokens(
+    tmp_path: Path, field: str, spelling: str
+) -> None:
+    model = tmp_path / "model"
+    model.mkdir()
+    _write_feat_params(model, **{field: spelling})
+
+    with pytest.raises(ValueError, match=r"must be a finite number"):
         require_complete_model(model)
 
 

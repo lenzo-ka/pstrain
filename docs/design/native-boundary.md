@@ -43,6 +43,17 @@ read/write operations, and feature extraction through its complete operation;
 raw C pointers never cross the process boundary. Direct access through the
 private `_pstrainc` implementation module is not a supported public operation.
 
+## Complete-model value validation
+
+`require_complete_model()` does not claim that every Python rejection is also a native
+parser rejection. Its range and enumeration checks are a conservative subset of observed
+native rejection, but its numeric spelling check is deliberately stricter. Native command-line
+conversion accepts a numeric prefix and truncates fractional spellings supplied to integer
+options (for example, `-ncep 13.5` becomes `13`). The complete-model boundary rejects such
+tokens because accepting them would let the recorded front end differ from the value actually
+used. Native parsing and feature-layout acceptance remain authoritative outside this stated
+exception.
+
 Across every phase there is one standing rule: **one native call at a time per
 process.** Multi-threaded use of the library is unsupported and undefined —
 `global_cmdln`, the error-callback slot, the allocator's jump target and some

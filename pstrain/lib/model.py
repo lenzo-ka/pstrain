@@ -7,6 +7,12 @@ Models provide metadata for the pipeline runner:
 - File paths (inputs, outputs)
 - Parameters (training settings)
 - Dependencies (what stages must run first)
+
+Complete-model validation follows native value ranges and enumerations conservatively,
+but deliberately requires whole-token numeric spellings. Native command-line parsing
+accepts numeric prefixes and silently truncates fractional spellings for integer options;
+those lossy spellings are rejected here so a recorded front end cannot describe a value
+different from the one the native parser actually used.
 """
 
 from __future__ import annotations
@@ -83,10 +89,12 @@ def _parse_finite_float(feat_params: Path, name: str, value: str) -> float:
 
 
 def _validate_complete_feat_params(feat_params: Path, parsed: dict[str, str]) -> None:
-    """Reject a conservative subset of values the native front end rejects.
+    """Validate ranges/enums conservatively and numeric spellings strictly.
 
-    This deliberately does not claim to reproduce all native validation.  In
-    particular, native parsing and feature-layout acceptance remain authoritative.
+    Native parsing and feature-layout acceptance remain authoritative outside those
+    checks. Numeric tokens are the deliberate exception: unlike native's prefix and
+    truncating conversions, this validator requires the complete token to represent
+    the recorded number.
     """
     integer_numbers: dict[str, int] = {}
     for name in _POSITIVE_INTEGER_FEAT_PARAMS | _NONNEGATIVE_INTEGER_FEAT_PARAMS:
@@ -94,7 +102,12 @@ def _validate_complete_feat_params(feat_params: Path, parsed: dict[str, str]) ->
         try:
             number = int(value)
         except ValueError:
-            raise _invalid_feat_param(feat_params, name, value, "must be an integer") from None
+            raise _invalid_feat_param(
+                feat_params,
+                name,
+                value,
+                "must use an exact integer spelling (native truncation is not accepted)",
+            ) from None
         minimum = 0 if name in _NONNEGATIVE_INTEGER_FEAT_PARAMS else 1
         if number < minimum:
             raise _invalid_feat_param(feat_params, name, value, f"must be >= {minimum}")
@@ -210,9 +223,10 @@ __all__ = [
 def require_complete_model(model_dir: str | Path) -> Path:
     """Require and validate the complete pstrain front-end record.
 
-    This rejects a conservative subset of values known to fail the native front end; native
-    parsing remains authoritative. It does not prove compatibility between the record and the
-    model's binary tensors.
+    Range and enumeration rejection is a conservative subset of native rejection. Numeric
+    spelling is deliberately stricter: the complete token must parse without native-style
+    prefix acceptance or integer truncation. Native parsing remains authoritative otherwise.
+    This does not prove compatibility between the record and the model's binary tensors.
     """
     model_dir = Path(model_dir)
     feat_params = model_dir / "feat.params"
