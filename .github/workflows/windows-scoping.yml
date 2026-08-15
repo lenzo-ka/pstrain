@@ -33,20 +33,19 @@ jobs:
           $build = "build-${{ matrix.compiler }}"
           $compilerArgs = @()
           if ("${{ matrix.compiler }}" -eq "clang-cl") {
-            $compilerArgs += "-DCMAKE_C_COMPILER=clang-cl"
+            $compilerArgs += "-T"
+            $compilerArgs += "ClangCL"
             $compilerArgs += "-DCMAKE_C_FLAGS=/clang:-ferror-limit=0"
           }
-          # Windows otherwise maps both the pstrainc static archive and the
-          # pstrainc shared-library import archive to lib/pstrainc.lib.
-          cmake -S . -B $build -G Ninja `
+          cmake -S . -B $build `
             -DBUILD_SHARED_LIBS=ON `
             -DBUILD_CLI=ON `
-            -DCMAKE_STATIC_LIBRARY_SUFFIX=.static.lib `
             @compilerArgs
 
       - name: Compile broadly (${{ matrix.compiler }})
         shell: pwsh
         run: |
-          # Ninja's unlimited keep-going mode attempts every target that is not
-          # blocked by a failed dependency, exposing more than the first error.
-          cmake --build "build-${{ matrix.compiler }}" --parallel -- -k 0
+          # Continue independent MSBuild projects after failed compile/link
+          # tasks, exposing more than the first target's diagnostics.
+          cmake --build "build-${{ matrix.compiler }}" --parallel -- `
+            /p:ContinueOnError=WarnAndContinue
