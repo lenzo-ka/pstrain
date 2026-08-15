@@ -28,12 +28,17 @@ typedef struct pstrain_align_config_s {
     int     compute_states;  /**< Return state segments.    Default 0.    */
     const char *feat_type;   /**< Feature stream spec.   Default "1s_c_d_dd". */
     const char *cmn;         /**< CMN type.              Default "current". */
+    const char *cmninit;     /**< Initial CMN vector.    Default "40,3,-1". */
     const char *agc;         /**< AGC type.              Default "none".    */
     int     varnorm;         /**< Cepstral variance norm.   Default 0.    */
+    int     ceplen;          /**< Cepstral vector width.    Default 13.   */
     int     frate;           /**< Frame rate (Hz).          Default 100.  */
     int     lts_mismatch;    /**< Use LTS rules for OOV.    Default 0.    */
 } pstrain_align_config_t;
 
+#define PSTRAIN_ABI_VERSION 1
+
+uint32 pstrain_abi_version(void);
 void pstrain_align_config_default(pstrain_align_config_t *config);
 
 typedef struct pstrain_align_context_s pstrain_align_context_t;
@@ -65,9 +70,8 @@ typedef struct pstrain_align_result_s {
  * @param var_path  Variances file.
  * @param mixw_path Mixture weights file.
  * @param tmat_path Transition matrices file.
- * @param feat_params_path Optional feat.params file (may be NULL); when
- *        present overrides feat/cmn/agc/varnorm from the config struct
- *        the way the standalone sphinx3_align does.
+ * @param feat_params_path Path retained for CLI parity diagnostics. The
+ *        caller must project validated feature parameters into config.
  * @param dict_path Main dictionary.
  * @param fdict_path Filler dictionary (may be NULL).
  * @param config Tunables (NULL for defaults).

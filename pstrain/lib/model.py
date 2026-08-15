@@ -45,6 +45,7 @@ COMPLETE_MODEL_FEAT_PARAMS_REQUIRED = frozenset(
         "-alpha",
         "-cmn",
         "-cmninit",
+        "-ceplen",
         "-dither",
         "-feat",
         "-frate",
@@ -68,7 +69,7 @@ COMPLETE_MODEL_FEAT_PARAMS_REQUIRED = frozenset(
 _BOOLEAN_FEAT_PARAMS = frozenset(
     {"-dither", "-remove_dc", "-remove_noise", "-unit_area", "-round_filters", "-varnorm"}
 )
-_POSITIVE_INTEGER_FEAT_PARAMS = frozenset({"-ncep", "-nfilt", "-nfft", "-frate"})
+_POSITIVE_INTEGER_FEAT_PARAMS = frozenset({"-ceplen", "-ncep", "-nfilt", "-nfft", "-frate"})
 _NONNEGATIVE_INTEGER_FEAT_PARAMS = frozenset({"-lifter"})
 _NONNEGATIVE_FLOAT_FEAT_PARAMS = frozenset({"-lowerf"})
 _POSITIVE_FLOAT_FEAT_PARAMS = frozenset({"-samprate", "-upperf", "-wlen"})
@@ -179,6 +180,13 @@ def _validate_complete_feat_params(feat_params: Path, parsed: dict[str, str]) ->
         raise _invalid_feat_param(
             feat_params, "-upperf", parsed["-upperf"], "must be greater than -lowerf"
         )
+    if numbers["-ceplen"] != numbers["-ncep"]:
+        raise _invalid_feat_param(
+            feat_params,
+            "-ceplen",
+            parsed["-ceplen"],
+            "must match -ncep so the native waveform and feature initializers agree",
+        )
     if numbers["-upperf"] > numbers["-samprate"] / 2 + 1.0:
         raise _invalid_feat_param(
             feat_params, "-upperf", parsed["-upperf"], "must not exceed the Nyquist frequency"
@@ -216,12 +224,13 @@ __all__ = [
     "CDModel",
     "create_model",
     "get_model_class",
+    "read_complete_model_feat_params",
     "require_complete_model",
 ]
 
 
-def require_complete_model(model_dir: str | Path) -> Path:
-    """Require and validate the complete pstrain front-end record.
+def read_complete_model_feat_params(model_dir: str | Path) -> dict[str, str]:
+    """Require, validate, and return the complete pstrain front-end record.
 
     Range and enumeration rejection is a conservative subset of native rejection. Numeric
     spelling is deliberately stricter: the complete token must parse without native-style
@@ -253,6 +262,19 @@ def require_complete_model(model_dir: str | Path) -> Path:
 
     missing = sorted(COMPLETE_MODEL_FEAT_PARAMS_REQUIRED - parsed.keys())
     if missing:
+        if "-ceplen" in missing and "-ncep" in parsed:
+            other_missing = [name for name in missing if name != "-ceplen"]
+            suffix = (
+                " No other missing or misspelled fields are accepted."
+                if not other_missing
+                else " Also restore the other missing fields: " + ", ".join(other_missing) + "."
+            )
+            raise ValueError(
+                f"feat.params ({feat_params}) is from the legacy pre-ceplen format. "
+                f"Add the line '-ceplen {parsed['-ncep']}' (the value must equal -ncep) so "
+                "the native waveform extractor and feature initializer use the same "
+                f"cepstral width.{suffix}"
+            )
         raise ValueError(
             f"feat.params ({feat_params}) is missing required front-end fields: "
             + ", ".join(missing)
@@ -264,7 +286,14 @@ def require_complete_model(model_dir: str | Path) -> Path:
             + ", ".join(unexpected)
         )
     _validate_complete_feat_params(feat_params, parsed)
-    return feat_params
+    return parsed
+
+
+def require_complete_model(model_dir: str | Path) -> Path:
+    """Require and validate the complete pstrain front-end record."""
+    model_dir = Path(model_dir)
+    read_complete_model_feat_params(model_dir)
+    return model_dir / "feat.params"
 
 
 class Model(ABC):

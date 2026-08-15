@@ -175,6 +175,9 @@ kbcore_t *New_kbcore(cmd_ln_t *config);
 S3DECODER_EXPORT
 void s3_am_init(kbcore_t *kbc);
 
+/** Apply a comma-separated initial mean vector to a feature control block. */
+void set_cmninit(feat_t *fcb, char const *cmninit);
+
 
 /**
  * Initialize one or more of all the major models:  pronunciation dictionary, acoustic models,

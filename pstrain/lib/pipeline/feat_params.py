@@ -6,12 +6,80 @@ from pathlib import Path
 
 from pstrain.lib.pipeline.context import FeatParams
 
+# One ordered declaration drives both serialization and the waveform-extractor
+# projection. ``extractor_name=None`` classifies a downstream transform field or
+# a second native spelling of an already-projected value.
+_FIELD_SPECS: tuple[tuple[str, str | None, str, str | None], ...] = (
+    ("-samprate", "samprate", "number", "samprate"),
+    ("-ncep", "ncep", "number", "ncep"),
+    ("-ceplen", "ncep", "number", None),
+    ("-nfilt", "nfilt", "number", "nfilt"),
+    ("-nfft", "nfft", "number", "nfft"),
+    ("-lowerf", "lowerf", "number", "lowerf"),
+    ("-upperf", "upperf", "number", "upperf"),
+    ("-alpha", "alpha", "number", "alpha"),
+    ("-dither", "dither", "boolean", "dither"),
+    ("-remove_dc", "remove_dc", "boolean", "remove_dc"),
+    ("-remove_noise", "remove_noise", "boolean", "remove_noise"),
+    ("-frate", "frate", "number", "frate"),
+    ("-wlen", "wlen", "number", "wlen"),
+    ("-feat", "feat_type", "number", None),
+    ("-transform", "transform", "number", "transform"),
+    ("-lifter", "lifter", "number", "lifter"),
+    ("-agc", "agc", "number", None),
+    ("-cmn", "cmn", "number", None),
+    ("-cmninit", "cmninit", "number", None),
+    ("-varnorm", "varnorm", "number", None),
+    ("-unit_area", None, "yes", None),
+    ("-round_filters", None, "yes", None),
+)
+EXTRACTOR_FIELDS = tuple(spec[3] for spec in _FIELD_SPECS if spec[3] is not None)
+
+
+FeatureValue = int | float | bool | str
+
+
+def feature_extractor_config(feat: FeatParams) -> dict[str, FeatureValue]:
+    """Project the authoritative training record into waveform extraction args."""
+    return {
+        extractor_name: getattr(feat, attribute)
+        for _, attribute, _, extractor_name in _FIELD_SPECS
+        if extractor_name is not None and attribute is not None
+    }
+
+
+def _native_bool(value: str) -> bool:
+    return value[0] in "ytYT1"
+
+
+def feature_extractor_config_from_record(record: dict[str, str]) -> dict[str, FeatureValue]:
+    """Project a validated Sphinx record into waveform extraction args."""
+    defaults = FeatParams()
+    return {
+        extractor_name: _record_value(record[flag], getattr(defaults, attribute))
+        for flag, attribute, formatting, extractor_name in _FIELD_SPECS
+        if extractor_name is not None and attribute is not None
+    }
+
+
+def _record_value(value: str, exemplar: FeatureValue) -> FeatureValue:
+    """Convert a validated token to the declared field's Python type."""
+    if isinstance(exemplar, bool):
+        return _native_bool(value)
+    if isinstance(exemplar, int):
+        return int(value)
+    if isinstance(exemplar, float):
+        return float(value)
+    return value
+
 
 def _validate_honored_values(feat: FeatParams) -> None:
     """Reject settings that the native training engine hardcodes."""
     honored = {
         "feat_type": "1s_c_d_dd",
         "agc": "none",
+        "cmn": "batch",
+        "cmninit": "40,3,-1",
         "varnorm": "no",
     }
     for field, actual in honored.items():
@@ -26,32 +94,13 @@ def _validate_honored_values(feat: FeatParams) -> None:
 def feat_params_lines(feat: FeatParams) -> list[str]:
     """Return a complete Sphinx ``feat.params`` for *feat*."""
     _validate_honored_values(feat)
-    return [
-        f"-samprate {feat.samprate}\n",
-        f"-ncep {feat.ncep}\n",
-        f"-nfilt {feat.nfilt}\n",
-        f"-nfft {feat.nfft}\n",
-        f"-lowerf {feat.lowerf}\n",
-        f"-upperf {feat.upperf}\n",
-        f"-alpha {feat.alpha}\n",
-        f"-dither {'yes' if feat.dither else 'no'}\n",
-        f"-remove_dc {'yes' if feat.remove_dc else 'no'}\n",
-        f"-remove_noise {'yes' if feat.remove_noise else 'no'}\n",
-        f"-frate {feat.frate}\n",
-        f"-wlen {feat.wlen}\n",
-        f"-feat {feat.feat_type}\n",
-        f"-transform {feat.transform}\n",
-        f"-lifter {feat.lifter}\n",
-        f"-agc {feat.agc}\n",
-        f"-cmn {feat.cmn}\n",
-        f"-cmninit {feat.cmninit}\n",
-        f"-varnorm {feat.varnorm}\n",
-        # Invariants of pstrain's extraction path: unit_area/round_filters are the
-        # sphinxbase fe defaults it never overrides. Writing them explicitly
-        # prevents decoder-version defaults drifting from the training front end.
-        "-unit_area yes\n",
-        "-round_filters yes\n",
-    ]
+    lines = []
+    for flag, attribute, formatting, _ in _FIELD_SPECS:
+        value = "yes" if attribute is None else getattr(feat, attribute)
+        if formatting == "boolean":
+            value = "yes" if value else "no"
+        lines.append(f"{flag} {value}\n")
+    return lines
 
 
 def write_feat_params(path: Path, feat: FeatParams) -> Path:

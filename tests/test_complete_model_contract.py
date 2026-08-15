@@ -79,6 +79,7 @@ def test_complete_model_rejects_native_front_end_failures(
     [
         ("-nfft", "512.0"),
         ("-ncep", "13.5"),
+        ("-ceplen", "13.5"),
         ("-nfilt", "25.5"),
         ("-frate", "100.5"),
         ("-lifter", "22.5"),
@@ -115,6 +116,50 @@ def test_complete_model_deliberately_requires_whole_float_tokens(
     _write_feat_params(model, **{field: spelling})
 
     with pytest.raises(ValueError, match=r"must be a finite number"):
+        require_complete_model(model)
+
+
+def test_complete_model_requires_both_native_cepstral_widths_to_match(tmp_path: Path) -> None:
+    model = tmp_path / "model"
+    model.mkdir()
+    _write_feat_params(model, **{"-ceplen": "12"})
+
+    with pytest.raises(ValueError, match=r"-ceplen.*must match -ncep"):
+        require_complete_model(model)
+
+
+def test_legacy_model_gets_exact_ceplen_migration_guidance(tmp_path: Path) -> None:
+    model = tmp_path / "model"
+    model.mkdir()
+    _write_feat_params(model)
+    path = model / "feat.params"
+    path.write_text(
+        "\n".join(line for line in path.read_text().splitlines() if not line.startswith("-ceplen "))
+        + "\n"
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"legacy pre-ceplen.*Add the line '-ceplen 13'.*must equal -ncep.*waveform extractor.*feature initializer",
+    ):
+        require_complete_model(model)
+
+
+def test_legacy_ceplen_guidance_survives_another_missing_field(tmp_path: Path) -> None:
+    model = tmp_path / "model"
+    model.mkdir()
+    _write_feat_params(model)
+    path = model / "feat.params"
+    path.write_text(
+        "\n".join(
+            line
+            for line in path.read_text().splitlines()
+            if not line.startswith(("-ceplen ", "-nfilt "))
+        )
+        + "\n"
+    )
+
+    with pytest.raises(ValueError, match=r"legacy pre-ceplen.*Add the line '-ceplen 13'.*-nfilt"):
         require_complete_model(model)
 
 

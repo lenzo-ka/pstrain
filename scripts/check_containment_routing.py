@@ -2,8 +2,10 @@
 """Statically enforce containment of literal Python-to-CFFI call expressions.
 
 This scanner certifies calls whose callee is a literal name or attribute chain, a
-literal/module-constant ``getattr`` name, or a literal-key dictionary selection. It
-is silent on callees whose target name or selected value cannot be resolved statically.
+literal/module-constant ``getattr`` name, a literal-key dictionary selection, a direct
+``FFI().dlopen``, or a single-assignment local alias of a known native leaf/loader. It
+is silent on multi-step dataflow, function pointers produced by ``ffi.addressof``, and
+aliases that cross module boundaries or arise from dynamic imports.
 """
 
 from __future__ import annotations
@@ -11,10 +13,39 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from cffi import FFI
+
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from pstrain.lib._cffi.cdef import CDEF  # noqa: E402
+
+
+def _cffi_function_names() -> frozenset[str]:
+    """Derive every callable native leaf from the ABI-mode CFFI surface."""
+    ffi = FFI()
+    ffi.cdef(CDEF)
+    return frozenset(
+        key.removeprefix("function ")
+        for key in ffi._parser._declarations  # type: ignore[attr-defined]
+        if key.startswith("function ")
+    )
+
+
+CFFI_FUNCTION_NAMES = _cffi_function_names()
+# These Python helpers reach ``dlopen`` directly or transitively.  They are not
+# C functions, so they do not occur in CDEF, but they are native-entry leaves.
+NATIVE_ENTRY_NAMES = CFFI_FUNCTION_NAMES | {
+    "_init",
+    "dlopen",
+    "get_ffi",
+    "get_lib",
+    "path_or_null",
+}
 INFRASTRUCTURE = {
     "pstrain/lib/_cffi/core.py",
     "pstrain/lib/_pstrainc.py",
@@ -90,6 +121,7 @@ class Scanner(ast.NodeVisitor):
         self.functions: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
         self.worker_depth = 0
         self.constants: dict[str, str] = {}
+        self.aliases: list[dict[str, str]] = [{}]
 
     def _decorated(self) -> bool:
         return any(
@@ -101,7 +133,9 @@ class Scanner(ast.NodeVisitor):
         prior = self.worker_depth
         self.worker_depth = 0
         self.functions.append(node)
+        self.aliases.append({})
         self._visit_statements(node.body)
+        self.aliases.pop()
         self.functions.pop()
         self.worker_depth = prior
 
@@ -144,6 +178,14 @@ class Scanner(ast.NodeVisitor):
             for target in node.targets:
                 if isinstance(target, ast.Name):
                     self.constants[target.id] = node.value.value
+        if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            target = node.targets[0].id
+            value = self._callee(node.value)
+            leaf = value.rsplit(".", 1)[-1]
+            if value and leaf in NATIVE_ENTRY_NAMES:
+                self.aliases[-1][target] = value
+            else:
+                self.aliases[-1].pop(target, None)
         self.generic_visit(node)
 
     def _string(self, node: ast.AST) -> str | None:
@@ -157,8 +199,17 @@ class Scanner(ast.NodeVisitor):
         return None
 
     def _callee(self, node: ast.AST) -> str:
+        if (
+            isinstance(node, ast.Attribute)
+            and node.attr == "dlopen"
+            and isinstance(node.value, ast.Call)
+            and _name(node.value.func).endswith("FFI")
+        ):
+            return "FFI().dlopen"
         literal = _name(node)
         if literal:
+            if isinstance(node, ast.Name):
+                return self.aliases[-1].get(literal, literal)
             return literal
         if isinstance(node, ast.Call) and _name(node.func) == "getattr" and len(node.args) >= 2:
             attribute = self._string(node.args[1])
@@ -177,7 +228,7 @@ class Scanner(ast.NodeVisitor):
     def visit_Call(self, node: ast.Call) -> None:
         symbol = self._callee(node.func)
         leaf = symbol.rsplit(".", 1)[-1]
-        if leaf in {"get_lib", "_init"} or leaf.startswith("pstrain_"):
+        if leaf in NATIVE_ENTRY_NAMES:
             if self.path in INFRASTRUCTURE:
                 disposition, reason = "infrastructure", "implements the low-level worker boundary"
             elif self.path in DECLARED_EXCEPTIONS:

@@ -1,5 +1,6 @@
 -samprate 16000
 -ncep 13
+-ceplen 13
 -nfilt 25
 -nfft 512
 -lowerf 130

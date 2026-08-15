@@ -24,8 +24,8 @@ class FeatureConfig(StrictModel):
     ncep: Annotated[int, Field(gt=0, description="Number of cepstral coefficients")] = 13
     nfilt: Annotated[int, Field(gt=0, description="Number of mel filters")] = 25
     nfft: Annotated[int, Field(gt=0, description="FFT size")] = 512
-    lowerf: Annotated[int, Field(ge=0, description="Lower filter-bank frequency in Hz")] = 130
-    upperf: Annotated[int, Field(gt=0, description="Upper filter-bank frequency in Hz")] = 6800
+    lowerf: Annotated[float, Field(ge=0, description="Lower filter-bank frequency in Hz")] = 130.0
+    upperf: Annotated[float, Field(gt=0, description="Upper filter-bank frequency in Hz")] = 6800.0
     alpha: Annotated[float, Field(description="Pre-emphasis coefficient")] = 0.97
     dither: Annotated[bool, Field(description="Add half-bit dither to input audio")] = True
     remove_dc: Annotated[bool, Field(description="Remove DC offset from each frame")] = True

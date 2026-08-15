@@ -21,10 +21,11 @@ def test_default_feat_params_contains_complete_training_front_end() -> None:
     assert params == {
         "-samprate": "16000",
         "-ncep": "13",
+        "-ceplen": "13",
         "-nfilt": "25",
         "-nfft": "512",
-        "-lowerf": "130",
-        "-upperf": "6800",
+        "-lowerf": "130.0",
+        "-upperf": "6800.0",
         "-alpha": "0.97",
         "-dither": "yes",
         "-remove_dc": "yes",
@@ -63,7 +64,6 @@ def test_packaging_copies_trained_feat_params_despite_config_drift(tmp_path: Pat
         lowerf=200,
         upperf=3500,
         lifter=17,
-        cmn="current",
     )
     training_path = write_feat_params(trained_model / "feat.params", trained_profile)
     expected = training_path.read_bytes()
@@ -87,6 +87,8 @@ def test_packaging_copies_trained_feat_params_despite_config_drift(tmp_path: Pat
     [
         ("feat_type", "s2_4x"),
         ("agc", "max"),
+        ("cmn", "live"),
+        ("cmninit", "12,1,-3"),
         ("varnorm", "yes"),
     ],
 )

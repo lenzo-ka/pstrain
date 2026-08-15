@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import shutil
+import wave
 from pathlib import Path
 
+import numpy as np
 import pytest
 
+from pstrain.lib._cffi import read_gau, write_gau
 from pstrain.lib.alignment import (
     AlignedSegment,
     Aligner,
@@ -19,6 +23,35 @@ from pstrain.lib.alignment import (
     to_sphinx_segments,
     to_textgrid,
 )
+
+_FIXTURES = Path(__file__).parent / "fixtures"
+_ALIGNMENT_TRANSCRIPT = "author of the danger trail philip steels etc"
+
+
+def _alignment_model(tmp_path: Path, **updates: str) -> Path:
+    """Copy the real acoustic fixture and update its validated front-end record."""
+    model = tmp_path / "model"
+    shutil.copytree(_FIXTURES / "multipron_final_state" / "model", model)
+    record = dict(
+        line.split(maxsplit=1) for line in (model / "feat.params").read_text().splitlines()
+    )
+    record.update(updates)
+    (model / "feat.params").write_text(
+        "".join(f"{name} {value}\n" for name, value in record.items())
+    )
+    return model
+
+
+def _downsample_to_8khz(source: Path, output: Path) -> Path:
+    """Create the matching 8 kHz waveform used by the real-boundary construction."""
+    with wave.open(str(source), "rb") as source_wav:
+        samples = np.frombuffer(source_wav.readframes(source_wav.getnframes()), dtype=np.int16)
+    with wave.open(str(output), "wb") as output_wav:
+        output_wav.setnchannels(1)
+        output_wav.setsampwidth(2)
+        output_wav.setframerate(8000)
+        output_wav.writeframes(samples[::2].tobytes())
+    return output
 
 
 def _sample_result(utterance_id: str = "utt-1") -> AlignmentResult:
@@ -190,6 +223,116 @@ class TestAligner:
             ),
         ):
             Aligner(model, dict_path)
+
+    def test_real_alignment_rejects_12_cepstral_record_with_39d_model(self, tmp_path: Path) -> None:
+        model = _alignment_model(tmp_path, **{"-ncep": "12", "-ceplen": "12"})
+
+        with pytest.raises(
+            RuntimeError,
+            match=r"Feature dimension 36 does not match Gaussian dimension 39",
+        ):
+            Aligner(
+                model,
+                _FIXTURES / "mini_arctic" / "dictionary.dict",
+                filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
+                beam=1e-200,
+            )
+
+    def test_real_alignment_defaults_to_recorded_live_cmn(self, tmp_path: Path) -> None:
+        """Exercise CMN precedence against a score-sensitive real model path.
+
+        The copied one-density fixture is made score-sensitive without changing
+        its topology or dimensions: all 39-D means are zeroed, then codebooks
+        are spread from -1 to 1 on coefficient zero.  Existing variances and
+        mixture weights are retained coherently.
+        """
+        model = _alignment_model(tmp_path, **{"-cmn": "live", "-cmninit": "0,0,0"})
+        means = read_gau(str(model / "means"))[0]
+        means.fill(0.0)
+        means[:, 0, 0, 0] = np.linspace(-1.0, 1.0, means.shape[0])
+        assert write_gau(str(model / "means"), means) == 0
+        scores = []
+        for overrides in ({}, {"cmn": "live", "cmninit": "0,0,0"}, {"cmninit": "40,3,-1"}):
+            with Aligner(
+                model,
+                _FIXTURES / "mini_arctic" / "dictionary.dict",
+                filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
+                beam=1e-200,
+                **overrides,
+            ) as aligner:
+                result = aligner.align_audio(
+                    _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
+                    _ALIGNMENT_TRANSCRIPT,
+                )
+            scores.append(result.total_score)
+
+        assert scores[0] == scores[1] == -773494
+        assert scores[2] != scores[0]
+
+    def test_real_alignment_batch_record_preserves_previous_defaults(self, tmp_path: Path) -> None:
+        model = _alignment_model(tmp_path)
+        scores = []
+        for overrides in ({}, {"cmn": "batch", "cmninit": "40,3,-1"}):
+            with Aligner(
+                model,
+                _FIXTURES / "mini_arctic" / "dictionary.dict",
+                filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
+                beam=1e-200,
+                **overrides,
+            ) as aligner:
+                result = aligner.align_audio(
+                    _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
+                    _ALIGNMENT_TRANSCRIPT,
+                )
+            scores.append(result.total_score)
+
+        assert scores[0] == scores[1]
+
+    def test_real_alignment_honors_8khz_profile(self, tmp_path: Path) -> None:
+        model = _alignment_model(
+            tmp_path,
+            **{
+                "-samprate": "8000",
+                "-nfft": "256",
+                "-lowerf": "200.5",
+                "-upperf": "3500.5",
+            },
+        )
+        audio = _downsample_to_8khz(
+            _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
+            tmp_path / "arctic_a0001-8khz.wav",
+        )
+
+        with Aligner(
+            model,
+            _FIXTURES / "mini_arctic" / "dictionary.dict",
+            filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
+            beam=1e-200,
+        ) as aligner:
+            result = aligner.align_audio(audio, _ALIGNMENT_TRANSCRIPT)
+
+        assert result.words
+        assert result.n_frames > 0
+
+    def test_real_80hz_alignment_preserves_time_in_result_and_exports(self, tmp_path: Path) -> None:
+        model = _alignment_model(tmp_path, **{"-frate": "80"})
+        audio = _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav"
+
+        with Aligner(
+            model,
+            _FIXTURES / "mini_arctic" / "dictionary.dict",
+            filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
+            beam=1e-200,
+        ) as aligner:
+            result = aligner.align_audio(audio, _ALIGNMENT_TRANSCRIPT)
+
+        assert result.frame_rate == 80
+        assert result.duration_time() == pytest.approx(result.n_frames / 80)
+        assert f"xmax = {result.duration_time():.4f}" in to_textgrid(result)
+        final_ctm = to_ctm(result).splitlines()[-1].split()
+        assert float(final_ctm[2]) + float(final_ctm[3]) == pytest.approx(
+            result.duration_time(), abs=0.002
+        )
 
 
 class TestLoadTranscripts:

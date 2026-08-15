@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ast
 
-from scripts.check_containment_routing import Scanner, scan
+from scripts.check_containment_routing import CFFI_FUNCTION_NAMES, Scanner, scan
 
 
 def test_every_literal_cffi_callsite_is_contained_or_declared() -> None:
@@ -48,9 +48,63 @@ getattr(lib, CALLEE)(ctx)
     ]
 
 
+def test_native_leaf_population_is_derived_from_cffi_not_a_name_prefix() -> None:
+    assert {"s3mixw_read", "semi_ts2cb", "cont_ts2cb"} <= CFFI_FUNCTION_NAMES
+
+    source = """
+lib.s3mixw_read(path, out, n_mixw, n_feat, n_density)
+lib.semi_ts2cb(n_tied_state)
+lib.cont_ts2cb(n_tied_state)
+"""
+    scanner = Scanner("pstrain/_construction.py")
+    scanner.visit(ast.parse(source))
+
+    assert [(item.symbol, item.disposition) for item in scanner.callsites] == [
+        ("lib.s3mixw_read", "violation"),
+        ("lib.semi_ts2cb", "violation"),
+        ("lib.cont_ts2cb", "violation"),
+    ]
+
+
 def test_unresolvable_indirect_callee_is_an_explicitly_silent_axis() -> None:
     scanner = Scanner("pstrain/_construction.py")
     scanner.visit(ast.parse("getattr(lib, runtime_name)(ctx)"))
+    assert scanner.callsites == []
+
+
+def test_single_assignment_native_and_loader_aliases_are_detected() -> None:
+    source = """
+fn = lib.s3mixw_read
+fn(path, out, n_mixw, n_feat, n_density)
+load = get_lib
+load()
+"""
+    scanner = Scanner("pstrain/_construction.py")
+    scanner.visit(ast.parse(source))
+    assert [(item.symbol, item.disposition) for item in scanner.callsites] == [
+        ("lib.s3mixw_read", "violation"),
+        ("get_lib", "violation"),
+    ]
+
+
+def test_direct_fresh_ffi_dlopen_is_detected() -> None:
+    scanner = Scanner("pstrain/_construction.py")
+    scanner.visit(ast.parse("FFI().dlopen(path)"))
+    assert [(item.symbol, item.disposition) for item in scanner.callsites] == [
+        ("FFI().dlopen", "violation")
+    ]
+
+
+def test_function_pointers_and_cross_library_import_aliases_are_measured_silences() -> None:
+    source = """
+fn = ffi.addressof(lib, "pstrain_session_reset")
+fn()
+import importlib as il
+ps = il.import_module("pocketsphinx")
+decoder = ps.Decoder()
+"""
+    scanner = Scanner("pstrain/_construction.py")
+    scanner.visit(ast.parse(source))
     assert scanner.callsites == []
 
 

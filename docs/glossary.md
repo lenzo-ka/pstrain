@@ -89,11 +89,14 @@ The complete training-time front-end record carried by a trained model. Pstrain'
 `Decoder`, `Aligner`, and `package_model` entry points require it, but init and
 training do not while they are still constructing a model.
 
-At decode time, the trained model's `feat.params` is authoritative over the
-active schema profile because it records how that model's features were actually
-made. PocketSphinx reads it after pstrain's pre-initialization assignments, so a
-value in the file wins. A complete file defines all 19 schema fields plus the
-`unit_area` and `round_filters` training-engine invariants; none is optional.
+At decode time, the trained model's `feat.params` is authoritative by default
+over the active schema profile because it records how that model's features were
+actually made. PocketSphinx reads it after pstrain's pre-initialization
+assignments, so a value in the file wins. `Aligner` likewise uses the record's
+CMN values when its `cmn` and `cmninit` arguments are omitted; passing either
+argument explicitly is a deliberate override. A complete file defines all 19
+schema fields plus the `unit_area` and `round_filters` training-engine
+invariants; none is optional.
 Pstrain validates that inventory before its supported decode, align, and package
 entry points continue. A source gate rejects direct use of the pip PocketSphinx
 `Decoder` in the `pstrain` package, but code outside the package can bypass this

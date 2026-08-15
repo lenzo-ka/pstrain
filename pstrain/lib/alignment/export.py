@@ -15,7 +15,7 @@ from pstrain.lib.alignment.core import AlignedSegment, AlignmentResult
 
 def to_textgrid(
     result: AlignmentResult,
-    frame_shift: float = 0.01,
+    frame_shift: float | None = None,
     include_states: bool = False,
 ) -> str:
     """Render an alignment as a Praat TextGrid (long format).
@@ -27,13 +27,14 @@ def to_textgrid(
 
     Args:
         result: Alignment to render.
-        frame_shift: Seconds per frame (default 0.01 = 10ms, Sphinx standard).
+        frame_shift: Seconds per frame. By default, use the result's model frame rate.
         include_states: If True, include a state-level tier.
 
     Returns:
         TextGrid file contents as a UTF-8 string.
     """
-    xmax = result.duration_time(frame_shift)
+    effective_shift = result.frame_shift if frame_shift is None else frame_shift
+    xmax = result.duration_time(effective_shift)
 
     tiers: list[tuple[str, list[AlignedSegment]]] = [
         ("words", result.words),
@@ -53,7 +54,7 @@ def to_textgrid(
     lines.append("item []:")
 
     for tier_idx, (tier_name, segments) in enumerate(tiers, start=1):
-        intervals = _segments_to_intervals(segments, xmax, frame_shift)
+        intervals = _segments_to_intervals(segments, xmax, effective_shift)
         lines.append(f"    item [{tier_idx}]:")
         lines.append('        class = "IntervalTier"')
         lines.append(f'        name = "{tier_name}"')
@@ -72,7 +73,7 @@ def to_textgrid(
 def to_ctm(
     result: AlignmentResult,
     channel: str = "A",
-    frame_shift: float = 0.01,
+    frame_shift: float | None = None,
     level: str = "words",
 ) -> str:
     """Render an alignment as a CTM (Conversation Time Marked) file.
@@ -84,7 +85,7 @@ def to_ctm(
     Args:
         result: Alignment to render.
         channel: Channel identifier (default "A").
-        frame_shift: Seconds per frame.
+        frame_shift: Seconds per frame. By default, use the result's model frame rate.
         level: Which segment level to write ("words" or "phones").
 
     Returns:
@@ -99,10 +100,11 @@ def to_ctm(
 
     file_id = result.utterance_id or "utt"
 
+    effective_shift = result.frame_shift if frame_shift is None else frame_shift
     rows: list[str] = []
     for seg in segments:
-        start = seg.start_time(frame_shift)
-        duration = seg.duration_time(frame_shift)
+        start = seg.start_time(effective_shift)
+        duration = seg.duration_time(effective_shift)
         rows.append(f"{file_id} {channel} {start:.3f} {duration:.3f} {seg.name}")
     return "\n".join(rows) + ("\n" if rows else "")
 
@@ -143,7 +145,7 @@ def to_sphinx_segments(
 def save_textgrid(
     result: AlignmentResult,
     path: Path,
-    frame_shift: float = 0.01,
+    frame_shift: float | None = None,
     include_states: bool = False,
 ) -> None:
     """Write ``result`` as a Praat TextGrid file at ``path``."""
@@ -159,7 +161,7 @@ def save_ctm(
     result: AlignmentResult,
     path: Path,
     channel: str = "A",
-    frame_shift: float = 0.01,
+    frame_shift: float | None = None,
     level: str = "words",
 ) -> None:
     """Write ``result`` as a CTM file at ``path``."""

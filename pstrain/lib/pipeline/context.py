@@ -109,8 +109,8 @@ class FeatParams:
     ncep: int = field(default_factory=lambda: Profile().features.ncep)
     nfilt: int = field(default_factory=lambda: Profile().features.nfilt)
     nfft: int = field(default_factory=lambda: Profile().features.nfft)
-    lowerf: int = field(default_factory=lambda: Profile().features.lowerf)
-    upperf: int = field(default_factory=lambda: Profile().features.upperf)
+    lowerf: float = field(default_factory=lambda: Profile().features.lowerf)
+    upperf: float = field(default_factory=lambda: Profile().features.upperf)
     # Pre-emphasis coefficient (`-alpha`). 0.97 is the engine default.
     alpha: float = field(default_factory=lambda: Profile().features.alpha)
     dither: bool = field(default_factory=lambda: Profile().features.dither)

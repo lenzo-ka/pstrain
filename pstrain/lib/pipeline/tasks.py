@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from pstrain.lib.pipeline.context import PipelineContext, TrainingSchedule
-from pstrain.lib.pipeline.feat_params import write_feat_params
+from pstrain.lib.pipeline.feat_params import feature_extractor_config, write_feat_params
 from pstrain.lib.pipeline.runner import Pipeline, Task
 
 # Top-level worker functions for ProcessPoolExecutor (must be picklable).
@@ -157,18 +157,7 @@ def _make_extract_tasks(ctx: PipelineContext) -> list[Task]:
     Uses `audio_fileids()` (corpus-wide, recursively derived from `audio/`) so
     extraction can be planned before the train/test split has run.
     """
-    params: dict[str, Any] = {
-        "samprate": ctx.feat.samprate,
-        "ncep": ctx.feat.ncep,
-        "nfilt": ctx.feat.nfilt,
-        "nfft": ctx.feat.nfft,
-        "lowerf": ctx.feat.lowerf,
-        "upperf": ctx.feat.upperf,
-        "lifter": ctx.feat.lifter,
-        "alpha": ctx.feat.alpha,
-        "dither": ctx.feat.dither,
-        "remove_dc": ctx.feat.remove_dc,
-    }
+    params = feature_extractor_config(ctx.feat)
     fileids = ctx.audio_fileids()
     if not fileids:
         pattern = "**/*.wav"
