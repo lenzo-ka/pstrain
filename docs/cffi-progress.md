@@ -129,7 +129,7 @@ Build triphone models with state tying.
 ### 3c. State Tying
 | Component | C Program | CFFI Status | Priority | Notes |
 |-----------|-----------|-------------|----------|-------|
-| Tie states | `pstrain_tie_states` | ✅ | - | `dtree.tie_states()` |
+| Tie states | `pstrain_tie_states` | ✅ | - | `dtree.tie_states()`; allocation parity uses [partition comparison](design/tree-comparison.md), not label-sensitive senone-ID row counts |
 | TS2CB mapping | `s3ts2cb_*` | ✅ | - | `ts2cb.py` |
 
 ### 3d. CD Training
