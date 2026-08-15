@@ -33,6 +33,14 @@ Subject = tuple[str, int]
 Context = tuple[str, ...]
 Assignments = dict[Subject, dict[Context, int]]
 MdefRows = dict[Context, tuple[int, ...]]
+MDEF_COUNT_HEADERS = {
+    "n_base",
+    "n_tri",
+    "n_state_map",
+    "n_tied_state",
+    "n_tied_ci_state",
+    "n_tied_tmat",
+}
 
 
 def sha256(path: Path) -> str:
@@ -78,6 +86,8 @@ def canonical_tree(path: Path) -> tuple[Any, dict[str, Any]]:
             raise ValueError(f"{path}: missing child node {node_id}")
         if node_id in visiting:
             raise ValueError(f"{path}: cycle at node {node_id}")
+        if node_id in visited:
+            raise ValueError(f"{path}: node {node_id} is reused")
         visiting.add(node_id)
         node = nodes[node_id]
         if node.left is None:
@@ -147,8 +157,12 @@ def parse_mdef_rows(path: Path) -> MdefRows:
         fields = line.split()
         if not fields or fields[0].startswith("#"):
             continue
-        if len(fields) < 10 or fields[-1] != "N":
+        if (len(fields) == 1 and fields[0] == "0.3") or (
+            len(fields) == 2 and fields[0].isdigit() and fields[1] in MDEF_COUNT_HEADERS
+        ):
             continue
+        if len(fields) < 10 or fields[-1] != "N":
+            raise ValueError(f"{path}:{lineno}: malformed mdef row: {line.strip()}")
         context = tuple(fields[:6])
         try:
             senones = [int(value) for value in fields[6:-1]]
@@ -174,6 +188,42 @@ def parse_mdef_assignments(path: Path) -> Assignments:
 
 def _subject_name(subject: Subject) -> str:
     return f"{subject[0]}-{subject[1]}"
+
+
+def _disagreement_samples(
+    common: list[Context],
+    left_rows: dict[Context, int],
+    right_rows: dict[Context, int],
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """Find representative disagreeing pairs without enumerating every pair."""
+    by_left: dict[int, dict[int, Context]] = defaultdict(dict)
+    by_right: dict[int, dict[int, Context]] = defaultdict(dict)
+    for context in common:
+        left_label = left_rows[context]
+        right_label = right_rows[context]
+        by_left[left_label].setdefault(right_label, context)
+        by_right[right_label].setdefault(left_label, context)
+
+    samples: list[dict[str, Any]] = []
+    seen: set[tuple[Context, Context]] = set()
+    for groups, shared_side in ((by_left, "left"), (by_right, "right")):
+        for opposing in groups.values():
+            representatives = list(opposing.values())
+            for first, second in zip(representatives, representatives[1:], strict=False):
+                pair = tuple(sorted((first, second)))
+                if pair in seen:
+                    continue
+                seen.add(pair)
+                samples.append(
+                    {
+                        "contexts": [list(pair[0]), list(pair[1])],
+                        "share_senone_on": shared_side,
+                    }
+                )
+                if len(samples) == limit:
+                    return samples
+    return samples
 
 
 def compare_partitions(left_path: Path, right_path: Path) -> dict[str, Any]:
@@ -202,6 +252,10 @@ def compare_partitions(left_path: Path, right_path: Path) -> dict[str, Any]:
         )
         pairs = comb(len(common), 2)
         equal = not left_only and not right_only and disagreements == 0
+        disagreement_samples = _disagreement_samples(common, left_rows, right_rows)
+        differing_contexts = sorted(
+            {tuple(context) for sample in disagreement_samples for context in sample["contexts"]}
+        )
         subjects[_subject_name(subject)] = {
             "equal": equal,
             "common_contexts": len(common),
@@ -211,6 +265,8 @@ def compare_partitions(left_path: Path, right_path: Path) -> dict[str, Any]:
             "right_parts": len(right_counts),
             "context_pairs": pairs,
             "pair_disagreements": disagreements,
+            "differing_contexts": [list(context) for context in differing_contexts],
+            "pair_disagreement_samples": disagreement_samples,
         }
         total_pairs += pairs
         total_disagreements += disagreements

@@ -11,7 +11,9 @@ different questions and must not be substituted for one another.
 2. **Partition equality** compares the equivalence classes of context-state
    rows within each base-phone/emitting-state subject. Senone IDs are ignored;
    only which contexts share a senone matters. Equality supports an allocation
-   claim. Pair disagreements quantify allocation differences.
+   claim. Pair disagreements quantify allocation differences; unequal subjects
+   also report differing contexts and up to ten representative disagreeing
+   context pairs so that an allocation change can be located.
 3. **Keyed-row agreement** compares the numeric senone ID on corresponding
    context-state rows. It is label-sensitive: an ID permutation can reduce the
    count while leaving every partition unchanged. It is a serialization
@@ -26,3 +28,7 @@ The literal comparator deliberately does not compare score or occupancy
 fields (including values used as pruning thresholds). It also does not decide
 whether two different question expressions are semantically equivalent; it
 compares their normalized expression text exactly.
+
+Both inputs are validated before comparison. Malformed or truncated mdef rows
+are errors, and literal-tree inputs reject cycles, unreachable nodes, and nodes
+reused by more than one parent.
