@@ -145,6 +145,24 @@ def test_legacy_model_gets_exact_ceplen_migration_guidance(tmp_path: Path) -> No
         require_complete_model(model)
 
 
+def test_legacy_ceplen_guidance_survives_another_missing_field(tmp_path: Path) -> None:
+    model = tmp_path / "model"
+    model.mkdir()
+    _write_feat_params(model)
+    path = model / "feat.params"
+    path.write_text(
+        "\n".join(
+            line
+            for line in path.read_text().splitlines()
+            if not line.startswith(("-ceplen ", "-nfilt "))
+        )
+        + "\n"
+    )
+
+    with pytest.raises(ValueError, match=r"legacy pre-ceplen.*Add the line '-ceplen 13'.*-nfilt"):
+        require_complete_model(model)
+
+
 @pytest.mark.parametrize(
     "updates",
     [

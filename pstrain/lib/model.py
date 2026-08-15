@@ -262,12 +262,18 @@ def read_complete_model_feat_params(model_dir: str | Path) -> dict[str, str]:
 
     missing = sorted(COMPLETE_MODEL_FEAT_PARAMS_REQUIRED - parsed.keys())
     if missing:
-        if missing == ["-ceplen"] and "-ncep" in parsed:
+        if "-ceplen" in missing and "-ncep" in parsed:
+            other_missing = [name for name in missing if name != "-ceplen"]
+            suffix = (
+                " No other missing or misspelled fields are accepted."
+                if not other_missing
+                else " Also restore the other missing fields: " + ", ".join(other_missing) + "."
+            )
             raise ValueError(
                 f"feat.params ({feat_params}) is from the legacy pre-ceplen format. "
                 f"Add the line '-ceplen {parsed['-ncep']}' (the value must equal -ncep) so "
                 "the native waveform extractor and feature initializer use the same "
-                "cepstral width. No other missing or misspelled fields are accepted."
+                f"cepstral width.{suffix}"
             )
         raise ValueError(
             f"feat.params ({feat_params}) is missing required front-end fields: "

@@ -21,7 +21,10 @@ import yaml
 
 from pstrain.lib.pipeline import PipelineContext
 from pstrain.lib.pipeline.context import DEFAULT_CONFIGS, FeatParams, RunnerParams, SplitParams
-from pstrain.lib.pipeline.feat_params import EXTRACTOR_FIELDS
+from pstrain.lib.pipeline.feat_params import (
+    feat_params_lines,
+    feature_extractor_config_from_record,
+)
 from pstrain.lib.pipeline.tasks import DEFAULT_TARGET, TARGETS, build_pipeline
 from tests.clib import C_LIBRARY_AVAILABLE
 
@@ -158,15 +161,19 @@ def test_extract_task_forwards_lifter(empty_project: Path, monkeypatch: pytest.M
 
 
 def test_extract_task_forwards_every_recorded_waveform_field(empty_project: Path) -> None:
-    """The training invocation is derived from the authoritative record projection."""
+    """Both consumers receive declared non-defaults, checked independently of the schema."""
     feat = FeatParams(remove_noise=False, transform="legacy", frate=80, wlen=0.02)
     ctx = PipelineContext(project_dir=empty_project, feat=feat)
     task = build_pipeline(ctx).tasks()["extract:placeholder"]
 
     assert isinstance(task.fn, partial)
     params = task.fn.args[2]
-    assert set(params) == set(EXTRACTOR_FIELDS)
-    assert params == {name: getattr(feat, name) for name in EXTRACTOR_FIELDS}
+    assert params["frate"] == 80
+    assert params["transform"] == "legacy"
+    record = dict(line.rstrip().split(maxsplit=1) for line in feat_params_lines(feat))
+    alignment_params = feature_extractor_config_from_record(record)
+    assert alignment_params["frate"] == 80
+    assert alignment_params["transform"] == "legacy"
 
 
 def test_extract_task_forwards_preemphasis_alpha(empty_project: Path) -> None:

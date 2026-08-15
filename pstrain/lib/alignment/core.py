@@ -20,9 +20,7 @@ from pathlib import Path
 # through cd-8g acoustic models on clean read speech.
 DEFAULT_BEAM = 1e-64
 
-# Sphinx feature extraction uses a 10 ms frame shift. State-, phone-,
-# and word-level segments report start/end positions in frames; this
-# constant turns frame indices into seconds.
+# Default retained for callers constructing segments independently of a result.
 FRAME_SHIFT_SECONDS = 0.01
 
 
@@ -72,6 +70,7 @@ class AlignmentResult:
         total_score: Total acoustic score
         n_frames: Total number of frames
         transcript: Original transcript
+        frame_rate: Alignment frames per second, from the model record
     """
 
     utterance_id: str
@@ -81,10 +80,16 @@ class AlignmentResult:
     total_score: int
     n_frames: int
     transcript: str = ""
+    frame_rate: int = 100
 
-    def duration_time(self, frame_shift: float = FRAME_SHIFT_SECONDS) -> float:
+    @property
+    def frame_shift(self) -> float:
+        """Seconds represented by one alignment frame."""
+        return 1.0 / self.frame_rate
+
+    def duration_time(self, frame_shift: float | None = None) -> float:
         """Total duration in seconds."""
-        return self.n_frames * frame_shift
+        return self.n_frames * (self.frame_shift if frame_shift is None else frame_shift)
 
 
 def align_utterance(

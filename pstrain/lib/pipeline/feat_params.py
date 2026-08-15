@@ -54,22 +54,23 @@ def _native_bool(value: str) -> bool:
 
 def feature_extractor_config_from_record(record: dict[str, str]) -> dict[str, FeatureValue]:
     """Project a validated Sphinx record into waveform extraction args."""
+    defaults = FeatParams()
     return {
-        "samprate": int(record["-samprate"]),
-        "nfilt": int(record["-nfilt"]),
-        "nfft": int(record["-nfft"]),
-        "lowerf": float(record["-lowerf"]),
-        "upperf": float(record["-upperf"]),
-        "ncep": int(record["-ncep"]),
-        "alpha": float(record["-alpha"]),
-        "lifter": int(record["-lifter"]),
-        "dither": _native_bool(record["-dither"]),
-        "remove_dc": _native_bool(record["-remove_dc"]),
-        "remove_noise": _native_bool(record["-remove_noise"]),
-        "transform": record["-transform"],
-        "frate": int(record["-frate"]),
-        "wlen": float(record["-wlen"]),
+        extractor_name: _record_value(record[flag], getattr(defaults, attribute))
+        for flag, attribute, formatting, extractor_name in _FIELD_SPECS
+        if extractor_name is not None and attribute is not None
     }
+
+
+def _record_value(value: str, exemplar: FeatureValue) -> FeatureValue:
+    """Convert a validated token to the declared field's Python type."""
+    if isinstance(exemplar, bool):
+        return _native_bool(value)
+    if isinstance(exemplar, int):
+        return int(value)
+    if isinstance(exemplar, float):
+        return float(value)
+    return value
 
 
 def _validate_honored_values(feat: FeatParams) -> None:
@@ -77,6 +78,8 @@ def _validate_honored_values(feat: FeatParams) -> None:
     honored = {
         "feat_type": "1s_c_d_dd",
         "agc": "none",
+        "cmn": "batch",
+        "cmninit": "40,3,-1",
         "varnorm": "no",
     }
     for field, actual in honored.items():

@@ -145,14 +145,17 @@ class Aligner:
         cfg.compute_phones = 1 if include_phones else 0
         cfg.compute_states = 1 if include_states else 0
         cfg.varnorm = 1 if feat_record["-varnorm"][0] in "ytYT1" else 0
+        cfg.ceplen = int(feat_record["-ceplen"])
         cfg.frate = int(feat_record["-frate"])
         cfg.lts_mismatch = 1 if lts_mismatch else 0
 
         self._feat_type_b = feat_record["-feat"].encode()
         self._cmn_b = feat_record["-cmn"].encode()
+        self._cmninit_b = feat_record["-cmninit"].encode()
         self._agc_b = feat_record["-agc"].encode()
         cfg.feat_type = ffi.cast("const char *", ffi.from_buffer(self._feat_type_b))
         cfg.cmn = ffi.cast("const char *", ffi.from_buffer(self._cmn_b))
+        cfg.cmninit = ffi.cast("const char *", ffi.from_buffer(self._cmninit_b))
         cfg.agc = ffi.cast("const char *", ffi.from_buffer(self._agc_b))
 
         ctx = lib.pstrain_align_init(
@@ -173,6 +176,7 @@ class Aligner:
         self._ctx = ctx
         self._fe: FeatureExtractor | None = None
         self._sample_rate = int(self._fe_config["samprate"])
+        self._frame_rate = int(feat_record["-frate"])
         Aligner._active = self
 
     def _last_error(self) -> str | None:
@@ -391,6 +395,7 @@ class Aligner:
             total_score=int(result.total_score),
             n_frames=int(result.n_frames),
             transcript=transcript,
+            frame_rate=self._frame_rate,
         )
 
 

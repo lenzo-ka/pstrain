@@ -64,7 +64,6 @@ def test_packaging_copies_trained_feat_params_despite_config_drift(tmp_path: Pat
         lowerf=200,
         upperf=3500,
         lifter=17,
-        cmn="current",
     )
     training_path = write_feat_params(trained_model / "feat.params", trained_profile)
     expected = training_path.read_bytes()
@@ -88,6 +87,8 @@ def test_packaging_copies_trained_feat_params_despite_config_drift(tmp_path: Pat
     [
         ("feat_type", "s2_4x"),
         ("agc", "max"),
+        ("cmn", "live"),
+        ("cmninit", "12,1,-3"),
         ("varnorm", "yes"),
     ],
 )

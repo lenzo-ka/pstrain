@@ -700,8 +700,10 @@ typedef struct pstrain_align_config_s {
     int     compute_states;
     const char *feat_type;
     const char *cmn;
+    const char *cmninit;
     const char *agc;
     int     varnorm;
+    int     ceplen;
     int     frate;
     int     lts_mismatch;
 } pstrain_align_config_t;

@@ -108,8 +108,10 @@ pstrain_align_config_default(pstrain_align_config_t *config)
     config->compute_states = 0;
     config->feat_type = "1s_c_d_dd";
     config->cmn = "current";
+    config->cmninit = "40,3,-1";
     config->agc = "none";
     config->varnorm = 0;
+    config->ceplen = 13;
     config->frate = 100;
     config->lts_mismatch = 0;
 }
@@ -136,10 +138,12 @@ build_config(const char *mdef_path,
 {
     char beam_str[64];
     char insert_sil_str[16];
+    char ceplen_str[16];
     char frate_str[16];
     char lts_str[8];
     snprintf(beam_str, sizeof(beam_str), "%g", cfg->beam);
     snprintf(insert_sil_str, sizeof(insert_sil_str), "%d", cfg->insert_sil);
+    snprintf(ceplen_str, sizeof(ceplen_str), "%d", cfg->ceplen);
     snprintf(frate_str, sizeof(frate_str), "%d", cfg->frate);
     snprintf(lts_str, sizeof(lts_str), "%s", cfg->lts_mismatch ? "yes" : "no");
 
@@ -155,8 +159,11 @@ build_config(const char *mdef_path,
         "-featparams", feat_params_path ? feat_params_path : "",
         "-feat", nz(cfg->feat_type, "1s_c_d_dd"),
         "-cmn", nz(cfg->cmn, "current"),
+        "-cmninit", nz(cfg->cmninit, "40,3,-1"),
         "-agc", nz(cfg->agc, "none"),
         "-varnorm", cfg->varnorm ? "yes" : "no",
+        "-ceplen", ceplen_str,
+        "-frate", frate_str,
         "-beam", beam_str,
         "-insert_sil", insert_sil_str,
         "-lts_mismatch", lts_str,

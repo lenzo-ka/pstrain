@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import wave
 from pathlib import Path
 
@@ -21,12 +22,35 @@ from pstrain.lib.alignment import (
     to_sphinx_segments,
     to_textgrid,
 )
-from pstrain.lib.model import read_complete_model_feat_params
-from pstrain.lib.pipeline.context import FeatParams
-from pstrain.lib.pipeline.feat_params import (
-    feature_extractor_config_from_record,
-    write_feat_params,
-)
+
+_FIXTURES = Path(__file__).parent / "fixtures"
+_ALIGNMENT_TRANSCRIPT = "author of the danger trail philip steels etc"
+
+
+def _alignment_model(tmp_path: Path, **updates: str) -> Path:
+    """Copy the real acoustic fixture and update its validated front-end record."""
+    model = tmp_path / "model"
+    shutil.copytree(_FIXTURES / "multipron_final_state" / "model", model)
+    record = dict(
+        line.split(maxsplit=1) for line in (model / "feat.params").read_text().splitlines()
+    )
+    record.update(updates)
+    (model / "feat.params").write_text(
+        "".join(f"{name} {value}\n" for name, value in record.items())
+    )
+    return model
+
+
+def _downsample_to_8khz(source: Path, output: Path) -> Path:
+    """Create the matching 8 kHz waveform used by the real-boundary construction."""
+    with wave.open(str(source), "rb") as source_wav:
+        samples = np.frombuffer(source_wav.readframes(source_wav.getnframes()), dtype=np.int16)
+    with wave.open(str(output), "wb") as output_wav:
+        output_wav.setnchannels(1)
+        output_wav.setsampwidth(2)
+        output_wav.setframerate(8000)
+        output_wav.writeframes(samples[::2].tobytes())
+    return output
 
 
 def _sample_result(utterance_id: str = "utt-1") -> AlignmentResult:
@@ -199,60 +223,68 @@ class TestAligner:
         ):
             Aligner(model, dict_path)
 
-    def test_align_audio_uses_validated_model_front_end(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """An 8 kHz, 12-column model drives waveform extraction without defaults."""
-        model = tmp_path / "model"
-        model.mkdir()
-        write_feat_params(
-            model / "feat.params",
-            FeatParams(
-                samprate=8000,
-                ncep=12,
-                nfft=256,
-                lowerf=200.5,
-                upperf=3500.5,
-                dither=False,
-            ),
+    def test_real_alignment_honors_12_cepstral_record(self, tmp_path: Path) -> None:
+        model = _alignment_model(tmp_path, **{"-ncep": "12", "-ceplen": "12"})
+
+        with Aligner(
+            model,
+            _FIXTURES / "mini_arctic" / "dictionary.dict",
+            filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
+            beam=1e-200,
+        ) as aligner:
+            result = aligner.align_audio(
+                _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
+                _ALIGNMENT_TRANSCRIPT,
+            )
+
+        assert result.words
+        assert result.n_frames > 0
+
+    def test_real_alignment_honors_8khz_profile(self, tmp_path: Path) -> None:
+        model = _alignment_model(
+            tmp_path,
+            **{
+                "-samprate": "8000",
+                "-nfft": "256",
+                "-lowerf": "200.5",
+                "-upperf": "3500.5",
+            },
         )
-        record = read_complete_model_feat_params(model)
-        expected = feature_extractor_config_from_record(record)
-        captured: dict[str, object] = {}
+        audio = _downsample_to_8khz(
+            _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
+            tmp_path / "arctic_a0001-8khz.wav",
+        )
 
-        class FakeExtractor:
-            def __init__(self, **config: object) -> None:
-                captured.update(config)
+        with Aligner(
+            model,
+            _FIXTURES / "mini_arctic" / "dictionary.dict",
+            filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
+            beam=1e-200,
+        ) as aligner:
+            result = aligner.align_audio(audio, _ALIGNMENT_TRANSCRIPT)
 
-            def process_audio(self, audio: np.ndarray) -> np.ndarray:
-                assert len(audio) == 8000
-                return np.zeros((79, int(captured["ncep"])), dtype=np.float32)
+        assert result.words
+        assert result.n_frames > 0
 
-            def close(self) -> None:
-                pass
+    def test_real_80hz_alignment_preserves_time_in_result_and_exports(self, tmp_path: Path) -> None:
+        model = _alignment_model(tmp_path, **{"-frate": "80"})
+        audio = _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav"
 
-        monkeypatch.setattr("pstrain.lib.alignment.native.FeatureExtractor", FakeExtractor)
-        audio_path = tmp_path / "telephone.wav"
-        with wave.open(str(audio_path), "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(8000)
-            wf.writeframes(np.zeros(8000, dtype=np.int16).tobytes())
+        with Aligner(
+            model,
+            _FIXTURES / "mini_arctic" / "dictionary.dict",
+            filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
+            beam=1e-200,
+        ) as aligner:
+            result = aligner.align_audio(audio, _ALIGNMENT_TRANSCRIPT)
 
-        aligner = object.__new__(Aligner)
-        aligner._fe_config = expected
-        aligner._sample_rate = 8000
-        aligner._fe = None
-        observed: dict[str, object] = {}
-
-        def capture_mfcc(mfcc: np.ndarray, transcript: str, utterance_id: str) -> str:
-            observed.update(shape=mfcc.shape, transcript=transcript, utterance_id=utterance_id)
-            return "aligned"
-
-        aligner.align_mfcc = capture_mfcc  # type: ignore[method-assign]
-        assert aligner.align_audio(audio_path, "HELLO") == "aligned"
-        assert captured == expected
-        assert observed["shape"] == (79, 12)
+        assert result.frame_rate == 80
+        assert result.duration_time() == pytest.approx(result.n_frames / 80)
+        assert f"xmax = {result.duration_time():.4f}" in to_textgrid(result)
+        final_ctm = to_ctm(result).splitlines()[-1].split()
+        assert float(final_ctm[2]) + float(final_ctm[3]) == pytest.approx(
+            result.duration_time(), abs=0.002
+        )
 
 
 class TestLoadTranscripts:
