@@ -40,6 +40,7 @@ from pstrain.benchmarks.arctic import (
     make_record,
     paired_delta_ci,
     render_configuration_provenance,
+    render_results_report,
     resolve_data_dir,
     resolved_configuration_provenance,
     run,
@@ -223,8 +224,12 @@ def test_pin_configs_resolve_ratified_conditions(tmp_path: Path) -> None:
     assert off["untied_inventory"] == "linear"
     assert {off[stage]["convergence_ratio"] for stage in ("ci", "untied", "tied")} == {0.1}
     assert on["multipron_training"] is True
-    assert on["untied_inventory"] == "transcript-reachable"
+    assert on["untied_inventory"] == "all-triphone"
+    assert on["optional_final_silence"] is True
+    assert on["accept_arctic_a0587_known_skip"] is False
+    assert on["arctic_a0302_zero_codebook_band"] is None
     assert {on[stage]["convergence_ratio"] for stage in ("ci", "untied", "tied")} == {0.001}
+    assert on["untied"]["max_iterations"] == 6
     assert PIN_CONFIGS["off"]["split"]["test_count"] == 0
     assert PIN_CONFIGS["on"]["split"]["test_count"] == 0
     from pstrain.lib.pipeline.context import FeatParams, TrainParams
@@ -240,7 +245,7 @@ def test_pin_configs_resolve_ratified_conditions(tmp_path: Path) -> None:
     assert PIN_CONFIGS["off"]["training"]["exclusion_schedule"] == {}
     assert PIN_CONFIGS["on"]["training"]["exclusion_schedule"] == {}
     assert resolved["off"].profile.training.untied_inventory == "linear"
-    assert resolved["on"].profile.training.untied_inventory == "transcript-reachable"
+    assert resolved["on"].profile.training.untied_inventory == "all-triphone"
     assert [
         getattr(resolved[mode].profile.training, stage).convergence_ratio
         for mode in ("off", "on")
@@ -336,10 +341,19 @@ def test_emitted_record_uses_child_resolved_cli_override(
 
     monkeypatch.setattr("pstrain.benchmarks.arctic._run_trusted_child", surface_resolved)
     emitted = tmp_path / "record.json"
-    run(tmp_path / "work", None, 3, emit_record=emitted)
+    historical = _comparison_documents()[1]
+    historical_path = tmp_path / "historical.json"
+    historical_path.write_text(json.dumps(historical))
+    run(
+        tmp_path / "work",
+        None,
+        3,
+        emit_record=emitted,
+        historical_record_path=historical_path,
+    )
     record = json.loads(emitted.read_text())
 
-    for mode in ("off", "on"):
+    for mode in ("on",):
         assert record["conditions"]["pin_conditions"][mode]["runner"]["jobs"] == 3
         for dataset in ("slt55", "big"):
             rows = record["results"][mode][dataset]["configuration_provenance"][
@@ -357,7 +371,7 @@ def test_emitted_record_uses_child_resolved_cli_override(
 def test_record_rejects_provenance_that_disagrees_with_conditions() -> None:
     actual, _record = _comparison_documents()
     actual["conditions"] = benchmark_conditions()
-    for mode in ("off", "on"):
+    for mode in ("on",):
         document = {
             "profile": actual["conditions"]["pin_conditions"][mode],
             "profile_name": mode,
@@ -367,9 +381,7 @@ def test_record_rejects_provenance_that_disagrees_with_conditions() -> None:
         for dataset in ("slt55", "big"):
             actual["results"][mode][dataset]["configuration_provenance"] = provenance
     record = make_record(actual)
-    record["results"]["off"]["slt55"]["configuration_provenance"][
-        "diff_from_shipped_defaults"
-    ].pop()
+    record["results"]["on"]["slt55"]["configuration_provenance"]["diff_from_shipped_defaults"].pop()
     with pytest.raises(RuntimeError, match="provenance/conditions consistency"):
         validate_record(record)
 
@@ -483,6 +495,7 @@ def _cell(errors: tuple[int, ...], *, recorded: bool) -> dict[str, object]:
         "ref_words": 10 * len(errors),
         "utterances": len(errors),
         "decoded": len(errors),
+        "decode_denominator": len(errors),
         "oov_tokens": 0,
         "known_skips": [],
         "configuration_provenance": configuration_provenance(
@@ -512,6 +525,11 @@ def _comparison_documents() -> tuple[dict[str, object], dict[str, object]]:
     }
     record = {
         "schema_version": RECORD_SCHEMA_VERSION,
+        "basis": {
+            "name": "MULTIPRON-ONLY",
+            "live_cells": ["on/slt55", "on/big"],
+            "retired_cells": ["off/slt55", "off/big"],
+        },
         "resources": actual["resources"],
         "conditions": actual["conditions"],
         "engine": actual["engine"],
@@ -519,16 +537,18 @@ def _comparison_documents() -> tuple[dict[str, object], dict[str, object]]:
             mode: {dataset: _cell((1, 1, 1, 1), recorded=True) for dataset in ("slt55", "big")}
             for mode in ("off", "on")
         },
-        "off_big_floor_plus_1": True,
     }
+    for mode, cells in record["results"].items():
+        for cell in cells.values():
+            cell["status"] = "live" if mode == "on" else "retired/historical"
     return actual, record
 
 
 def test_comparison_uses_true_cross_run_matched_pairs() -> None:
     actual, record = _comparison_documents()
     rows = compare_results(actual, record)
-    assert [row["delta"] for row in rows] == [0.0] * 4
-    assert [row["paired_delta_ci_95"] for row in rows] == [[0.0, 0.0]] * 4
+    assert [row["delta"] for row in rows] == [0.0] * 2
+    assert [row["paired_delta_ci_95"] for row in rows] == [[0.0, 0.0]] * 2
     assert all(row["pass"] for row in rows)
 
     actual["results"]["on"]["big"] = _cell((2, 2, 2, 2), recorded=False)  # type: ignore[index]
@@ -548,7 +568,7 @@ def test_comparison_authenticates_inputs_and_pair_ids() -> None:
     assert compare_results(
         {**actual, "engine": {"version": "other"}}, record, allow_engine_drift=True
     )
-    pairs = actual["results"]["off"]["slt55"]["matched_pairs"]  # type: ignore[index]
+    pairs = actual["results"]["on"]["slt55"]["matched_pairs"]  # type: ignore[index]
     pairs["voice/extra"] = pairs.pop("voice/u0")
     with pytest.raises(RuntimeError, match="utterance ID mismatch"):
         compare_results(actual, record)
@@ -603,8 +623,16 @@ def test_record_schema_and_bootstrap_smoke() -> None:
         seed=1,
     )
     assert delta_low == delta_high == 0
-    with pytest.raises(RuntimeError, match="missing required field: engine"):
+    with pytest.raises(RuntimeError, match="missing required field: basis"):
         validate_record({"schema_version": RECORD_SCHEMA_VERSION})
+
+
+def test_headline_reports_decode_shortfall_denominator() -> None:
+    cell = _cell((1, 2, 3), recorded=False)
+    cell["utterances"] = 5
+    cell["decode_denominator"] = 5
+    report = render_results_report({"results": {"on": {"big": cell}}})
+    assert "WER: 20.0000% over 3/5 decoded" in report
 
 
 def test_incomplete_extraction_is_recovered(tmp_path: Path) -> None:
@@ -702,35 +730,15 @@ def _write_skip_telemetry(
     )
 
 
-def test_listed_terminal_skip_passes_and_lands_in_record(tmp_path: Path) -> None:
-    project = tmp_path / "off"
-    _write_skip_telemetry(project, utterance="arctic_a0587")
-    off_skips = [item for item in KNOWN_SKIPS if item["mode"] == "off"]
-    assert audit_monotonicity(project) == off_skips
-    actual, _ = _comparison_documents()
-    actual["results"]["off"]["slt55"]["known_skips"] = off_skips  # type: ignore[index]
-    record = make_record(actual)
-    assert record["results"]["off"]["slt55"]["known_skips"] == off_skips
-
-
-def test_on_mode_manifest_entry_passes_once_and_is_mandatorily_reported(
-    tmp_path: Path,
-) -> None:
+def test_retired_a0587_exception_is_rejected(tmp_path: Path) -> None:
     project = tmp_path / "on"
     utterance = "arctic_a0587"
     _write_skip_telemetry(project, utterance=utterance, stage="cd-1g", pass_numbers=(6,))
-    matching_entry = next(
-        item for item in KNOWN_SKIPS if item["utterance"] == utterance and item["mode"] == "on"
-    )
-    assert audit_monotonicity(project) == [matching_entry]
-
-    actual, record = _comparison_documents()
-    record["results"]["on"]["slt55"]["known_skips"] = [matching_entry]  # type: ignore[index]
-    with pytest.raises(RuntimeError, match="known_skips mismatch"):
-        compare_results(actual, record)
+    with pytest.raises(RuntimeError, match="unlisted terminal skip"):
+        audit_monotonicity(project)
 
 
-def test_a0302_band_declaration_passes_and_reports_adjudicated_skip(tmp_path: Path) -> None:
+def test_retired_a0302_band_is_rejected(tmp_path: Path) -> None:
     project = tmp_path / "on"
     _write_skip_telemetry(
         project,
@@ -740,28 +748,8 @@ def test_a0302_band_declaration_passes_and_reports_adjudicated_skip(tmp_path: Pa
         pass_numbers=tuple(range(3, 11)),
         occupancy=4600,
     )
-    matching_entry = next(item for item in KNOWN_SKIPS if item["utterance"] == "arctic_a0302")
-    assert audit_monotonicity(project) == [matching_entry]
-
-
-def test_on_mode_reports_multiple_manifest_entries(tmp_path: Path) -> None:
-    project = tmp_path / "on"
-    _write_skip_telemetry(
-        project,
-        utterance="arctic_a0302",
-        reason="accepted_exception_band",
-        stage="cd-untied",
-        pass_numbers=tuple(range(3, 11)),
-        occupancy=4600,
-    )
-    _write_skip_telemetry(project, utterance="arctic_a0587", stage="cd-1g", pass_numbers=(6,))
-    on_skips = [item for item in KNOWN_SKIPS if item["mode"] == "on"]
-    assert audit_monotonicity(project) == on_skips
-
-    actual, _ = _comparison_documents()
-    actual["results"]["on"]["slt55"]["known_skips"] = list(reversed(on_skips))  # type: ignore[index]
-    record = make_record(actual)
-    assert record["results"]["on"]["slt55"]["known_skips"] == on_skips
+    with pytest.raises(RuntimeError, match="invalid accepted-exception"):
+        audit_monotonicity(project)
 
 
 @pytest.mark.parametrize(
@@ -789,13 +777,6 @@ def test_unlisted_terminal_skip_fails(tmp_path: Path) -> None:
     _write_skip_telemetry(project, utterance="arctic_a0001")
     with pytest.raises(RuntimeError, match="unlisted terminal skip"):
         audit_monotonicity(project)
-
-
-def test_absent_expected_skip_is_comparison_deviation() -> None:
-    actual, record = _comparison_documents()
-    record["results"]["off"]["slt55"]["known_skips"] = KNOWN_SKIPS  # type: ignore[index]
-    with pytest.raises(RuntimeError, match="known_skips mismatch"):
-        compare_results(actual, record)
 
 
 def test_non_manifest_failure_reason_still_fails(tmp_path: Path) -> None:

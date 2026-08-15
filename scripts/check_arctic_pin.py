@@ -30,8 +30,48 @@ def main() -> int:
         action="store_true",
         help="add live-only condition fields; never change existing pins or benchmark results",
     )
+    parser.add_argument(
+        "--adopt-record",
+        type=Path,
+        metavar="CANDIDATE",
+        help="adopt a freshly emitted record while preserving retired historical measurements",
+    )
     args = parser.parse_args()
     record = json.loads(args.record.read_text(encoding="utf-8"))
+    if args.adopt_record:
+        candidate = json.loads(args.adopt_record.read_text(encoding="utf-8"))
+        validate_record(candidate)
+        actual = benchmark_conditions()
+        uncovered = authenticate_conditions(actual, candidate["conditions"])
+        if uncovered:
+            raise RuntimeError(f"candidate leaves live conditions uncovered: {uncovered}")
+        stable_fields = (
+            "wer",
+            "errors",
+            "ref_words",
+            "utterances",
+            "decoded",
+            "oov_tokens",
+            "known_skips",
+            "utterance_rows",
+            "configuration_provenance",
+        )
+        for dataset in ("slt55", "big"):
+            old = record["results"]["off"][dataset]
+            new = candidate["results"]["off"][dataset]
+            for field in stable_fields:
+                if new.get(field) != old.get(field):
+                    raise RuntimeError(
+                        f"retired off/{dataset} historical drift in {field}: "
+                        f"recorded={old.get(field)!r}, candidate={new.get(field)!r}"
+                    )
+        temporary = args.record.with_suffix(args.record.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps(candidate, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        temporary.replace(args.record)
+        print("adopted fresh MULTIPRON-ONLY Arctic benchmark record")
+        return 0
     validate_record(record)
     actual = benchmark_conditions()
     uncovered = authenticate_conditions(actual, record["conditions"])
