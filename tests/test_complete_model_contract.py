@@ -29,31 +29,101 @@ def test_decoder_rejects_feat_params_missing_front_end_field(tmp_path: Path) -> 
         require_complete_model(model)
 
 
-def test_production_code_does_not_construct_pocketsphinx_directly() -> None:
-    """New in-tree consumers must not bypass pstrain's complete-model boundary."""
+@pytest.mark.parametrize("invalid_field", sorted(COMPLETE_MODEL_FEAT_PARAMS_REQUIRED))
+def test_complete_model_rejects_invalid_value_in_each_required_field(
+    tmp_path: Path, invalid_field: str
+) -> None:
+    """Each of the 21 required values has a semantic or representation check."""
+    model = tmp_path / "model"
+    model.mkdir()
+    feat_params = model / "feat.params"
+    valid = dict(line.split(maxsplit=1) for line in feat_params_lines(FeatParams()))
+    valid[invalid_field] = "invalid-value\n"
+    feat_params.write_text("".join(f"{name} {value}" for name, value in valid.items()))
+
+    with pytest.raises(ValueError, match=r"Invalid feat\.params field"):
+        require_complete_model(model)
+
+
+def _literal_decoder_constructions(tree: ast.AST) -> list[ast.AST]:
+    """Return literal PocketSphinx Decoder imports/constructions in *tree*."""
+    module_aliases = {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+        if alias.name == "pocketsphinx"
+    }
+    importlib_aliases = {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+        if alias.name == "importlib"
+    }
+    import_module_aliases = {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "importlib"
+        for alias in node.names
+        if alias.name == "import_module"
+    }
+    return [
+        node
+        for node in ast.walk(tree)
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.module == "pocketsphinx"
+            and any(alias.name == "Decoder" for alias in node.names)
+        )
+        or (
+            isinstance(node, ast.Attribute)
+            and node.attr == "Decoder"
+            and isinstance(node.value, ast.Name)
+            and node.value.id in module_aliases
+        )
+        or (
+            isinstance(node, ast.Attribute)
+            and node.attr == "Decoder"
+            and isinstance(node.value, ast.Call)
+            and len(node.value.args) >= 1
+            and isinstance(node.value.args[0], ast.Constant)
+            and node.value.args[0].value == "pocketsphinx"
+            and (
+                (
+                    isinstance(node.value.func, ast.Attribute)
+                    and node.value.func.attr == "import_module"
+                    and isinstance(node.value.func.value, ast.Name)
+                    and node.value.func.value.id in importlib_aliases
+                )
+                or (
+                    isinstance(node.value.func, ast.Name)
+                    and node.value.func.id in import_module_aliases
+                )
+            )
+        )
+    ]
+
+
+def test_literal_importlib_decoder_construction_is_detected() -> None:
+    construction = ast.parse(
+        'import importlib\nimportlib.import_module("pocketsphinx").Decoder()\n'
+    )
+
+    assert _literal_decoder_constructions(construction)
+
+
+def test_production_code_has_no_literal_pocketsphinx_decoder_construction() -> None:
+    """Literal imports must not bypass pstrain's complete-model boundary.
+
+    This source gate is silent on dynamically computed module and attribute names.
+    """
     root = Path(__file__).parent.parent / "pstrain"
     violations: list[str] = []
     for path in root.rglob("*.py"):
         tree = ast.parse(path.read_text(), filename=str(path))
-        module_aliases = {
-            alias.asname or alias.name
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Import)
-            for alias in node.names
-            if alias.name == "pocketsphinx"
-        }
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.ImportFrom)
-                and node.module == "pocketsphinx"
-                and any(alias.name == "Decoder" for alias in node.names)
-            ) or (
-                isinstance(node, ast.Attribute)
-                and node.attr == "Decoder"
-                and isinstance(node.value, ast.Name)
-                and node.value.id in module_aliases
-            ):
-                violations.append(str(path.relative_to(root.parent)))
+        if _literal_decoder_constructions(tree):
+            violations.append(str(path.relative_to(root.parent)))
 
     assert violations == []
 

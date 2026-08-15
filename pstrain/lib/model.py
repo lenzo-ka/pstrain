@@ -11,6 +11,8 @@ Models provide metadata for the pipeline runner:
 
 from __future__ import annotations
 
+import math
+import re
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
@@ -57,6 +59,112 @@ COMPLETE_MODEL_FEAT_PARAMS_REQUIRED = frozenset(
     }
 )
 
+_BOOLEAN_FEAT_PARAMS = frozenset(
+    {"-dither", "-remove_dc", "-remove_noise", "-unit_area", "-round_filters", "-varnorm"}
+)
+_POSITIVE_INTEGER_FEAT_PARAMS = frozenset({"-samprate", "-ncep", "-nfilt", "-nfft", "-frate"})
+_NONNEGATIVE_INTEGER_FEAT_PARAMS = frozenset({"-lowerf", "-lifter"})
+_POSITIVE_FLOAT_FEAT_PARAMS = frozenset({"-upperf", "-wlen"})
+
+
+def _invalid_feat_param(feat_params: Path, name: str, value: str, requirement: str) -> ValueError:
+    return ValueError(f"Invalid feat.params field {name}={value!r} in {feat_params}: {requirement}")
+
+
+def _parse_finite_float(feat_params: Path, name: str, value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError:
+        raise _invalid_feat_param(feat_params, name, value, "must be a finite number") from None
+    if not math.isfinite(parsed):
+        raise _invalid_feat_param(feat_params, name, value, "must be a finite number")
+    return parsed
+
+
+def _validate_complete_feat_params(feat_params: Path, parsed: dict[str, str]) -> None:
+    """Validate every required value against the native front-end contract."""
+    numbers: dict[str, float | int] = {}
+    for name in _POSITIVE_INTEGER_FEAT_PARAMS | _NONNEGATIVE_INTEGER_FEAT_PARAMS:
+        value = parsed[name]
+        try:
+            number = int(value)
+        except ValueError:
+            raise _invalid_feat_param(feat_params, name, value, "must be an integer") from None
+        minimum = 0 if name in _NONNEGATIVE_INTEGER_FEAT_PARAMS else 1
+        if number < minimum:
+            raise _invalid_feat_param(feat_params, name, value, f"must be >= {minimum}")
+        numbers[name] = number
+
+    for name in _POSITIVE_FLOAT_FEAT_PARAMS:
+        value = parsed[name]
+        float_number = _parse_finite_float(feat_params, name, value)
+        if float_number <= 0:
+            raise _invalid_feat_param(feat_params, name, value, "must be > 0")
+        numbers[name] = float_number
+
+    alpha = _parse_finite_float(feat_params, "-alpha", parsed["-alpha"])
+    if not 0 <= alpha <= 1:
+        raise _invalid_feat_param(
+            feat_params, "-alpha", parsed["-alpha"], "must be between 0 and 1"
+        )
+
+    for name in _BOOLEAN_FEAT_PARAMS:
+        if parsed[name] not in {"yes", "no"}:
+            raise _invalid_feat_param(feat_params, name, parsed[name], "must be 'yes' or 'no'")
+
+    enums = {
+        "-transform": {"dct", "legacy", "htk"},
+        "-cmn": {"none", "batch", "live", "current", "prior"},
+    }
+    for name, choices in enums.items():
+        if parsed[name] not in choices:
+            raise _invalid_feat_param(
+                feat_params, name, parsed[name], "must be one of " + ", ".join(sorted(choices))
+            )
+
+    if parsed["-agc"] not in {"none", "max", "emax", "noise"}:
+        raise _invalid_feat_param(
+            feat_params, "-agc", parsed["-agc"], "must be one of emax, max, noise, none"
+        )
+
+    feature_type = parsed["-feat"]
+    known_feature_type = feature_type in {"s2_4x", "s3_1x39", "1s_12c_12d_3p_12dd"} or any(
+        feature_type.startswith(prefix)
+        for prefix in ("1s_c_d_dd", "1s_c_d_ld_dd", "cep_dcep", "1s_c_d", "cep", "1s_c")
+    )
+    generic_feature_type = re.fullmatch(r"[1-9]\d*(?:,[1-9]\d*)*(?::\d+)?", feature_type)
+    if generic_feature_type:
+        widths = feature_type.split(":", 1)[0]
+        known_feature_type = sum(int(width) for width in widths.split(",")) == numbers["-ncep"]
+    if not known_feature_type:
+        raise _invalid_feat_param(
+            feat_params, "-feat", feature_type, "must be a native-supported feature stream layout"
+        )
+    if feature_type in {"s2_4x", "s3_1x39", "1s_12c_12d_3p_12dd"} and numbers["-ncep"] != 13:
+        raise _invalid_feat_param(feat_params, "-feat", feature_type, "requires -ncep 13")
+
+    cmninit = parsed["-cmninit"].split(",")
+    if not cmninit or any(not item.strip() for item in cmninit):
+        raise _invalid_feat_param(
+            feat_params, "-cmninit", parsed["-cmninit"], "must be comma-separated finite numbers"
+        )
+    for item in cmninit:
+        _parse_finite_float(feat_params, "-cmninit", item.strip())
+
+    if numbers["-upperf"] <= numbers["-lowerf"]:
+        raise _invalid_feat_param(
+            feat_params, "-upperf", parsed["-upperf"], "must be greater than -lowerf"
+        )
+    if numbers["-upperf"] > numbers["-samprate"] / 2:
+        raise _invalid_feat_param(
+            feat_params, "-upperf", parsed["-upperf"], "must not exceed the Nyquist frequency"
+        )
+    if numbers["-nfft"] < numbers["-wlen"] * numbers["-samprate"]:
+        raise _invalid_feat_param(
+            feat_params, "-nfft", parsed["-nfft"], "must cover the analysis window"
+        )
+
+
 __all__ = [
     "MODEL_FILES_REQUIRED",
     "MODEL_FILES_COMPLETE_REQUIRED",
@@ -73,7 +181,11 @@ __all__ = [
 
 
 def require_complete_model(model_dir: str | Path) -> Path:
-    """Require and validate the front-end record for complete-model consumers."""
+    """Require and validate the complete pstrain front-end record.
+
+    This validates the serialized front-end fields and their cross-field consistency.
+    It does not prove compatibility between the record and the model's binary tensors.
+    """
     model_dir = Path(model_dir)
     feat_params = model_dir / "feat.params"
     if not feat_params.is_file():
@@ -103,6 +215,13 @@ def require_complete_model(model_dir: str | Path) -> Path:
             f"feat.params ({feat_params}) is missing required front-end fields: "
             + ", ".join(missing)
         )
+    unexpected = sorted(parsed.keys() - COMPLETE_MODEL_FEAT_PARAMS_REQUIRED)
+    if unexpected:
+        raise ValueError(
+            f"feat.params ({feat_params}) has unsupported front-end fields: "
+            + ", ".join(unexpected)
+        )
+    _validate_complete_feat_params(feat_params, parsed)
     return feat_params
 
 
