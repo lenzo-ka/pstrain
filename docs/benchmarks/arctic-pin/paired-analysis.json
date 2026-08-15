@@ -1,0 +1,51 @@
+{
+  "conditions": {
+    "big_speaker_stratified": true,
+    "bootstrap_resamples": 100000,
+    "bootstrap_seed": 7,
+    "paired_delta_path": "pstrain.benchmarks.arctic.paired_delta_ci"
+  },
+  "generated_from": {
+    "oracle_sidecar": {
+      "path": "oracle-sidecar.json",
+      "sha256": "1921f43bff555ebbff5399009a8f7e00af410ceaa7a70c264ef4d3e60577fd1b"
+    },
+    "record": {
+      "path": "record.json",
+      "sha256": "e0b8448505b8161e54a5c3fc23156a088f4fb533cfc0bd5f3f5cc007769f4be5"
+    }
+  },
+  "pstrain_vs_oracle": [
+    {
+      "dataset": "slt55",
+      "mode": "on",
+      "oracle_errors": 138,
+      "oracle_wer": 26.900584795321638,
+      "paired_ci_95_pp": [
+        -2.5830625105455822,
+        2.5
+      ],
+      "per_utterance_error_rows_differ": 26,
+      "pstrain_errors": 138,
+      "pstrain_minus_oracle_pp": 0.0,
+      "pstrain_wer": 26.900584795321635,
+      "ref_words": 513
+    },
+    {
+      "dataset": "big",
+      "mode": "on",
+      "oracle_errors": 22487,
+      "oracle_wer": 75.00166766726703,
+      "paired_ci_95_pp": [
+        -0.19910419703885776,
+        0.730867535363815
+      ],
+      "per_utterance_error_rows_differ": 1903,
+      "pstrain_errors": 22567,
+      "pstrain_minus_oracle_pp": 0.2668267627243012,
+      "pstrain_wer": 75.26849442999134,
+      "ref_words": 29982
+    }
+  ],
+  "schema_version": 1
+}

@@ -4,10 +4,11 @@ This pins the from-checkout, turnkey Arctic benchmark run by
 `scripts/bench_arctic.py` on current main. Its basis is `MULTIPRON-ONLY`: the
 live cells are multipron-on SLT-55 and big; the two off-mode cells are retained
 as `retired/historical` and are neither trained nor decoded. The
-machine-readable [record](arctic-pin/record.json) and upstream-oracle
-[sidecar](arctic-pin/oracle-sidecar.json) preserve the per-utterance rows and
-the complete engine, model, corpus, transcript, language-model, dictionary,
-and decoder identities.
+machine-readable [record](arctic-pin/record.json), upstream-oracle
+[sidecar](arctic-pin/oracle-sidecar.json), and generated
+[paired analysis](arctic-pin/paired-analysis.json) preserve the per-utterance
+rows, live comparisons, and the complete engine, model, corpus, transcript,
+language-model, dictionary, and decoder identities.
 
 The pin was accepted on a re-derived basis: its measured deltas are the
 documented baseline. They are not a claim that every cell is at zero delta
@@ -81,9 +82,13 @@ observations. The big cells therefore resample within speaker strata.
 | Mode | Cell | pstrain WER | Oracle WER | Delta pp | Paired 95% CI | Interpretation |
 |---|---|---:|---:|---:|---:|---|
 | off (retired) | SLT-55 | 28.8499 | 28.8499 | +0.0000 | [-4.7059, +4.7619] | historical only |
-| on | SLT-55 | 26.9006 | 26.9006 | +0.0000 | — | current product pin |
+| on | SLT-55 | 26.9006 | 26.9006 | +0.0000 | [-2.5831, +2.5000] | no statistically significant regression |
 | off (retired) | big | 76.6393 | 74.7915 | +1.8478 | [+1.3257, +2.3646] | historical only |
-| on | big | 75.2685 | 75.0017 | +0.2668 | — | current product pin |
+| on | big | 75.2685 | 75.0017 | +0.2668 | [-0.1991, +0.7309] | no statistically significant regression |
+
+The live intervals are generated from the current record and preserved oracle
+rows by `scripts/regenerate_arctic_paired_analysis.py`; they are not
+hand-entered into the machine-readable analysis.
 
 ### Gap composition
 

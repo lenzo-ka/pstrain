@@ -104,6 +104,7 @@ config-check: cffi-exports-check
 	$(MAKE) docs-gen
 	git diff --exit-code -- docs/api/config-reference.rst
 	python scripts/check_arctic_pin.py
+	python scripts/regenerate_arctic_paired_analysis.py --check
 
 .PHONY: contract-docs-gen
 contract-docs-gen:
