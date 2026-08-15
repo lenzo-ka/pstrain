@@ -28,7 +28,8 @@ gh workflow run windows-scoping.yml --ref "$probe_tag"
 for _ in {1..30}; do
     run=$(gh run list --workflow windows-scoping.yml --branch "$probe_tag" \
         --event workflow_dispatch --limit 1 \
-        --json databaseId,headSha,url --jq '.[0] | [.databaseId, .headSha, .url] | @tsv')
+        --json databaseId,headSha,url \
+        --jq 'if .[0] then .[0] | [.databaseId, .headSha, .url] | @tsv else empty end')
     if [[ -n "$run" ]]; then
         IFS=$'\t' read -r run_id run_sha run_url <<<"$run"
         if [[ "$run_sha" != "$probe_sha" ]]; then
