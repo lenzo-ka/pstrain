@@ -236,6 +236,11 @@ else()
   target_link_libraries(pstrainc_shared PUBLIC ${LAPACK_LIBRARIES})
 endif()
 set_target_properties(pstrainc_shared PROPERTIES OUTPUT_NAME pstrainc)
+if(WIN32)
+  # Keep the DLL import archive at pstrainc.lib and give the static archive a
+  # distinct name so single-output generators can represent both targets.
+  set_target_properties(pstrainc PROPERTIES ARCHIVE_OUTPUT_NAME pstrainc_static)
+endif()
 if(APPLE)
   set_target_properties(pstrainc_shared PROPERTIES
     INSTALL_RPATH "@loader_path"
@@ -313,9 +318,15 @@ set(S3A_SOURCES
   programs/sphinx3_align/kbcore.c
   programs/sphinx3_align/main_align.c
 )
+set(S3A_NAMESPACE_HEADER
+  "${CMAKE_CURRENT_SOURCE_DIR}/programs/sphinx3_align/s3a_namespace.h")
+if(MSVC)
+  set(S3A_FORCE_INCLUDE "/FI${S3A_NAMESPACE_HEADER}")
+else()
+  set(S3A_FORCE_INCLUDE "-include;${S3A_NAMESPACE_HEADER}")
+endif()
 set_source_files_properties(${S3A_SOURCES} PROPERTIES
-  COMPILE_OPTIONS "-include;${CMAKE_CURRENT_SOURCE_DIR}/programs/sphinx3_align/s3a_namespace.h"
-)
+  COMPILE_OPTIONS "${S3A_FORCE_INCLUDE}")
 
 if(MATH_LIBRARY)
   target_link_libraries(pstrainc PUBLIC ${MATH_LIBRARY})

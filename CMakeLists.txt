@@ -42,6 +42,27 @@ CHECK_INCLUDE_FILE(errno.h HAVE_ERRNO_H)
 
 # Compiler flags
 if(MSVC)
+  # Keep the declared policy and compiler enforcement together, as in the
+  # non-MSVC branch.  clang-cl accepts Clang flags through /clang:.
+  set(PSTRAIN_FP_CONTRACT_POLICY "off" CACHE INTERNAL
+      "Declared floating-point contraction policy for native targets")
+  if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+    set(PSTRAIN_FP_CONTRACT_FLAG "/clang:-ffp-contract=off")
+  else()
+    set(PSTRAIN_FP_CONTRACT_FLAG "/fp:precise")
+  endif()
+  check_c_compiler_flag("${PSTRAIN_FP_CONTRACT_FLAG}"
+    PSTRAIN_COMPILER_SUPPORTS_FP_CONTRACT)
+  if(NOT PSTRAIN_COMPILER_SUPPORTS_FP_CONTRACT)
+    message(FATAL_ERROR
+      "${CMAKE_C_COMPILER_ID} ${CMAKE_C_COMPILER_VERSION} does not support the declared "
+      "floating-point contraction policy: ${PSTRAIN_FP_CONTRACT_POLICY}")
+  endif()
+  add_compile_options("${PSTRAIN_FP_CONTRACT_FLAG}")
+  add_compile_definitions(
+    PSTRAIN_FP_CONTRACT_POLICY="${PSTRAIN_FP_CONTRACT_POLICY}")
+  message(STATUS
+    "Floating-point contraction policy: ${PSTRAIN_FP_CONTRACT_POLICY} (declared)")
   add_compile_options(/W3)
 else()
   # Contraction must not inherit a compiler or architecture default.  FMA

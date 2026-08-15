@@ -1,0 +1,106 @@
+name: Windows scoping probe
+
+# Diagnostic only: enumerate native Windows portability work without gating.
+on:
+  pull_request:
+    branches: [master, main]
+    paths:
+      - csrc/**
+      - scripts/check_fp_contract.py
+      - tests/test_fp_contract_gate.py
+      - CMakeLists.txt
+      - pyproject.toml
+      - .github/workflows/windows-scoping.yml
+  workflow_dispatch:
+
+jobs:
+  windows-scoping:
+    name: Windows scoping (${{ matrix.compiler }})
+    runs-on: windows-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [msvc, clang-cl]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Enter the MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure (${{ matrix.compiler }})
+        shell: pwsh
+        run: |
+          $build = "build-${{ matrix.compiler }}"
+          $compilerArgs = @()
+          if ("${{ matrix.compiler }}" -eq "clang-cl") {
+            $compilerArgs += "-T"
+            $compilerArgs += "ClangCL"
+            $compilerArgs += "-DCMAKE_C_FLAGS=/clang:-ferror-limit=0"
+          }
+          cmake -S . -B $build `
+            -DBUILD_SHARED_LIBS=ON `
+            -DBUILD_CLI=ON `
+            @compilerArgs
+
+      - name: Configure Ninja graph (${{ matrix.compiler }})
+        shell: pwsh
+        run: |
+          $compilerArgs = @()
+          if ("${{ matrix.compiler }}" -eq "clang-cl") {
+            $compilerArgs += "-DCMAKE_C_COMPILER=clang-cl"
+          }
+          cmake -S . -B "build-ninja-${{ matrix.compiler }}" -G Ninja `
+            -DBUILD_SHARED_LIBS=ON `
+            -DBUILD_CLI=ON `
+            @compilerArgs
+          ninja -C "build-ninja-${{ matrix.compiler }}" -t targets `
+            | Select-String "pstrainc(_shared)?:"
+
+      - name: Compile broadly (${{ matrix.compiler }})
+        shell: pwsh
+        run: |
+          # Continue independent MSBuild projects after failed compile/link
+          # tasks, exposing more than the first target's diagnostics.
+          cmake --build "build-${{ matrix.compiler }}" --parallel -- `
+            /p:ContinueOnError=WarnAndContinue
+
+      - name: Compile contraction-enabled COFF canary (${{ matrix.compiler }})
+        shell: pwsh
+        run: |
+          $artifact = "coff-${{ matrix.compiler }}"
+          New-Item -ItemType Directory -Force $artifact | Out-Null
+          Set-Content "$artifact/fp-contract-canary.c" `
+            'double fp_contract_canary(double a, double b, double c) { return a * b + c; }'
+          if ("${{ matrix.compiler }}" -eq "clang-cl") {
+            clang-cl /nologo /c /O2 /clang:-ffp-contract=fast /clang:-mfma `
+              "$artifact/fp-contract-canary.c" `
+              "/Fo$artifact/fp-contract-canary.obj"
+          } else {
+            cl /nologo /c /O2 /fp:fast /arch:AVX2 `
+              "$artifact/fp-contract-canary.c" `
+              "/Fo$artifact/fp-contract-canary.obj"
+          }
+
+      - name: Stage COFF objects (${{ matrix.compiler }})
+        if: always()
+        shell: pwsh
+        run: |
+          $artifact = "coff-${{ matrix.compiler }}"
+          $production = Join-Path $artifact "production"
+          New-Item -ItemType Directory -Force $production | Out-Null
+          Get-ChildItem "build-${{ matrix.compiler }}" -Recurse -Filter *.obj | ForEach-Object {
+            $relative = [IO.Path]::GetRelativePath("build-${{ matrix.compiler }}", $_.FullName)
+            $destination = Join-Path $production $relative
+            New-Item -ItemType Directory -Force (Split-Path $destination) | Out-Null
+            Copy-Item $_.FullName $destination
+          }
+
+      - name: Upload COFF objects (${{ matrix.compiler }})
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: coff-${{ matrix.compiler }}
+          path: coff-${{ matrix.compiler }}/
+          if-no-files-found: error

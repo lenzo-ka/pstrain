@@ -11,7 +11,7 @@
  * uses its copy for Gaussian evaluation.
  *
  * Force-included on every sphinx3_align translation unit via the
- * `set_source_files_properties(... COMPILE_OPTIONS -include ...)` hook
+ * compiler-aware forced-include hook in csrc/CMakeLists.txt
  * in csrc/CMakeLists.txt.
  */
 

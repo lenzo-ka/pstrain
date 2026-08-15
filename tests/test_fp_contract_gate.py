@@ -83,3 +83,40 @@ def test_contraction_enabled_wheel_makes_gate_red(tmp_path: Path) -> None:
     )
     assert result.returncode == 1
     assert "FP contraction gate failed; fused instructions found" in result.stderr
+
+
+def test_contraction_enabled_coff_object_makes_gate_red(tmp_path: Path) -> None:
+    """A contraction-enabled COFF object must make the object scan fail."""
+    compiler = shutil.which("clang")
+    objdump = shutil.which("objdump")
+    if compiler is None or objdump is None:
+        pytest.skip("COFF negative control requires clang and objdump")
+
+    objects = tmp_path / "objects"
+    objects.mkdir()
+    source = objects / "canary.c"
+    source.write_text("double fused(double a,double b,double c){return a*b+c;}\n")
+    artifact = objects / "fp-contract-canary.obj"
+    subprocess.run(
+        [
+            compiler,
+            "--target=x86_64-pc-windows-msvc",
+            "-O3",
+            "-ffp-contract=fast",
+            "-mfma",
+            "-c",
+            str(source),
+            "-o",
+            str(artifact),
+        ],
+        check=True,
+    )
+
+    result = subprocess.run(
+        [sys.executable, "scripts/check_fp_contract.py", "--objects", str(objects)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert "fp-contract-canary.obj" in result.stderr
+    assert "FP contraction gate failed; fused instructions found" in result.stderr

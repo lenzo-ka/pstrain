@@ -23,6 +23,11 @@ NATIVE_MAGICS = {
     b"\xfe\xed\xfa\xcf",
     b"\xcf\xfa\xed\xfe",
 }
+COFF_MACHINES = {
+    b"\x4c\x01",  # i386
+    b"\x64\x86",  # amd64
+    b"\x64\xaa",  # arm64
+}
 
 
 def build_artifacts(build_dir: Path) -> list[Path]:
@@ -45,7 +50,15 @@ def _is_native(path: Path) -> bool:
         start = path.read_bytes()[:8]
     except OSError:
         return False
-    return start[:4] in NATIVE_MAGICS or start == b"!<arch>\n"
+    return start[:4] in NATIVE_MAGICS or start == b"!<arch>\n" or start[:2] in COFF_MACHINES
+
+
+def object_artifacts(object_dir: Path) -> list[Path]:
+    """Return COFF object files recursively from an extracted CI artifact."""
+    found = sorted(path.resolve() for path in object_dir.rglob("*.obj") if path.is_file())
+    if not found:
+        raise RuntimeError(f"unchecked object set: no .obj files found in {object_dir}")
+    return found
 
 
 def _require_training_artifacts(found: set[Path], source: Path) -> None:
@@ -80,7 +93,7 @@ def _run(command: list[str], path: Path) -> str:
 
 def disassemblies(path: Path) -> list[tuple[str, str]]:
     """Return an explicit architecture label and disassembly for each slice."""
-    if sys.platform == "darwin":
+    if sys.platform == "darwin" and path.read_bytes()[:2] not in COFF_MACHINES:
         lipo = shutil.which("lipo")
         otool = shutil.which("otool")
         if lipo is None or otool is None:
@@ -128,7 +141,13 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("build_dir", nargs="?", type=Path, default=Path("build"))
     parser.add_argument("--wheels", type=Path)
+    parser.add_argument("--objects", type=Path)
     args = parser.parse_args()
+
+    if args.objects is not None:
+        if args.wheels is not None:
+            parser.error("--objects and --wheels are mutually exclusive")
+        return check([(str(args.objects), path) for path in object_artifacts(args.objects)])
 
     if args.wheels is None:
         return check([(str(args.build_dir), path) for path in build_artifacts(args.build_dir)])
