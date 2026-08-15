@@ -224,12 +224,13 @@ __all__ = [
     "CDModel",
     "create_model",
     "get_model_class",
+    "read_complete_model_feat_params",
     "require_complete_model",
 ]
 
 
-def require_complete_model(model_dir: str | Path) -> Path:
-    """Require and validate the complete pstrain front-end record.
+def read_complete_model_feat_params(model_dir: str | Path) -> dict[str, str]:
+    """Require, validate, and return the complete pstrain front-end record.
 
     Range and enumeration rejection is a conservative subset of native rejection. Numeric
     spelling is deliberately stricter: the complete token must parse without native-style
@@ -261,6 +262,13 @@ def require_complete_model(model_dir: str | Path) -> Path:
 
     missing = sorted(COMPLETE_MODEL_FEAT_PARAMS_REQUIRED - parsed.keys())
     if missing:
+        if missing == ["-ceplen"] and "-ncep" in parsed:
+            raise ValueError(
+                f"feat.params ({feat_params}) is from the legacy pre-ceplen format. "
+                f"Add the line '-ceplen {parsed['-ncep']}' (the value must equal -ncep) so "
+                "the native waveform extractor and feature initializer use the same "
+                "cepstral width. No other missing or misspelled fields are accepted."
+            )
         raise ValueError(
             f"feat.params ({feat_params}) is missing required front-end fields: "
             + ", ".join(missing)
@@ -272,7 +280,14 @@ def require_complete_model(model_dir: str | Path) -> Path:
             + ", ".join(unexpected)
         )
     _validate_complete_feat_params(feat_params, parsed)
-    return feat_params
+    return parsed
+
+
+def require_complete_model(model_dir: str | Path) -> Path:
+    """Require and validate the complete pstrain front-end record."""
+    model_dir = Path(model_dir)
+    read_complete_model_feat_params(model_dir)
+    return model_dir / "feat.params"
 
 
 class Model(ABC):

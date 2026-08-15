@@ -72,6 +72,42 @@ def test_unresolvable_indirect_callee_is_an_explicitly_silent_axis() -> None:
     assert scanner.callsites == []
 
 
+def test_single_assignment_native_and_loader_aliases_are_detected() -> None:
+    source = """
+fn = lib.s3mixw_read
+fn(path, out, n_mixw, n_feat, n_density)
+load = get_lib
+load()
+"""
+    scanner = Scanner("pstrain/_construction.py")
+    scanner.visit(ast.parse(source))
+    assert [(item.symbol, item.disposition) for item in scanner.callsites] == [
+        ("lib.s3mixw_read", "violation"),
+        ("get_lib", "violation"),
+    ]
+
+
+def test_direct_fresh_ffi_dlopen_is_detected() -> None:
+    scanner = Scanner("pstrain/_construction.py")
+    scanner.visit(ast.parse("FFI().dlopen(path)"))
+    assert [(item.symbol, item.disposition) for item in scanner.callsites] == [
+        ("FFI().dlopen", "violation")
+    ]
+
+
+def test_function_pointers_and_cross_library_import_aliases_are_measured_silences() -> None:
+    source = """
+fn = ffi.addressof(lib, "pstrain_session_reset")
+fn()
+import importlib as il
+ps = il.import_module("pocketsphinx")
+decoder = ps.Decoder()
+"""
+    scanner = Scanner("pstrain/_construction.py")
+    scanner.visit(ast.parse(source))
+    assert scanner.callsites == []
+
+
 def test_proxy_branch_must_forward_before_native_fallback_is_worker_only() -> None:
     source = """
 class Escape:

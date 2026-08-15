@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import wave
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from pstrain.lib.alignment import (
@@ -18,6 +20,12 @@ from pstrain.lib.alignment import (
     to_ctm,
     to_sphinx_segments,
     to_textgrid,
+)
+from pstrain.lib.model import read_complete_model_feat_params
+from pstrain.lib.pipeline.context import FeatParams
+from pstrain.lib.pipeline.feat_params import (
+    feature_extractor_config_from_record,
+    write_feat_params,
 )
 
 
@@ -190,6 +198,61 @@ class TestAligner:
             ),
         ):
             Aligner(model, dict_path)
+
+    def test_align_audio_uses_validated_model_front_end(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An 8 kHz, 12-column model drives waveform extraction without defaults."""
+        model = tmp_path / "model"
+        model.mkdir()
+        write_feat_params(
+            model / "feat.params",
+            FeatParams(
+                samprate=8000,
+                ncep=12,
+                nfft=256,
+                lowerf=200.5,
+                upperf=3500.5,
+                dither=False,
+            ),
+        )
+        record = read_complete_model_feat_params(model)
+        expected = feature_extractor_config_from_record(record)
+        captured: dict[str, object] = {}
+
+        class FakeExtractor:
+            def __init__(self, **config: object) -> None:
+                captured.update(config)
+
+            def process_audio(self, audio: np.ndarray) -> np.ndarray:
+                assert len(audio) == 8000
+                return np.zeros((79, int(captured["ncep"])), dtype=np.float32)
+
+            def close(self) -> None:
+                pass
+
+        monkeypatch.setattr("pstrain.lib.alignment.native.FeatureExtractor", FakeExtractor)
+        audio_path = tmp_path / "telephone.wav"
+        with wave.open(str(audio_path), "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(8000)
+            wf.writeframes(np.zeros(8000, dtype=np.int16).tobytes())
+
+        aligner = object.__new__(Aligner)
+        aligner._fe_config = expected
+        aligner._sample_rate = 8000
+        aligner._fe = None
+        observed: dict[str, object] = {}
+
+        def capture_mfcc(mfcc: np.ndarray, transcript: str, utterance_id: str) -> str:
+            observed.update(shape=mfcc.shape, transcript=transcript, utterance_id=utterance_id)
+            return "aligned"
+
+        aligner.align_mfcc = capture_mfcc  # type: ignore[method-assign]
+        assert aligner.align_audio(audio_path, "HELLO") == "aligned"
+        assert captured == expected
+        assert observed["shape"] == (79, 12)
 
 
 class TestLoadTranscripts:

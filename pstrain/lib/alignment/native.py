@@ -31,7 +31,8 @@ from pstrain.lib import native_worker
 from pstrain.lib._cffi.core import _init
 from pstrain.lib.alignment.core import AlignedSegment, AlignmentResult
 from pstrain.lib.features import FeatureExtractor
-from pstrain.lib.model import MODEL_FILES_REQUIRED, require_complete_model
+from pstrain.lib.model import MODEL_FILES_REQUIRED, read_complete_model_feat_params
+from pstrain.lib.pipeline.feat_params import feature_extractor_config_from_record
 
 if TYPE_CHECKING:
     import numpy.typing as npt
@@ -99,7 +100,9 @@ class Aligner:
             model_file = model_dir / name
             if not model_file.exists():
                 raise FileNotFoundError(f"Model file missing: {model_file}")
-        feat_params = require_complete_model(model_dir)
+        feat_record = read_complete_model_feat_params(model_dir)
+        feat_params = model_dir / "feat.params"
+        self._fe_config = feature_extractor_config_from_record(feat_record)
         if not dict_path.exists():
             raise FileNotFoundError(f"Dictionary not found: {dict_path}")
 
@@ -141,13 +144,13 @@ class Aligner:
         cfg.insert_sil = 1 if insert_sil else 0
         cfg.compute_phones = 1 if include_phones else 0
         cfg.compute_states = 1 if include_states else 0
-        cfg.varnorm = 1 if varnorm else 0
-        cfg.frate = int(frate)
+        cfg.varnorm = 1 if feat_record["-varnorm"][0] in "ytYT1" else 0
+        cfg.frate = int(feat_record["-frate"])
         cfg.lts_mismatch = 1 if lts_mismatch else 0
 
-        self._feat_type_b = feat_type.encode()
-        self._cmn_b = cmn.encode()
-        self._agc_b = agc.encode()
+        self._feat_type_b = feat_record["-feat"].encode()
+        self._cmn_b = feat_record["-cmn"].encode()
+        self._agc_b = feat_record["-agc"].encode()
         cfg.feat_type = ffi.cast("const char *", ffi.from_buffer(self._feat_type_b))
         cfg.cmn = ffi.cast("const char *", ffi.from_buffer(self._cmn_b))
         cfg.agc = ffi.cast("const char *", ffi.from_buffer(self._agc_b))
@@ -169,8 +172,7 @@ class Aligner:
 
         self._ctx = ctx
         self._fe: FeatureExtractor | None = None
-        self._sample_rate = 16000
-        self._ncep = 13
+        self._sample_rate = int(self._fe_config["samprate"])
         Aligner._active = self
 
     def _last_error(self) -> str | None:
@@ -323,11 +325,13 @@ class Aligner:
             sample_rate = wf.getframerate()
             audio = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16)
 
-        if self._fe is None or sample_rate != self._sample_rate:
-            self._sample_rate = sample_rate
-            if self._fe is not None:
-                self._fe.close()
-            self._fe = FeatureExtractor(samprate=sample_rate, ncep=self._ncep)
+        if sample_rate != self._sample_rate:
+            raise ValueError(
+                f"{audio_path}: sample rate {sample_rate} does not match model feat.params "
+                f"-samprate {self._sample_rate}"
+            )
+        if self._fe is None:
+            self._fe = FeatureExtractor(**self._fe_config)
 
         mfcc = self._fe.process_audio(audio)
         return self.align_mfcc(mfcc, transcript, utterance_id=utt_id)
