@@ -88,6 +88,11 @@ param_cnt(FILE *out_fp,
 	n_cnt = mdef->acmod_set->next_id;
 	cnt_fn = phone_cnt;
     }
+    else {
+	E_ERROR("Unknown parameter type '%s'; expected state, cb, or phone\n",
+		param_type);
+	return S3_ERROR;
+    }
     cnt = ckd_calloc(n_cnt, sizeof(uint32));
 
     E_INFO("Scanning corpus\n");
