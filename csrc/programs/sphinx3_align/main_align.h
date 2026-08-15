@@ -54,6 +54,7 @@ void models_free(void);
 int align_utt_capture(char *sent,
                       int32 nfr,
                       char *uttid,
+                      int32 verbatim_tokens,
                       align_stseg_t **out_stseg,
                       align_phseg_t **out_phseg,
                       align_wdseg_t **out_wdseg);

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import shutil
+import sys
 import wave
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+from pstrain.cli.cli import main
 from pstrain.lib._cffi import read_gau, write_gau
 from pstrain.lib.alignment import (
     AlignedSegment,
@@ -334,6 +336,82 @@ class TestAligner:
             result.duration_time(), abs=0.002
         )
 
+    def test_default_explicit_variant_matches_prechange_collapsed_output(
+        self, tmp_path: Path
+    ) -> None:
+        """The opt-in leaves the recorded default output byte-for-byte unchanged."""
+        model = _alignment_model(tmp_path)
+        kwargs = {
+            "filler_dict": _FIXTURES / "mini_arctic" / "filler.dict",
+            "beam": 1e-200,
+        }
+        transcript = "author of the(2) danger trail philip steels etc"
+        with Aligner(model, _FIXTURES / "mini_arctic" / "dictionary.dict", **kwargs) as aligner:
+            implicit_default = aligner.align_audio(
+                _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav", transcript
+            )
+        with Aligner(
+            model,
+            _FIXTURES / "mini_arctic" / "dictionary.dict",
+            verbatim_tokens=False,
+            **kwargs,
+        ) as aligner:
+            explicit_default = aligner.align_audio(
+                _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav", transcript
+            )
+
+        assert implicit_default == explicit_default
+        assert implicit_default.total_score == -700195
+        assert [
+            (word.name, word.start_frame, word.end_frame) for word in implicit_default.words
+        ] == [
+            ("<s>", 0, 2),
+            ("author", 3, 11),
+            ("of", 12, 17),
+            ("the", 18, 23),
+            ("danger", 24, 38),
+            ("trail", 39, 50),
+            ("philip", 51, 65),
+            ("steels", 66, 80),
+            ("etc", 81, 101),
+            ("</s>", 102, 333),
+        ]
+        assert [phone.name for phone in implicit_default.phones[6:8]] == ["DH", "AH"]
+
+    def test_verbatim_variant_forces_nonfirst_pronunciation(self, tmp_path: Path) -> None:
+        model = _alignment_model(tmp_path)
+        with Aligner(
+            model,
+            _FIXTURES / "mini_arctic" / "dictionary.dict",
+            filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
+            beam=1e-200,
+            verbatim_tokens=True,
+        ) as aligner:
+            result = aligner.align_audio(
+                _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
+                "author of the(2) danger trail philip steels etc",
+            )
+
+        assert result.words[3].name == "the(2)"
+        assert [phone.name for phone in result.phones[6:8]] == ["DH", "IY"]
+
+    def test_verbatim_unknown_variant_names_token(self, tmp_path: Path) -> None:
+        model = _alignment_model(tmp_path)
+        with (
+            Aligner(
+                model,
+                _FIXTURES / "mini_arctic" / "dictionary.dict",
+                filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
+                beam=1e-200,
+                verbatim_tokens=True,
+            ) as aligner,
+            pytest.raises(RuntimeError, match=r"the\(9\).*not in the dictionary"),
+        ):
+            aligner.align_audio(
+                _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
+                "author of the(9) danger trail philip steels etc",
+            )
+
 
 class TestLoadTranscripts:
     def test_parses_sphinx_format(self, tmp_path: Path) -> None:
@@ -353,6 +431,70 @@ class TestLoadTranscripts:
 
 
 class TestAlignCorpus:
+    def test_verbatim_unknown_variant_preserves_token(self, tmp_path: Path) -> None:
+        model = _alignment_model(tmp_path)
+        audio_dir = tmp_path / "audio"
+        audio_dir.mkdir()
+        shutil.copy(
+            _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
+            audio_dir / "bad.wav",
+        )
+
+        job = align_corpus(
+            transcripts={"bad": "author of the(9) danger trail philip steels etc"},
+            audio_dir=audio_dir,
+            model_dir=model,
+            dict_path=_FIXTURES / "mini_arctic" / "dictionary.dict",
+            filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
+            verbatim_tokens=True,
+        )
+
+        assert job.n_failed == 1
+        assert "the(9)" in job.errors["bad"]
+
+    def test_profile_cli_unknown_variant_exits_nonzero_and_names_token(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        project = tmp_path / "project"
+        (project / "etc").mkdir(parents=True)
+        (project / "etc" / "config.yaml").write_text(
+            "config_version: 1\nalignment:\n  verbatim_tokens: true\n"
+        )
+        model = _alignment_model(tmp_path)
+        transcript_file = project / "bad.transcription"
+        transcript_file.write_text(
+            "<s> author of the(9) danger trail philip steels etc </s> (bad)\n"
+        )
+        audio_dir = project / "audio"
+        audio_dir.mkdir()
+        shutil.copy(
+            _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
+            audio_dir / "bad.wav",
+        )
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "pstrain",
+                "align",
+                str(model),
+                "--project-dir",
+                str(project),
+                "--transcripts",
+                str(transcript_file),
+                "--audio-dir",
+                str(audio_dir),
+                "--dict",
+                str(_FIXTURES / "mini_arctic" / "dictionary.dict"),
+                "--filler-dict",
+                str(_FIXTURES / "mini_arctic" / "filler.dict"),
+            ],
+        )
+
+        assert main() != 0
+        output = capsys.readouterr()
+        assert "the(9)" in output.out + output.err
+
     def test_missing_model_records_per_utt_error(self, tmp_path: Path) -> None:
         # Aligner init fails (model files missing) -> every utterance is
         # marked failed with the same init error.

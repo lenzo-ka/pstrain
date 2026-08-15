@@ -14,7 +14,7 @@ from pstrain.lib._cffi.cdef import CDEF
 
 _ffi: FFI | None = None
 _lib: Any = None
-PSTRAIN_ABI_VERSION = 1
+PSTRAIN_ABI_VERSION = 2
 
 
 def _find_library() -> Path:

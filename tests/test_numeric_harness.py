@@ -722,6 +722,49 @@ def test_multipron_second_variant_receives_occupancy(
 
 
 @requires_c_library
+@pytest.mark.parametrize("multipron", [False, True], ids=["linear", "multipron"])
+def test_bw_explicit_variant_is_exact_in_both_modes(
+    flat_project: PipelineContext, tmp_path: Path, multipron: bool
+) -> None:
+    """An explicit training token reaches real BW as exactly that variant."""
+    engineered = tmp_path / f"verbatim-{multipron}.dict"
+    base = (flat_project.shared_dir / "dictionary.dict").read_text()
+    base = re.sub(r"^author .*$", "author K", base, flags=re.MULTILINE)
+    engineered.write_text(base + "author(2) AO TH ER\n")
+    trainer = _trainer(flat_project, multipron=multipron)
+    trainer.set_dict(engineered, flat_project.filler_dict)
+    mfcc = read_sphinx_mfc(flat_project.features_dir / "arctic_a0001.mfc")
+
+    assert trainer.process_utterance_mfcc(mfcc, "<s> author(2) </s>")
+    counts_path = tmp_path / f"verbatim-counts-{multipron}"
+    assert trainer.save_density_counts(counts_path)
+    occupancies = _pstrainc.read_dnom(str(counts_path))[0]
+    ao_states = _ci_state_ids(flat_project.model_dir("flat") / "mdef", "AO")
+    k_states = _ci_state_ids(flat_project.model_dir("flat") / "mdef", "K")
+    assert float(occupancies[ao_states].sum()) > 1.0
+    assert float(occupancies[k_states].sum()) == 0.0
+
+
+@requires_c_library
+@pytest.mark.parametrize("multipron", [False, True], ids=["linear", "multipron"])
+def test_bw_unknown_explicit_variant_names_token(
+    flat_project: PipelineContext,
+    multipron: bool,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Training rejects an unknown explicit variant at the real BW entry."""
+    from pstrain.lib import native_worker
+
+    monkeypatch.setattr(native_worker, "_inside_worker", True)
+    trainer = _trainer(flat_project, multipron=multipron)
+    trainer.set_dict(flat_project.shared_dir / "dictionary.dict", flat_project.filler_dict)
+    mfcc = read_sphinx_mfc(flat_project.features_dir / "arctic_a0001.mfc")
+    assert not trainer.process_utterance_mfcc(mfcc, "<s> author(9) </s>")
+    assert "author(9)" in capfd.readouterr().err
+
+
+@requires_c_library
 def test_multipron_variants_share_utterance_final_state(
     flat_project: PipelineContext, tmp_path: Path
 ) -> None:

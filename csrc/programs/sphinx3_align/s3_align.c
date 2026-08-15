@@ -413,14 +413,14 @@ build_pred_ci(pnode_t * nodelist, s3cipid_t * pred_ci)
 
 
 static void
-build_succ_ci(s3wid_t w, int32 append_filler, s3cipid_t * succ_ci)
+build_succ_ci(s3wid_t w, int32 exact, int32 append_filler, s3cipid_t * succ_ci)
 {
     int32 i, p;
 
     for (p = 0; p < mdef->n_ciphone; p++)
         succ_ci[p] = 0;
 
-    for (; IS_S3WID(w); w = dict->word[w].alt)
+    for (; IS_S3WID(w); w = exact ? BAD_S3WID : dict->word[w].alt)
         succ_ci[(unsigned) dict->word[w].ciphone[0]] = 1;
 
     if (append_filler) {
@@ -453,6 +453,8 @@ append_transcript_word(s3wid_t w,
                                 /** Previous end points to be attached to w */
                        s3wid_t nextw,
                                 /** Next word to follow w (ignoring optional fillers) */
+                       int32 exact,
+                       int32 next_exact,
                        int32 prefix_filler,
                                 /** Whether optional filler words to precede w */
                        int32 append_filler)
@@ -472,7 +474,7 @@ append_transcript_word(s3wid_t w,
     /* Add optional silence/filler words before w, if indicated */
     if (prefix_filler) {
         build_pred_ci(prev_end, pred_ci);       /* Predecessor CI list for fillers */
-        build_succ_ci(w, 0, succ_ci);   /* Successor CI list for fillers */
+        build_succ_ci(w, exact, 0, succ_ci);   /* Successor CI list for fillers */
 
         new_end = NULL;
         for (i = 0; IS_S3WID(fillwid[i]); i++) {
@@ -492,10 +494,10 @@ append_transcript_word(s3wid_t w,
 
     /* Add w */
     build_pred_ci(prev_end, pred_ci);   /* Predecessor CI list for w */
-    build_succ_ci(nextw, append_filler, succ_ci);       /* Successor CI list for w */
+    build_succ_ci(nextw, next_exact, append_filler, succ_ci); /* Successor CI list for w */
 
     new_end = NULL;
-    for (; IS_S3WID(w); w = dict->word[w].alt) {
+    for (; IS_S3WID(w); w = exact ? BAD_S3WID : dict->word[w].alt) {
         tmp_end = append_word(w, prev_end, pred_ci, succ_ci);
 
         for (node = tmp_end; node->next; node = node->next);
@@ -582,6 +584,23 @@ dump_pdag(void)
 }
 
 #endif
+
+static int32
+dict_word_has_variant_suffix(const char *word)
+{
+    const char *open, *p;
+    size_t len;
+
+    if (word == NULL || (len = strlen(word)) < 4 || word[len - 1] != ')')
+        return 0;
+    open = strrchr(word, '(');
+    if (open == NULL || open == word || open + 1 == word + len - 1)
+        return 0;
+    for (p = open + 1; p < word + len - 1; ++p)
+        if (*p < '0' || *p > '9')
+            return 0;
+    return 1;
+}
 
 
 /**
@@ -816,10 +835,10 @@ dump_sent_hmm(void)
  * Return 0 if successful, \<0 if any error (eg, OOV word encountered).
  */
 int32
-align_build_sent_hmm(char *wordstr, int insert_sil)
+align_build_sent_hmm(char *wordstr, int insert_sil, int verbatim_tokens)
 {
     s3wid_t w, nextw;
-    int32 k, oov;
+    int32 k, oov, exact, next_exact;
     pnode_t *word_end, *node;
     char *wd, delim, *wdcopy = NULL;
 
@@ -849,6 +868,8 @@ align_build_sent_hmm(char *wordstr, int insert_sil)
     n_pnode = 0;
     pnode_list = NULL;
     oov = 0;
+    exact = 0;
+    next_exact = 0;
 
     /* State-level DAG initialization should be here in case the build is aborted */
     shead.pnode = &phead;
@@ -874,18 +895,20 @@ align_build_sent_hmm(char *wordstr, int insert_sil)
         wdcopy = ckd_salloc(wd);
         *wordstr = delim;
         nextw = dict_wordid(dict, wdcopy);
-        if (IS_S3WID(nextw))
+        next_exact = verbatim_tokens && dict_word_has_variant_suffix(wdcopy);
+        if (IS_S3WID(nextw) && !next_exact)
             nextw = dict_basewid(dict, nextw);
     }
 
     /* Create node(s) for <s> before any transcript word */
     word_end =
-        append_transcript_word(dict->startwid, &phead, nextw, 0,
+        append_transcript_word(dict->startwid, &phead, nextw, 0, next_exact, 0,
                                insert_sil);
 
     /* Append each word in transcription to partial sent HMM created so far */
     while (k >= 0) {
         w = nextw;
+        exact = next_exact;
         if (NOT_S3WID(w)) {
             E_ERROR("%s not in dictionary\n", wdcopy);
             oov = 1;
@@ -902,12 +925,13 @@ align_build_sent_hmm(char *wordstr, int insert_sil)
             wdcopy = ckd_salloc(wd);
             *wordstr = delim;
             nextw = dict_wordid(dict, wdcopy);
-            if (IS_S3WID(nextw))
+            next_exact = verbatim_tokens && dict_word_has_variant_suffix(wdcopy);
+            if (IS_S3WID(nextw) && !next_exact)
                 nextw = dict_basewid(dict, nextw);
         }
 
         word_end =
-            append_transcript_word(w, word_end, nextw, insert_sil,
+            append_transcript_word(w, word_end, nextw, exact, next_exact, insert_sil,
                                    insert_sil);
     }
     if (oov)
@@ -915,7 +939,7 @@ align_build_sent_hmm(char *wordstr, int insert_sil)
 
     /* Append phone HMMs for </s> at the end; link to tail node */
     word_end =
-        append_transcript_word(dict->finishwid, word_end, BAD_S3WID,
+        append_transcript_word(dict->finishwid, word_end, BAD_S3WID, 0, 0,
                                insert_sil, 0);
     for (node = word_end; node; node = node->next)
         link_pnodes(node, &ptail);

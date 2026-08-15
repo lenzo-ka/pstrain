@@ -19,6 +19,15 @@ logger = logging.getLogger(__name__)
 
 # Cadence for "Progress: N/total" log lines during a long batch.
 _PROGRESS_LOG_EVERY = 100
+_ERROR_MESSAGE_LIMIT = 200
+
+
+def _error_message(exc: Exception) -> str:
+    """Keep the actionable end of a bounded native-worker diagnostic."""
+    message = str(exc)
+    if len(message) <= _ERROR_MESSAGE_LIMIT:
+        return message
+    return f"...{message[-(_ERROR_MESSAGE_LIMIT - 3) :]}"
 
 
 @dataclass
@@ -59,6 +68,7 @@ def align_corpus(
     filler_dict: Path | None = None,
     audio_ext: str = ".wav",
     include_phones: bool = True,
+    verbatim_tokens: bool = False,
 ) -> AlignmentJob:
     """Align an entire corpus.
 
@@ -72,6 +82,7 @@ def align_corpus(
         filler_dict: Path to filler dictionary (optional).
         audio_ext: Audio file extension (default ``".wav"``).
         include_phones: Capture phone-level segmentation.
+        verbatim_tokens: Honor explicit pronunciation variants exactly.
 
     Returns:
         :class:`AlignmentJob` with all alignment results.
@@ -111,6 +122,7 @@ def align_corpus(
             dict_path,
             filler_dict=filler_dict,
             include_phones=include_phones,
+            verbatim_tokens=verbatim_tokens,
         )
     except (FileNotFoundError, RuntimeError) as e:
         logger.error("Failed to initialize aligner: %s", e)
@@ -142,9 +154,10 @@ def align_corpus(
                 results[utt_id] = result
                 n_aligned += 1
             except Exception as e:
-                errors[utt_id] = str(e)[:200]
+                message = _error_message(e)
+                errors[utt_id] = message
                 n_failed += 1
-                logger.warning("Alignment failed for %s: %s", utt_id, str(e)[:100])
+                logger.warning("Alignment failed for %s: %s", utt_id, message)
     finally:
         aligner.close()
 

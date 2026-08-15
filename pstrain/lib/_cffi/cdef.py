@@ -706,6 +706,7 @@ typedef struct pstrain_align_config_s {
     int     ceplen;
     int     frate;
     int     lts_mismatch;
+    int     verbatim_tokens;
 } pstrain_align_config_t;
 
 uint32 pstrain_abi_version(void);

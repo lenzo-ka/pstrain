@@ -100,6 +100,7 @@ def align_utterance(
     filler_dict: Path | None = None,
     include_phones: bool = True,
     beam: float = DEFAULT_BEAM,
+    verbatim_tokens: bool = False,
 ) -> AlignmentResult:
     """Align a single utterance.
 
@@ -120,12 +121,15 @@ def align_utterance(
         filler_dict: Filler / non-speech dictionary (optional).
         include_phones: Return phone-level segments in the result.
         beam: Viterbi pruning beam (default 1e-64, sphinx3_align default).
+        verbatim_tokens: Honor explicit pronunciation variants exactly. The
+            default collapses suffixes and considers every alternative.
 
     Returns:
         :class:`AlignmentResult` with word- (and optionally phone-)
         level segments. A variant suffix such as ``reading(2)`` labels the
-        dictionary pronunciation selected by Viterbi. A suffix in the input
-        transcript does not constrain that selection and need not be preserved.
+        dictionary pronunciation selected by Viterbi. With the default
+        ``verbatim_tokens=False``, an input suffix does not constrain that
+        selection. With the option enabled, it selects exactly that variant.
 
     Raises:
         FileNotFoundError: Audio file or model files are missing.
@@ -143,5 +147,6 @@ def align_utterance(
         filler_dict=filler_dict,
         beam=beam,
         include_phones=include_phones,
+        verbatim_tokens=verbatim_tokens,
     ) as aligner:
         return aligner.align_audio(audio_path, transcript)
