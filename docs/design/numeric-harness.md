@@ -69,13 +69,15 @@ shipped gate to reject the fused instruction. This proves the detector's red
 path on the test host; it does not reproduce the separate training trajectory
 or benchmark measurements reported separately.
 
-The dispatch-only Windows probe checks a narrower platform boundary. At the
-current default production x64 ISA, contraction cannot be expressed as an FMA,
-so a green production-object scan alone would be vacuous. Its no-`/arch`
-contraction-enabled canary records that boundary, its AVX2/FMA canary proves
-that the scanner discriminates, and its production-object ISA-drift detector
-turns the current vacuity into an enforced boundary: any future FMA-class
-instruction requires the contraction story to be re-established.
+The dispatch-only Windows probe checks a narrower platform boundary. In the
+current staged population (x64), contraction cannot be expressed at the
+production ISA, so a green production-object scan is vacuous; a no-`/arch`
+contraction-enabled canary records that fact. The persistent gate enumerates
+the architectures in the staged production objects. For every staged
+architecture that can express FMA (x64 with `/arch:AVX2`, or ARM64 at its
+baseline ISA), it requires a contraction-enabled canary of that same
+architecture which the scanner rejects. Staging a new architecture without a
+discriminating same-ISA canary fails the probe.
 
 Regenerate from the repository root with:
 

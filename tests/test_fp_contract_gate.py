@@ -122,6 +122,83 @@ def test_contraction_enabled_coff_object_makes_gate_red(tmp_path: Path) -> None:
     assert "FP contraction gate failed; fused instructions found" in result.stderr
 
 
+def test_object_population_requires_discriminating_same_architecture_canary(
+    tmp_path: Path,
+) -> None:
+    """The staged architecture is green only with a same-ISA rejecting canary."""
+    compiler = shutil.which("clang")
+    objdump = shutil.which("objdump")
+    if compiler is None or objdump is None:
+        pytest.skip("COFF population control requires clang and objdump")
+
+    source = tmp_path / "canary.c"
+    source.write_text("double fused(double a,double b,double c){return a*b+c;}\n")
+    production = tmp_path / "production"
+    canaries = tmp_path / "canaries"
+    production.mkdir()
+    canaries.mkdir()
+    common = [
+        compiler,
+        "--target=x86_64-pc-windows-msvc",
+        "-O3",
+        "-mfma",
+        "-c",
+        str(source),
+    ]
+    subprocess.run(
+        [*common, "-ffp-contract=off", "-o", str(production / "production.obj")],
+        check=True,
+    )
+    subprocess.run(
+        [*common, "-ffp-contract=fast", "-o", str(canaries / "canary.obj")],
+        check=True,
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/check_fp_contract.py",
+            "--objects",
+            str(production),
+            "--canaries",
+            str(canaries),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert "canary evidence for" in result.stdout
+    assert "canary rejected" in result.stdout
+
+    arm_source = tmp_path / "arm-production.s"
+    arm_source.write_text(".text\n.globl clean\nclean:\n  ret\n")
+    subprocess.run(
+        [
+            compiler,
+            "--target=aarch64-pc-windows-msvc",
+            "-c",
+            str(arm_source),
+            "-o",
+            str(production / "arm-production.obj"),
+        ],
+        check=True,
+    )
+    missing = subprocess.run(
+        [
+            sys.executable,
+            "scripts/check_fp_contract.py",
+            "--objects",
+            str(production),
+            "--canaries",
+            str(canaries),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert missing.returncode == 1
+    assert "missing same-architecture canary" in missing.stderr
+
+
 @pytest.mark.parametrize("mnemonic", ["fmad", "fmsb", "fnmad", "fnmsb"])
 def test_sve_multiplicand_coff_arm64_object_makes_gate_red(tmp_path: Path, mnemonic: str) -> None:
     """The scanner rejects every SVE fused destructive-multiplicand form."""
@@ -155,4 +232,49 @@ def test_sve_multiplicand_coff_arm64_object_makes_gate_red(tmp_path: Path, mnemo
     )
     assert result.returncode == 1
     assert f"sve-{mnemonic}.obj" in result.stderr
+    assert mnemonic in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("mnemonic", "instruction", "march"),
+    [
+        ("fcmla", "fcmla v0.2d, v1.2d, v2.2d, #0", "armv8.3-a"),
+        ("fmmla", "fmmla z0.s, z1.s, z2.s", "armv8.6-a+sve+f32mm"),
+        ("bfmmla", "bfmmla v0.4s, v1.8h, v2.8h", "armv8.6-a+bf16"),
+    ],
+)
+def test_arm_fused_complex_and_matrix_coff_objects_make_gate_red(
+    tmp_path: Path, mnemonic: str, instruction: str, march: str
+) -> None:
+    """The scanner rejects retained ARM64 complex and FP matrix constructions."""
+    compiler = shutil.which("clang")
+    objdump = shutil.which("objdump")
+    if compiler is None or objdump is None:
+        pytest.skip("ARM64 COFF negative control requires clang and objdump")
+
+    objects = tmp_path / "objects"
+    objects.mkdir()
+    source = objects / f"{mnemonic}.s"
+    source.write_text(f".text\n.globl fused\nfused:\n  {instruction}\n  ret\n")
+    artifact = objects / f"arm64-{mnemonic}.obj"
+    subprocess.run(
+        [
+            compiler,
+            "--target=aarch64-pc-windows-msvc",
+            f"-march={march}",
+            "-c",
+            str(source),
+            "-o",
+            str(artifact),
+        ],
+        check=True,
+    )
+
+    result = subprocess.run(
+        [sys.executable, "scripts/check_fp_contract.py", "--objects", str(objects)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert f"arm64-{mnemonic}.obj" in result.stderr
     assert mnemonic in result.stderr

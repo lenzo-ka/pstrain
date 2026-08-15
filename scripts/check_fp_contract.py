@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""Reject fused multiply-add instructions in build trees or built wheels.
+"""Reject FP instructions that multiply and accumulate without intermediate rounding.
 
-The mnemonic boundary covers x86 FMA3/FMA4, Arm scalar/AdvSIMD, and Arm
-SVE/SVE2 fused multiply-add/subtract families.  It is derived by enumerating
-the fused operations in the Arm A64 instruction-set index (DDI 0602, SVE
-instructions: https://developer.arm.com/documentation/ddi0602/latest/SVE-Instructions),
-including all four destructive multiplicand forms: FMAD, FMSB, FNMAD, and
-FNMSB.  Operand forms do not need separate patterns because disassemblers emit
-the same mnemonic before their predicate operands.
+That criterion follows the fused-operation semantics in the Arm Architecture
+Reference Manual.  The enumerated boundary covers x86 FMA3/FMA4 and Arm
+scalar, AdvSIMD, SVE, and SVE2 families: ordinary and negated multiply-add or
+subtract; destructive multiplicand forms; widening FP16/BF16 long forms;
+complex FCMLA; and floating-point FMMLA/BFMMLA matrix operations.  Operand and
+element-width forms share mnemonic roots in disassembly.
+
+Integer matrix operations such as SMMLA and UMMLA are outside the boundary
+because they do not compute floating-point results.  FP dot-product
+instructions are also outside it: they perform a multi-product reduction and
+cannot be emitted by contracting a source-level FP ``a * b + c`` expression.
 """
 
 from __future__ import annotations
@@ -23,8 +27,11 @@ from pathlib import Path
 
 FMA = re.compile(
     r"\b(?:"
-    r"v?f(?:madd|msub|nmadd|nmsub|mad|msb|mla|mls|nmad|nmsb|nmla|nmls)[a-z0-9.]*"
-    r"|bfml(?:al|sl)[bt][a-z0-9.]*"
+    r"v?f(?:madd|msub|nmadd|nmsub)[a-z0-9.]*"
+    r"|f(?:mad|msb|nmad|nmsb|nmla|nmls)[a-z0-9.]*"
+    r"|f(?:mla|mls)(?:l2?|lb|lt)?[a-z0-9.]*"
+    r"|fcmla[a-z0-9.]*|fmmla[a-z0-9.]*"
+    r"|bfmla[a-z0-9.]*|bfmmla[a-z0-9.]*"
     r")\b",
     re.IGNORECASE,
 )
@@ -131,17 +138,24 @@ def disassemblies(path: Path) -> list[tuple[str, str]]:
     return [("+".join(architectures), _run([objdump, "-d", str(path)], path))]
 
 
-def check(paths: list[tuple[str, Path]]) -> int:
-    """Check labelled artifacts and report every inspected architecture."""
-    failures: list[str] = []
+def inspect(paths: list[tuple[str, Path]]) -> tuple[list[str], dict[str, list[str]]]:
+    """Return inspected labels and fused instructions grouped by architecture."""
     checked: list[str] = []
+    fused: dict[str, list[str]] = {}
     for source, path in paths:
         for architecture, assembly in disassemblies(path):
             label = f"{source}:{path.name}[{architecture}]"
             checked.append(label)
             matches = sorted({match.group(0) for match in FMA.finditer(assembly)})
             if matches:
-                failures.append(f"{label}: {', '.join(matches)}")
+                fused.setdefault(architecture, []).append(f"{label}: {', '.join(matches)}")
+    return checked, fused
+
+
+def check(paths: list[tuple[str, Path]]) -> int:
+    """Check labelled artifacts and report every inspected architecture."""
+    checked, fused = inspect(paths)
+    failures = [failure for architecture in sorted(fused) for failure in fused[architecture]]
     if failures:
         print("FP contraction gate failed; fused instructions found:", file=sys.stderr)
         print("\n".join(failures), file=sys.stderr)
@@ -152,17 +166,56 @@ def check(paths: list[tuple[str, Path]]) -> int:
     return 0
 
 
+def check_population(production_dir: Path, canary_dir: Path) -> int:
+    """Require clean production objects and a rejecting canary for every architecture."""
+    production = [(str(production_dir), path) for path in object_artifacts(production_dir)]
+    canaries = [(str(canary_dir), path) for path in object_artifacts(canary_dir)]
+    checked, production_fused = inspect(production)
+    canary_checked, canary_fused = inspect(canaries)
+    production_architectures = {label.rsplit("[", 1)[1][:-1] for label in checked}
+    canary_architectures = {label.rsplit("[", 1)[1][:-1] for label in canary_checked}
+
+    failures: list[str] = []
+    for architecture in sorted(production_fused):
+        failures.extend(production_fused[architecture])
+    missing = sorted(production_architectures - canary_architectures)
+    nondiscriminating = sorted(production_architectures - set(canary_fused))
+    if missing:
+        failures.append("missing same-architecture canary: " + ", ".join(missing))
+    if nondiscriminating:
+        failures.append("canary did not trigger scanner: " + ", ".join(nondiscriminating))
+    if failures:
+        print("FP contraction population gate failed:", file=sys.stderr)
+        print("\n".join(failures), file=sys.stderr)
+        return 1
+
+    architectures = ", ".join(sorted(production_architectures))
+    print(
+        "FP contraction population gate passed: "
+        f"{len(checked)} production object architectures; canary evidence for {architectures}"
+    )
+    for architecture in sorted(production_architectures):
+        print(f"canary rejected [{architecture}]: {'; '.join(canary_fused[architecture])}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("build_dir", nargs="?", type=Path, default=Path("build"))
     parser.add_argument("--wheels", type=Path)
     parser.add_argument("--objects", type=Path)
+    parser.add_argument("--canaries", type=Path)
     args = parser.parse_args()
 
     if args.objects is not None:
         if args.wheels is not None:
             parser.error("--objects and --wheels are mutually exclusive")
+        if args.canaries is not None:
+            return check_population(args.objects, args.canaries)
         return check([(str(args.objects), path) for path in object_artifacts(args.objects)])
+
+    if args.canaries is not None:
+        parser.error("--canaries requires --objects")
 
     if args.wheels is None:
         return check([(str(args.build_dir), path) for path in build_artifacts(args.build_dir)])

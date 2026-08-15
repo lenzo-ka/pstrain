@@ -171,11 +171,19 @@ def _find_lib_path() -> Path | None:
                     return hits[0]
 
     # 3. Development build. On Windows the shared library is a RUNTIME
-    #    artifact and lands in build/bin (CMAKE_RUNTIME_OUTPUT_DIRECTORY),
-    #    not build/lib, so search there too.
+    #    artifact. Multi-config generators append the selected configuration
+    #    to CMAKE_RUNTIME_OUTPUT_DIRECTORY, so search those directories before
+    #    the unsuffixed runtime directory.
     project_root = _get_project_root()
     if project_root:
-        for subdir in ["build/lib", "build/bin", "build"]:
+        subdirs = ["build/lib"]
+        if sys.platform == "win32":
+            subdirs.extend(
+                f"build/bin/{configuration}"
+                for configuration in ("Release", "Debug", "RelWithDebInfo", "MinSizeRel")
+            )
+        subdirs.extend(["build/bin", "build"])
+        for subdir in subdirs:
             for name in lib_names:
                 candidate = project_root / subdir / name
                 if candidate.exists():

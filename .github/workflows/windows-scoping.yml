@@ -1,8 +1,8 @@
 name: Windows scoping probe
 
-# Diagnostic only. This workflow is dispatch-only and scripts/dispatch_windows_probe.sh
-# targets an empty commit on a probe ref. That distinct SHA cannot be any PR's head,
-# so this intentionally tolerant population pass cannot attach as a PR check.
+# Diagnostic only. This workflow is dispatch-only. The helper targets a unique
+# tag on an empty commit and verifies each created run's head SHA before trusting
+# it, so this intentionally tolerant population pass is never assumed safe by ref.
 on:
   workflow_dispatch:
 
@@ -59,9 +59,10 @@ jobs:
           cmake --build "build-${{ matrix.compiler }}" --config Release --parallel -- `
             /p:ContinueOnError=WarnAndContinue
 
-      # At the current production x64 ISA, contraction cannot be expressed as
-      # FMA. The no-/arch canary documents that vacuity; the FMA-ISA canary
-      # proves scanner discrimination, and the production scan detects ISA drift.
+      # In the current staged x64 population, contraction cannot be expressed at
+      # the production ISA. Every architecture found in production must also be
+      # represented by a same-architecture contraction-enabled canary which the
+      # scanner rejects; adding an architecture without that canary fails closed.
       - name: Compile production-ISA and FMA-ISA canaries (${{ matrix.compiler }})
         shell: pwsh
         run: |
@@ -118,32 +119,19 @@ jobs:
           }
           Write-Host "Production-ISA canary: PASS (no fused instruction at default x64 ISA; contraction is not expressible)."
 
-      - name: Verify scanner discrimination at FMA ISA (${{ matrix.compiler }})
+      - name: Verify production population and per-architecture canaries (${{ matrix.compiler }})
         shell: pwsh
         run: |
           $artifact = "coff-${{ matrix.compiler }}"
-          $canary = Join-Path $artifact "fma-isa"
-          New-Item -ItemType Directory -Force $canary | Out-Null
-          Copy-Item "$artifact/fma-isa-canary.obj" $canary
-          $nativeErrors = $PSNativeCommandUseErrorActionPreference
-          $PSNativeCommandUseErrorActionPreference = $false
-          python scripts/check_fp_contract.py --objects $canary
-          $scannerExit = $LASTEXITCODE
-          $PSNativeCommandUseErrorActionPreference = $nativeErrors
-          if ($scannerExit -ne 1) {
-            throw "FMA-ISA canary did not exercise the scanner's red path"
-          }
-          $global:LASTEXITCODE = 0
-          Write-Host "FMA-ISA canary: PASS (scanner rejected the fused instruction)."
-
-      - name: Detect FMA ISA drift in production objects (${{ matrix.compiler }})
-        shell: pwsh
-        run: |
-          python scripts/check_fp_contract.py --objects "coff-${{ matrix.compiler }}/production"
+          $canaries = Join-Path $artifact "canaries"
+          New-Item -ItemType Directory -Force $canaries | Out-Null
+          Copy-Item "$artifact/fma-isa-canary.obj" $canaries
+          python scripts/check_fp_contract.py `
+            --objects "$artifact/production" `
+            --canaries $canaries
           if ($LASTEXITCODE -ne 0) {
-            throw "Production objects use an FMA-class instruction; re-establish the contraction boundary"
+            throw "Production population lacks a rejecting same-architecture canary or contains a fused FP instruction"
           }
-          Write-Host "Production ISA-drift detector: PASS (no FMA-class instructions)."
 
       - name: Upload COFF objects (${{ matrix.compiler }})
         if: always()
