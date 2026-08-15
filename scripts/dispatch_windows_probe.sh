@@ -39,6 +39,7 @@ for _ in {1..30}; do
         fi
         echo "Windows probe dispatched for $probe_sha"
         echo "$run_url"
+        gh run watch "$run_id" --exit-status
         exit 0
     fi
     sleep 2
