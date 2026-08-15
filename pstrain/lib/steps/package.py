@@ -105,12 +105,9 @@ def package_model(
     for fname in MODEL_FILES_REQUIRED:
         src = model_dir / fname
         dst = acoustic_dir / fname
-        if src.exists():
-            shutil.copy(src, dst)
-            result[fname] = dst
-            logger.debug("Copied %s -> %s", src, dst)
-        else:
-            logger.warning("Model file not found: %s", src)
+        shutil.copy(src, dst)
+        result[fname] = dst
+        logger.debug("Copied %s -> %s", src, dst)
 
     feat_path = acoustic_dir / "feat.params"
     shutil.copyfile(source_feat_params, feat_path)
