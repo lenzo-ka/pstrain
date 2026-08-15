@@ -19,6 +19,15 @@ logger = logging.getLogger(__name__)
 
 # Cadence for "Progress: N/total" log lines during a long batch.
 _PROGRESS_LOG_EVERY = 100
+_ERROR_MESSAGE_LIMIT = 200
+
+
+def _error_message(exc: Exception) -> str:
+    """Keep the actionable end of a bounded native-worker diagnostic."""
+    message = str(exc)
+    if len(message) <= _ERROR_MESSAGE_LIMIT:
+        return message
+    return f"...{message[-(_ERROR_MESSAGE_LIMIT - 3) :]}"
 
 
 @dataclass
@@ -145,9 +154,10 @@ def align_corpus(
                 results[utt_id] = result
                 n_aligned += 1
             except Exception as e:
-                errors[utt_id] = str(e)[:200]
+                message = _error_message(e)
+                errors[utt_id] = message
                 n_failed += 1
-                logger.warning("Alignment failed for %s: %s", utt_id, str(e)[:100])
+                logger.warning("Alignment failed for %s: %s", utt_id, message)
     finally:
         aligner.close()
 

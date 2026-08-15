@@ -213,6 +213,9 @@ class AlignCommand(Command):
                 ctx.log(f"  failure: {utt_id}: {msg}")
             if len(job.errors) > 5:
                 ctx.log(f"  ... and {len(job.errors) - 5} more")
+            return CommandResult.fail(
+                f"Alignment failed for {job.n_failed}/{job.n_utterances} utterances"
+            )
 
         return CommandResult.ok(f"Aligned {job.n_aligned}/{job.n_utterances}")
 

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import shutil
+import sys
 import wave
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+from pstrain.cli.cli import main
 from pstrain.lib._cffi import read_gau, write_gau
 from pstrain.lib.alignment import (
     AlignedSegment,
@@ -429,6 +431,70 @@ class TestLoadTranscripts:
 
 
 class TestAlignCorpus:
+    def test_verbatim_unknown_variant_preserves_token(self, tmp_path: Path) -> None:
+        model = _alignment_model(tmp_path)
+        audio_dir = tmp_path / "audio"
+        audio_dir.mkdir()
+        shutil.copy(
+            _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
+            audio_dir / "bad.wav",
+        )
+
+        job = align_corpus(
+            transcripts={"bad": "author of the(9) danger trail philip steels etc"},
+            audio_dir=audio_dir,
+            model_dir=model,
+            dict_path=_FIXTURES / "mini_arctic" / "dictionary.dict",
+            filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
+            verbatim_tokens=True,
+        )
+
+        assert job.n_failed == 1
+        assert "the(9)" in job.errors["bad"]
+
+    def test_profile_cli_unknown_variant_exits_nonzero_and_names_token(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        project = tmp_path / "project"
+        (project / "etc").mkdir(parents=True)
+        (project / "etc" / "config.yaml").write_text(
+            "config_version: 1\nalignment:\n  verbatim_tokens: true\n"
+        )
+        model = _alignment_model(tmp_path)
+        transcript_file = project / "bad.transcription"
+        transcript_file.write_text(
+            "<s> author of the(9) danger trail philip steels etc </s> (bad)\n"
+        )
+        audio_dir = project / "audio"
+        audio_dir.mkdir()
+        shutil.copy(
+            _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
+            audio_dir / "bad.wav",
+        )
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "pstrain",
+                "align",
+                str(model),
+                "--project-dir",
+                str(project),
+                "--transcripts",
+                str(transcript_file),
+                "--audio-dir",
+                str(audio_dir),
+                "--dict",
+                str(_FIXTURES / "mini_arctic" / "dictionary.dict"),
+                "--filler-dict",
+                str(_FIXTURES / "mini_arctic" / "filler.dict"),
+            ],
+        )
+
+        assert main() != 0
+        output = capsys.readouterr()
+        assert "the(9)" in output.out + output.err
+
     def test_missing_model_records_per_utt_error(self, tmp_path: Path) -> None:
         # Aligner init fails (model files missing) -> every utterance is
         # marked failed with the same init error.

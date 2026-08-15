@@ -217,6 +217,9 @@ only that pronunciation; when disabled, forced alignment collapses the token
 to its base word and scores the complete alternative chain. Baum-Welch
 training already treats explicit variant tokens exactly in both
 `multipron_training` modes and is never changed by the alignment setting.
+Pinning changes the forced-alignment search graph and can therefore change its
+`total_score`; in one mixed construction it changed from -718768 to -729754.
+This setting does not promise score invariance.
 
 ## What we don't do
 
