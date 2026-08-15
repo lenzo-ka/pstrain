@@ -522,6 +522,7 @@ def run_bw_training(
     max_skip_fraction: float = 0.05,
     retry_beam_factor: float = 1e10,
     failed_alignment: Literal["recover", "abort", "omit"] = "recover",
+    checkpoint_iterations: bool = False,
     exclusion_schedule: dict[int | str, list[str]] | None = None,
     arctic_a0302_zero_codebook_band: tuple[int, int] | None = None,
     accept_arctic_a0587_pass: int | None = None,
@@ -553,6 +554,9 @@ def run_bw_training(
             to disable retries.
         failed_alignment: Recover with one widened-beam retry, abort the stage,
             or report and omit the utterance while continuing.
+        checkpoint_iterations: Retain the compact model files produced by each
+            pass. The deprecated ``PSTRAIN_BW_CHECKPOINTS=1`` environment
+            variable can also enable retention, but cannot disable this setting.
         first_pass_2passvar: Required stage policy for the first iteration.
             ``True`` selects centered two-pass accumulation and ``False``
             selects one-pass variance accumulation.
@@ -588,7 +592,7 @@ def run_bw_training(
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    checkpoints_enabled = os.environ.get("PSTRAIN_BW_CHECKPOINTS") == "1"
+    checkpoints_enabled = checkpoint_iterations or os.environ.get("PSTRAIN_BW_CHECKPOINTS") == "1"
     if checkpoints_enabled:
         shutil.rmtree(output_dir / "iterations", ignore_errors=True)
 

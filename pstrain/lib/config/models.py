@@ -102,6 +102,18 @@ class TrainingConfig(StrictModel):
             )
         ),
     ] = "recover"
+    bw_checkpoint_iterations: Annotated[
+        bool,
+        Field(
+            description=(
+                "Retain the compact model files from every completed Baum-Welch pass under "
+                "``iterations/NN``; costs roughly one additional model copy per pass and does "
+                "not retain the much larger ``.bw-accum`` shard accumulators. The deprecated "
+                "``PSTRAIN_BW_CHECKPOINTS=1`` environment variable can also enable retention, "
+                "but cannot disable a true profile setting"
+            )
+        ),
+    ] = False
     arctic_a0302_zero_codebook_band: Annotated[
         tuple[int, int] | None,
         Field(

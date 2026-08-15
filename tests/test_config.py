@@ -23,6 +23,10 @@ def test_tree_intermediate_dumps_are_off_by_default() -> None:
     assert TrainingConfig().tree_intermediate_dumps is False
 
 
+def test_bw_iteration_checkpoints_are_off_by_default() -> None:
+    assert TrainingConfig().bw_checkpoint_iterations is False
+
+
 def test_tree_semantic_fixes_are_on_by_default() -> None:
     training = TrainingConfig()
     assert training.tree_rotate_state_weights is True

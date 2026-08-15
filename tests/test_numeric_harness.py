@@ -637,14 +637,21 @@ def test_iteration_checkpoints_are_opt_in_and_replace_stale_passes(
     stale = enabled_output / "iterations" / "99"
     stale.mkdir(parents=True)
     (stale / "stale").write_text("stale")
-    monkeypatch.setenv("PSTRAIN_BW_CHECKPOINTS", "1")
-    run_bw_training(output_dir=enabled_output, n_iter=2, **kwargs)
+    monkeypatch.setenv("PSTRAIN_BW_CHECKPOINTS", "0")
+    run_bw_training(output_dir=enabled_output, n_iter=2, checkpoint_iterations=True, **kwargs)
     assert [path.name for path in sorted((enabled_output / "iterations").iterdir())] == [
         "01",
         "02",
     ]
     for checkpoint in (enabled_output / "iterations").iterdir():
         assert {path.name for path in checkpoint.iterdir()} == set(_CHECKPOINT_MODEL_FILES)
+
+    # The legacy environment switch remains an enable-only compatibility path.
+    legacy_output = tmp_path / "legacy-checkpointed-model"
+    monkeypatch.setenv("PSTRAIN_BW_CHECKPOINTS", "1")
+    run_bw_training(output_dir=legacy_output, n_iter=1, checkpoint_iterations=False, **kwargs)
+    checkpoint = legacy_output / "iterations" / "01"
+    assert {path.name for path in checkpoint.iterdir()} == set(_CHECKPOINT_MODEL_FILES)
 
 
 @requires_c_library
