@@ -117,33 +117,6 @@ class TestCommandBuilder:
         assert "-phnlistfn" in shell
         assert "-n_state_pm 5" in shell
 
-    def test_param_cnt_command(self, tmp_path: Path) -> None:
-        builder = CommandBuilder()
-        cmd = builder.param_cnt(
-            moddeffn=tmp_path / "mdef",
-            dictfn=tmp_path / "dict",
-            ctlfn=tmp_path / "train.fileids",
-            lsnfn=tmp_path / "train.transcription",
-            paramtype="phone",
-            outputfn=tmp_path / "phone_counts",
-        )
-
-        assert cmd.binary.endswith("param_cnt")
-        assert cmd.args == [
-            "-moddeffn",
-            str(tmp_path / "mdef"),
-            "-dictfn",
-            str(tmp_path / "dict"),
-            "-ctlfn",
-            str(tmp_path / "train.fileids"),
-            "-lsnfn",
-            str(tmp_path / "train.transcription"),
-            "-paramtype",
-            "phone",
-            "-outputfn",
-            str(tmp_path / "phone_counts"),
-        ]
-
     def test_command_queue(self, tmp_path: Path) -> None:
         """Test command queue management."""
         builder = CommandBuilder()
@@ -195,7 +168,6 @@ class TestBinaryRegistry:
             "tiestate",
             "sphinx3_align",
             "map_adapt",
-            "param_cnt",
         ]
         for name in expected:
             assert name in PSTRAIN_BINARIES

@@ -59,6 +59,7 @@
     pstrain_decoder_hyp;
     pstrain_decoder_process_raw;
     pstrain_decoder_start_utt;
+    pstrain_delint;
     pstrain_fe_create;
     pstrain_fe_create_default;
     pstrain_flat_mixw;
@@ -68,14 +69,17 @@
     pstrain_inc_comp;
     pstrain_init_gau;
     pstrain_init_mixw;
+    pstrain_kdtree_build;
     pstrain_kmeans;
     pstrain_kmeans_init;
     pstrain_make_quests;
+    pstrain_map_adapt;
     pstrain_mdef_count_triphones;
     pstrain_mdef_gen_alltriphones;
     pstrain_mdef_gen_ci;
     pstrain_mdef_gen_untied;
     pstrain_norm_gau;
+    pstrain_param_cnt;
     pstrain_pocketsphinx_version;
     pstrain_prune_tree;
     pstrain_read_pset;
