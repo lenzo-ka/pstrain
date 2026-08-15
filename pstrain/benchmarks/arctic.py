@@ -1,4 +1,9 @@
-"""Turnkey CMU Arctic parity benchmark harness."""
+"""Turnkey CMU Arctic parity benchmark harness.
+
+Every WER result records decode coverage as decoded utterances over its
+evaluation-set denominator. Missing audio and decode failures remain visible as
+coverage shortfalls but never block record production or the WER comparison.
+"""
 
 from __future__ import annotations
 

@@ -12,6 +12,16 @@ pstrain descends from
 developers, researchers, institutions, and community members whose work made
 this project possible.
 
+pstrain rebuilds SphinxTrain with its C core vendored and its orchestration
+reimplemented. On the shared CMU Arctic benchmark, pstrain under its product
+defaults (including multiple-pronunciation training) measures at statistical
+parity with stock SphinxTrain: both paired 95% confidence intervals span zero,
+and the small evaluation set is point-identical. The
+[benchmark pin](docs/benchmarks/arctic-pin.md) and its
+[machine-readable record](docs/benchmarks/arctic-pin/record.json) preserve the
+evidence and measurement conditions. Run `make verified` for the repository's
+aggregate verification command.
+
 ## What pstrain does
 
 pstrain provides an in-process training pipeline for:

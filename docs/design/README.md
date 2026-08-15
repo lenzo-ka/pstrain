@@ -6,6 +6,8 @@ while making decisions; the current source of truth is the code in
 
 ## Current architecture
 
+* [`parity-and-deviations.md`](parity-and-deviations.md) — stock-equivalence
+  conditions and the tracked divergence register.
 * [`config-unification.md`](config-unification.md) — proposed canonical,
   source-aware configuration schema and migration from the current split
   configuration systems.
