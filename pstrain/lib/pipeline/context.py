@@ -41,6 +41,40 @@ from pstrain.lib.config.resolver import ResolvedConfig, resolve_config
 from pstrain.lib.paths import get_lib_path
 from pstrain.lib.runtime import fp_contract_policy
 
+# This is the complete fingerprint contract. A model produced by another
+# pstrain version, architecture, or native binary/library can follow a
+# different numeric trajectory. For a parity-focused trainer, conservative
+# one-time retraining is safer than silently reusing a model with a different
+# provenance identity. Host and config_sources remain diagnostic provenance.
+FINGERPRINT_COMPOSITION: dict[str, dict[str, tuple[str, ...]]] = {
+    "features": {
+        "resolved_values": ("stage", "config_version", "features"),
+        "declared_identities": ("tool_version", "native_library", "native_programs"),
+    },
+    "split": {
+        "resolved_values": ("stage", "config_version", "split"),
+        "declared_identities": ("tool_version", "native_library", "native_programs"),
+    },
+    "training": {
+        "resolved_values": (
+            "stage",
+            "config_version",
+            "features",
+            "training",
+            "split",
+            "sharding",
+            "execution.requested_jobs",
+            "execution.bw_shard_count",
+        ),
+        "declared_identities": (
+            "tool_version",
+            "execution.architecture",
+            "native_library",
+            "native_programs",
+        ),
+    },
+}
+
 
 @cache
 def _sha256_file(path: Path, size: int, mtime_ns: int) -> str:
@@ -502,8 +536,7 @@ class PipelineContext:
 
     def provenance_path(self, stage: str) -> Path:
         """Content-addressed path for a stage's effective configuration."""
-        fingerprint_payload = self.provenance_payload(stage)
-        fingerprint_payload.pop("config_sources", None)
+        fingerprint_payload = self.fingerprint_payload(stage)
         canonical = json.dumps(
             fingerprint_payload,
             sort_keys=True,
@@ -519,6 +552,27 @@ class PipelineContext:
             / self.config_name
             / f"{stage}-{fingerprint}.json"
         )
+
+    def fingerprint_payload(self, stage: str) -> dict[str, Any]:
+        """Return the explicitly declared resolved values and identity keys."""
+        provenance = self.provenance_payload(stage)
+        composition = FINGERPRINT_COMPOSITION.get(stage)
+        if composition is None:
+            raise ValueError(f"unknown provenance stage: {stage!r}")
+        keys = {
+            path.partition(".")[0]
+            for classification in composition.values()
+            for path in classification
+        }
+        payload = {key: provenance[key] for key in keys}
+        if stage == "training":
+            execution = provenance["execution"]
+            payload["execution"] = {
+                "architecture": execution["architecture"],
+                "requested_jobs": execution["requested_jobs"],
+                "bw_shard_count": execution["bw_shard_count"],
+            }
+        return payload
 
     def provenance_document(self, stage: str) -> dict[str, Any]:
         """Serializable provenance, including its effective-config fingerprint."""

@@ -22,6 +22,7 @@ import yaml
 from pstrain.lib.pipeline import PipelineContext
 from pstrain.lib.pipeline.context import (
     DEFAULT_CONFIGS,
+    FINGERPRINT_COMPOSITION,
     FeatParams,
     RunnerParams,
     ShardingParams,
@@ -398,6 +399,47 @@ def test_training_fingerprint_excludes_config_source_metadata(empty_project: Pat
     assert (
         explicit_project_value.provenance_document("training")["config_sources"] == explicit_sources
     )
+
+
+def test_training_fingerprint_payload_composition_is_pinned(empty_project: Path) -> None:
+    """Make additions to the cache key fail until their role is declared."""
+    ctx = PipelineContext.from_config(empty_project)
+    payload = ctx.fingerprint_payload("training")
+
+    assert set(payload) == {
+        "stage",
+        "config_version",
+        "features",
+        "training",
+        "split",
+        "sharding",
+        "execution",
+        "tool_version",
+        "native_library",
+        "native_programs",
+    }
+    assert FINGERPRINT_COMPOSITION["training"]["resolved_values"] == (
+        "stage",
+        "config_version",
+        "features",
+        "training",
+        "split",
+        "sharding",
+        "execution.requested_jobs",
+        "execution.bw_shard_count",
+    )
+    assert FINGERPRINT_COMPOSITION["training"]["declared_identities"] == (
+        "tool_version",
+        "execution.architecture",
+        "native_library",
+        "native_programs",
+    )
+    assert set(payload["execution"]) == {
+        "architecture",
+        "requested_jobs",
+        "bw_shard_count",
+    }
+    assert "host" in ctx.provenance_payload("training")["execution"]
 
 
 @pytest.mark.parametrize(
