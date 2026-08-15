@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Reject fused multiply-add instructions in build trees or built wheels."""
+"""Reject fused multiply-add instructions in build trees or built wheels.
+
+The mnemonic boundary covers x86 FMA3/FMA4, Arm scalar/AdvSIMD, and Arm
+SVE/SVE2 fused multiply-add/subtract families.  The list was derived from the
+Intel and Arm instruction indexes, including the predicated SVE spellings;
+operand forms do not need separate patterns because disassemblers emit the
+same mnemonic before their predicate operands.
+"""
 
 from __future__ import annotations
 
@@ -12,7 +19,13 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-FMA = re.compile(r"\b(?:v?f(?:n?madd|n?msub|mla|mls)[a-z0-9.]*)\b", re.IGNORECASE)
+FMA = re.compile(
+    r"\b(?:"
+    r"v?f(?:madd|msub|nmadd|nmsub|mad|mla|mls|nmad|nmla|nmls)[a-z0-9.]*"
+    r"|bfml(?:al|sl)[bt][a-z0-9.]*"
+    r")\b",
+    re.IGNORECASE,
+)
 REQUIRED = ("bw", "norm", "sphinx_fe")
 NATIVE_MAGICS = {
     b"\x7fELF",

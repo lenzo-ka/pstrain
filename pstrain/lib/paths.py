@@ -130,7 +130,7 @@ def _find_lib_path() -> Path | None:
     4. LD_LIBRARY_PATH / DYLD_LIBRARY_PATH
     5. System library paths
     """
-    lib_names = ["libpstrainc.dylib", "libpstrainc.so"]
+    lib_names = ["libpstrainc.dylib", "libpstrainc.so", "pstrainc.dll"]
 
     # 1. Environment variable override
     if "PSTRAIN_LIB_PATH" in os.environ:
@@ -160,7 +160,7 @@ def _find_lib_path() -> Path | None:
     ]
     for vendored in vendored_dirs:
         if vendored.is_dir():
-            for pattern in ("libpstrainc*.so", "libpstrainc*.dylib"):
+            for pattern in ("libpstrainc*.so", "libpstrainc*.dylib", "pstrainc*.dll"):
                 hits = sorted(vendored.glob(pattern))
                 if hits:
                     return hits[0]

@@ -120,3 +120,38 @@ def test_contraction_enabled_coff_object_makes_gate_red(tmp_path: Path) -> None:
     assert result.returncode == 1
     assert "fp-contract-canary.obj" in result.stderr
     assert "FP contraction gate failed; fused instructions found" in result.stderr
+
+
+def test_sve_fmad_coff_arm64_object_makes_gate_red(tmp_path: Path) -> None:
+    """The ARM64 COFF scanner must reject a predicated SVE fmad instruction."""
+    compiler = shutil.which("clang")
+    objdump = shutil.which("objdump")
+    if compiler is None or objdump is None:
+        pytest.skip("ARM64 COFF negative control requires clang and objdump")
+
+    objects = tmp_path / "objects"
+    objects.mkdir()
+    source = objects / "fmad.s"
+    source.write_text(".text\n.globl fused\nfused:\n  fmad z0.d, p0/m, z1.d, z2.d\n  ret\n")
+    artifact = objects / "sve-fmad.obj"
+    subprocess.run(
+        [
+            compiler,
+            "--target=aarch64-pc-windows-msvc",
+            "-march=armv8-a+sve",
+            "-c",
+            str(source),
+            "-o",
+            str(artifact),
+        ],
+        check=True,
+    )
+
+    result = subprocess.run(
+        [sys.executable, "scripts/check_fp_contract.py", "--objects", str(objects)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert "sve-fmad.obj" in result.stderr
+    assert "fmad" in result.stderr

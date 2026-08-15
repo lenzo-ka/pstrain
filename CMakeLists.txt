@@ -49,6 +49,14 @@ if(MSVC)
   if(CMAKE_C_COMPILER_ID MATCHES "Clang")
     set(PSTRAIN_FP_CONTRACT_FLAG "/clang:-ffp-contract=off")
   else()
+    # Microsoft documents that /fp:precise defaults to fp_contract(off) only
+    # starting with Visual Studio 2022 (MSVC 19.30, _MSC_VER 1930):
+    # https://learn.microsoft.com/cpp/build/reference/fp-specify-floating-point-behavior
+    if(MSVC_VERSION LESS 1930)
+      message(FATAL_ERROR
+        "MSVC ${MSVC_VERSION} is too old for the declared floating-point contraction "
+        "policy: Visual Studio 2022 / MSVC 19.30 (_MSC_VER 1930) or newer is required")
+    endif()
     set(PSTRAIN_FP_CONTRACT_FLAG "/fp:precise")
   endif()
   check_c_compiler_flag("${PSTRAIN_FP_CONTRACT_FLAG}"

@@ -344,7 +344,8 @@ set_target_properties(pstrainc PROPERTIES
 include(GNUInstallDirs)
 install(TARGETS pstrainc pstrainc_shared
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 # Build CLI programs for development/testing
