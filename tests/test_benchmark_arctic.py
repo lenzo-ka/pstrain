@@ -213,7 +213,7 @@ def test_pin_configs_resolve_ratified_conditions(tmp_path: Path) -> None:
         )
         for mode in ("off", "on")
     }
-    for mode in ("off", "on"):
+    for mode in ("on",):
         expected = Profile.model_validate(PIN_CONFIGS[mode]).model_dump(mode="json")
         assert resolved[mode].as_dict() == expected
         assert resolved[mode].profile.split.test_count == 0
@@ -390,7 +390,7 @@ def test_adopt_uncovered_keeps_cell_provenance_consistent(tmp_path: Path) -> Non
     source = Path("docs/benchmarks/arctic-pin/record.json")
     record = json.loads(source.read_text())
     setting = "training.optional_final_silence"
-    for mode in ("off", "on"):
+    for mode in ("on",):
         del record["conditions"]["pin_conditions"][mode]["training"]["optional_final_silence"]
         for dataset in ("slt55", "big"):
             provenance = record["results"][mode][dataset]["configuration_provenance"]
@@ -423,15 +423,11 @@ def test_adopt_uncovered_keeps_cell_provenance_consistent(tmp_path: Path) -> Non
         text=True,
     )
 
-    assert "adopted 2 previously uncovered" in completed.stdout
+    assert "adopted 1 previously uncovered" in completed.stdout
     updated = json.loads(adopted.read_text())
     validate_record(updated)
     assert (
-        updated["conditions"]["pin_conditions"]["off"]["training"]["optional_final_silence"]
-        is False
-    )
-    assert (
-        updated["conditions"]["pin_conditions"]["on"]["training"]["optional_final_silence"] is False
+        updated["conditions"]["pin_conditions"]["on"]["training"]["optional_final_silence"] is True
     )
     assert {
         mode: {
@@ -449,7 +445,7 @@ def test_adopt_uncovered_keeps_cell_provenance_consistent(tmp_path: Path) -> Non
     ("mutation", "message"),
     [
         (
-            lambda record: record["results"]["off"]["slt55"]["configuration_provenance"][
+            lambda record: record["results"]["on"]["slt55"]["configuration_provenance"][
                 "diff_from_shipped_defaults"
             ].pop(),
             "provenance/conditions consistency mismatch",

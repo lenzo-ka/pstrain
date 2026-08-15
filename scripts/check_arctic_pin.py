@@ -79,7 +79,8 @@ def main() -> int:
         record["conditions"] = adopt_uncovered_conditions(actual, record["conditions"])
         pin_conditions = record["conditions"]["pin_conditions"]
         source_kinds = record["conditions"]["pin_condition_source_kinds"]
-        for mode, datasets in record["results"].items():
+        for mode in pin_conditions:
+            datasets = record["results"][mode]
             provenance = resolved_configuration_provenance(
                 {
                     "profile": pin_conditions[mode],
