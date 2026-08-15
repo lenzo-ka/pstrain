@@ -6,12 +6,16 @@ Reference Manual.  The enumerated boundary covers x86 FMA3/FMA4 and Arm
 scalar, AdvSIMD, SVE, and SVE2 families: ordinary and negated multiply-add or
 subtract; destructive multiplicand forms; widening FP16/BF16 long forms;
 complex FCMLA; and floating-point FMMLA/BFMMLA matrix operations.  Operand and
-element-width forms share mnemonic roots in disassembly.
+element-width forms share mnemonic roots in disassembly.  It also covers the
+x86 VDPBF16PS and Arm BFDOT families, whose dot products accumulate unrounded
+products.
 
 Integer matrix operations such as SMMLA and UMMLA are outside the boundary
-because they do not compute floating-point results.  FP dot-product
-instructions are also outside it: they perform a multi-product reduction and
-cannot be emitted by contracting a source-level FP ``a * b + c`` expression.
+because they do not compute floating-point results.  X86 DPPS/DPPD are outside
+the boundary because each multiplication is rounded before its products are
+summed.  Arm SDOT, UDOT, USDOT, and SUDOT are integer operations.  Arm BFDOT,
+BFMMLALB/BFMMLALT, and BFMMLA are retained because their products are not
+rounded before accumulation.
 """
 
 from __future__ import annotations
@@ -31,7 +35,8 @@ FMA = re.compile(
     r"|f(?:mad|msb|nmad|nmsb|nmla|nmls)[a-z0-9.]*"
     r"|f(?:mla|mls)(?:l2?|lb|lt)?[a-z0-9.]*"
     r"|fcmla[a-z0-9.]*|fmmla[a-z0-9.]*"
-    r"|bfmla[a-z0-9.]*|bfmmla[a-z0-9.]*"
+    r"|bf(?:dot|mla|mmla)[a-z0-9.]*"
+    r"|vdpbf16ps[a-z0-9.]*"
     r")\b",
     re.IGNORECASE,
 )

@@ -1,14 +1,16 @@
-name: Windows scoping probe
+name: Windows diagnostic-never-gating probe
 
-# Diagnostic only. This workflow is dispatch-only. The helper targets a unique
-# tag on an empty commit and verifies each created run's head SHA before trusting
-# it, so this intentionally tolerant population pass is never assumed safe by ref.
+# Diagnostic only and never gating. This workflow is dispatch-only. The helper
+# targets a unique tag on an empty commit and verifies each created run's head
+# SHA. Through repository-owned refs and workflows, these checks never attach to
+# a PR head. A third party can later point a branch at the probe SHA; that
+# external branch aliasing is outside this boundary.
 on:
   workflow_dispatch:
 
 jobs:
   windows-scoping:
-    name: Windows scoping (${{ matrix.compiler }})
+    name: Windows diagnostic-never-gating (${{ matrix.compiler }})
     runs-on: windows-latest
     continue-on-error: true
     strategy:

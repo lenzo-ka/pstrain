@@ -122,6 +122,43 @@ def test_contraction_enabled_coff_object_makes_gate_red(tmp_path: Path) -> None:
     assert "FP contraction gate failed; fused instructions found" in result.stderr
 
 
+def test_vdpbf16ps_coff_object_makes_gate_red(tmp_path: Path) -> None:
+    """The scanner rejects the x86 BF16 fused three-way dot-product construction."""
+    compiler = shutil.which("clang")
+    objdump = shutil.which("objdump")
+    if compiler is None or objdump is None:
+        pytest.skip("VDPBF16PS COFF negative control requires clang and objdump")
+
+    objects = tmp_path / "objects"
+    objects.mkdir()
+    source = objects / "vdpbf16ps.s"
+    source.write_text(
+        ".text\n.globl fused_dot\nfused_dot:\n  vdpbf16ps %zmm2, %zmm1, %zmm0\n  ret\n"
+    )
+    artifact = objects / "x86-vdpbf16ps.obj"
+    subprocess.run(
+        [
+            compiler,
+            "--target=x86_64-pc-windows-msvc",
+            "-march=cooperlake",
+            "-c",
+            str(source),
+            "-o",
+            str(artifact),
+        ],
+        check=True,
+    )
+
+    result = subprocess.run(
+        [sys.executable, "scripts/check_fp_contract.py", "--objects", str(objects)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert "x86-vdpbf16ps.obj" in result.stderr
+    assert "vdpbf16ps" in result.stderr
+
+
 def test_object_population_requires_discriminating_same_architecture_canary(
     tmp_path: Path,
 ) -> None:
@@ -240,6 +277,9 @@ def test_sve_multiplicand_coff_arm64_object_makes_gate_red(tmp_path: Path, mnemo
     [
         ("fcmla", "fcmla v0.2d, v1.2d, v2.2d, #0", "armv8.3-a"),
         ("fmmla", "fmmla z0.s, z1.s, z2.s", "armv8.6-a+sve+f32mm"),
+        ("bfdot", "bfdot v0.4s, v1.8h, v2.8h", "armv8.6-a+bf16"),
+        ("bfmlalb", "bfmlalb z0.s, z1.h, z2.h", "armv8.6-a+sve+bf16"),
+        ("bfmlalt", "bfmlalt z0.s, z1.h, z2.h", "armv8.6-a+sve+bf16"),
         ("bfmmla", "bfmmla v0.4s, v1.8h, v2.8h", "armv8.6-a+bf16"),
     ],
 )

@@ -45,5 +45,9 @@ for _ in {1..30}; do
     sleep 2
 done
 
+trap - EXIT
 echo "Workflow dispatch was accepted, but its run was not confirmed within 60 seconds" >&2
+echo "Retained probe tag: $probe_tag" >&2
+echo "Expected probe SHA: $probe_sha" >&2
+echo "Recovery: locate and cancel the run, then run git push origin :$probe_ref and git update-ref -d $probe_ref" >&2
 exit 1
