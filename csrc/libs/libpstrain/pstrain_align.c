@@ -107,6 +107,13 @@ pstrain_align_config_default(pstrain_align_config_t *config)
     config->compute_phones = 1;
     config->compute_states = 0;
     config->feat_type = "1s_c_d_dd";
+    /* Keep the historical aligner spelling "current".  Vendored cmn.c maps
+     * it to CMN_BATCH, which computes and subtracts the complete utterance's
+     * mean (excluding negative-c0 frames), so this is not a different native
+     * mode from "batch".  The stage-2 TIMIT forced-alignment comparison also
+     * produced bit-for-bit identical boundaries for the two spellings.  That
+     * measurement did not cover other corpora or conditions, decoding, or
+     * CMN_LIVE, and does not justify changing this public C default. */
     config->cmn = "current";
     config->agc = "none";
     config->varnorm = 0;

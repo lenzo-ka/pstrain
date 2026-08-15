@@ -1,0 +1,44 @@
+[
+  {
+    "subsystem": "training / decode",
+    "default_mode": "[read] batch (native CMN_BATCH; current is an exact alias)",
+    "is_reachable": "[read] yes; training feat.params and the in-process decoder consume FeatureConfig.cmn",
+    "evidence_exists": [
+      "[read] vendored cmn.c computes the complete-utterance mean while skipping negative-c0 frames, then subtracts it from every frame",
+      "[read] the schema exposes features.cmn, and the same resolved feature field feeds training artifacts and decoder evaluation",
+      "[measured] the supplied stage-2 TIMIT forced-alignment run found batch and current boundary outputs bit-for-bit identical: 17.545/14.812 ms, 100% coverage, 0/0/0 edits, and identical F1 at every band"
+    ],
+    "not_established": [
+      "[measured] the TIMIT measurement did not exercise training or decoding",
+      "[inference] effects on trained parameters, decoded hypotheses, other corpora or conditions, and live CMN remain unestablished"
+    ]
+  },
+  {
+    "subsystem": "pstrain_align.c",
+    "default_mode": "[read] current (an exact parser alias for native CMN_BATCH)",
+    "is_reachable": "[read] yes through the public C API when its config is omitted or cmn is null/empty; shipped Python Aligner instead explicitly defaults and passes batch",
+    "evidence_exists": [
+      "[read] vendored cmn.c maps current and batch to the same CMN_BATCH enum and implementation",
+      "[read] the explicit aligner cmn setting is independently configurable through both the C config struct and Python Aligner constructor; the supplied feat.params path does not override it in this wrapper's initialization path",
+      "[measured] the supplied stage-2 TIMIT run aligned the same models with current and batch and produced bit-for-bit identical per-utterance boundaries: 17.545/14.812 ms, 100% coverage, 0/0/0 edits, and identical F1 at every band"
+    ],
+    "not_established": [
+      "[measured] the comparison covered one corpus and condition with exact-phone targets only",
+      "[inference] effects for other material and any comparison with live CMN remain unestablished"
+    ]
+  },
+  {
+    "subsystem": "pstrain_agg_seg.c",
+    "default_mode": "[read] live (native CMN_LIVE; prior is an exact alias)",
+    "is_reachable": "[read] yes through the shipped public Python/CFFI aggregate_segments API and the standalone agg_seg program; no shipped training step calls aggregate_segments",
+    "evidence_exists": [
+      "[read] vendored cmn_live.c subtracts the previously held running mean, accumulates accepted current frames, updates at utterance end, and bounds history with a decaying window",
+      "[read] the CFFI wrapper always leaves the internal live default in force and exposes no cmn argument; the standalone agg_seg command accepts an explicit -cmn override",
+      "[inference] no comparative measurement supporting this default is known"
+    ],
+    "not_established": [
+      "[read] the TIMIT result concerns forced alignment with the batch/current aliases and supplies no evidence about agg_seg or live CMN",
+      "[inference] effects on aggregated observations, later acoustic models, decoding, other corpora, and other conditions remain unestablished"
+    ]
+  }
+]
