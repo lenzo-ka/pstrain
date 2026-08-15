@@ -69,6 +69,11 @@ class Aligner:
         feat_type: Feature stream spec (default ``"1s_c_d_dd"``).
         frate: Frame rate in Hz (default 100, i.e. 10 ms frames).
         lts_mismatch: Use CMU letter-to-sound rules for OOV words.
+        verbatim_tokens: Honor an explicit pronunciation token such as
+            ``WORD(2)`` exactly. The default is ``False``: suffixes collapse
+            to the base word and Viterbi considers its full alternative chain.
+            Unknown explicit variants fail with the token named. This option
+            affects forced alignment only, never Baum-Welch training.
     """
 
     _active: Aligner | None = None
@@ -90,6 +95,7 @@ class Aligner:
         feat_type: str = _DEFAULT_FEAT_TYPE,
         frate: int = 100,
         lts_mismatch: bool = False,
+        verbatim_tokens: bool = False,
     ) -> None:
         if Aligner._active is not None:
             raise RuntimeError(
@@ -133,6 +139,7 @@ class Aligner:
                     "feat_type": feat_type,
                     "frate": frate,
                     "lts_mismatch": lts_mismatch,
+                    "verbatim_tokens": verbatim_tokens,
                 },
                 (model_dir, dict_path),
             )
@@ -158,6 +165,7 @@ class Aligner:
         cfg.ceplen = int(feat_record["-ceplen"])
         cfg.frate = int(feat_record["-frate"])
         cfg.lts_mismatch = 1 if lts_mismatch else 0
+        cfg.verbatim_tokens = 1 if verbatim_tokens else 0
 
         self._feat_type_b = feat_record["-feat"].encode()
         self._cmn_b = cmn.encode()
@@ -244,9 +252,10 @@ class Aligner:
         Returns:
             An :class:`AlignmentResult` with word- (and phone-/state-)
             level segments. A variant suffix such as ``reading(2)`` labels the
-            dictionary pronunciation selected by Viterbi. A suffix in
-            ``transcript`` does not constrain that selection and need not be
-            preserved in the output.
+            dictionary pronunciation selected by Viterbi. By default, a
+            suffix in ``transcript`` does not constrain that selection. With
+            ``verbatim_tokens=True``, an explicit suffix selects exactly that
+            pronunciation and is preserved.
         """
         if hasattr(self, "_proxy"):
             result = self._proxy.call("align_mfcc", mfcc, transcript, utterance_id)

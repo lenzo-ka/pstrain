@@ -59,6 +59,7 @@ def align_corpus(
     filler_dict: Path | None = None,
     audio_ext: str = ".wav",
     include_phones: bool = True,
+    verbatim_tokens: bool = False,
 ) -> AlignmentJob:
     """Align an entire corpus.
 
@@ -72,6 +73,7 @@ def align_corpus(
         filler_dict: Path to filler dictionary (optional).
         audio_ext: Audio file extension (default ``".wav"``).
         include_phones: Capture phone-level segmentation.
+        verbatim_tokens: Honor explicit pronunciation variants exactly.
 
     Returns:
         :class:`AlignmentJob` with all alignment results.
@@ -111,6 +113,7 @@ def align_corpus(
             dict_path,
             filler_dict=filler_dict,
             include_phones=include_phones,
+            verbatim_tokens=verbatim_tokens,
         )
     except (FileNotFoundError, RuntimeError) as e:
         logger.error("Failed to initialize aligner: %s", e)

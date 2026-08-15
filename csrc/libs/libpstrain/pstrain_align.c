@@ -81,6 +81,7 @@ struct pstrain_align_context_s {
     int32 ncep;
     int32 want_phones;
     int32 want_states;
+    int32 verbatim_tokens;
 };
 
 /* Single-instance enforcement: the underlying aligner holds module-static
@@ -128,6 +129,7 @@ pstrain_align_config_default(pstrain_align_config_t *config)
     config->ceplen = 13;
     config->frate = 100;
     config->lts_mismatch = 0;
+    config->verbatim_tokens = 0;
 }
 
 static const char *
@@ -237,6 +239,7 @@ pstrain_align_init(const char *mdef_path,
     ctx->ncep = feat_cepsize(kbcore_fcb(kbc));
     ctx->want_phones = cfg->compute_phones;
     ctx->want_states = cfg->compute_states;
+    ctx->verbatim_tokens = cfg->verbatim_tokens;
     g_ctx = ctx;
     g_last_error[0] = '\0';
     return ctx;
@@ -282,6 +285,36 @@ clean_transcript(const char *raw)
         out[--len] = '\0';
     }
     return out;
+}
+
+static int
+has_numeric_variant_suffix(const char *word)
+{
+    const char *open, *p;
+    size_t len = strlen(word);
+    if (len < 4 || word[len - 1] != ')' || (open = strrchr(word, '(')) == NULL ||
+        open == word || open + 1 == word + len - 1)
+        return 0;
+    for (p = open + 1; p < word + len - 1; ++p)
+        if (*p < '0' || *p > '9') return 0;
+    return 1;
+}
+
+static int
+validate_verbatim_tokens(const char *transcript)
+{
+    char *copy = ckd_salloc(transcript);
+    char *token = strtok(copy, " \t\r\n");
+    while (token != NULL) {
+        if (has_numeric_variant_suffix(token) && NOT_S3WID(dict_wordid(dict, token))) {
+            set_error("explicit pronunciation token '%s' is not in the dictionary", token);
+            ckd_free(copy);
+            return -1;
+        }
+        token = strtok(NULL, " \t\r\n");
+    }
+    ckd_free(copy);
+    return 0;
 }
 
 /* Count the entries in a linked seg list. Each variant of align_*_t has
@@ -505,6 +538,9 @@ pstrain_align_mfcc(pstrain_align_context_t *ctx,
     }
     *out_result = NULL;
 
+    if (ctx->verbatim_tokens && validate_verbatim_tokens(transcript) < 0)
+        return -1;
+
     int32 nfr = 0;
     if (prepare_feat_from_mfcc(mfcc, n_frames, ncep, &nfr) < 0) {
         return -1;
@@ -516,6 +552,7 @@ pstrain_align_mfcc(pstrain_align_context_t *ctx,
     align_wdseg_t *wdseg = NULL;
     int rc = align_utt_capture(sent, nfr,
                                (char *)(utt_id ? utt_id : "utt"),
+                               ctx->verbatim_tokens,
                                &stseg, &phseg, &wdseg);
     if (rc != 0) {
         ckd_free(sent);
@@ -544,6 +581,9 @@ pstrain_align_mfc_file(pstrain_align_context_t *ctx,
     }
     *out_result = NULL;
 
+    if (ctx->verbatim_tokens && validate_verbatim_tokens(transcript) < 0)
+        return -1;
+
     int32 nfr = feat_s2mfc2feat(kbcore_fcb(kbc), mfc_path, NULL, "",
                                 0, -1, feat, PSTRAIN_ALIGN_MAX_FRAMES);
     if (nfr <= 0) {
@@ -557,6 +597,7 @@ pstrain_align_mfc_file(pstrain_align_context_t *ctx,
     align_wdseg_t *wdseg = NULL;
     int rc = align_utt_capture(sent, nfr,
                                (char *)(utt_id ? utt_id : "utt"),
+                               ctx->verbatim_tokens,
                                &stseg, &phseg, &wdseg);
     if (rc != 0) {
         ckd_free(sent);

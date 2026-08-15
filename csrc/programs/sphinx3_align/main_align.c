@@ -698,6 +698,7 @@ int
 align_utt_capture(char *sent,
                   int32 nfr,
                   char *uttid,
+                  int32 verbatim_tokens,
                   align_stseg_t **out_stseg,
                   align_phseg_t **out_phseg,
                   align_wdseg_t **out_wdseg)
@@ -716,7 +717,8 @@ align_utt_capture(char *sent,
         return -1;
     }
 
-    if (align_build_sent_hmm(sent, cmd_ln_int32_r(kbc->config, "-insert_sil")) != 0) {
+    if (align_build_sent_hmm(sent, cmd_ln_int32_r(kbc->config, "-insert_sil"),
+                             verbatim_tokens) != 0) {
         align_destroy_sent_hmm();
         E_ERROR("No sentence HMM; no alignment for %s\n", uttid);
         return -2;
@@ -806,7 +808,7 @@ align_utt(char *sent,           /* In: Reference transcript */
     ptmr_start(timers + tmr_utt);
 
 
-    if (align_build_sent_hmm(sent, cmd_ln_int32_r(kbc->config, "-insert_sil")) != 0) {
+    if (align_build_sent_hmm(sent, cmd_ln_int32_r(kbc->config, "-insert_sil"), 0) != 0) {
         align_destroy_sent_hmm();
         ptmr_stop(timers + tmr_utt);
 

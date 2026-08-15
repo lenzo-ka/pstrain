@@ -34,9 +34,10 @@ typedef struct pstrain_align_config_s {
     int     ceplen;          /**< Cepstral vector width.    Default 13.   */
     int     frate;           /**< Frame rate (Hz).          Default 100.  */
     int     lts_mismatch;    /**< Use LTS rules for OOV.    Default 0.    */
+    int     verbatim_tokens; /**< Honor explicit WORD(n).    Default 0.    */
 } pstrain_align_config_t;
 
-#define PSTRAIN_ABI_VERSION 1
+#define PSTRAIN_ABI_VERSION 2
 
 uint32 pstrain_abi_version(void);
 void pstrain_align_config_default(pstrain_align_config_t *config);

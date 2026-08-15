@@ -115,6 +115,7 @@
     ],
     "pin_condition_source_kinds": {
       "off": {
+        "alignment.verbatim_tokens": "project-profile",
         "description": "project-profile",
         "features.agc": "project-profile",
         "features.alpha": "project-profile",
@@ -176,6 +177,7 @@
         "training.untied_inventory": "project-profile"
       },
       "on": {
+        "alignment.verbatim_tokens": "project-profile",
         "description": "project-profile",
         "features.agc": "project-profile",
         "features.alpha": "project-profile",
@@ -239,6 +241,9 @@
     },
     "pin_conditions": {
       "off": {
+        "alignment": {
+          "verbatim_tokens": false
+        },
         "description": "BM1 multipron off pin",
         "features": {
           "agc": "none",
@@ -318,6 +323,9 @@
         }
       },
       "on": {
+        "alignment": {
+          "verbatim_tokens": false
+        },
         "description": "BM1 multipron on pin",
         "features": {
           "agc": "none",

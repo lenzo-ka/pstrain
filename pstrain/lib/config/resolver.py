@@ -137,6 +137,7 @@ CONSUMERS: dict[str, tuple[str, str]] = {
     "split.seed": ("pipeline.split", "split"),
     "runner.jobs": ("pipeline.runner", "runner"),
     "runner.nice": ("pipeline.runner", "runner"),
+    "alignment.verbatim_tokens": ("cli.align", "alignment"),
 }
 
 CONSUMER_TOUCHES: dict[str, str] = {
@@ -209,6 +210,7 @@ CONSUMER_TOUCHES: dict[str, str] = {
     "split.seed": "split.seed",
     "runner.jobs": "runner.jobs",
     "runner.nice": "runner.nice",
+    "alignment.verbatim_tokens": "resolved_config.profile.alignment.verbatim_tokens",
 }
 
 

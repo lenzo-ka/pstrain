@@ -245,6 +245,20 @@ class RunnerConfig(StrictModel):
     nice: Annotated[int, Field(ge=0, description="Worker niceness increment")] = 5
 
 
+class AlignmentConfig(StrictModel):
+    """Forced-alignment transcript policy."""
+
+    verbatim_tokens: Annotated[
+        bool,
+        Field(
+            description=(
+                "Honor explicit pronunciation tokens such as WORD(2) exactly during forced "
+                "alignment; this does not alter training"
+            )
+        ),
+    ] = False
+
+
 class Profile(StrictModel):
     """One complete named model-training profile."""
 
@@ -253,6 +267,7 @@ class Profile(StrictModel):
     training: TrainingConfig = Field(default_factory=TrainingConfig)
     split: SplitConfig = Field(default_factory=SplitConfig)
     runner: RunnerConfig = Field(default_factory=RunnerConfig)
+    alignment: AlignmentConfig = Field(default_factory=AlignmentConfig)
 
 
 class ProfileDefinition(StrictModel):
@@ -264,6 +279,7 @@ class ProfileDefinition(StrictModel):
     training: dict[str, Any] | None = None
     split: dict[str, Any] | None = None
     runner: dict[str, Any] | None = None
+    alignment: dict[str, Any] | None = None
 
 
 class ProfilesDocument(StrictModel):
@@ -282,9 +298,10 @@ class OverlayDocument(StrictModel):
     training: dict[str, Any] | None = None
     split: dict[str, Any] | None = None
     runner: dict[str, Any] | None = None
+    alignment: dict[str, Any] | None = None
 
 
-SEMANTIC_BLOCKS = ("features", "training", "split", "runner")
+SEMANTIC_BLOCKS = ("features", "training", "split", "runner", "alignment")
 
 
 def default_profile() -> Profile:

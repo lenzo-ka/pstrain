@@ -100,12 +100,19 @@ class AlignCommand(Command):
 
     def execute(self, ctx: CommandContext) -> CommandResult:
         from pstrain.lib.alignment import align_corpus, load_transcripts, save_ctm, save_textgrid
+        from pstrain.lib.config import resolve_config
 
         project_dir = Path(ctx.args.project_dir).resolve() if ctx.args.project_dir else Path.cwd()
         if not project_dir.exists():
             return CommandResult.fail(f"Project directory does not exist: {project_dir}")
 
         config_name = ctx.args.config
+        try:
+            alignment_config = resolve_config(
+                project_dir, profile_name=config_name
+            ).profile.alignment
+        except ValueError as exc:
+            return CommandResult.fail(str(exc))
         model_arg = ctx.args.model
 
         if "/" in model_arg or Path(model_arg).is_absolute():
@@ -160,6 +167,7 @@ class AlignCommand(Command):
         ctx.log(f"  Audio dir:  {audio_dir}")
         ctx.log(f"  Dictionary: {dict_file}")
         ctx.log(f"  Phones:     {'yes' if include_phones else 'no'}")
+        ctx.log(f"  Verbatim:   {'yes' if alignment_config.verbatim_tokens else 'no'}")
         if ctx.dry_run:
             ctx.log("# Would align and write segmentations")
             return CommandResult.ok("Dry run complete")
@@ -173,6 +181,7 @@ class AlignCommand(Command):
             filler_dict=filler_dict,
             audio_ext=ctx.args.audio_ext,
             include_phones=include_phones,
+            verbatim_tokens=alignment_config.verbatim_tokens,
         )
 
         ctx.log(

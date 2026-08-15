@@ -4,6 +4,15 @@ Configuration Reference
 All configuration parameters for pstrain.
 
 
+alignment
+---------
+
+``alignment.verbatim_tokens``
+   :Type: ``bool``
+   :Default: ``False``
+   :Description: Honor explicit pronunciation tokens such as WORD(2) exactly during forced alignment; this does not alter training
+
+
 description
 -----------
 

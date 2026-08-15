@@ -46,10 +46,21 @@ def test_active_names_and_defaults_are_canonical() -> None:
     assert profile.features.samprate == 16000
     assert profile.training.n_state == 3
     assert profile.runner.jobs is None
+    assert profile.alignment.verbatim_tokens is False
     with pytest.raises(ValueError):
         FeatureConfig.model_validate({"num_ceps": 26})
     with pytest.raises(ValueError):
         TrainingConfig.model_validate({"n_states": 5})
+
+
+def test_alignment_verbatim_tokens_resolves_opt_in(tmp_path: Path) -> None:
+    (tmp_path / "etc").mkdir()
+    (tmp_path / "etc" / "config.yaml").write_text(
+        "config_version: 1\nalignment:\n  verbatim_tokens: true\n"
+    )
+    resolved = resolve_config(tmp_path)
+    assert resolved.profile.alignment.verbatim_tokens is True
+    assert resolved.fields["alignment.verbatim_tokens"].consumer == "cli.align"
 
 
 @pytest.mark.parametrize(

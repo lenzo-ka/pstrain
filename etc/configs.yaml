@@ -60,6 +60,8 @@ profiles:
     runner:
       jobs: null
       nice: 5
+    alignment:
+      verbatim_tokens: false
   wideband:
     extends: default
     description: Wideband (16kHz) microphone speech

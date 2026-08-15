@@ -211,6 +211,13 @@ disk for A/B testing. The included
 held-out audio against two models and reports which variants each
 model picks per word.
 
+`alignment.verbatim_tokens` is a separate, default-off forced-alignment
+policy. When enabled, an explicit transcript token such as `WORD(2)` selects
+only that pronunciation; when disabled, forced alignment collapses the token
+to its base word and scores the complete alternative chain. Baum-Welch
+training already treats explicit variant tokens exactly in both
+`multipron_training` modes and is never changed by the alignment setting.
+
 ## What we don't do
 
 * **OpenFST or K2-style FST machinery.** Overkill; our per-utterance
@@ -294,7 +301,7 @@ learns about variant phones.
 | 4 | `4a05db5` | Wire into BW behind the `multipron` config knob. |
 | Flip | `d68c17e` | Enable multipron training by default. |
 | Eval | `0b0691c` | Empirical comparison script + results. |
-| Fix | `115dd02` | Repair forced alignment to use single-pass `seg()` (and preserve variant suffixes). |
+| Fix | `115dd02` | Repair forced alignment to use single-pass `seg()` (and report the variant selected from the base word's alternatives). |
 | Upstream-align | `7e2bc43` | Hoist `build_utt_state_seq` into `next_utt_states_graph()` to mirror upstream PR #58. |
 | Upstream-align | `9fe0e38` | Add `-multipron` argv flag to the standalone `bw` binary. |
 
