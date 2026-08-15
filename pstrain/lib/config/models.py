@@ -91,14 +91,22 @@ class TrainingConfig(StrictModel):
         float, Field(ge=0, le=1, description="Maximum skipped-update fraction")
     ] = 0.05
     retry_beam_factor: Annotated[
-        float, Field(gt=0, description="Beam widening factor for one retry")
+        float,
+        Field(
+            gt=0,
+            description=(
+                "Factor that widens the forward beam for one retry after an utterance fails "
+                "to reach its final state; a retry is counted only when that second attempt runs"
+            ),
+        ),
     ] = 1e10
     failed_alignment: Annotated[
         Literal["recover", "abort", "omit"],
         Field(
             description=(
-                "Action when Baum-Welch alignment fails; ``omit`` reports and excludes "
-                "the utterance while continuing"
+                "Action when an utterance fails to reach its final state: ``recover`` runs one "
+                "wider-beam retry and aborts if it also fails, ``abort`` fails immediately, and "
+                "``omit`` reports and excludes the failed update"
             )
         ),
     ] = "recover"
@@ -108,7 +116,8 @@ class TrainingConfig(StrictModel):
             description=(
                 "Retain the compact model files from every completed Baum-Welch pass under "
                 "``iterations/NN``; costs roughly one additional model copy per pass and does "
-                "not retain the much larger ``.bw-accum`` shard accumulators. The deprecated "
+                "not retain the much larger ``.bw-accum`` shard accumulators or change which "
+                "checkpoint is loaded by training. The deprecated "
                 "``PSTRAIN_BW_CHECKPOINTS=1`` environment variable can also enable retention, "
                 "but cannot disable a true profile setting"
             )
@@ -162,15 +171,34 @@ class TrainingConfig(StrictModel):
     ] = 20
     question_niter: Annotated[int, Field(ge=1, description="Question generation iterations")] = 1
     multipron_training: Annotated[
-        bool, Field(description="Sum posteriors over pronunciation variants")
+        bool,
+        Field(
+            description=(
+                "Sum posteriors over pronunciation variants; when disabled without an explicit "
+                "inventory policy, untied inventory resolves to upstream-compatible ``linear``"
+            )
+        ),
     ] = True
     optional_final_silence: Annotated[
         bool,
-        Field(description="Permit final transcript silence to consume zero frames"),
+        Field(
+            description=(
+                "Permit final transcript silence to consume zero frames; stock SphinxTrain "
+                "requires that silence to consume at least one frame"
+            )
+        ),
     ] = True
     untied_inventory: Annotated[
         Literal["all-triphone", "transcript-reachable", "linear"],
-        Field(description="Untied-model phone inventory policy"),
+        Field(
+            description=(
+                "Untied-model phone inventory policy: ``transcript-reachable`` includes contexts "
+                "reachable through every pronunciation when multipron training is enabled; "
+                "upstream-compatible ``linear`` includes contexts observed through each "
+                "transcript word's first pronunciation; ``all-triphone`` includes the complete "
+                "phoneset cross-product"
+            )
+        ),
     ] = "all-triphone"
     exclusion_schedule: Annotated[
         dict[str, dict[int | str, list[str]]],
@@ -270,7 +298,9 @@ class AlignmentConfig(StrictModel):
         Field(
             description=(
                 "Honor explicit pronunciation tokens such as WORD(2) exactly during forced "
-                "alignment; this does not alter training"
+                "alignment, matching PocketSphinx token handling. When false, suffixes collapse "
+                "to the base word and the vendored aligner considers its alternatives. This does "
+                "not alter training"
             )
         ),
     ] = False
