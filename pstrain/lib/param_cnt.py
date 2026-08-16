@@ -98,4 +98,4 @@ def count_params(
     )
 
     if ret != 0:
-        raise RuntimeError(f"Parameter counting failed for {param_type.name}")
+        raise RuntimeError(f"Parameter counting failed for {param_type.name}: -ctlfn {ctl_path}")

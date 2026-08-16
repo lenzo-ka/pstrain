@@ -1,9 +1,11 @@
 """Tests for parameter counting functionality."""
 
+import sys
 from pathlib import Path
 
 import pytest
 
+from pstrain.lib.native_worker import PstrainNativeError
 from pstrain.lib.param_cnt import ParamType, count_params
 
 # Check if library exists
@@ -119,6 +121,77 @@ class TestCountParamsValidation:
         )
 
         assert output.read_text().splitlines()
+
+    @pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
+    @pytest.mark.parametrize(
+        ("contents", "name"),
+        [
+            ("   #comment\n", "indented-comment"),
+            ("  \t  \n", "whitespace"),
+            ("", "empty"),
+        ],
+    )
+    def test_zero_utterance_control_is_unsuccessful(
+        self, tmp_path: Path, contents: str, name: str
+    ) -> None:
+        """Test that zero selected utterances fail across the CFFI boundary."""
+        fixture = Path(__file__).parent / "fixtures" / "multipron_final_state"
+        ctl = tmp_path / f"{name}.ctl"
+        ctl.write_text(contents)
+        lsn = tmp_path / "empty.lsn"
+        lsn.write_text("a\n")
+        output = tmp_path / "phone.counts"
+
+        with pytest.raises(PstrainNativeError) as exc_info:
+            count_params(
+                mdef_path=fixture / "model" / "mdef",
+                dict_path=fixture / "dictionary.dict",
+                ctl_path=ctl,
+                lsn_path=lsn,
+                output_path=output,
+                param_type=ParamType.PHONE,
+            )
+
+        assert f"-ctlfn {ctl}" in str(exc_info.value)
+        assert not output.exists()
+
+    @pytest.mark.parametrize("kind", ["directory", "mode-000", "dev-null", "malformed-second-line"])
+    def test_control_read_failures_remain_unsuccessful(self, tmp_path: Path, kind: str) -> None:
+        """Test established control-reader failures across the CFFI boundary."""
+        if sys.platform == "win32" and kind in {"mode-000", "dev-null"}:
+            pytest.skip("POSIX control-file behavior")
+
+        fixture = Path(__file__).parent / "fixtures" / "multipron_final_state"
+        ctl = tmp_path / "test.ctl"
+        if kind == "directory":
+            ctl.mkdir()
+        elif kind == "mode-000":
+            ctl.write_text("test\n")
+            ctl.chmod(0)
+        elif kind == "dev-null":
+            ctl = Path("/dev/null")
+        else:
+            ctl.write_text("test\ngarbage ???\n")
+
+        lsn = tmp_path / "test.lsn"
+        lsn.write_text("a\n")
+        output = tmp_path / "phone.counts"
+
+        try:
+            with pytest.raises(PstrainNativeError):
+                count_params(
+                    mdef_path=fixture / "model" / "mdef",
+                    dict_path=fixture / "dictionary.dict",
+                    ctl_path=ctl,
+                    lsn_path=lsn,
+                    output_path=output,
+                    param_type=ParamType.PHONE,
+                )
+        finally:
+            if kind == "mode-000":
+                ctl.chmod(0o600)
+
+        assert not output.exists()
 
 
 class TestCountParamsStringConversion:
