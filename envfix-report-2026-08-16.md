@@ -19,6 +19,5 @@
   tests with one expected skip and one deselection; the focused configuration suite passed 41/41;
   and the ambient-import, floating-point contract, generated documentation, Arctic pin, paired
   analysis, Ruff, formatting, and mypy checks passed.
-- PR #115 Python 3.13 passed on commit `06181da`. Python 3.11 passed its test suite, then its
-  installed-package `config-check` invocation correctly rejected the job's editable installation;
-  verification of the CI-only prerequisite correction is pending.
+- PR #115 passed all seven CI jobs on commit `b6ae41d`. Ubuntu Python 3.11 passed in 7 minutes 24
+  seconds, and Ubuntu Python 3.13 passed in 4 minutes 58 seconds.
