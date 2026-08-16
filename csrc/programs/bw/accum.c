@@ -773,18 +773,18 @@ commit(int32 mixw_reest,
     if (mixw_reest) {
 	sprintf(fn_bkp, "%s/mixw_counts.bkp", out_dir);
 
-	unlink(fn_bkp);
+	sys_compat_unlink(fn_bkp);
     }
     if (tmat_reest) {
 	sprintf(fn_bkp, "%s/tmat_counts.bkp", out_dir);
 
-	unlink(fn_bkp);
+	sys_compat_unlink(fn_bkp);
     }
     if (mean_reest || var_reest) {
 	sprintf(fn_bkp, "%s/gauden_counts.bkp", out_dir);
 
 
-	unlink(fn_bkp);
+	sys_compat_unlink(fn_bkp);
     }
 
     sprintf(fn, "%s/ckpt", out_dir);
@@ -804,7 +804,7 @@ commit(int32 mixw_reest,
 	if (fp != NULL) {
 	    fclose(fp);
 
-	    if (unlink(fn) < 0) {
+	    if (sys_compat_unlink(fn) < 0) {
 		E_ERROR("Unable to unlink checkpoint file\n");
 		return S3_ERROR;
 	    }

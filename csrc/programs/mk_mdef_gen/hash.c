@@ -43,6 +43,7 @@
 #include <s3/s3.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys_compat/misc.h>
 #include "hash.h"
 
 
@@ -90,10 +91,10 @@ hashelement_t *install(const char *b, const char *l, const char *r, const char *
     {
         np = (hashelement_t *) calloc (1,sizeof(*np));
         if (np == NULL ||
-	    (np->basephone = strdup(b)) == NULL ||
-	    (np->leftcontext = strdup(l)) == NULL ||
-	    (np->rightcontext = strdup(r)) == NULL ||
-	    (np->wordposition = strdup(wp)) == NULL)
+	    (np->basephone = sys_compat_strdup(b)) == NULL ||
+	    (np->leftcontext = sys_compat_strdup(l)) == NULL ||
+	    (np->rightcontext = sys_compat_strdup(r)) == NULL ||
+	    (np->wordposition = sys_compat_strdup(wp)) == NULL)
             return NULL;
 
         np->dictcount = 0;
@@ -161,7 +162,7 @@ dicthashelement_t *dictinstall(char *name, dicthashelement_t **hashtable)
     if ((np = dictlookup(name, hashtable)) == NULL)
     {
         np = (dicthashelement_t *) calloc (1,sizeof(*np));
-        if (np == NULL || (np->word = strdup(name)) == NULL)
+        if (np == NULL || (np->word = sys_compat_strdup(name)) == NULL)
             return NULL;
 
         np->nphns = 0;
@@ -227,7 +228,7 @@ phnhashelement_t *phninstall(char *name, phnhashelement_t **hashtable)
     if ((np = phnlookup(name, hashtable)) == NULL)
     {
         np = (phnhashelement_t *) calloc (1,sizeof(*np));
-        if (np == NULL || (np->phone = strdup(name)) == NULL)
+        if (np == NULL || (np->phone = sys_compat_strdup(name)) == NULL)
             return NULL;
 
         hashval = phnhash(name);

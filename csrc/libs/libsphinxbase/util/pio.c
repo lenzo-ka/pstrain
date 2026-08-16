@@ -44,9 +44,8 @@
 #include <string.h>
 #include <assert.h>
 
-#ifdef HAVE_UNISTD_H
-#include <unistd.h>
-#endif
+#include <sys_compat/file.h>
+#include <sys_compat/misc.h>
 
 #ifdef HAVE_SYS_TYPES_H
 #include <sys/types.h>
@@ -136,7 +135,7 @@ fopen_comp(const char *file, const char *mode, int32 * ispipe)
                 command = NULL; /* Make compiler happy. */
                 E_FATAL("Unknown  compression type %d\n", isgz);
             }
-            if ((fp = popen(command, mode)) == NULL) {
+            if ((fp = sys_compat_popen(command, mode)) == NULL) {
                 E_ERROR_SYSTEM("Failed to open a pipe for a command '%s' mode '%s'", command, mode);
                 ckd_free(command);
                 return NULL;
@@ -159,7 +158,7 @@ fopen_comp(const char *file, const char *mode, int32 * ispipe)
                 command = NULL; /* Make compiler happy. */
                 E_FATAL("Unknown compression type %d\n", isgz);
             }
-            if ((fp = popen(command, mode)) == NULL) {
+            if ((fp = sys_compat_popen(command, mode)) == NULL) {
                 E_ERROR_SYSTEM("Failed to open a pipe for a command '%s' mode '%s'", command, mode);
                 ckd_free(command);
                 return NULL;
@@ -185,11 +184,7 @@ fclose_comp(FILE * fp, int32 ispipe)
 {
     if (ispipe) {
 #ifdef HAVE_POPEN
-#if defined(_WIN32) && (!defined(__SYMBIAN32__))
-        _pclose(fp);
-#else
-        pclose(fp);
-#endif
+        sys_compat_pclose(fp);
 #endif
     }
     else
@@ -438,7 +433,7 @@ fread_retry(void *pointer, int32 size, int32 num_items, FILE * stream)
 
             loc += n_items_read * size;
 #if !defined(_WIN32) && defined(HAVE_UNISTD_H)
-            sleep(1);
+            sys_compat_sleep(1);
 #endif
         }
     } while (n_items_rem > 0);
@@ -508,7 +503,7 @@ stat_retry(const char *file, struct stat * statbuf)
             E_ERROR_SYSTEM("Failed to stat file '%s'; retrying...", file);
         }
 #ifdef HAVE_UNISTD_H
-        sleep(1);
+        sys_compat_sleep(1);
 #endif
     }
 

@@ -56,6 +56,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <sys_compat/misc.h>
 
 pset_t *
 read_pset_file(const char *file_name,
@@ -93,7 +94,7 @@ read_pset_file(const char *file_name,
 	if (n_phone > 0) {
 	    out[i].phone  = ckd_calloc(n_phone, sizeof(acmod_id_t));
 	    out[i].member = ckd_calloc(n_ci, sizeof(uint32));
-	    out[i].name = strdup(strtok(li->buf, " \t"));
+	    out[i].name = sys_compat_strdup(strtok(li->buf, " \t"));
 	    for (j = 0; j < n_phone; j++) {
 		char *phone = strtok(NULL, " \t");
 		p = acmod_set_name2id(acmod_set, phone);
@@ -107,7 +108,7 @@ read_pset_file(const char *file_name,
 	}
 	else {
 	    string_trim(li->buf, STRING_BOTH);
-	    out[i].name = strdup(li->buf);
+	    out[i].name = sys_compat_strdup(li->buf);
 	    out[i].posn = ckd_calloc(N_WORD_POSN, sizeof(uint32));
 
 	    if (strcmp(out[i].name, "WDBNDRY_B") == 0) {

@@ -67,6 +67,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys_compat/file.h>
 
 #if defined(_WIN32) && !defined(__SYMBIAN32__)
 # include <windows.h>
@@ -74,13 +75,8 @@
 #  include <time.h>
 # endif
 #else /* Unix/macOS */
-# include <unistd.h>
 # include <sys/time.h>
 # include <sys/resource.h>
-#endif
-
-#ifdef _MSC_VER
-#pragma warning (disable: 4996)
 #endif
 
 #include "sphinxbase/profile.h"
@@ -319,24 +315,24 @@ host_endian(void)
     if (fwrite(&k, sizeof(int32), 1, fp) != 1) {
         E_ERROR("Failed to write to file '%s'\n", file);
         fclose(fp);
-        unlink(file);
+        sys_compat_unlink(file);
         return -1;
     }
 
     fclose(fp);
     if ((fp = fopen(file, "rb")) == NULL) {
         E_ERROR_SYSTEM("Failed to open file '%s' for reading", file);
-        unlink(file);
+        sys_compat_unlink(file);
         return -1;
     }
     if (fread(buf, 1, sizeof(int32), fp) != sizeof(int32)) {
         E_ERROR("Failed to read from file '%s'\n", file);
         fclose(fp);
-        unlink(file);
+        sys_compat_unlink(file);
         return -1;
     }
     fclose(fp);
-    unlink(file);
+    sys_compat_unlink(file);
 
     /* If buf[0] == lsB of BYTE_ORDER_MAGIC, we are little-endian */
     endian = (buf[0] == (BYTE_ORDER_MAGIC & 0x000000ff)) ? 1 : 0;

@@ -53,6 +53,7 @@
 #include <sphinxbase/ckd_alloc.h>
 #include <sphinxbase/byteorder.h>
 #include <sphinxbase/hash_table.h>
+#include <sys_compat/misc.h>
 
 #include "sphinx_wave2feat.h"
 #include "cmd_ln_defn.h"
@@ -235,7 +236,7 @@ detect_sph2pipe(sphinx_wave2feat_t *wtf)
 
     /* Now popen it with sph2pipe. */
     cmdline = string_join("sph2pipe -f raw '", wtf->infile, "'", NULL);
-    if ((fh = popen(cmdline, "r")) == NULL) {
+    if ((fh = sys_compat_popen(cmdline, "r")) == NULL) {
         E_ERROR_SYSTEM("Failed to popen(\"sph2pipe -f raw '%s'\")", wtf->infile);
         ckd_free(cmdline);
         return -1;
@@ -264,7 +265,7 @@ detect_sox(sphinx_wave2feat_t *wtf)
         ckd_free(cmdline);
         return -1;
     }
-    if ((fh = popen(cmdline, "r")) == NULL) {
+    if ((fh = sys_compat_popen(cmdline, "r")) == NULL) {
         E_ERROR_SYSTEM("Failed to popen(\"%s\")", cmdline);
         ckd_free(cmdline);
         return -1;

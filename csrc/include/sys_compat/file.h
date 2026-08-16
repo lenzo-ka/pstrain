@@ -56,6 +56,12 @@
 
 #define MAXPATHLEN FILENAME_MAX
 #define F_OK 0
+#define sys_compat_access _access
+#if defined(_WIN32_WCE) || defined(_WIN32_WP)
+#define sys_compat_unlink unlink
+#else
+#define sys_compat_unlink _unlink
+#endif
 
 #else
 
@@ -66,6 +72,9 @@
 #include <sys/types.h>
 #include <fcntl.h>
 #include <unistd.h>
+
+#define sys_compat_access access
+#define sys_compat_unlink unlink
 
 #endif
 

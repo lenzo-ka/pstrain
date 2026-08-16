@@ -160,7 +160,7 @@ agg_all_seg(feat_t *fcb,
 			    E_INFO("sleeping...\n");
 			    no_retries++;
 			}
-			sleep(3);
+			sys_compat_sleep(3);
 
 			if(no_retries > 10){
 			  E_FATAL("Failed to write to a dmp file after 10 retries of getting MFCC(about 30 seconds)\n ");

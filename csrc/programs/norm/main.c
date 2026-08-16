@@ -308,7 +308,7 @@ normalize()
 		    E_ERROR("Unable to write %s; Retrying...\n", file_name);
 		}
 		++err;
-		sleep(3);
+		sys_compat_sleep(3);
 		no_retries++;
 		if(no_retries>10){
 		  E_FATAL("Failed to get the files after 10 retries(about 30 seconds).\n ");
@@ -353,7 +353,7 @@ normalize()
 		    E_ERROR("Unable to write %s; Retrying...\n", file_name);
 		}
 		++err;
-		sleep(3);
+		sys_compat_sleep(3);
 		no_retries++;
 		if(no_retries>10){
 		  E_FATAL("Failed to get the files after 10 retries(about 5 minutes).\n ");
@@ -376,7 +376,7 @@ normalize()
 		    E_ERROR("Unable to write %s; Retrying...\n", file_name);
 		}
 		++err;
-		sleep(3);
+		sys_compat_sleep(3);
 		no_retries++;
 		if(no_retries>10){
 		  E_FATAL("Failed to get the files after 10 retries(about 5 minutes).\n ");

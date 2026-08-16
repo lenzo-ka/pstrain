@@ -87,7 +87,7 @@ accum_wt_param(char **accum_dir,
     for (i = 0; accum_dir[i] != NULL; i++) {
 	sprintf(fn, "%s/gauden_counts", accum_dir[i]);
 
-	if (access(fn, F_OK) == 0) {
+	if (sys_compat_access(fn, F_OK) == 0) {
 	    E_INFO("Reading gaussian density count file %s\n", fn);
 
 	    if (s3gaucnt_read(fn,

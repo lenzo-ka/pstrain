@@ -123,7 +123,7 @@
 #endif
 
 #ifdef _MSC_VER
-#pragma warning (disable: 4244 4996)
+#pragma warning (disable: 4244)
 #endif
 
 #include "sphinxbase/fe.h"

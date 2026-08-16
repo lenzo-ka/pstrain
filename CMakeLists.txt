@@ -31,7 +31,12 @@ CHECK_TYPE_SIZE(long LONG)
 CHECK_TYPE_SIZE("long long" LONG_LONG)
 set(SIZEOF_LONG ${LONG})
 set(SIZEOF_LONG_LONG ${LONG_LONG})
-CHECK_SYMBOL_EXISTS(popen stdio.h HAVE_POPEN)
+if(WIN32)
+  # sys_compat routes the POSIX spelling to the MSVC CRT's _popen.
+  set(HAVE_POPEN 1)
+else()
+  CHECK_SYMBOL_EXISTS(popen stdio.h HAVE_POPEN)
+endif()
 CHECK_SYMBOL_EXISTS(snprintf stdio.h HAVE_SNPRINTF)
 CHECK_INCLUDE_FILE(sys/stat.h HAVE_SYS_STAT_H)
 CHECK_INCLUDE_FILE(sys/types.h HAVE_SYS_TYPES_H)
@@ -68,6 +73,7 @@ if(MSVC)
   endif()
   add_compile_options("${PSTRAIN_FP_CONTRACT_FLAG}")
   add_compile_definitions(
+    _CRT_SECURE_NO_WARNINGS
     PSTRAIN_FP_CONTRACT_POLICY="${PSTRAIN_FP_CONTRACT_POLICY}")
   message(STATUS
     "Floating-point contraction policy: ${PSTRAIN_FP_CONTRACT_POLICY} (declared)")

@@ -94,6 +94,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <sys_compat/misc.h>
 #include <assert.h>
 
 /*********************************************************************
@@ -208,7 +209,7 @@ char **new_attrib(const char **in)
     out = (char **)ckd_calloc(len+1, sizeof(char *));
 
     for (i = 0; i < len; i++) {
-	out[i] = strdup(in[i]);
+	out[i] = sys_compat_strdup(in[i]);
     }
 
     out[i] = NULL;
@@ -269,7 +270,7 @@ acmod_set_add_ci(acmod_set_t *acmod_set,
      * does not have restrictions on overwriting the value
      * of the passed arguments */
 
-    acmod_set->ci[id].name   = strdup(name);
+    acmod_set->ci[id].name   = sys_compat_strdup(name);
     acmod_set->ci[id].attrib = new_attrib(attrib);
 
     /* the following allows ci_acmod_t structures to be
@@ -881,7 +882,7 @@ acmod_set_s2_parse_triphone(acmod_set_t *acmod_set,
     uint32 i;
     char *pmap = WORD_POSN_CHAR_MAP;
 
-    save = strdup(str);
+    save = sys_compat_strdup(str);
 
     tok = strtok(save, "(,)");
     *base = acmod_set_name2id(acmod_set, tok);

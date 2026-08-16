@@ -48,6 +48,8 @@
 #define MISC_H
 
 #include <pstrain/rng.h>
+#include <stdio.h>
+#include <string.h>
 
 #ifndef M_PI
 #define M_PI       (3.14159265358979323846)
@@ -57,13 +59,24 @@
 
 #include <windows.h>
 
-#define sleep(x) Sleep((x)*1000)
+#define sys_compat_strdup _strdup
+#define sys_compat_popen _popen
+#define sys_compat_pclose _pclose
+#define sys_compat_sleep(seconds) Sleep((seconds) * 1000)
+/* Preserve sphinx3_align's historical no-op retry delay on native Windows. */
+#define sys_compat_optional_sleep(seconds) (0)
 
 #else
 
 #include <unistd.h>
 #include <stdlib.h>
 #include <sys/param.h>
+
+#define sys_compat_strdup strdup
+#define sys_compat_popen popen
+#define sys_compat_pclose pclose
+#define sys_compat_sleep sleep
+#define sys_compat_optional_sleep sleep
 
 #ifndef MAXHOSTNAMELEN
 #include <netdb.h>

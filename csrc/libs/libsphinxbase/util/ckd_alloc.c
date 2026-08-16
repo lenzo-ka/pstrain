@@ -90,10 +90,6 @@
 #include <assert.h>
 #include <stdarg.h>
 
-#ifdef _MSC_VER
-#pragma warning (disable: 4996)
-#endif
-
 #include "sphinxbase/ckd_alloc.h"
 #include "sphinxbase/err.h"
 
