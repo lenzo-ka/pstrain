@@ -224,7 +224,7 @@ def test_pin_configs_resolve_ratified_conditions(tmp_path: Path) -> None:
     assert off["untied_inventory"] == "linear"
     assert {off[stage]["convergence_ratio"] for stage in ("ci", "untied", "tied")} == {0.1}
     assert on["multipron_training"] is True
-    assert on["untied_inventory"] == "all-triphone"
+    assert on["untied_inventory"] == "transcript-reachable"
     assert on["optional_final_silence"] is True
     assert on["accept_arctic_a0587_known_skip"] is False
     assert on["arctic_a0302_zero_codebook_band"] is None
@@ -245,7 +245,7 @@ def test_pin_configs_resolve_ratified_conditions(tmp_path: Path) -> None:
     assert PIN_CONFIGS["off"]["training"]["exclusion_schedule"] == {}
     assert PIN_CONFIGS["on"]["training"]["exclusion_schedule"] == {}
     assert resolved["off"].profile.training.untied_inventory == "linear"
-    assert resolved["on"].profile.training.untied_inventory == "all-triphone"
+    assert resolved["on"].profile.training.untied_inventory == "transcript-reachable"
     assert [
         getattr(resolved[mode].profile.training, stage).convergence_ratio
         for mode in ("off", "on")

@@ -343,5 +343,5 @@ training
 
 ``training.untied_inventory``
    :Type: ``all-triphone | transcript-reachable | linear``
-   :Default: ``'all-triphone'``
+   :Default: ``'transcript-reachable'``
    :Description: Untied-model phone inventory policy: ``transcript-reachable`` includes contexts reachable through every pronunciation when multipron training is enabled; upstream-compatible ``linear`` includes contexts observed through each transcript word's first pronunciation; ``all-triphone`` includes the complete phoneset cross-product

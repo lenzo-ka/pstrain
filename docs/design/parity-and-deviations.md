@@ -15,7 +15,7 @@ contracts behind each classified difference.
 
 | Surface | Classification | pstrain posture | Stock posture | A parity experiment must pin |
 |---|---|---|---|---|
-| Untied inventory | Shipped default plus ratification-pending alternative | Shipped default and live benchmark profile: `all-triphone`; opt-in `transcript-reachable` includes contexts reachable through alternative pronunciations when multipron training is on | First-pronunciation-observed inventory | Multipron mode, inventory policy, dictionary, transcripts, and the produced untied mdef |
+| Untied inventory | Deliberate deviation with upstream-compatible and exhaustive alternatives | Shipped default and live benchmark profile: `transcript-reachable` when multipron training is on; multipron-off configurations without an explicit policy select `linear`; explicit `linear` and `all-triphone` remain available | First-pronunciation-observed inventory, equivalent to pstrain's `linear` policy | Multipron mode, inventory policy, dictionary, transcripts, and the produced untied mdef |
 | Training front end | Deliberate deviation | Dither and per-frame DC removal enabled | Neither enabled | Input audio, complete feature configuration, extractor identity, and produced feature bytes |
 | Alignment retry | Deliberate deviation | One wider-beam retry after a forward-final-state pruning failure | No retry | Normal beam, retry factor, failure policy, retry telemetry, and skipped-utterance identities |
 | Optional final silence | Deliberate deviation | Final transcript silence may consume zero frames | Final silence must consume a frame | Optional-final-silence setting, transcripts, alignment outcomes, and accepted frame counts |
@@ -25,13 +25,19 @@ contracts behind each classified difference.
 
 ## Inventory under multiple pronunciations
 
-The shipped pstrain default is `all-triphone`, and the live Arctic parity
-evidence was measured under that policy. `transcript-reachable` is an opt-in,
-ratification-pending alternative that follows the same pronunciation graph
-consumed by multipron Baum-Welch. Stock SphinxTrain instead observes the first
-pronunciation while producing its untied inventory, even when later training
-uses pronunciation alternatives. The inventory producer and its interaction
-with training mode are specified in
+The shipped pstrain default is `transcript-reachable` when multipron training
+is enabled, as it is by default, and the live Arctic evidence is measured under
+that policy. It follows the pronunciation graphs consumed by multipron
+Baum-Welch, covering contexts from every usable pronunciation without
+allocating the complete phoneset cross-product produced by `all-triphone`.
+Unlike stock SphinxTrain's first-pronunciation-observed inventory, represented
+by pstrain's `linear` policy, it does not omit contexts that are reachable only
+through alternative pronunciations. Stock SphinxTrain does observe only the
+first pronunciation while producing its untied inventory, even when later
+training uses pronunciation alternatives. Multipron-off configurations with
+no explicit inventory select `linear`; explicit `linear` and `all-triphone`
+choices remain honored. The inventory producer and its interaction with
+training mode are specified in
 [multiple-pronunciation training](multi-pron-training.md).
 
 ## Training front-end boundary

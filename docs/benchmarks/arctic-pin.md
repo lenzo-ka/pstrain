@@ -35,7 +35,7 @@ when the acoustic-model bytes are identical.
 | Filler dictionary | SHA-256 `fb50883998c41a5030c2a602965935c647563321e84a86f2adabb377ec24b49c` |
 | Shared training | 3 states, 200 senones, `a_beam=1e-90`, `b_beam=1e-10`, maximum skip fraction 0.05, retry beam factor `1e10`, tree state weights `[1.0, 0.05, 0.0]`, `ssplitmax=7`, `ssplitthr=0`, `csplitmax=2000`, `csplitthr=0`, `mwfloor=1e-8`, 12 question permutations, 20 questions/state, 1 question iteration |
 | Basis | `MULTIPRON-ONLY`; off cells retained as retired history |
-| Multipron on training | Product defaults: `multipron_training=true`, all-triphone untied inventory, optional final silence, one retry at a beam widened by `1e10`; CI/tied 1–10 iterations and untied 1–6, convergence 0.001 |
+| Multipron on training | Product defaults: `multipron_training=true`, transcript-reachable untied inventory, optional final silence, one retry at a beam widened by `1e10`; CI/tied 1–10 iterations and untied 1–6, convergence 0.001 |
 | Acoustic features | 16 kHz, 13 cepstra, 25 filters, 512-point FFT, 130–6800 Hz, alpha 0.97, `1s_c_d_dd`, lifter 22, DCT, no AGC, batch CMN, no variance normalization |
 | Split | Seed 42, test count 0 |
 | Decoder | `beam=pbeam=lpbeam=lponlybeam=fwdflatbeam=1e-80`; `wbeam=fwdflatwbeam=1e-40`; `pl_window=5`, `lw=10`, `wip=0.2` |

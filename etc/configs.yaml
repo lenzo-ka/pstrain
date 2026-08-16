@@ -53,7 +53,7 @@ profiles:
       question_niter: 1
       multipron_training: true
       optional_final_silence: true
-      untied_inventory: all-triphone
+      untied_inventory: transcript-reachable
       exclusion_schedule: {}
     split:
       train_ratio: null

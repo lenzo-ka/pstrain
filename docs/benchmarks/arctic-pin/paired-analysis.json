@@ -12,7 +12,7 @@
     },
     "record": {
       "path": "record.json",
-      "sha256": "6bd8e4ed15740d10ca5a1f666ecfd7f44cdf80054322f5eba3e75b0d552c12d7"
+      "sha256": "a1cd3bf9b3a22805b972167d06033c97e877186ab855f5a10d037a39743a8ba2"
     }
   },
   "pstrain_vs_oracle": [

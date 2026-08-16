@@ -264,7 +264,7 @@ PIN_CONFIGS: dict[str, dict[str, Any]] = {
             "question_niter": 1,
             "multipron_training": True,
             "optional_final_silence": True,
-            "untied_inventory": "all-triphone",
+            "untied_inventory": "transcript-reachable",
             "exclusion_schedule": {},
             "ci": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.001},
             "untied": {"max_iterations": 6, "min_iterations": 1, "convergence_ratio": 0.001},
