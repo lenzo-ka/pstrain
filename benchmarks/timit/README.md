@@ -53,3 +53,23 @@ cell's MFC tree, and a content hash of the acoustic parameter files (excluding
 configuration/provenance files).  Equal seeds make reruns repeatable; different
 feature or model hashes adjudicate whether enabling dither changes that
 stage's numeric result.
+
+### Completed `ci-1g` result
+
+On the canonical TIMIT split, with `features.seed` fixed at 243, enabling
+frontend dither changes both the feature stream and the resulting `ci-1g`
+model.  Dither is not a no-op even when the RNG is seeded.  The paired run used
+3,696 training utterances from 462 speakers and 1,344 test utterances from 168
+speakers, with SA1 and SA2 excluded; the core test slice contains 192
+utterances.  Dither was the only varying profile field.  The committed
+[`results.json`](dither-ci-1g/results.json) and
+[`run.log`](dither-ci-1g/run.log) preserve the adjudication record.
+
+The following SHA-256 values are conditioned evidence from this host and build,
+not reproducible pins.  The durable result is the boolean adjudication
+`features_changed=true` and `model_changed=true`.
+
+| Cell | Feature tree SHA-256 | Model tree SHA-256 | Resolved config SHA-256 |
+| --- | --- | --- | --- |
+| dither off | `30dee11fae4d1def3ff784f5230b41de6d4246ed12ab6e2052d8819235d8c7b2` | `a7fd560ddd34566e9c7189f64c0fedd0d948e690c14d5af7cf0bb91121954df5` | `3c6af89a0e866f9a615181b37dae06eb1d6e6406b3aa6101f36cd3336b6f3f7e` |
+| dither on | `ac138281879232d961339e863a541d5212d0e1eecfd5b562c21307d717fa1a6c` | `9e4e2841b2cccf73b92d72ea24be9774094d2a9d792a3b521dbba366ec42f75a` | `b08c91c277cc182e838cfbec2fd9de587a78115be25e7ec81d3cc8d3221ce67e` |

@@ -1,0 +1,48 @@
+{
+  "policy": "TIMIT canonical TRAIN/TEST, SA1/SA2 excluded",
+  "split_state": "generated-canonical",
+  "lexicon_state": "regenerated",
+  "train_utterances": 3696,
+  "test_utterances": 1344,
+  "train_speakers": 462,
+  "test_speakers": 168,
+  "core_test_utterances": 192
+}
+{
+  "adjudication": {
+    "features_changed": true,
+    "model_changed": true
+  },
+  "canonical_split": {
+    "core_test_utterances": 192,
+    "lexicon_state": "regenerated",
+    "policy": "TIMIT canonical TRAIN/TEST, SA1/SA2 excluded",
+    "split_state": "generated-canonical",
+    "test_fileids": 1344,
+    "test_speakers": 168,
+    "test_utterances": 1344,
+    "train_fileids": 3696,
+    "train_speakers": 462,
+    "train_utterances": 3696
+  },
+  "design": "paired canonical-split training; dither is the only varying profile field",
+  "jobs": 34,
+  "results": {
+    "dither-off": {
+      "dither": false,
+      "feature_tree_sha256": "30dee11fae4d1def3ff784f5230b41de6d4246ed12ab6e2052d8819235d8c7b2",
+      "model_tree_sha256": "a7fd560ddd34566e9c7189f64c0fedd0d948e690c14d5af7cf0bb91121954df5",
+      "resolved_config_sha256": "3c6af89a0e866f9a615181b37dae06eb1d6e6406b3aa6101f36cd3336b6f3f7e",
+      "seed": 243
+    },
+    "dither-on": {
+      "dither": true,
+      "feature_tree_sha256": "ac138281879232d961339e863a541d5212d0e1eecfd5b562c21307d717fa1a6c",
+      "model_tree_sha256": "9e4e2841b2cccf73b92d72ea24be9774094d2a9d792a3b521dbba366ec42f75a",
+      "resolved_config_sha256": "b08c91c277cc182e838cfbec2fd9de587a78115be25e7ec81d3cc8d3221ce67e",
+      "seed": 243
+    }
+  },
+  "schema_version": 1,
+  "target": "ci-1g"
+}
