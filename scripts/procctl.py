@@ -4,10 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import ctypes
 import json
 import os
 import signal
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
@@ -15,7 +18,20 @@ import time
 from pathlib import Path
 from typing import Any
 
-FIELDS = ("host", "user", "pid", "start_time", "command", "attempt_path")
+FIELDS = (
+    "host",
+    "user",
+    "pid",
+    "pgid",
+    "start_time",
+    "requested_command",
+    "observed_command",
+    "attempt_path",
+)
+FINGERPRINT_SETTLE_INTERVAL = 0.1
+FINGERPRINT_SETTLE_DURATION = 1.0
+FINGERPRINT_SETTLE_TIMEOUT = 2.0
+LAUNCH_CLEANUP_TIMEOUT = 2.0
 
 
 class Refusal(Exception):
@@ -40,6 +56,50 @@ def _process_details(pid: int) -> dict[str, str]:
         raise Refusal(f"could not inspect PID {pid} with ps")
     user, *started, command = parts
     return {"user": user, "start_time": " ".join(started), "command": command}
+
+
+def _linux_process_start_time(pid: int) -> str:
+    """Return Linux's process start tick, which is stable across exec."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise Refusal(f"could not inspect start time for PID {pid}: {error}") from error
+    closing_parenthesis = stat.rfind(")")
+    fields_after_command = stat[closing_parenthesis + 2 :].split()
+    if closing_parenthesis < 0 or len(fields_after_command) < 20:
+        raise Refusal(f"could not inspect start time for PID {pid} from /proc")
+    return f"linux-proc-ticks:{fields_after_command[19]}"
+
+
+def _darwin_process_start_time(pid: int) -> str:
+    """Return kinfo_proc.p_starttime as seconds and microseconds on macOS."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    mib = (ctypes.c_int * 4)(1, 14, 1, pid)  # CTL_KERN, KERN_PROC, KERN_PROC_PID
+    size = ctypes.c_size_t()
+    if libc.sysctl(mib, 4, None, ctypes.byref(size), None, 0) != 0:
+        error = ctypes.get_errno()
+        raise Refusal(f"could not inspect start time for PID {pid}: {os.strerror(error)}")
+    if size.value < 16:
+        raise Refusal(f"PID {pid} is not running")
+    buffer = ctypes.create_string_buffer(size.value)
+    if libc.sysctl(mib, 4, buffer, ctypes.byref(size), None, 0) != 0:
+        error = ctypes.get_errno()
+        raise Refusal(f"could not inspect start time for PID {pid}: {os.strerror(error)}")
+    if size.value < 16:
+        raise Refusal(f"PID {pid} is not running")
+    seconds, microseconds = struct.unpack_from("@qi", buffer.raw)
+    return f"darwin-timeval:{seconds}:{microseconds}"
+
+
+def _process_start_time(pid: int, ps_start_time: str) -> str:
+    if sys.platform.startswith("linux"):
+        return _linux_process_start_time(pid)
+    if sys.platform == "darwin":
+        return _darwin_process_start_time(pid)
+    # Unsupported platforms retain the second-granularity ps value. This has a
+    # documented same-second PID-reuse residual and is never supplemented by a
+    # command match.
+    return f"ps-lstart:{ps_start_time}"
 
 
 def _process_cwd(pid: int) -> str:
@@ -67,10 +127,78 @@ def _live_fingerprint(pid: int) -> dict[str, Any]:
         "host": socket.gethostname(),
         "user": details["user"],
         "pid": pid,
-        "start_time": details["start_time"],
+        "start_time": _process_start_time(pid, details["start_time"]),
         "command": details["command"],
         "attempt_path": _process_cwd(pid),
     }
+
+
+def _settled_live_fingerprint(pid: int) -> dict[str, Any]:
+    """Read an identity unchanged for a full second within the launch budget."""
+    started = time.monotonic()
+    deadline = started + FINGERPRINT_SETTLE_TIMEOUT
+    previous: dict[str, Any] | None = None
+    stable_since = started
+    while True:
+        now = time.monotonic()
+        if now > deadline:
+            break
+        try:
+            current = _live_fingerprint(pid)
+        except Refusal:
+            previous = None
+            stable_since = now
+        else:
+            if current != previous:
+                previous = current
+                stable_since = now
+            elif now - stable_since >= FINGERPRINT_SETTLE_DURATION:
+                return current
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(FINGERPRINT_SETTLE_INTERVAL, remaining))
+    raise Refusal(f"process identity for PID {pid} did not settle after launch")
+
+
+def _process_group_exists(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _wait_for_process_group_exit(pgid: int, timeout: float) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not _process_group_exists(pgid):
+            return True
+        time.sleep(0.05)
+    return not _process_group_exists(pgid)
+
+
+def _terminate_failed_launch(process: subprocess.Popen[bytes], pgid: int) -> str:
+    """Terminate a child after launch bookkeeping fails, escalating if needed."""
+    os.killpg(pgid, signal.SIGTERM)
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        process.wait(timeout=LAUNCH_CLEANUP_TIMEOUT)
+    if _wait_for_process_group_exit(pgid, LAUNCH_CLEANUP_TIMEOUT):
+        return f"sent SIGTERM to process group {pgid}; exit confirmed"
+    os.killpg(pgid, signal.SIGKILL)
+    try:
+        process.wait(timeout=LAUNCH_CLEANUP_TIMEOUT)
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError(
+            f"process group {pgid} survived SIGTERM and SIGKILL after launch failure"
+        ) from error
+    if not _wait_for_process_group_exit(pgid, LAUNCH_CLEANUP_TIMEOUT):
+        raise RuntimeError(
+            f"process group {pgid} survived SIGTERM and SIGKILL after launch failure"
+        )
+    return f"sent SIGTERM then SIGKILL to process group {pgid}; exit confirmed"
 
 
 def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
@@ -100,13 +228,21 @@ def launch(args: argparse.Namespace) -> int:
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
+    pgid = os.getpgid(process.pid)
+    if pgid != process.pid:
+        cleanup = _terminate_failed_launch(process, pgid)
+        raise RuntimeError(f"detached process did not lead its process group; {cleanup}")
     try:
-        fingerprint = _live_fingerprint(process.pid)
+        fingerprint = _settled_live_fingerprint(process.pid)
         if fingerprint["attempt_path"] != str(attempt):
             raise RuntimeError("detached process did not start in the attempt path")
+        fingerprint["observed_command"] = fingerprint.pop("command")
+        fingerprint["requested_command"] = " ".join(args.command)
+        fingerprint["pgid"] = pgid
         _write_json_atomic(fingerprint_path, fingerprint)
     except BaseException:
-        process.terminate()
+        cleanup = _terminate_failed_launch(process, pgid)
+        print(f"launch failed; {cleanup}", file=sys.stderr)
         raise
     print(f"launched PID {process.pid}; fingerprint: {fingerprint_path}")
     return 0
@@ -121,13 +257,24 @@ def _read_fingerprint(path: Path) -> dict[str, Any]:
         raise Refusal("fingerprint must be a JSON object")
     missing = [field for field in FIELDS if field not in value]
     extra = [field for field in value if field not in FIELDS]
+    integer_fields = ("pid", "pgid")
     invalid_strings = [
-        field for field in FIELDS if field != "pid" and not isinstance(value.get(field), str)
+        field
+        for field in FIELDS
+        if field not in integer_fields and not isinstance(value.get(field), str)
     ]
-    if missing or extra or type(value.get("pid")) is not int or invalid_strings:
+    invalid_integers = [field for field in integer_fields if type(value.get(field)) is not int]
+    if (
+        missing
+        or extra
+        or invalid_integers
+        or invalid_strings
+        or value.get("pgid") != value.get("pid")
+    ):
         raise Refusal(
             "invalid fingerprint fields "
-            f"(missing={missing}, extra={extra}, non_strings={invalid_strings})"
+            f"(missing={missing}, extra={extra}, non_strings={invalid_strings}, "
+            f"non_integers={invalid_integers}, pgid_must_equal_pid={value.get('pgid') != value.get('pid')})"
         )
     return value
 
@@ -135,24 +282,26 @@ def _read_fingerprint(path: Path) -> dict[str, Any]:
 def stop(args: argparse.Namespace) -> int:
     expected = _read_fingerprint(args.fingerprint)
     live = _live_fingerprint(expected["pid"])
+    identity_fields = ("host", "user", "pid", "start_time", "attempt_path")
     mismatches = [
         f"{field}: fingerprint={expected[field]!r}, live={live[field]!r}"
-        for field in FIELDS
+        for field in identity_fields
         if expected[field] != live[field]
     ]
     if mismatches:
         raise Refusal("fingerprint mismatch; no signal sent:\n  " + "\n  ".join(mismatches))
-    os.kill(expected["pid"], signal.SIGTERM)
-    print(f"sent SIGTERM to verified PID {expected['pid']}")
-    deadline = time.monotonic() + args.timeout
-    while time.monotonic() < deadline:
-        try:
-            _process_details(expected["pid"])
-        except Refusal:
-            print(f"PID {expected['pid']} stopped")
-            return 0
-        time.sleep(0.05)
-    print(f"PID {expected['pid']} still running after {args.timeout:g}s", file=sys.stderr)
+    pgid = expected["pgid"]
+    os.killpg(pgid, signal.SIGTERM)
+    print(f"sent SIGTERM to verified process group {pgid}")
+    if _wait_for_process_group_exit(pgid, args.timeout):
+        print(f"process group {pgid} stopped")
+        return 0
+    os.killpg(pgid, signal.SIGKILL)
+    print(f"sent SIGKILL to verified process group {pgid}", file=sys.stderr)
+    if _wait_for_process_group_exit(pgid, args.timeout):
+        print(f"process group {pgid} stopped")
+        return 0
+    print(f"process group {pgid} survived SIGKILL", file=sys.stderr)
     return 1
 
 
