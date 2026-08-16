@@ -15,9 +15,19 @@ import time
 from pathlib import Path
 from typing import Any
 
-FIELDS = ("host", "user", "pid", "start_time", "command", "attempt_path")
+FIELDS = (
+    "host",
+    "user",
+    "pid",
+    "start_time",
+    "requested_command",
+    "observed_command",
+    "attempt_path",
+)
 FINGERPRINT_SETTLE_INTERVAL = 0.1
+FINGERPRINT_SETTLE_DURATION = 1.0
 FINGERPRINT_SETTLE_TIMEOUT = 2.0
+LAUNCH_CLEANUP_TIMEOUT = 2.0
 
 
 class Refusal(Exception):
@@ -76,16 +86,48 @@ def _live_fingerprint(pid: int) -> dict[str, Any]:
 
 
 def _settled_live_fingerprint(pid: int) -> dict[str, Any]:
-    """Read a live identity after any immediate exec indirection has settled."""
-    previous = _live_fingerprint(pid)
-    deadline = time.monotonic() + FINGERPRINT_SETTLE_TIMEOUT
-    while time.monotonic() < deadline:
-        time.sleep(FINGERPRINT_SETTLE_INTERVAL)
-        current = _live_fingerprint(pid)
-        if current == previous:
-            return current
-        previous = current
+    """Read an identity unchanged for a full second within the launch budget."""
+    started = time.monotonic()
+    deadline = started + FINGERPRINT_SETTLE_TIMEOUT
+    previous: dict[str, Any] | None = None
+    stable_since = started
+    while True:
+        now = time.monotonic()
+        if now > deadline:
+            break
+        try:
+            current = _live_fingerprint(pid)
+        except Refusal:
+            previous = None
+            stable_since = now
+        else:
+            if current != previous:
+                previous = current
+                stable_since = now
+            elif now - stable_since >= FINGERPRINT_SETTLE_DURATION:
+                return current
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(FINGERPRINT_SETTLE_INTERVAL, remaining))
     raise Refusal(f"process identity for PID {pid} did not settle after launch")
+
+
+def _terminate_failed_launch(process: subprocess.Popen[bytes]) -> str:
+    """Terminate a child after launch bookkeeping fails, escalating if needed."""
+    process.terminate()
+    try:
+        process.wait(timeout=LAUNCH_CLEANUP_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        try:
+            process.wait(timeout=LAUNCH_CLEANUP_TIMEOUT)
+        except subprocess.TimeoutExpired as error:
+            raise RuntimeError(
+                f"PID {process.pid} survived SIGTERM and SIGKILL after launch failure"
+            ) from error
+        return f"sent SIGTERM then SIGKILL to PID {process.pid}; exit confirmed"
+    return f"sent SIGTERM to PID {process.pid}; exit confirmed"
 
 
 def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
@@ -119,9 +161,12 @@ def launch(args: argparse.Namespace) -> int:
         fingerprint = _settled_live_fingerprint(process.pid)
         if fingerprint["attempt_path"] != str(attempt):
             raise RuntimeError("detached process did not start in the attempt path")
+        fingerprint["observed_command"] = fingerprint.pop("command")
+        fingerprint["requested_command"] = " ".join(args.command)
         _write_json_atomic(fingerprint_path, fingerprint)
     except BaseException:
-        process.terminate()
+        cleanup = _terminate_failed_launch(process)
+        print(f"launch failed; {cleanup}", file=sys.stderr)
         raise
     print(f"launched PID {process.pid}; fingerprint: {fingerprint_path}")
     return 0
@@ -150,11 +195,19 @@ def _read_fingerprint(path: Path) -> dict[str, Any]:
 def stop(args: argparse.Namespace) -> int:
     expected = _read_fingerprint(args.fingerprint)
     live = _live_fingerprint(expected["pid"])
+    identity_fields = ("host", "user", "pid", "start_time", "attempt_path")
     mismatches = [
         f"{field}: fingerprint={expected[field]!r}, live={live[field]!r}"
-        for field in FIELDS
+        for field in identity_fields
         if expected[field] != live[field]
     ]
+    accepted_commands = (expected["requested_command"], expected["observed_command"])
+    if live["command"] not in accepted_commands:
+        mismatches.append(
+            "command: "
+            f"fingerprint requested={accepted_commands[0]!r}, "
+            f"observed={accepted_commands[1]!r}, live={live['command']!r}"
+        )
     if mismatches:
         raise Refusal("fingerprint mismatch; no signal sent:\n  " + "\n  ".join(mismatches))
     os.kill(expected["pid"], signal.SIGTERM)
