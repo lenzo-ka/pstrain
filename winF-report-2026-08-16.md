@@ -14,7 +14,7 @@ W-F is a build/CI-configuration-only change. It does not change training arithme
 ## Validation
 
 - `make verified`: passed on macOS, including all 719 selected Python tests, all 10 CTest tests, the floating-point contraction gate, configuration checks, generated-document checks, Arctic pin checks, Ruff, mypy, and format checks.
-- Pull request Windows native build, MSVC: pending.
-- Pull request Windows native build, clang-cl: pending.
+- Pull request #125 Windows native build, MSVC: passed in 1m40s.
+- Pull request #125 Windows native build, clang-cl: passed in 2m9s.
 
 Making the Windows native build check required for merge is a branch-protection setting and is Kevin's follow-up.
