@@ -200,7 +200,7 @@ class TrainingConfig(StrictModel):
                 "phoneset cross-product"
             )
         ),
-    ] = "all-triphone"
+    ] = "transcript-reachable"
     exclusion_schedule: Annotated[
         dict[str, dict[int | str, list[str]]],
         Field(description="Experimental stage/pass utterance exclusions"),

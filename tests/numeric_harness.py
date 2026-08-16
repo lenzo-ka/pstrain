@@ -48,7 +48,12 @@ def create_project(
     ctx = PipelineContext.from_config(project_dir)
     ctx = replace(
         ctx,
-        train=replace(ctx.train, a_beam=1e-200, optional_final_silence=False),
+        train=replace(
+            ctx.train,
+            a_beam=1e-200,
+            optional_final_silence=False,
+            untied_inventory="all-triphone",
+        ),
         split=replace(ctx.split, seed=SEED),
     )
     assert ctx.split.seed == SEED
