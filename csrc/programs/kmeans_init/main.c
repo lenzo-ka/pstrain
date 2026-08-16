@@ -1328,6 +1328,7 @@ init_state(const char *obsdmp,
     uint32 i, j, ts, n;
     int32 full_covar;
     pstrain_rng_t rng;
+    int rv = S3_SUCCESS;
 
     full_covar = cmd_ln_int32("-fullvar");
     /* libc drand48() formerly supplied one process-global default stream. */
@@ -1376,14 +1377,16 @@ init_state(const char *obsdmp,
 	    E_ERROR_SYSTEM("Unable to open dump file %s for reading\n",
 			   cmd_ln_str("-segdmpfn"));
 
-	    return S3_ERROR;
+	    rv = S3_ERROR;
+	    goto cleanup;
 	}
 
 	if (bio_fread(&n_frame, sizeof(uint32), 1, dmp_fp, dmp_swp, &ignore) != 1) {
 	    E_ERROR_SYSTEM("Unable to open dump file %s for reading\n",
 			   cmd_ln_str("-segdmpfn"));
 
-	    return S3_ERROR;
+	    rv = S3_ERROR;
+	    goto cleanup;
 	}
 
 	data_offset = ftell(dmp_fp);
@@ -1441,8 +1444,6 @@ init_state(const char *obsdmp,
 	     * of the top codeword over the corpus and normalizing */
 	    init_mixw(mixw[i], mean[i], n_density, veclen, n_frame, n_stream, label);
 
-	    ckd_free(label);
-
 	    if (reest == TRUE && full_covar)
 		E_ERROR("EM re-estimation is not yet supported for full covariances\n");
 	    else if (reest == TRUE) {
@@ -1456,6 +1457,7 @@ init_state(const char *obsdmp,
 		ptmr_stop(&em_timer);
 	    }
 	}
+	ckd_free(label);
 
 	++n_corpus;
 	tot_sqerr += sqerr;
@@ -1467,9 +1469,6 @@ init_state(const char *obsdmp,
 	E_INFO("sqerr = %e tot %e rms\n", tot_sqerr, sqrt(tot_sqerr/n_corpus));
     }
 
-    if (!multiclass)
-	s3close(dmp_fp);
-
     if (meanfn) {
 	if (s3gau_write(meanfn,
 			(const vector_t ***)mean,
@@ -1477,7 +1476,8 @@ init_state(const char *obsdmp,
 			n_stream,
 			n_density,
 			veclen) != S3_SUCCESS) {
-	    return S3_ERROR;
+	    rv = S3_ERROR;
+	    goto cleanup;
 	}
     }
     else {
@@ -1491,8 +1491,10 @@ init_state(const char *obsdmp,
 				 ts_cnt,
 				 n_stream,
 				 n_density,
-				 veclen) != S3_SUCCESS)
-		return S3_ERROR;
+				 veclen) != S3_SUCCESS) {
+		rv = S3_ERROR;
+		goto cleanup;
+	    }
 	}
 	else {
 	    if (s3gau_write(varfn,
@@ -1500,8 +1502,10 @@ init_state(const char *obsdmp,
 				 ts_cnt,
 				 n_stream,
 				 n_density,
-				 veclen) != S3_SUCCESS)
-		return S3_ERROR;
+				 veclen) != S3_SUCCESS) {
+		rv = S3_ERROR;
+		goto cleanup;
+	    }
 	}
     }
     else {
@@ -1514,14 +1518,28 @@ init_state(const char *obsdmp,
 			 ts_cnt,
 			 n_stream,
 			 n_density) != S3_SUCCESS) {
-	    return S3_ERROR;
+	    rv = S3_ERROR;
+	    goto cleanup;
 	}
     }
     else {
 	E_INFO("No mixing weight file given; none written\n");
     }
 
-    return S3_SUCCESS;
+cleanup:
+    if (!multiclass && dmp_fp != NULL) {
+	s3close(dmp_fp);
+	dmp_fp = NULL;
+    }
+    gauden_free_param(mean);
+    if (fullvar != NULL)
+	gauden_free_param_full(fullvar);
+    if (var != NULL)
+	gauden_free_param(var);
+    if (mixw != NULL)
+	ckd_free_3d((void ***)mixw);
+
+    return rv;
 }
 
 int
