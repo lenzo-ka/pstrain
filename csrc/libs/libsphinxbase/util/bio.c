@@ -64,10 +64,6 @@
 #include <string.h>
 #include <assert.h>
 
-#ifdef _MSC_VER
-#pragma warning (disable: 4996)
-#endif
-
 #include "sphinxbase/bio.h"
 #include "sphinxbase/err.h"
 #include "sphinxbase/ckd_alloc.h"

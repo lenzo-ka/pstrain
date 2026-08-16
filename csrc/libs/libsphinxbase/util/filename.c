@@ -45,10 +45,6 @@
 
 #include "sphinxbase/filename.h"
 
-#ifdef _MSC_VER
-#pragma warning (disable: 4996)
-#endif
-
 const char *
 path2basename(const char *path)
 {

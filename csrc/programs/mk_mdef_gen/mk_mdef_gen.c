@@ -54,6 +54,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys_compat/misc.h>
 #include <assert.h>
 #include <time.h>
 
@@ -171,7 +172,7 @@ int32 make_ci_list_cd_hash_frm_phnlist(const char  *phnlist,
         phnptr = phnhash[i];
         while (phnptr != NULL) {
             addciphone = (heapelement_t *) ckd_calloc(1,sizeof(heapelement_t));
-            addciphone->basephone = strdup(phnptr->phone);
+            addciphone->basephone = sys_compat_strdup(phnptr->phone);
             heapsize = insert(&heap, heapsize, addciphone);
             phnptr = phnptr->next;
         }
@@ -290,7 +291,7 @@ int32  read_dict(const char *dictfile, const char *fillerdict,
 		continue;
 	    }
 
-	    dictsent = strdup(liter->buf);
+	    dictsent = sys_compat_strdup(liter->buf);
             if ((dictword = strtok(dictsent, " \t\n")) == NULL)
                 E_FATAL("Empty line in dictionary!\n");
 
@@ -485,7 +486,7 @@ int32  count_triphones (const char *transfile,
 
     for (line = lineiter_start_clean(fp); line; line = lineiter_next(line)) {
 
-	tline = strdup(line->buf);
+	tline = sys_compat_strdup(line->buf);
         if (strtok(tline," \t\n") == NULL) {
            free(tline);
     	   continue;
@@ -667,10 +668,10 @@ int32 make_CD_heap(hashelement_t  **triphonehash,
 		addtriphone = (heapelement_t *) calloc(1,sizeof(heapelement_t));
 		if (addtriphone == NULL)
 		    E_FATAL("Heap install error. Out of memory!\n");
-		addtriphone->basephone = strdup(triphone_el->basephone);
-		addtriphone->leftcontext = strdup(triphone_el->leftcontext);
-		addtriphone->rightcontext = strdup(triphone_el->rightcontext);
-	        addtriphone->wordposition = strdup(triphone_el->wordposition);
+		addtriphone->basephone = sys_compat_strdup(triphone_el->basephone);
+		addtriphone->leftcontext = sys_compat_strdup(triphone_el->leftcontext);
+		addtriphone->rightcontext = sys_compat_strdup(triphone_el->rightcontext);
+	        addtriphone->wordposition = sys_compat_strdup(triphone_el->wordposition);
 		heapsize = insert(&heap, heapsize, addtriphone);
             }
 	    triphone_el = triphone_el->next;
@@ -707,7 +708,7 @@ int32   print_counts(const char *countfn, phnhashelement_t  **CIhash,
 		continue;
 	    }
 	    addphone = (heapelement_t *) ckd_calloc(1,sizeof(heapelement_t));
-	    addphone->basephone = strdup(ciphone_el->phone);
+	    addphone->basephone = sys_compat_strdup(ciphone_el->phone);
 	    addphone->count = ciphone_el->count;
 	    ciheapsize = insert(&CIheap, ciheapsize, addphone);
 	    ciphone_el = ciphone_el->next;
@@ -729,10 +730,10 @@ int32   print_counts(const char *countfn, phnhashelement_t  **CIhash,
 		continue;
 	    }
 	    addtriphone = (heapelement_t *) ckd_calloc(1,sizeof(heapelement_t));
-	    addtriphone->basephone = strdup(triphone_el->basephone);
-	    addtriphone->leftcontext = strdup(triphone_el->leftcontext);
-	    addtriphone->rightcontext = strdup(triphone_el->rightcontext);
-	    addtriphone->wordposition = strdup(triphone_el->wordposition);
+	    addtriphone->basephone = sys_compat_strdup(triphone_el->basephone);
+	    addtriphone->leftcontext = sys_compat_strdup(triphone_el->leftcontext);
+	    addtriphone->rightcontext = sys_compat_strdup(triphone_el->rightcontext);
+	    addtriphone->wordposition = sys_compat_strdup(triphone_el->wordposition);
 	    addtriphone->count = triphone_el->count;
 	    cdheapsize = insert(&CDheap, cdheapsize, addtriphone);
 	    triphone_el = triphone_el->next;
@@ -907,15 +908,15 @@ int32 make_mdef_from_list(const char *mdeffile,
     smap = (uint32 **)ckd_calloc_2d(n_total, n_state_pm-1, sizeof(uint32));
 
     for (i = 0; i < n_base; i++) {
-        base_str[i] = strdup(CIlist[i]);
+        base_str[i] = sys_compat_strdup(CIlist[i]);
     }
 
     for (j = 0; j < n_tri; j++,i++) {
         cdphone = yanktop(&CDheap,cdheapsize,&cdheapsize);
-	base_str[i] = strdup(cdphone->basephone);
-	left_str[i] = strdup(cdphone->leftcontext);
-	right_str[i] = strdup(cdphone->rightcontext);
-	posn_str[i] = strdup(cdphone->wordposition);
+	base_str[i] = sys_compat_strdup(cdphone->basephone);
+	left_str[i] = sys_compat_strdup(cdphone->leftcontext);
+	right_str[i] = sys_compat_strdup(cdphone->rightcontext);
+	posn_str[i] = sys_compat_strdup(cdphone->wordposition);
 	free_heapelement(cdphone);
     }
     if (cdheapsize != 0)

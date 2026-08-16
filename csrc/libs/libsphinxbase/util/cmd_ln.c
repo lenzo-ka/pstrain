@@ -64,16 +64,14 @@
 #include <assert.h>
 
 #ifdef _MSC_VER
-#pragma warning (disable: 4996 4018)
+#pragma warning (disable: 4018)
 #endif
 
 #ifdef HAVE_CONFIG_H
 #include <config.h>
 #endif
 
-#ifdef HAVE_UNISTD_H
-#include <unistd.h>
-#endif
+#include <sys_compat/file.h>
 
 #include "sphinxbase/cmd_ln.h"
 #include "sphinxbase/err.h"

@@ -48,6 +48,7 @@
 #include <s3/swap.h>
 #include <s3/s3.h>
 #include <sys_compat/file.h>
+#include <sys_compat/misc.h>
 
 #include <sphinxbase/ckd_alloc.h>
 #include <sphinxbase/bio.h>
@@ -116,8 +117,8 @@ s3add_fattr(char *a,
     }
 
     if (dup) {
-	attrib[n_attrib] = strdup(a);
-	value[n_attrib] = strdup(v);
+	attrib[n_attrib] = sys_compat_strdup(a);
+	value[n_attrib] = sys_compat_strdup(v);
     }
     else {
 	attrib[n_attrib] = a;

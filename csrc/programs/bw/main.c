@@ -928,7 +928,7 @@ main_reestimate(model_inventory_t *inv,
 		      E_FATAL("Failed to get the files after 10 retries(about 5 minutes).\n ");
 		    }
 		}
-		sleep(DUMP_RETRY_PERIOD);
+		sys_compat_sleep(DUMP_RETRY_PERIOD);
 	    }
 	}
     }
@@ -980,7 +980,7 @@ main_reestimate(model_inventory_t *inv,
 	    }
 	}
 
-	sleep(DUMP_RETRY_PERIOD);
+	sys_compat_sleep(DUMP_RETRY_PERIOD);
 
 
     }
@@ -1813,7 +1813,7 @@ main_mmi_reestimate(model_inventory_t *inv,
 	E_FATAL("Failed to get the files after 10 retries(about 5 minutes).\n ");
       }
     }
-    sleep(DUMP_RETRY_PERIOD);
+    sys_compat_sleep(DUMP_RETRY_PERIOD);
   }
 
   /* Write a log entry on success */

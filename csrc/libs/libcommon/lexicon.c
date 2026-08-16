@@ -54,6 +54,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <string.h>
+#include <sys_compat/misc.h>
 
 static int
 add_word(char *ortho,
@@ -252,7 +253,7 @@ lexicon_t *lexicon_read(lexicon_t *prior_lex,
 
 	/* allocate space for string.  It will be parsed
 	 * by strtok() */
-	lex_line = strdup(line->buf);
+	lex_line = sys_compat_strdup(line->buf);
 
 	/* get the word and make a hash table entry for
 	   this lexicon entry */

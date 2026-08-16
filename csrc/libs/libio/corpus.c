@@ -236,7 +236,7 @@ parse_ctl_line(char *line,
     if (sp == NULL) {
 	/* 'old' style control file */
 	if (path)
-	    *path = strdup(sv_line);
+	    *path = sys_compat_strdup(sv_line);
 	if (sf)
 	    *sf = NO_FRAME;
 	if (ef)
@@ -247,7 +247,7 @@ parse_ctl_line(char *line,
     else {
 	*sp = '\0';
 	if (path)
-	    *path = strdup(sv_line);
+	    *path = sys_compat_strdup(sv_line);
 
 	/* at least one space, so try to parse rest of line */
 	if (sf != NULL)
@@ -269,7 +269,7 @@ parse_ctl_line(char *line,
 		*id = NULL;
 	    }
 	    else {
-		*id = strdup(sp+1);	/* set the utterance ID */
+		*id = sys_compat_strdup(sp+1);	/* set the utterance ID */
 	    }
 	}
     }
@@ -1111,7 +1111,7 @@ corpus_next_utt()
 	}
 	if (transcription_line)
 	    free(transcription_line);
-	transcription_line = strdup(trans_li->buf);
+	transcription_line = sys_compat_strdup(trans_li->buf);
 	lineiter_free(trans_li);
     }
 
@@ -1277,7 +1277,7 @@ corpus_read_next_sent_file(char **trans)
 	return S3_ERROR;
     }
 
-    *trans = strdup(li->buf);
+    *trans = sys_compat_strdup(li->buf);
     lineiter_free(li);
     fclose(fp);
 
@@ -1329,7 +1329,7 @@ corpus_get_generic_featurevec(vector_t **mfc,
 	    E_ERROR_SYSTEM("Failed to read MFC file '%s'. Retrying after sleep...\n",
 		    mk_filename(DATA_TYPE_MFCC, cur_ctl_path));
 	    no_retries++;
-	    sleep(3);
+	    sys_compat_sleep(3);
 	    if(no_retries>100){
 	      E_FATAL("Failed to get the files after 100 retries (about 300 seconds)\n");
 	    }
@@ -1482,7 +1482,7 @@ corpus_read_next_transcription_line(char **trans)
 	   for the ordering of the LSN file */
     }
 
-    *trans = strdup(transcription_line);
+    *trans = sys_compat_strdup(transcription_line);
 
     return S3_SUCCESS;
 }

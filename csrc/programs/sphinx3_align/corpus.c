@@ -90,11 +90,8 @@
 
 
 #include <string.h>
-#if !defined(_WIN32) && !defined(WIN32)
-#include <unistd.h>
-#else
 #include <stdlib.h>
-#endif
+#include <sys_compat/misc.h>
 
 #include <sphinxbase/pio.h>
 #include <sphinxbase/filename.h>
@@ -102,11 +99,7 @@
 #include "corpus.h"
 typedef struct kb_s kb_t;
 
-#if ((defined(_WIN32) || defined(WIN32)) && !defined(__CYGWIN__))
-#define SLEEP_SEC(sec)  (0)                     /* Why doesn't Sleep((sec)*1000) work? */
-#else
-#define SLEEP_SEC(sec)  sleep(sec)              /* sec must be integer */
-#endif
+#define SLEEP_SEC(sec)  sys_compat_optional_sleep(sec) /* sec must be integer */
 
 utt_res_t *
 new_utt_res()

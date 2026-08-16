@@ -52,10 +52,6 @@
 #include <math.h>
 #include <string.h>
 
-#ifdef _MSC_VER
-#pragma warning (disable: 4996)
-#endif
-
 #include "sphinxbase/strfuncs.h"
 #include "sphinxbase/err.h"
 
