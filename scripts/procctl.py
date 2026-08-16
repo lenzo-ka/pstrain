@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import ctypes
 import json
 import os
 import signal
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
@@ -56,6 +58,50 @@ def _process_details(pid: int) -> dict[str, str]:
     return {"user": user, "start_time": " ".join(started), "command": command}
 
 
+def _linux_process_start_time(pid: int) -> str:
+    """Return Linux's process start tick, which is stable across exec."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise Refusal(f"could not inspect start time for PID {pid}: {error}") from error
+    closing_parenthesis = stat.rfind(")")
+    fields_after_command = stat[closing_parenthesis + 2 :].split()
+    if closing_parenthesis < 0 or len(fields_after_command) < 20:
+        raise Refusal(f"could not inspect start time for PID {pid} from /proc")
+    return f"linux-proc-ticks:{fields_after_command[19]}"
+
+
+def _darwin_process_start_time(pid: int) -> str:
+    """Return kinfo_proc.p_starttime as seconds and microseconds on macOS."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    mib = (ctypes.c_int * 4)(1, 14, 1, pid)  # CTL_KERN, KERN_PROC, KERN_PROC_PID
+    size = ctypes.c_size_t()
+    if libc.sysctl(mib, 4, None, ctypes.byref(size), None, 0) != 0:
+        error = ctypes.get_errno()
+        raise Refusal(f"could not inspect start time for PID {pid}: {os.strerror(error)}")
+    if size.value < 16:
+        raise Refusal(f"PID {pid} is not running")
+    buffer = ctypes.create_string_buffer(size.value)
+    if libc.sysctl(mib, 4, buffer, ctypes.byref(size), None, 0) != 0:
+        error = ctypes.get_errno()
+        raise Refusal(f"could not inspect start time for PID {pid}: {os.strerror(error)}")
+    if size.value < 16:
+        raise Refusal(f"PID {pid} is not running")
+    seconds, microseconds = struct.unpack_from("@qi", buffer.raw)
+    return f"darwin-timeval:{seconds}:{microseconds}"
+
+
+def _process_start_time(pid: int, ps_start_time: str) -> str:
+    if sys.platform.startswith("linux"):
+        return _linux_process_start_time(pid)
+    if sys.platform == "darwin":
+        return _darwin_process_start_time(pid)
+    # Unsupported platforms retain the second-granularity ps value. This has a
+    # documented same-second PID-reuse residual and is never supplemented by a
+    # command match.
+    return f"ps-lstart:{ps_start_time}"
+
+
 def _process_cwd(pid: int) -> str:
     proc_cwd = Path(f"/proc/{pid}/cwd")
     if proc_cwd.exists():
@@ -81,7 +127,7 @@ def _live_fingerprint(pid: int) -> dict[str, Any]:
         "host": socket.gethostname(),
         "user": details["user"],
         "pid": pid,
-        "start_time": details["start_time"],
+        "start_time": _process_start_time(pid, details["start_time"]),
         "command": details["command"],
         "attempt_path": _process_cwd(pid),
     }
@@ -233,16 +279,6 @@ def _read_fingerprint(path: Path) -> dict[str, Any]:
     return value
 
 
-def _allowed_live_commands(fingerprint: dict[str, Any]) -> tuple[str, ...]:
-    """Return the recorded wrapper and launch-derived post-exec commands."""
-    requested = fingerprint["requested_command"]
-    _wrapper, separator, target = requested.partition(" ")
-    commands = [fingerprint["observed_command"], requested]
-    if separator and target:
-        commands.append(target)
-    return tuple(dict.fromkeys(commands))
-
-
 def stop(args: argparse.Namespace) -> int:
     expected = _read_fingerprint(args.fingerprint)
     live = _live_fingerprint(expected["pid"])
@@ -254,12 +290,6 @@ def stop(args: argparse.Namespace) -> int:
     ]
     if mismatches:
         raise Refusal("fingerprint mismatch; no signal sent:\n  " + "\n  ".join(mismatches))
-    allowed_commands = _allowed_live_commands(expected)
-    if live["command"] not in allowed_commands:
-        raise Refusal(
-            "fingerprint command mismatch; no signal sent:\n"
-            f"  fingerprint commands={allowed_commands!r}, live={live['command']!r}"
-        )
     pgid = expected["pgid"]
     os.killpg(pgid, signal.SIGTERM)
     print(f"sent SIGTERM to verified process group {pgid}")

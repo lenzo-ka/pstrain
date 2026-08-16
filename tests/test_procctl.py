@@ -149,9 +149,16 @@ def test_stop_refuses_dead_pid_without_signalling(
     killpg.assert_not_called()
 
 
-@pytest.mark.parametrize("matching_field", ("requested_command", "observed_command"))
-def test_stop_accepts_either_recorded_command(
-    monkeypatch: pytest.MonkeyPatch, matching_field: str
+@pytest.mark.parametrize(
+    ("requested_command", "live_command"),
+    (
+        ("/resolved/wrapper launched-target", "launched-target"),
+        ("python3 wrapper.py target", "target"),
+    ),
+    ids=("resolved-wrapper-exec", "python-wrapper-exec"),
+)
+def test_stop_accepts_arbitrary_post_exec_command(
+    monkeypatch: pytest.MonkeyPatch, requested_command: str, live_command: str
 ) -> None:
     fingerprint = {
         "host": "host",
@@ -159,8 +166,8 @@ def test_stop_accepts_either_recorded_command(
         "pid": 42,
         "pgid": 42,
         "start_time": "start",
-        "requested_command": "requested",
-        "observed_command": "observed",
+        "requested_command": requested_command,
+        "observed_command": requested_command,
         "attempt_path": "/attempt",
     }
     live = {
@@ -168,7 +175,7 @@ def test_stop_accepts_either_recorded_command(
         "user": "user",
         "pid": 42,
         "start_time": "start",
-        "command": fingerprint[matching_field],
+        "command": live_command,
         "attempt_path": "/attempt",
     }
     killpg = Mock()
@@ -183,7 +190,7 @@ def test_stop_accepts_either_recorded_command(
     killpg.assert_called_once_with(42, procctl.signal.SIGTERM)
 
 
-def test_stop_accepts_late_exec_to_launch_argv_tail(
+def test_stop_refuses_same_second_pid_reuse_by_precise_start_time(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fingerprint = {
@@ -191,65 +198,31 @@ def test_stop_accepts_late_exec_to_launch_argv_tail(
         "user": "user",
         "pid": 42,
         "pgid": 42,
-        "start_time": "start",
-        "requested_command": "wrapper target",
-        "observed_command": "wrapper target",
-        "attempt_path": "/attempt",
-    }
-    wrapper = {
-        "host": "host",
-        "user": "user",
-        "pid": 42,
-        "start_time": "start",
-        "command": "wrapper target",
-        "attempt_path": "/attempt",
-    }
-    target = {**wrapper, "command": "target"}
-    observations = iter((wrapper, target))
-    killpg = Mock()
-    monkeypatch.setattr(procctl, "_read_fingerprint", lambda _path: fingerprint)
-    monkeypatch.setattr(procctl, "_live_fingerprint", lambda _pid: next(observations))
-    monkeypatch.setattr(procctl, "_wait_for_process_group_exit", lambda _pgid, _timeout: True)
-    monkeypatch.setattr(procctl.os, "killpg", killpg)
-
-    assert next(observations) == wrapper
-    result = procctl.stop(argparse.Namespace(fingerprint=Path("unused"), timeout=0.01))
-
-    assert result == 0
-    killpg.assert_called_once_with(42, procctl.signal.SIGTERM)
-
-
-def test_stop_refuses_unrelated_command_with_matching_strong_identity(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    fingerprint = {
-        "host": "host",
-        "user": "user",
-        "pid": 42,
-        "pgid": 42,
-        "start_time": "same-second-start",
+        "start_time": "darwin-timeval:1786852800:100000",
         "requested_command": "wrapper launched-target",
         "observed_command": "wrapper launched-target",
         "attempt_path": "/attempt",
     }
-    wrapper = {
-        "host": "host",
-        "user": "user",
-        "pid": 42,
-        "start_time": "same-second-start",
-        "command": "wrapper launched-target",
-        "attempt_path": "/attempt",
-    }
-    imposter = {**wrapper, "command": "unrelated-command"}
-    observations = iter((wrapper, imposter))
+    start_time = Mock(return_value="darwin-timeval:1786852800:900000")
     killpg = Mock(side_effect=AssertionError("stop must not signal an imposter"))
     monkeypatch.setattr(procctl, "_read_fingerprint", lambda _path: fingerprint)
-    monkeypatch.setattr(procctl, "_live_fingerprint", lambda _pid: next(observations))
+    monkeypatch.setattr(
+        procctl,
+        "_process_details",
+        lambda _pid: {
+            "user": "user",
+            "start_time": "Sun Aug 16 12:00:00 2026",
+            "command": "launched-target",
+        },
+    )
+    monkeypatch.setattr(procctl, "_process_start_time", start_time)
+    monkeypatch.setattr(procctl, "_process_cwd", lambda _pid: "/attempt")
+    monkeypatch.setattr(procctl.socket, "gethostname", lambda: "host")
     monkeypatch.setattr(procctl.os, "killpg", killpg)
 
-    assert next(observations) == wrapper
-    with pytest.raises(procctl.Refusal, match="command mismatch; no signal sent"):
+    with pytest.raises(procctl.Refusal, match="start_time"):
         procctl.stop(argparse.Namespace(fingerprint=Path("unused"), timeout=0.01))
+    start_time.assert_called_once_with(42, "Sun Aug 16 12:00:00 2026")
     killpg.assert_not_called()
 
 

@@ -2,14 +2,11 @@
 
 ## Outcome
 
-`procctl launch` records both the requested command and a settled observed live command.
-The original implementation on `main` already recorded one live observation, but that
-single immediate sample could capture a pre-exec wrapper. The fix samples for up to two
-seconds and requires consecutive equal observations spanning at least one second;
-transient reader failures are retried inside that budget. `procctl stop` retains PID,
-start time, and user as its primary identity core, also requires host and working
-directory to match, and accepts command drift only to the recorded wrapper or the
-post-exec target derived from the requested argv.
+`procctl launch` records the finest process start time exposed by the operating system:
+Linux `/proc` clock ticks or macOS `kinfo_proc.p_starttime` microseconds. `procctl stop`
+requires that value, PID, user, host, and working directory to match exactly. Requested,
+observed, and live commands are diagnostic only because an arbitrary wrapper's eventual
+`exec` target cannot be predicted safely.
 
 The fingerprint also records the fresh session's process-group ID. Normal stop and
 launch cleanup send SIGTERM to the group, wait for a bounded period, escalate the group
@@ -18,8 +15,8 @@ is reported as such.
 
 ## Verification
 
-- `python scripts/run_verified_tests.py tests/test_procctl.py`: 15 passed.
-- `PYTHONPATH=. make verified`: passed on macOS; 693 tests passed, 1 skipped, and 1 deselected
+- `python scripts/run_verified_tests.py tests/test_procctl.py`: 14 passed.
+- `PYTHONPATH=. make verified`: passed on macOS; 692 tests passed, 1 skipped, and 1 deselected
   in the main verified suite, followed by 41 configuration tests passing, CTest
   6/6 passing, floating-point contraction verification passing, generated-file
   checks passing, Ruff passing, mypy passing, and Ruff format checks passing.
@@ -77,3 +74,19 @@ target is terminated, while an unrelated same-second PID-reuse imposter with mat
 host, PID, start time, user, and working directory is refused without a signal. Dead
 PIDs and strong-identity mismatches continue to refuse without signaling, and group
 termination continues to reap a TERM-ignoring wrapper and child.
+
+## Round 5 — 2026-08-16
+
+The PID-reuse guard now uses the highest-precision process start time available. Linux
+reads `/proc/<pid>/stat` field 22 as clock ticks since boot; macOS reads
+`kinfo_proc.p_starttime` through `KERN_PROC_PID` as a seconds-and-microseconds pair. An
+unsupported platform falls back to the second-granularity `ps` value with the residual
+same-second reuse ambiguity documented explicitly.
+
+Stop no longer predicts an arbitrary wrapper's post-`exec` command. Once host, PID,
+user, working directory, and precise start time all match, it terminates the recorded
+process group regardless of live command. Requested and observed commands remain only
+for diagnostics. Deterministic regressions terminate both resolved-wrapper and Python
+wrapper command transitions, refuse a same-second PID reuse with a different
+subsecond start time without any signal, preserve zero-signal refusal for dead or
+mismatched identities, and retain group cleanup of a TERM-ignoring wrapper and child.
