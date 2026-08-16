@@ -6,6 +6,7 @@ import ast
 import importlib
 import inspect
 import subprocess
+import sys
 import types
 from pathlib import Path
 from typing import Any, Union, get_args, get_origin, get_type_hints
@@ -211,6 +212,18 @@ class TestCommandBuilder:
         bin_dir.mkdir()
         binary = bin_dir / "bw"
         binary.touch()
+
+        assert resolve_binary("bw", bin_dir) == binary.resolve()
+        assert CommandBuilder(bin_dir=bin_dir)._get_binary("bw") == str(binary.resolve())
+
+    def test_resolution_uses_exe_suffix_on_windows(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bin_dir = tmp_path / "bin" / "Release"
+        bin_dir.mkdir(parents=True)
+        binary = bin_dir / "bw.exe"
+        binary.touch()
+        monkeypatch.setattr(sys, "platform", "win32")
 
         assert resolve_binary("bw", bin_dir) == binary.resolve()
         assert CommandBuilder(bin_dir=bin_dir)._get_binary("bw") == str(binary.resolve())

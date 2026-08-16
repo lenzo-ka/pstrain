@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 
 from pstrain.lib import _pstrainc
-from pstrain.lib.commands import CommandBuilder, find_binary
+from pstrain.lib.commands import CommandBuilder, resolve_binary
 from pstrain.lib.paths import get_bin_dir
 
 # =============================================================================
@@ -36,13 +36,7 @@ def binary_available(name: str) -> bool:
 
 def _resolve_bin(name: str) -> Path | None:
     """Resolve a pstrain binary to a concrete path (PATH or pstrain's build dir)."""
-    found = find_binary(name)
-    if found is not None:
-        return found
-    bin_dir = get_bin_dir()
-    if bin_dir is not None and (bin_dir / name).is_file():
-        return bin_dir / name
-    return None
+    return resolve_binary(name, get_bin_dir())
 
 
 @pytest.fixture(scope="module")

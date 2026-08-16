@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import shlex
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,13 @@ from typing import Any
 from pstrain.lib.paths import get_bin_dir
 
 logger = logging.getLogger(__name__)
+
+
+def _binary_names(name: str) -> tuple[str, ...]:
+    """Return the native executable filenames accepted on this platform."""
+    if sys.platform == "win32" and not name.lower().endswith(".exe"):
+        return (f"{name}.exe", name)
+    return (name,)
 
 
 def _reject_comma_path(path: Path, flag: str) -> None:
@@ -135,9 +143,10 @@ def find_binary(name: str, search_paths: list[Path] | None = None) -> Path | Non
     # Check search paths
     if search_paths:
         for p in search_paths:
-            candidate = p / name
-            if candidate.exists() and candidate.is_file():
-                return candidate
+            for filename in _binary_names(name):
+                candidate = p / filename
+                if candidate.exists() and candidate.is_file():
+                    return candidate
 
     return None
 
@@ -147,9 +156,10 @@ def resolve_binary(name: str, bin_dir: Path | None = None) -> Path | None:
     if bin_dir is None:
         bin_dir = get_bin_dir()
     if bin_dir is not None:
-        candidate = bin_dir / name
-        if candidate.is_file():
-            return candidate.resolve()
+        for filename in _binary_names(name):
+            candidate = bin_dir / filename
+            if candidate.is_file():
+                return candidate.resolve()
     return find_binary(name)
 
 
