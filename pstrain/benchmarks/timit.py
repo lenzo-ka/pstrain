@@ -15,6 +15,8 @@ from typing import Any
 import yaml
 
 from pstrain.lib.config.models import Profile
+from pstrain.lib.corpus import split_is_external
+from pstrain.lib.corpus.split import SPLIT_FILENAMES, VALIDATED_SPLIT
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SEED = 243
@@ -61,8 +63,10 @@ def pinned_profile(*, dither: bool, seed: int) -> dict[str, Any]:
 
 def prepare_project(project: Path, corpus: Path, data: Path, *, dither: bool, seed: int) -> None:
     """Install canonical TIMIT inputs as one isolated training project."""
-    etc = project / "etc"
+    config_etc = project / "etc"
+    etc = project / "experiments" / "default" / "etc"
     shared = project / "shared"
+    config_etc.mkdir(parents=True, exist_ok=True)
     etc.mkdir(parents=True, exist_ok=True)
     shared.mkdir(parents=True, exist_ok=True)
     train = data / "train.transcription"
@@ -70,13 +74,10 @@ def prepare_project(project: Path, corpus: Path, data: Path, *, dither: bool, se
     (etc / "all.transcription").write_text(
         train.read_text(encoding="utf-8") + test.read_text(encoding="utf-8"), encoding="utf-8"
     )
-    for name in (
-        "train.fileids",
-        "test.fileids",
-        "train.transcription",
-        "test.transcription",
-    ):
+    for name in SPLIT_FILENAMES:
         shutil.copyfile(data / name, etc / name)
+        if (etc / name).read_bytes() != (data / name).read_bytes():
+            raise RuntimeError(f"canonical split manifest failed byte verification: {name}")
     shutil.copyfile(data / "timit.reduced.dict", shared / "dictionary.dict")
     phones = {
         phone
@@ -87,7 +88,7 @@ def prepare_project(project: Path, corpus: Path, data: Path, *, dither: bool, se
         "\n".join(sorted(phones | {"SIL"})) + "\n", encoding="utf-8"
     )
     (shared / "filler.dict").write_text(FILLER_DICTIONARY, encoding="utf-8")
-    (etc / "configs.yaml").write_text(
+    (config_etc / "configs.yaml").write_text(
         yaml.safe_dump(
             {
                 "config_version": 1,
@@ -102,8 +103,19 @@ def prepare_project(project: Path, corpus: Path, data: Path, *, dither: bool, se
         audio.symlink_to(corpus, target_is_directory=True)
 
 
-def _count_lines(path: Path) -> int:
-    return sum(bool(line.strip()) for line in path.read_text(encoding="utf-8").splitlines())
+def _validated_split_counts(project: Path) -> dict[str, int]:
+    """Read counts emitted by the pipeline's successful split validation."""
+    marker = project / "experiments" / "default" / "etc" / VALIDATED_SPLIT
+    validation = json.loads(marker.read_text(encoding="utf-8"))
+    if validation.get("mode") != "external":
+        raise RuntimeError(f"pipeline did not validate an external split: {marker}")
+    try:
+        return {
+            "train_fileids": int(validation["n_train"]),
+            "test_fileids": int(validation["n_test"]),
+        }
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError(f"pipeline validation has no usable split counts: {marker}") from exc
 
 
 def run(corpus: Path, work_dir: Path, *, jobs: int, seed: int, target: str) -> dict[str, Any]:
@@ -115,9 +127,13 @@ def run(corpus: Path, work_dir: Path, *, jobs: int, seed: int, target: str) -> d
     )
     preparation = json.loads((data / "preparation.json").read_text(encoding="utf-8"))
     results: dict[str, Any] = {}
+    validated_counts: dict[str, int] | None = None
     for cell, dither in CELLS.items():
         project = work_dir / cell
         prepare_project(project, corpus, data, dither=dither, seed=seed)
+        split_dir = project / "experiments" / "default" / "etc"
+        if not split_is_external(split_dir):
+            raise RuntimeError(f"canonical external split was not detected for {cell}: {split_dir}")
         command = [
             sys.executable,
             "-m",
@@ -138,6 +154,13 @@ def run(corpus: Path, work_dir: Path, *, jobs: int, seed: int, target: str) -> d
             env = os.environ.copy()
             env["PYTHONPATH"] = os.pathsep.join(filter(None, (str(ROOT), env.get("PYTHONPATH"))))
             subprocess.run(command, check=True, stdout=log, stderr=subprocess.STDOUT, env=env)
+        cell_counts = _validated_split_counts(project)
+        if validated_counts is not None and cell_counts != validated_counts:
+            raise RuntimeError(
+                f"pipeline validated different split counts across cells: "
+                f"{validated_counts} != {cell_counts}"
+            )
+        validated_counts = cell_counts
         features = project / "shared" / "features"
         model = project / "shared" / "models" / target / "timit"
         results[cell] = {
@@ -157,8 +180,7 @@ def run(corpus: Path, work_dir: Path, *, jobs: int, seed: int, target: str) -> d
         "jobs": jobs,
         "canonical_split": {
             **preparation,
-            "train_fileids": _count_lines(data / "train.fileids"),
-            "test_fileids": _count_lines(data / "test.fileids"),
+            **(validated_counts or {}),
         },
         "results": results,
         "adjudication": {

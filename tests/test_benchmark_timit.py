@@ -5,6 +5,7 @@ from pathlib import Path
 import yaml
 
 from pstrain.benchmarks.timit import pinned_profile, prepare_project, tree_sha256
+from pstrain.lib.corpus import split_is_external
 
 
 def _write_data(data: Path) -> None:
@@ -32,12 +33,14 @@ def test_project_installs_canonical_external_split(tmp_path: Path) -> None:
     project = tmp_path / "project"
     prepare_project(project, corpus, data, dither=True, seed=243)
     assert project.joinpath("audio").resolve() == corpus
-    assert project.joinpath("etc/all.transcription").read_text().splitlines() == [
+    split = project / "experiments" / "default" / "etc"
+    assert split.joinpath("all.transcription").read_text().splitlines() == [
         "train/dr1/fabc0/sx1 hello",
         "test/dr2/mdef0/sx2 world",
     ]
     for name in ("train.fileids", "test.fileids", "train.transcription", "test.transcription"):
-        assert project.joinpath("etc", name).read_bytes() == data.joinpath(name).read_bytes()
+        assert split.joinpath(name).read_bytes() == data.joinpath(name).read_bytes()
+    assert split_is_external(split)
     config = yaml.safe_load(project.joinpath("etc/configs.yaml").read_text())
     assert (
         config["profiles"]["timit"]["features"] | {"dither": True, "seed": 243}
