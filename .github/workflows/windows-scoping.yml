@@ -73,4 +73,21 @@ jobs:
       - name: Run Windows-compatible Python tests
         env:
           PSTRAIN_REQUIRE_CLIB: "1"
-        run: python -m pytest -v
+        shell: pwsh
+        run: |
+          python -m pytest -v -rs `
+            tests/test_paths.py `
+            tests/test_commands.py::TestCommandBuilder::test_resolution_uses_exe_suffix_on_windows `
+            tests/test_cffi_abi.py `
+            tests/test_lib_structure.py `
+            tests/test_pstrainc.py `
+            tests/test_features.py `
+            tests/test_split.py `
+            tests/test_bw_sharding.py `
+            tests/test_dtree.py `
+            tests/test_e2e_training.py `
+            tests/test_feat_params.py `
+            tests/test_numeric_harness.py `
+            tests/test_pipeline_tasks.py `
+            tests/test_train_convergence.py `
+            tests/test_train_retry.py
