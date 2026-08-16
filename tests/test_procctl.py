@@ -183,7 +183,7 @@ def test_stop_accepts_either_recorded_command(
     killpg.assert_called_once_with(42, procctl.signal.SIGTERM)
 
 
-def test_stop_accepts_command_drift_when_strong_identity_matches(
+def test_stop_accepts_late_exec_to_launch_argv_tail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fingerprint = {
@@ -196,24 +196,61 @@ def test_stop_accepts_command_drift_when_strong_identity_matches(
         "observed_command": "wrapper target",
         "attempt_path": "/attempt",
     }
-    live = {
+    wrapper = {
         "host": "host",
         "user": "user",
         "pid": 42,
         "start_time": "start",
-        "command": "target",
+        "command": "wrapper target",
         "attempt_path": "/attempt",
     }
+    target = {**wrapper, "command": "target"}
+    observations = iter((wrapper, target))
     killpg = Mock()
     monkeypatch.setattr(procctl, "_read_fingerprint", lambda _path: fingerprint)
-    monkeypatch.setattr(procctl, "_live_fingerprint", lambda _pid: live)
+    monkeypatch.setattr(procctl, "_live_fingerprint", lambda _pid: next(observations))
     monkeypatch.setattr(procctl, "_wait_for_process_group_exit", lambda _pgid, _timeout: True)
     monkeypatch.setattr(procctl.os, "killpg", killpg)
 
+    assert next(observations) == wrapper
     result = procctl.stop(argparse.Namespace(fingerprint=Path("unused"), timeout=0.01))
 
     assert result == 0
     killpg.assert_called_once_with(42, procctl.signal.SIGTERM)
+
+
+def test_stop_refuses_unrelated_command_with_matching_strong_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fingerprint = {
+        "host": "host",
+        "user": "user",
+        "pid": 42,
+        "pgid": 42,
+        "start_time": "same-second-start",
+        "requested_command": "wrapper launched-target",
+        "observed_command": "wrapper launched-target",
+        "attempt_path": "/attempt",
+    }
+    wrapper = {
+        "host": "host",
+        "user": "user",
+        "pid": 42,
+        "start_time": "same-second-start",
+        "command": "wrapper launched-target",
+        "attempt_path": "/attempt",
+    }
+    imposter = {**wrapper, "command": "unrelated-command"}
+    observations = iter((wrapper, imposter))
+    killpg = Mock(side_effect=AssertionError("stop must not signal an imposter"))
+    monkeypatch.setattr(procctl, "_read_fingerprint", lambda _path: fingerprint)
+    monkeypatch.setattr(procctl, "_live_fingerprint", lambda _pid: next(observations))
+    monkeypatch.setattr(procctl.os, "killpg", killpg)
+
+    assert next(observations) == wrapper
+    with pytest.raises(procctl.Refusal, match="command mismatch; no signal sent"):
+        procctl.stop(argparse.Namespace(fingerprint=Path("unused"), timeout=0.01))
+    killpg.assert_not_called()
 
 
 def test_stop_terminates_sigterm_ignoring_process_group(tmp_path: Path) -> None:

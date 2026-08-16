@@ -233,6 +233,16 @@ def _read_fingerprint(path: Path) -> dict[str, Any]:
     return value
 
 
+def _allowed_live_commands(fingerprint: dict[str, Any]) -> tuple[str, ...]:
+    """Return the recorded wrapper and launch-derived post-exec commands."""
+    requested = fingerprint["requested_command"]
+    _wrapper, separator, target = requested.partition(" ")
+    commands = [fingerprint["observed_command"], requested]
+    if separator and target:
+        commands.append(target)
+    return tuple(dict.fromkeys(commands))
+
+
 def stop(args: argparse.Namespace) -> int:
     expected = _read_fingerprint(args.fingerprint)
     live = _live_fingerprint(expected["pid"])
@@ -244,6 +254,12 @@ def stop(args: argparse.Namespace) -> int:
     ]
     if mismatches:
         raise Refusal("fingerprint mismatch; no signal sent:\n  " + "\n  ".join(mismatches))
+    allowed_commands = _allowed_live_commands(expected)
+    if live["command"] not in allowed_commands:
+        raise Refusal(
+            "fingerprint command mismatch; no signal sent:\n"
+            f"  fingerprint commands={allowed_commands!r}, live={live['command']!r}"
+        )
     pgid = expected["pgid"]
     os.killpg(pgid, signal.SIGTERM)
     print(f"sent SIGTERM to verified process group {pgid}")

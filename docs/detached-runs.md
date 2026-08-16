@@ -30,12 +30,14 @@ python scripts/procctl.py stop /absolute/path/to/attempt/process.json
 ```
 
 Before signaling, the helper re-reads the live process. Host, PID, start time, user, and
-working directory form the strong identity and must all match. Once they match, command
-text is a soft signal rather than a gate: a changed live command is accepted as a
-wrapper-to-target `exec`, including one after the settlement window. A mismatch in any
-strong-identity field, a missing process, a malformed file, or an inability to inspect
-the working directory causes a refusal without signaling. The helper never accepts a
-name, command, or pattern in place of a fingerprint.
+working directory form the strong identity and must all match. The live command must
+also match the recorded settled wrapper command, the requested command, or the expected
+post-exec target derived from the requested command's argv tail. This permits a wrapper
+to exec its launched target after the settlement window, but refuses an unrelated
+command even when every strong-identity field matches. A mismatch, a missing process, a
+malformed file, or an inability to inspect the working directory causes a refusal
+without signaling. The helper never accepts a name, command, or pattern in place of a
+fingerprint.
 
 Stop sends `SIGTERM` to the verified process group and waits up to the configured
 timeout. If any group member remains, it sends `SIGKILL` to the group and waits once
@@ -43,8 +45,6 @@ more. Launch-failure cleanup uses the same group-wide TERM-to-KILL escalation. B
 launch creates a fresh session, these signals cover the wrapper and its children without
 reaching unrelated process groups.
 
-The strong identity has a deliberate discrimination residual. An unrelated process can
-be indistinguishable if it has a reused PID, the same second-granularity start time, the
-same host, user, and working directory. Start time remains the primary PID-reuse guard,
-but its platform-provided granularity cannot eliminate that case. Command text is not
-used to widen matching: no command match can overcome a strong-identity mismatch.
+Start time remains the primary PID-reuse guard, and command validation protects the
+same-second reuse case when the replacement command is unrelated. No command match can
+overcome a strong-identity mismatch.

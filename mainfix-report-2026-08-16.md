@@ -8,8 +8,8 @@ single immediate sample could capture a pre-exec wrapper. The fix samples for up
 seconds and requires consecutive equal observations spanning at least one second;
 transient reader failures are retried inside that budget. `procctl stop` retains PID,
 start time, and user as its primary identity core, also requires host and working
-directory to match, and treats live command drift as a legitimate `exec` after that
-strong identity matches.
+directory to match, and accepts command drift only to the recorded wrapper or the
+post-exec target derived from the requested argv.
 
 The fingerprint also records the fresh session's process-group ID. Normal stop and
 launch cleanup send SIGTERM to the group, wait for a bounded period, escalate the group
@@ -18,8 +18,8 @@ is reported as such.
 
 ## Verification
 
-- `python scripts/run_verified_tests.py tests/test_procctl.py`: 14 passed.
-- `make verified`: passed on macOS; 692 tests passed, 1 skipped, and 1 deselected
+- `python scripts/run_verified_tests.py tests/test_procctl.py`: 15 passed.
+- `PYTHONPATH=. make verified`: passed on macOS; 693 tests passed, 1 skipped, and 1 deselected
   in the main verified suite, followed by 41 configuration tests passing, CTest
   6/6 passing, floating-point contraction verification passing, generated-file
   checks passing, Ruff passing, mypy passing, and Ruff format checks passing.
@@ -63,3 +63,17 @@ SIGTERM, wait for a bounded period, escalate surviving group members to SIGKILL,
 wait again to confirm the group has exited. The process regression uses a TERM-ignoring
 wrapper and child and requires that no group member survive stop; the late-exec
 regression uses a deterministic mocked identity sequence.
+
+## Round 4 — 2026-08-16
+
+Command drift is accepted only when the live command matches the recorded settled
+wrapper, the requested command, or the expected post-exec target derived from the
+requested argv tail. The target is derived from the recorded launch request rather than
+the settlement observation, so a wrapper that remains visible throughout settlement
+and execs later can still be stopped safely.
+
+Deterministic regressions cover both sides of the rule: a late exec to the launched
+target is terminated, while an unrelated same-second PID-reuse imposter with matching
+host, PID, start time, user, and working directory is refused without a signal. Dead
+PIDs and strong-identity mismatches continue to refuse without signaling, and group
+termination continues to reap a TERM-ignoring wrapper and child.
