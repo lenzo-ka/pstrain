@@ -114,7 +114,9 @@ jobs:
 
       - name: Verify canonical config consumers and generated reference
         if: matrix.python == '3.11' && matrix.os == 'ubuntu-latest'
-        run: make config-check
+        # This is an installed-package job; the ambient gate is exercised by
+        # the in-tree verified flow and must reject this editable installation.
+        run: make AMBIENT_IMPORT_PREREQUISITE= config-check
 
       - name: Upload coverage
         uses: codecov/codecov-action@v7
