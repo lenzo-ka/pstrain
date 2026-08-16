@@ -60,3 +60,37 @@ def test_find_lib_path_does_not_select_windows_runtime_on_posix(
     monkeypatch.setattr(paths, "_get_project_root", lambda: tmp_path)
 
     assert paths._find_lib_path() is None
+
+
+def test_find_lib_path_does_not_select_posix_library_on_windows(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Windows discovery uses the DLL basename, not a planted POSIX library."""
+    posix_library = tmp_path / "build" / "lib" / "libpstrainc.so"
+    posix_library.parent.mkdir(parents=True)
+    posix_library.write_bytes(b"shared library")
+    monkeypatch.delenv("PSTRAIN_LIB_PATH", raising=False)
+    monkeypatch.setattr(paths.sys, "platform", "win32")
+    monkeypatch.setattr(paths, "_get_bundled_lib_dir", lambda: None)
+    monkeypatch.setattr(paths, "_get_project_root", lambda: tmp_path)
+
+    assert paths._find_lib_path() is None
+
+
+def test_find_lib_path_keeps_platform_specific_posix_names(tmp_path: Path, monkeypatch) -> None:
+    """Linux and macOS retain their existing shared-library basenames."""
+    monkeypatch.delenv("PSTRAIN_LIB_PATH", raising=False)
+    monkeypatch.setattr(paths, "_get_bundled_lib_dir", lambda: None)
+    monkeypatch.setattr(paths, "_get_project_root", lambda: tmp_path)
+
+    linux_library = tmp_path / "build" / "lib" / "libpstrainc.so"
+    linux_library.parent.mkdir(parents=True)
+    linux_library.write_bytes(b"shared library")
+    monkeypatch.setattr(paths.sys, "platform", "linux")
+    assert paths._find_lib_path() == linux_library
+
+    linux_library.unlink()
+    macos_library = tmp_path / "build" / "lib" / "libpstrainc.dylib"
+    macos_library.write_bytes(b"shared library")
+    monkeypatch.setattr(paths.sys, "platform", "darwin")
+    assert paths._find_lib_path() == macos_library

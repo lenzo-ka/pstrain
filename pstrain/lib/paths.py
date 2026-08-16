@@ -130,9 +130,12 @@ def _find_lib_path() -> Path | None:
     4. LD_LIBRARY_PATH / DYLD_LIBRARY_PATH
     5. System library paths
     """
-    lib_names = ["libpstrainc.dylib", "libpstrainc.so"]
     if sys.platform == "win32":
-        lib_names.append("pstrainc.dll")
+        lib_names = ["pstrainc.dll"]
+    elif sys.platform == "darwin":
+        lib_names = ["libpstrainc.dylib"]
+    else:
+        lib_names = ["libpstrainc.so"]
 
     # 1. Environment variable override
     if "PSTRAIN_LIB_PATH" in os.environ:
@@ -162,9 +165,12 @@ def _find_lib_path() -> Path | None:
     ]
     for vendored in vendored_dirs:
         if vendored.is_dir():
-            patterns = ["libpstrainc*.so", "libpstrainc*.dylib"]
             if sys.platform == "win32":
-                patterns.append("pstrainc*.dll")
+                patterns = ["pstrainc*.dll"]
+            elif sys.platform == "darwin":
+                patterns = ["libpstrainc*.dylib"]
+            else:
+                patterns = ["libpstrainc*.so"]
             for pattern in patterns:
                 hits = sorted(vendored.glob(pattern))
                 if hits:

@@ -43,3 +43,34 @@ jobs:
       - name: Build static core, shared core, and CLI programs (${{ matrix.compiler }})
         shell: pwsh
         run: cmake --build "build-${{ matrix.compiler }}" --config Release --parallel
+
+  windows-python-tests:
+    name: Windows Python 3.13 tests
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Enter the MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build native library and CLI programs
+        shell: pwsh
+        run: |
+          cmake -S . -B build -DBUILD_SHARED_LIBS=ON -DBUILD_CLI=ON
+          cmake --build build --config Release --parallel
+
+      - name: Install package and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run Windows-compatible Python tests
+        env:
+          PSTRAIN_REQUIRE_CLIB: "1"
+        run: python -m pytest -v

@@ -22,8 +22,8 @@ def _find_library() -> Path:
 
     Uses pstrain.lib.paths for discovery, which checks:
     1. Environment variables (PSTRAIN_LIB_PATH)
-    2. Bundled in wheel (pstrain/_lib/lib/)
-    3. Development build (build/lib/)
+    2. Bundled in wheel (pstrain/_lib/lib/ or bin/ on Windows)
+    3. Development build (build/lib/ on POSIX, build/bin/<Config>/ on Windows)
     4. System library paths
     """
     # Import here to avoid circular import
