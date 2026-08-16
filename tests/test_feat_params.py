@@ -4,6 +4,10 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip(
+    "resource", reason="POSIX-only training resource accounting requires the resource module"
+)
+
 from pstrain.lib.filetypes import FileType, detect_file_type
 from pstrain.lib.model import MODEL_FILES_REQUIRED
 from pstrain.lib.model import require_complete_model as real_require_complete_model
