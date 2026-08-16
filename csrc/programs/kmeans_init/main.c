@@ -815,17 +815,16 @@ cluster(int32 ts,
 	uint32 blksize,
 	vector_t **mean,
 	uint32 n_density,
-	codew_t **out_label)
+	codew_t **out_label,
+	pstrain_rng_t *rng)
 {
     float64 sum_sqerr, sqerr=0;
     uint32 s, n_frame;
     const char *meth;
-    pstrain_rng_t rng;
 
     *out_label = NULL;
 
     k_means_set_get_obs(&get_obs);
-    pstrain_rng_init(&rng);
 
     for (s = 0, sum_sqerr = 0; s < n_stream; s++, sum_sqerr += sqerr) {
 	meth = cmd_ln_str("-method");
@@ -841,7 +840,7 @@ cluster(int32 ts,
 				  cmd_ln_float32("-minratio"),
 				  cmd_ln_int32("-maxiter"),
 				  out_label,
-				  &rng);
+				  rng);
 	    if (sqerr < 0) {
 		E_ERROR("Too few observations for kmeans\n");
 
@@ -1311,8 +1310,11 @@ init_state(const char *obsdmp,
     segdmp_type_t t;
     uint32 i, j, ts, n;
     int32 full_covar;
+    pstrain_rng_t rng;
 
     full_covar = cmd_ln_int32("-fullvar");
+    /* libc drand48() formerly supplied one process-global default stream. */
+    pstrain_rng_init(&rng);
     /* fully-continuous for now */
     mean = gauden_alloc_param(ts_cnt, n_stream, n_density, veclen);
     if (full_covar)
@@ -1397,7 +1399,8 @@ init_state(const char *obsdmp,
 	E_INFO("Convergence ratios are abs(cur - prior) / abs(prior)\n");
 	/* Do some variety of k-means clustering */
 	ptmr_start(&km_timer);
-	sqerr = cluster(ts, n_stream, n_frame, veclen, blksize, mean[i], n_density, &label);
+	sqerr = cluster(ts, n_stream, n_frame, veclen, blksize,
+			mean[i], n_density, &label, &rng);
 	ptmr_stop(&km_timer);
 
 	if (sqerr < 0) {
