@@ -1,12 +1,6 @@
 set(PROGRAM agg_seg)
 set(SRCS
-  agg_all_seg.c
-  agg_phn_seg.c
-  agg_st_seg.c
-  cnt_phn_seg.c
-  cnt_st_seg.c
   main.c
-  mk_seg.c
   parse_cmd_ln.c
   )
 

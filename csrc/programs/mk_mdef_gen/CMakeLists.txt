@@ -1,9 +1,6 @@
 set(PROGRAM mk_mdef_gen)
 set(SRCS
-hash.c
-heap.c
 main.c
-mk_mdef_gen.c
 parse_cmd_ln.c
 )
 

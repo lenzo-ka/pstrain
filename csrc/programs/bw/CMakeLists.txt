@@ -1,13 +1,7 @@
 set(PROGRAM bw)
 set(SRCS
-accum.c
-backward.c
-baum_welch.c
-forward.c
 main.c
-next_utt_states.c
 train_cmd_ln.c
-viterbi.c
   )
 
 add_executable(${PROGRAM} ${SRCS})
