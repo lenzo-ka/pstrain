@@ -22,9 +22,9 @@ def _run(binary: str, *args: str) -> subprocess.CompletedProcess[str]:
 def _param_cnt_args(tmp_path: Path, param_type: str) -> list[str]:
     fixture = Path(__file__).parent / "fixtures" / "multipron_final_state"
     ctl = tmp_path / "empty.ctl"
-    ctl.write_text("")
+    ctl.write_text("test\n")
     lsn = tmp_path / "empty.lsn"
-    lsn.write_text("")
+    lsn.write_text("a\n")
     segdir = tmp_path / "seg"
     segdir.mkdir()
     return [
@@ -54,6 +54,24 @@ def test_param_cnt_output_open_failure_is_unsuccessful(tmp_path: Path) -> None:
 
     assert result.returncode == 1, result.stderr
     assert f"Couldn't open {output} for writing" in result.stderr
+
+
+def test_param_cnt_empty_control_file_is_unsuccessful(tmp_path: Path) -> None:
+    ctl = tmp_path / "empty.ctl"
+    args = _param_cnt_args(tmp_path, "phone")
+    ctl.write_text("")
+    output = tmp_path / "counts"
+    result = _run(
+        "param_cnt",
+        *args,
+        "-outputfn",
+        str(output),
+    )
+
+    assert result.returncode != 0, result.stderr
+    assert f"-ctlfn {ctl}" in result.stderr
+    assert result.stdout == ""
+    assert not output.exists() or output.read_text() == ""
 
 
 def test_param_cnt_rejects_unknown_parameter_type(tmp_path: Path) -> None:

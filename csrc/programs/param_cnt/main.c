@@ -70,6 +70,7 @@ initialize_from_cmd_ln(lexicon_t **out_lex,
     model_def_t *mdef;
     const char *fdictfn;
     const char *dictfn;
+    const char *ctlfn;
     const char *segdir;
     const char *ts2cbfn;
     uint32 n_ts;
@@ -90,7 +91,11 @@ initialize_from_cmd_ln(lexicon_t **out_lex,
 	corpus_set_sent_ext(cmd_ln_str("-sentext"));
     }
 
-    corpus_set_ctl_filename(cmd_ln_str("-ctlfn"));
+    ctlfn = cmd_ln_str("-ctlfn");
+    if (corpus_set_ctl_filename(ctlfn) != S3_SUCCESS) {
+	E_ERROR("Failed to initialize corpus from -ctlfn %s\n", ctlfn);
+	return S3_ERROR;
+    }
 
     if (cmd_ln_int32("-nskip") && cmd_ln_int32("-runlen")) {
         corpus_set_interval(cmd_ln_int32("-nskip"),

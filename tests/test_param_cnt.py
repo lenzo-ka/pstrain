@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from pstrain.lib.native_worker import PstrainNativeError
 from pstrain.lib.param_cnt import ParamType, count_params
 
 # Check if library exists
@@ -119,6 +120,28 @@ class TestCountParamsValidation:
         )
 
         assert output.read_text().splitlines()
+
+    @pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
+    def test_empty_control_file_is_unsuccessful(self, tmp_path: Path) -> None:
+        """Test that corpus setup failures cross the CFFI boundary."""
+        fixture = Path(__file__).parent / "fixtures" / "multipron_final_state"
+        ctl = tmp_path / "empty.ctl"
+        ctl.write_text("")
+        lsn = tmp_path / "empty.lsn"
+        lsn.write_text("")
+        output = tmp_path / "phone.counts"
+
+        with pytest.raises(PstrainNativeError):
+            count_params(
+                mdef_path=fixture / "model" / "mdef",
+                dict_path=fixture / "dictionary.dict",
+                ctl_path=ctl,
+                lsn_path=lsn,
+                output_path=output,
+                param_type=ParamType.PHONE,
+            )
+
+        assert not output.exists() or output.read_text() == ""
 
 
 class TestCountParamsStringConversion:
