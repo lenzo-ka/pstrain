@@ -15,8 +15,10 @@ def _run(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _launch(tmp_path: Path) -> tuple[Path, int]:
+def _launch(tmp_path: Path, *command: str) -> tuple[Path, int]:
     fingerprint = tmp_path / "process.json"
+    if not command:
+        command = (sys.executable, "-c", "import time; time.sleep(60)")
     result = _run(
         "launch",
         "--attempt",
@@ -26,9 +28,7 @@ def _launch(tmp_path: Path) -> tuple[Path, int]:
         "--log",
         str(tmp_path / "process.log"),
         "--",
-        sys.executable,
-        "-c",
-        "import time; time.sleep(60)",
+        *command,
     )
     assert result.returncode == 0, result.stderr
     return fingerprint, json.loads(fingerprint.read_text())["pid"]
@@ -40,6 +40,26 @@ def test_stop_verified_process(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert "sent SIGTERM to verified PID" in result.stdout
     assert "stopped" in result.stdout
+
+
+def test_fingerprints_command_after_exec_indirection(tmp_path: Path) -> None:
+    shim = tmp_path / "exec-shim"
+    shim.write_text('#!/bin/sh\nsleep 0.05\nexec "$@"\n')
+    shim.chmod(0o755)
+    fingerprint, pid = _launch(
+        tmp_path,
+        str(shim),
+        sys.executable,
+        "-c",
+        "import time; time.sleep(60)",
+    )
+    recorded = json.loads(fingerprint.read_text())
+    try:
+        assert str(shim) not in recorded["command"]
+        result = _run("stop", str(fingerprint), "--timeout", "2")
+        assert result.returncode == 0, result.stderr
+    finally:
+        subprocess.run(["kill", str(pid)], check=False, capture_output=True)
 
 
 def test_refuses_stale_fingerprint_without_signalling(tmp_path: Path) -> None:

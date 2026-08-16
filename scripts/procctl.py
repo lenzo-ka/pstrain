@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any
 
 FIELDS = ("host", "user", "pid", "start_time", "command", "attempt_path")
+FINGERPRINT_SETTLE_INTERVAL = 0.1
+FINGERPRINT_SETTLE_TIMEOUT = 2.0
 
 
 class Refusal(Exception):
@@ -73,6 +75,19 @@ def _live_fingerprint(pid: int) -> dict[str, Any]:
     }
 
 
+def _settled_live_fingerprint(pid: int) -> dict[str, Any]:
+    """Read a live identity after any immediate exec indirection has settled."""
+    previous = _live_fingerprint(pid)
+    deadline = time.monotonic() + FINGERPRINT_SETTLE_TIMEOUT
+    while time.monotonic() < deadline:
+        time.sleep(FINGERPRINT_SETTLE_INTERVAL)
+        current = _live_fingerprint(pid)
+        if current == previous:
+            return current
+        previous = current
+    raise Refusal(f"process identity for PID {pid} did not settle after launch")
+
+
 def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
@@ -101,7 +116,7 @@ def launch(args: argparse.Namespace) -> int:
             start_new_session=True,
         )
     try:
-        fingerprint = _live_fingerprint(process.pid)
+        fingerprint = _settled_live_fingerprint(process.pid)
         if fingerprint["attempt_path"] != str(attempt):
             raise RuntimeError("detached process did not start in the attempt path")
         _write_json_atomic(fingerprint_path, fingerprint)
