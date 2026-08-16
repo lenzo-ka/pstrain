@@ -63,7 +63,13 @@ GUARDED_OPERATIONS = frozenset(
 #: in the helper because a clean ``exit(0)`` mid-request and a signal death
 #: cannot be induced from outside the child.
 _FAULT_OPERATIONS = frozenset(
-    {"_fault_exit_zero", "_fault_signal", "_session_probe_set", "_session_probe_is_set"}
+    {
+        "_fault_exit_zero",
+        "_fault_signal",
+        "_mdef_gen_parse_unknown_probe",
+        "_session_probe_set",
+        "_session_probe_is_set",
+    }
 )
 _STATUS_OPERATIONS = frozenset({"prune_tree", "make_quests", "mdef_gen_ci"})
 
@@ -214,6 +220,8 @@ def _dispatch(
     if operation == "_fault_signal":
         os.kill(os.getpid(), arguments[0])
         return 0
+    if operation == "_mdef_gen_parse_unknown_probe":
+        return int(lib.pstrain_mdef_gen_parse_unknown_probe())
     if operation == "_session_probe_set":
         return int(lib.pstrain_session_probe_set())
     if operation == "_session_probe_is_set":

@@ -220,7 +220,7 @@ pstrain_agg_seg(const char *mdef_path,
     argv[argc++] = "-cachesz";
     argv[argc++] = cachesz_str;
 
-    cmd_ln_parse(args, argc, (char **)argv, FALSE);
+    cmd_ln_parse(args, argc, (char **)argv, TRUE);
 
     ret = agg_seg_run();
 
