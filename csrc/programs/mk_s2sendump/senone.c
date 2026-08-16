@@ -333,7 +333,7 @@ static int32 senone_mixw_read(logmath_t * logmath, senone_t *s, const char *file
     return 0;
 }
 
-senone_t *senone_init (logmath_t *logmath, const char *mixwfile, const char *sen2mgau_map, float64 mixwfloor)
+senone_t *mk_s2sendump_senone_init (logmath_t *logmath, const char *mixwfile, const char *sen2mgau_map, float64 mixwfloor)
 {
     senone_t *s;
 

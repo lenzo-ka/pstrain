@@ -90,7 +90,7 @@ typedef struct {
  * PDF values to logs3 domain and quantize to 8-bits.
  * Return value: pointer to senone structure created.  Caller MUST NOT change its contents.
  */
-senone_t *senone_init (logmath_t *logmath,		/* In: logmath */
+senone_t *mk_s2sendump_senone_init (logmath_t *logmath, /* In: logmath */
 		       const char *mixwfile,		/* In: mixing weights file */
 		       const char *mgau_mapfile,	/* In: file specifying mapping from each
 						   senone to mixture gaussian codebook.

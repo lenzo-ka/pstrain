@@ -277,7 +277,7 @@ int main (int32 argc, char **argv)
     logmath = logmath_init(1.0001, shift, TRUE);
 
     model_def_read(&m, mdeffile);
-    s = senone_init (logmath, senfile, mgaumap, wtflr);
+    s = mk_s2sendump_senone_init (logmath, senfile, mgaumap, wtflr);
 
     if (m->n_tied_state != s->n_sen)
 	E_FATAL("#senones different in mdef(%d) and mixw(%d) files\n", m->n_tied_state, s->n_sen);
