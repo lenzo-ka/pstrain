@@ -28,6 +28,11 @@ The shrub preparation run against
 The four canonical manifest files are copied into each project as persistent,
 authoritative external split files.  `all.transcription` is their ordered
 concatenation, and audio file IDs remain rooted at `train/` or `test/`.
+They are installed under each arm's `experiments/default/etc`, where the
+pipeline consumes them.  Before training, each arm detected the split as
+external; the pipeline validation sidecars recorded `mode: external`, 3,696
+training utterances, and 1,344 test utterances, with matching hashes for all
+four manifests.  The counts in `results.json` come from those sidecars.
 
 ## Dither adjudication
 
@@ -35,9 +40,9 @@ The clean paired run completed on shrub:
 
 - checkout: `/home/lenzo/shrub-data/pstrain-timitcs`
 - per-checkout environment: `/home/lenzo/shrub-data/pstrain-timitcs/.venv`
-- result directory: `/home/lenzo/shrub-data/timit-canonical-dither-v2`
-- PID file: `/home/lenzo/shrub-data/timit-canonical-dither-v2/run.pid`
-- top-level log: `/home/lenzo/shrub-data/timit-canonical-dither-v2/run.log`
+- result directory: `/home/lenzo/shrub-data/timit-canonical-dither-v4`
+- PID file: `/home/lenzo/shrub-data/timit-canonical-dither-v4/run.pid`
+- top-level log: `/home/lenzo/shrub-data/timit-canonical-dither-v4/run.log`
 - workers: 34 on a 36-logical-core host
 - target: `ci-1g`
 - cells: `dither-off` and `dither-on`, both complete
@@ -60,8 +65,8 @@ durable claim.
 
 | Cell | Feature tree SHA-256 | Model tree SHA-256 | Resolved config SHA-256 |
 | --- | --- | --- | --- |
-| dither off | `30dee11fae4d1def3ff784f5230b41de6d4246ed12ab6e2052d8819235d8c7b2` | `a7fd560ddd34566e9c7189f64c0fedd0d948e690c14d5af7cf0bb91121954df5` | `3c6af89a0e866f9a615181b37dae06eb1d6e6406b3aa6101f36cd3336b6f3f7e` |
-| dither on | `ac138281879232d961339e863a541d5212d0e1eecfd5b562c21307d717fa1a6c` | `9e4e2841b2cccf73b92d72ea24be9774094d2a9d792a3b521dbba366ec42f75a` | `b08c91c277cc182e838cfbec2fd9de587a78115be25e7ec81d3cc8d3221ce67e` |
+| dither off | `469b21b02b94ddecd9f7385f52e1401600f0f42d5a00eafedc09857fa879206c` | `c7d598d0e3cd41aae2048f4afb5988525d51a51b822a9419c85ef4590637b4fd` | `3c6af89a0e866f9a615181b37dae06eb1d6e6406b3aa6101f36cd3336b6f3f7e` |
+| dither on | `510ebd512920178771b1fb7358be77824f94ae6218640ab555418d666f0bd030` | `b05e33800ecf6f9f2a2a16813d5c94a3fa1bacedc5e0a064d65f71e19670f8b3` | `b08c91c277cc182e838cfbec2fd9de587a78115be25e7ec81d3cc8d3221ce67e` |
 
 The completed records are committed at
 `benchmarks/timit/dither-ci-1g/results.json` and
@@ -70,6 +75,6 @@ The completed records are committed at
 ## Verification
 
 - Focused local tests: 11 passed.
-- Focused shrub-venv tests: 11 passed.
+- Focused shrub-venv split and benchmark tests: 8 passed.
 - Local `make verified`: green; 716 passed, 1 skipped, 1 deselected, with all
   configuration, lint, type, format, native, and ambient-import gates green.

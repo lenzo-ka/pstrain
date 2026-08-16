@@ -30,15 +30,15 @@
   "results": {
     "dither-off": {
       "dither": false,
-      "feature_tree_sha256": "30dee11fae4d1def3ff784f5230b41de6d4246ed12ab6e2052d8819235d8c7b2",
-      "model_tree_sha256": "a7fd560ddd34566e9c7189f64c0fedd0d948e690c14d5af7cf0bb91121954df5",
+      "feature_tree_sha256": "469b21b02b94ddecd9f7385f52e1401600f0f42d5a00eafedc09857fa879206c",
+      "model_tree_sha256": "c7d598d0e3cd41aae2048f4afb5988525d51a51b822a9419c85ef4590637b4fd",
       "resolved_config_sha256": "3c6af89a0e866f9a615181b37dae06eb1d6e6406b3aa6101f36cd3336b6f3f7e",
       "seed": 243
     },
     "dither-on": {
       "dither": true,
-      "feature_tree_sha256": "ac138281879232d961339e863a541d5212d0e1eecfd5b562c21307d717fa1a6c",
-      "model_tree_sha256": "9e4e2841b2cccf73b92d72ea24be9774094d2a9d792a3b521dbba366ec42f75a",
+      "feature_tree_sha256": "510ebd512920178771b1fb7358be77824f94ae6218640ab555418d666f0bd030",
+      "model_tree_sha256": "b05e33800ecf6f9f2a2a16813d5c94a3fa1bacedc5e0a064d65f71e19670f8b3",
       "resolved_config_sha256": "b08c91c277cc182e838cfbec2fd9de587a78115be25e7ec81d3cc8d3221ce67e",
       "seed": 243
     }

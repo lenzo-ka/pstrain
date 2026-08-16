@@ -48,11 +48,14 @@ On a 36-logical-core compute host, leaving two cores free:
 python scripts/bench_timit.py /path/to/timit --work-dir /path/to/results -j 34
 ```
 
-`results.json` records the canonical split counts, a content hash of each
+Before either training command starts, the harness requires the pipeline to
+detect the four manifests as an external split.  Each pipeline arm then
+validates that split as 3,696 training and 1,344 test utterances.
+`results.json` records those pipeline-validated counts, a content hash of each
 cell's MFC tree, and a content hash of the acoustic parameter files (excluding
 configuration/provenance files).  Equal seeds make reruns repeatable; different
-feature or model hashes adjudicate whether enabling dither changes that
-stage's numeric result.
+feature or model hashes adjudicate whether enabling dither changes that stage's
+numeric result.
 
 ### Completed `ci-1g` result
 
@@ -71,5 +74,5 @@ not reproducible pins.  The durable result is the boolean adjudication
 
 | Cell | Feature tree SHA-256 | Model tree SHA-256 | Resolved config SHA-256 |
 | --- | --- | --- | --- |
-| dither off | `30dee11fae4d1def3ff784f5230b41de6d4246ed12ab6e2052d8819235d8c7b2` | `a7fd560ddd34566e9c7189f64c0fedd0d948e690c14d5af7cf0bb91121954df5` | `3c6af89a0e866f9a615181b37dae06eb1d6e6406b3aa6101f36cd3336b6f3f7e` |
-| dither on | `ac138281879232d961339e863a541d5212d0e1eecfd5b562c21307d717fa1a6c` | `9e4e2841b2cccf73b92d72ea24be9774094d2a9d792a3b521dbba366ec42f75a` | `b08c91c277cc182e838cfbec2fd9de587a78115be25e7ec81d3cc8d3221ce67e` |
+| dither off | `469b21b02b94ddecd9f7385f52e1401600f0f42d5a00eafedc09857fa879206c` | `c7d598d0e3cd41aae2048f4afb5988525d51a51b822a9419c85ef4590637b4fd` | `3c6af89a0e866f9a615181b37dae06eb1d6e6406b3aa6101f36cd3336b6f3f7e` |
+| dither on | `510ebd512920178771b1fb7358be77824f94ae6218640ab555418d666f0bd030` | `b05e33800ecf6f9f2a2a16813d5c94a3fa1bacedc5e0a064d65f71e19670f8b3` | `b08c91c277cc182e838cfbec2fd9de587a78115be25e7ec81d3cc8d3221ce67e` |
