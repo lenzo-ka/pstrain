@@ -211,7 +211,6 @@ param_cnt_run(void)
     model_def_t *mdef;
     const char *type;
     const char *outfn;
-    FILE *out_fp = stdout;
 
     if (initialize_from_cmd_ln(&lex, &mdef) != S3_SUCCESS) {
 	E_ERROR("errors initializing.\n");
@@ -220,23 +219,8 @@ param_cnt_run(void)
 
     type = cmd_ln_str("-paramtype");
     outfn = cmd_ln_str("-outputfn");
-    if (outfn != NULL) {
-	out_fp = fopen(outfn, "w");
-	if (out_fp == NULL) {
-	    E_ERROR_SYSTEM("Couldn't open %s for writing\n", outfn);
-	    return 1;
-	}
-    }
-
-    if (param_cnt(out_fp, lex, mdef, type) != S3_SUCCESS) {
-	if (outfn != NULL && out_fp != stdout) {
-	    fclose(out_fp);
-	}
+    if (param_cnt(outfn, lex, mdef, type) != S3_SUCCESS) {
 	return 1;
-    }
-
-    if (outfn != NULL && out_fp != stdout) {
-	fclose(out_fp);
     }
 
     return 0;
@@ -250,7 +234,6 @@ main(int argc, char *argv[])
     model_def_t *mdef;
     const char *type;
     const char *outfn;
-    FILE *out_fp = stdout;
 
     if (initialize(&lex, &mdef, argc, argv) != S3_SUCCESS) {
 	E_ERROR("errors initializing.\n");
@@ -259,22 +242,9 @@ main(int argc, char *argv[])
 
     type = cmd_ln_str("-paramtype");
     outfn = cmd_ln_str("-outputfn");
-    if (outfn != NULL) {
-	out_fp = fopen(outfn, "w");
-	if (out_fp == NULL) {
-	    E_ERROR_SYSTEM("Couldn't open %s for writing\n", outfn);
-	    return 1;
-	}
-    }
-
-    if (param_cnt(out_fp, lex, mdef, type) != S3_SUCCESS) {
-	if (outfn != NULL && out_fp != stdout)
-	    fclose(out_fp);
+    if (param_cnt(outfn, lex, mdef, type) != S3_SUCCESS) {
 	return 1;
     }
-
-    if (outfn != NULL && out_fp != stdout)
-	fclose(out_fp);
 
     return 0;
 }
