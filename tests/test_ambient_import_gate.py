@@ -16,11 +16,14 @@ def _venv_python(tmp_path: Path) -> Path:
     return venv / ("Scripts" if os.name == "nt" else "bin") / binary
 
 
-def _run(python: Path, *, pythonpath: Path | None = None) -> subprocess.CompletedProcess[str]:
+def _run(
+    python: Path, *, pythonpath: Path | list[Path] | None = None
+) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
     environment.pop("PYTHONPATH", None)
     if pythonpath is not None:
-        environment["PYTHONPATH"] = str(pythonpath)
+        paths = pythonpath if isinstance(pythonpath, list) else [pythonpath]
+        environment["PYTHONPATH"] = os.pathsep.join(map(str, paths))
     return subprocess.run(
         [str(python), str(CHECK)],
         cwd=ROOT,
@@ -31,6 +34,16 @@ def _run(python: Path, *, pythonpath: Path | None = None) -> subprocess.Complete
     )
 
 
+def _site_packages(python: Path) -> Path:
+    result = subprocess.run(
+        [str(python), "-c", "import site; print(site.getsitepackages()[0])"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return Path(result.stdout.strip())
+
+
 def test_ambient_import_gate_accepts_clean_or_checkout_local_import(
     tmp_path: Path,
 ) -> None:
@@ -39,7 +52,7 @@ def test_ambient_import_gate_accepts_clean_or_checkout_local_import(
     assert clean.returncode == 0, clean.stderr
     assert "ambient pstrain import:" in clean.stdout
 
-    checkout_local = _run(python, pythonpath=ROOT)
+    checkout_local = _run(Path(sys.executable), pythonpath=ROOT)
     assert checkout_local.returncode == 0, checkout_local.stderr
     assert "checkout-local" in checkout_local.stdout
 
@@ -47,11 +60,56 @@ def test_ambient_import_gate_accepts_clean_or_checkout_local_import(
 def test_ambient_import_gate_rejects_foreign_import(tmp_path: Path) -> None:
     python = _venv_python(tmp_path)
     package = tmp_path / "foreign" / "pstrain"
-    package.mkdir(parents=True)
+    benchmarks = package / "benchmarks"
+    benchmarks.mkdir(parents=True)
     (package / "__init__.py").write_text("\n", encoding="utf-8")
+    (benchmarks / "__init__.py").write_text("\n", encoding="utf-8")
+    (benchmarks / "arctic.py").write_text("\n", encoding="utf-8")
 
     result = _run(python, pythonpath=package.parent)
 
     assert result.returncode != 0
     assert "resolves outside this checkout" in result.stderr
     assert str((package / "__init__.py").resolve()) in result.stderr
+
+
+def test_ambient_import_gate_uses_script_startup(tmp_path: Path) -> None:
+    python = _venv_python(tmp_path)
+    foreign = tmp_path / "foreign"
+    package = foreign / "pstrain"
+    benchmarks = package / "benchmarks"
+    benchmarks.mkdir(parents=True)
+    (package / "__init__.py").write_text("\n", encoding="utf-8")
+    (benchmarks / "__init__.py").write_text("\n", encoding="utf-8")
+    (benchmarks / "arctic.py").write_text("\n", encoding="utf-8")
+    site_packages = _site_packages(python)
+    (site_packages / "argv_conditioned.pth").write_text(
+        f"import sys; sys.path.insert(0, {str(foreign)!r}) if sys.argv[0] != '-c' else None\n",
+        encoding="utf-8",
+    )
+
+    result = _run(python)
+
+    assert result.returncode != 0
+    assert str((package / "__init__.py").resolve()) in result.stderr
+
+
+def test_ambient_import_gate_rejects_foreign_package_path(tmp_path: Path) -> None:
+    python = _venv_python(tmp_path)
+    foreign = tmp_path / "foreign" / "pstrain"
+    benchmarks = foreign / "benchmarks"
+    benchmarks.mkdir(parents=True)
+    (benchmarks / "__init__.py").write_text("\n", encoding="utf-8")
+    (benchmarks / "arctic.py").write_text("\n", encoding="utf-8")
+    hook = tmp_path / "hook"
+    hook.mkdir()
+    (hook / "sitecustomize.py").write_text(
+        f"import pstrain\npstrain.__path__.insert(0, {str(foreign)!r})\n",
+        encoding="utf-8",
+    )
+
+    result = _run(python, pythonpath=[hook, ROOT])
+
+    assert result.returncode != 0
+    assert "offending pstrain.__path__" in result.stderr
+    assert str(foreign.resolve()) in result.stderr

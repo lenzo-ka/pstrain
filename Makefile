@@ -73,6 +73,10 @@ verified: ambient-import-check build-c verified-test config-check lint
 ambient-import-check:
 	python scripts/check_ambient_import.py
 
+# These verified legs may run concurrently with one another, but none may begin
+# until the ambient-import gate has completed successfully.
+build-c verified-test config-check lint: | ambient-import-check
+
 .PHONY: format
 format:
 	ruff format pstrain tests
@@ -100,6 +104,8 @@ cffi-exports-gen:
 .PHONY: cffi-exports-check
 cffi-exports-check:
 	python scripts/generate_cffi_exports.py --check
+
+docs-gen cffi-exports-check: | ambient-import-check
 
 .PHONY: config-check
 config-check: cffi-exports-check

@@ -19,7 +19,13 @@ except ModuleNotFoundError as error:
         raise
     print(json.dumps({"status": "missing"}))
 else:
-    print(json.dumps({"status": "resolved", "path": pstrain.__file__}))
+    import pstrain.benchmarks.arctic as arctic
+    print(json.dumps({
+        "status": "resolved",
+        "package_file": pstrain.__file__,
+        "package_path": list(pstrain.__path__),
+        "arctic_origin": arctic.__spec__.origin,
+    }))
 """
 
 
@@ -34,8 +40,10 @@ def _is_relative_to(path: Path, root: Path) -> bool:
 def main() -> int:
     # A neutral cwd prevents the checkout itself from making the bare import pass.
     with tempfile.TemporaryDirectory(prefix="pstrain-ambient-probe-") as directory:
+        probe_path = Path(directory) / "probe.py"
+        probe_path.write_text(PROBE, encoding="utf-8")
         result = subprocess.run(
-            [sys.executable, "-c", PROBE],
+            [sys.executable, str(probe_path)],
             cwd=directory,
             check=False,
             capture_output=True,
@@ -59,14 +67,20 @@ def main() -> int:
         print("ambient pstrain import: clean (ModuleNotFoundError)")
         return 0
 
-    package_path = Path(outcome["path"]).resolve()
-    if not _is_relative_to(package_path, ROOT):
-        raise SystemExit(
-            "ERROR: ambient pstrain import resolves outside this checkout\n"
-            f"offending path: {package_path}\n"
-            f"current checkout: {ROOT}"
-        )
-    print(f"ambient pstrain import: checkout-local ({package_path})")
+    paths = [
+        ("pstrain.__file__", outcome["package_file"]),
+        *(("pstrain.__path__", path) for path in outcome["package_path"]),
+        ("pstrain.benchmarks.arctic origin", outcome["arctic_origin"]),
+    ]
+    for label, raw_path in paths:
+        resolved_path = Path(raw_path).resolve()
+        if not _is_relative_to(resolved_path, ROOT):
+            raise SystemExit(
+                "ERROR: ambient pstrain import resolves outside this checkout\n"
+                f"offending {label}: {resolved_path}\n"
+                f"current checkout: {ROOT}"
+            )
+    print(f"ambient pstrain import: checkout-local ({Path(outcome['package_file']).resolve()})")
     return 0
 
 
