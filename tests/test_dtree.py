@@ -6,6 +6,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+pytest.importorskip(
+    "resource", reason="POSIX-only training resource accounting requires the resource module"
+)
+
 from pstrain.lib import _pstrainc, dtree, mdef, native_worker
 from pstrain.lib.steps import cd_pipeline
 

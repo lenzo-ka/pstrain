@@ -6,6 +6,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+pytest.importorskip(
+    "resource", reason="POSIX-only training resource accounting requires the resource module"
+)
+
 from pstrain.lib.steps.train import (
     TerminalAlignmentError,
     _accept_arctic_a0302_exception,

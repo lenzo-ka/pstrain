@@ -13,6 +13,8 @@ from typing import Any, Literal
 import numpy as np
 import pytest
 
+pytest.importorskip("fcntl", reason="POSIX-only pipeline locking requires the fcntl module")
+
 from pstrain.lib import _pstrainc
 from pstrain.lib.bw import HMM, BWConfig, BWTrainer
 from pstrain.lib.contract_docs import contract_check_fields, contract_check_files, contract_scope
