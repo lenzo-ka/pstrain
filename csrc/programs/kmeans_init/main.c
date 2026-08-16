@@ -68,6 +68,7 @@
 #include <s3/vector.h>
 
 #include <sys_compat/file.h>
+#include <pstrain/rng.h>
 #include <sys_compat/misc.h>
 
 #include <stdlib.h>
@@ -404,6 +405,11 @@ main_initialize(int argc,
     uint32 n_cb;
     const char *ts2cbfn;
 
+    *out_lex = NULL;
+    *out_omdef = NULL;
+    *out_dmdef = NULL;
+    *out_feat = NULL;
+
     parse_cmd_ln(argc, argv);
 
     feat =
@@ -420,7 +426,7 @@ main_initialize(int argc,
         if (feat_read_lda(feat,
                           cmd_ln_str("-lda"),
                           cmd_ln_int32("-ldadim")) < 0)
-            return -1;
+            goto error;
     }
 
     if (cmd_ln_str("-svspec")) {
@@ -428,9 +434,11 @@ main_initialize(int argc,
         E_INFO("Using subvector specification %s\n",
                cmd_ln_str("-svspec"));
         if ((subvecs = parse_subvecs(cmd_ln_str("-svspec"))) == NULL)
-            return -1;
-        if ((feat_set_subvecs(feat, subvecs)) < 0)
-            return -1;
+            goto error;
+        if ((feat_set_subvecs(feat, subvecs)) < 0) {
+            subvecs_free(subvecs);
+            goto error;
+        }
     }
 
     if (cmd_ln_exists("-agcthresh")
@@ -470,7 +478,7 @@ main_initialize(int argc,
 	   transition matrix tying and state level tying. */
 	if (model_def_read(&omdef,
 			   cmd_ln_str("-omoddeffn")) != S3_SUCCESS) {
-	    return S3_ERROR;
+	    goto error;
 	}
 
 	if (cmd_ln_str("-dmoddeffn")) {
@@ -478,7 +486,7 @@ main_initialize(int argc,
 
 	    if (model_def_read(&dmdef,
 			       cmd_ln_str("-dmoddeffn")) != S3_SUCCESS) {
-		return S3_ERROR;
+		goto error;
 	    }
 	    setup_d2o_map(dmdef, omdef);
 	}
@@ -507,7 +515,7 @@ main_initialize(int argc,
 				  &omdef->cb,
 				  &n_ts,
 				  &n_cb) != S3_SUCCESS) {
-		return S3_ERROR;
+		goto error;
 	    }
 
 	    if (omdef->n_tied_state != n_ts) {
@@ -532,7 +540,7 @@ main_initialize(int argc,
 			   fn,
 			   omdef->acmod_set);
 	if (lex == NULL)
-	    return S3_ERROR;
+	    goto error;
     }
 
     fn = cmd_ln_str("-fdictfn");
@@ -548,6 +556,16 @@ main_initialize(int argc,
     stride = cmd_ln_int32("-stride");
 
     return S3_SUCCESS;
+
+error:
+    if (lex != NULL)
+        lexicon_free(lex);
+    if (dmdef != NULL)
+        model_def_free(dmdef);
+    if (omdef != NULL)
+        model_def_free(omdef);
+    feat_free(feat);
+    return S3_ERROR;
 }
 
 #include <s3/kmeans.h>
@@ -561,7 +579,8 @@ random_kmeans(uint32 n_trial,
 	      uint32 n_mean,
 	      float32 min_ratio,
 	      uint32 max_iter,
-	      codew_t **out_label)
+	      codew_t **out_label,
+	      pstrain_rng_t *rng)
 {
     uint32 t, k, kk;
     float32 rr;
@@ -583,7 +602,7 @@ random_kmeans(uint32 n_trial,
 	do {
 	    /* pick a (pseudo-)random set of initial means from the corpus */
 	    for (k = 0; k < n_mean; k++) {
-		rr = drand48();	/* random numbers in the interval [0, 1) */
+		rr = (float32)pstrain_drand48(rng);
 		cc = rr * n_obs;
 		assert((cc >= 0) && (cc < n_obs));
 		c = get_obs(cc);
@@ -813,7 +832,8 @@ cluster(int32 ts,
 	uint32 blksize,
 	vector_t **mean,
 	uint32 n_density,
-	codew_t **out_label)
+	codew_t **out_label,
+	pstrain_rng_t *rng)
 {
     float64 sum_sqerr, sqerr=0;
     uint32 s, n_frame;
@@ -836,7 +856,8 @@ cluster(int32 ts,
 				  n_density,
 				  cmd_ln_float32("-minratio"),
 				  cmd_ln_int32("-maxiter"),
-				  out_label);
+				  out_label,
+				  rng);
 	    if (sqerr < 0) {
 		E_ERROR("Too few observations for kmeans\n");
 
@@ -1306,8 +1327,12 @@ init_state(const char *obsdmp,
     segdmp_type_t t;
     uint32 i, j, ts, n;
     int32 full_covar;
+    pstrain_rng_t rng;
+    int rv = S3_SUCCESS;
 
     full_covar = cmd_ln_int32("-fullvar");
+    /* libc drand48() formerly supplied one process-global default stream. */
+    pstrain_rng_init(&rng);
     /* fully-continuous for now */
     mean = gauden_alloc_param(ts_cnt, n_stream, n_density, veclen);
     if (full_covar)
@@ -1352,14 +1377,16 @@ init_state(const char *obsdmp,
 	    E_ERROR_SYSTEM("Unable to open dump file %s for reading\n",
 			   cmd_ln_str("-segdmpfn"));
 
-	    return S3_ERROR;
+	    rv = S3_ERROR;
+	    goto cleanup;
 	}
 
 	if (bio_fread(&n_frame, sizeof(uint32), 1, dmp_fp, dmp_swp, &ignore) != 1) {
 	    E_ERROR_SYSTEM("Unable to open dump file %s for reading\n",
 			   cmd_ln_str("-segdmpfn"));
 
-	    return S3_ERROR;
+	    rv = S3_ERROR;
+	    goto cleanup;
 	}
 
 	data_offset = ftell(dmp_fp);
@@ -1392,7 +1419,8 @@ init_state(const char *obsdmp,
 	E_INFO("Convergence ratios are abs(cur - prior) / abs(prior)\n");
 	/* Do some variety of k-means clustering */
 	ptmr_start(&km_timer);
-	sqerr = cluster(ts, n_stream, n_frame, veclen, blksize, mean[i], n_density, &label);
+	sqerr = cluster(ts, n_stream, n_frame, veclen, blksize,
+			mean[i], n_density, &label, &rng);
 	ptmr_stop(&km_timer);
 
 	if (sqerr < 0) {
@@ -1416,8 +1444,6 @@ init_state(const char *obsdmp,
 	     * of the top codeword over the corpus and normalizing */
 	    init_mixw(mixw[i], mean[i], n_density, veclen, n_frame, n_stream, label);
 
-	    ckd_free(label);
-
 	    if (reest == TRUE && full_covar)
 		E_ERROR("EM re-estimation is not yet supported for full covariances\n");
 	    else if (reest == TRUE) {
@@ -1431,6 +1457,7 @@ init_state(const char *obsdmp,
 		ptmr_stop(&em_timer);
 	    }
 	}
+	ckd_free(label);
 
 	++n_corpus;
 	tot_sqerr += sqerr;
@@ -1442,9 +1469,6 @@ init_state(const char *obsdmp,
 	E_INFO("sqerr = %e tot %e rms\n", tot_sqerr, sqrt(tot_sqerr/n_corpus));
     }
 
-    if (!multiclass)
-	s3close(dmp_fp);
-
     if (meanfn) {
 	if (s3gau_write(meanfn,
 			(const vector_t ***)mean,
@@ -1452,7 +1476,8 @@ init_state(const char *obsdmp,
 			n_stream,
 			n_density,
 			veclen) != S3_SUCCESS) {
-	    return S3_ERROR;
+	    rv = S3_ERROR;
+	    goto cleanup;
 	}
     }
     else {
@@ -1466,8 +1491,10 @@ init_state(const char *obsdmp,
 				 ts_cnt,
 				 n_stream,
 				 n_density,
-				 veclen) != S3_SUCCESS)
-		return S3_ERROR;
+				 veclen) != S3_SUCCESS) {
+		rv = S3_ERROR;
+		goto cleanup;
+	    }
 	}
 	else {
 	    if (s3gau_write(varfn,
@@ -1475,8 +1502,10 @@ init_state(const char *obsdmp,
 				 ts_cnt,
 				 n_stream,
 				 n_density,
-				 veclen) != S3_SUCCESS)
-		return S3_ERROR;
+				 veclen) != S3_SUCCESS) {
+		rv = S3_ERROR;
+		goto cleanup;
+	    }
 	}
     }
     else {
@@ -1489,23 +1518,37 @@ init_state(const char *obsdmp,
 			 ts_cnt,
 			 n_stream,
 			 n_density) != S3_SUCCESS) {
-	    return S3_ERROR;
+	    rv = S3_ERROR;
+	    goto cleanup;
 	}
     }
     else {
 	E_INFO("No mixing weight file given; none written\n");
     }
 
-    return S3_SUCCESS;
+cleanup:
+    if (!multiclass && dmp_fp != NULL) {
+	s3close(dmp_fp);
+	dmp_fp = NULL;
+    }
+    gauden_free_param(mean);
+    if (fullvar != NULL)
+	gauden_free_param_full(fullvar);
+    if (var != NULL)
+	gauden_free_param(var);
+    if (mixw != NULL)
+	ckd_free_3d((void ***)mixw);
+
+    return rv;
 }
 
 int
 main(int argc, char *argv[])
 {
-    lexicon_t *lex;
-    model_def_t *omdef;
-    model_def_t *dmdef;
-    feat_t *feat;
+    lexicon_t *lex = NULL;
+    model_def_t *omdef = NULL;
+    model_def_t *dmdef = NULL;
+    feat_t *feat = NULL;
     uint32 n_stream, blksize;
     uint32 *veclen;
     uint32 ts_off;
@@ -1513,6 +1556,7 @@ main(int argc, char *argv[])
     FILE *fp;
 
     if (main_initialize(argc, argv, &lex, &omdef, &dmdef, &feat) != S3_SUCCESS) {
+	cmd_ln_free();
 	return -1;
     }
 
@@ -1591,6 +1635,7 @@ main(int argc, char *argv[])
 	    }
 
 	    fprintf(fp, "%d %d\n", ts_off, ts_cnt);
+	    fclose(fp);
 	}
 	else if (ts_cnt != omdef->n_tied_state) {
 	    E_WARN("Subset of tied states specified, but no -tsrngfn arg");
@@ -1645,6 +1690,15 @@ main(int argc, char *argv[])
 	    E_INFOCONT("\n");
 	}
     }
+
+    if (lex != NULL)
+	lexicon_free(lex);
+    if (dmdef != NULL)
+	model_def_free(dmdef);
+    if (omdef != NULL)
+	model_def_free(omdef);
+    feat_free(feat);
+    cmd_ln_free();
 
     return 0;
 }

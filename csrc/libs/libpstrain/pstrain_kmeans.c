@@ -49,6 +49,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <pstrain/rng.h>
 
 #include <sphinxbase/ckd_alloc.h>
 #include <sphinxbase/err.h>
@@ -90,7 +91,8 @@ pstrain_kmeans(const float32 *observations,
     vector_t *mean = NULL;
     codew_t *labels = NULL;
     float64 sqerr;
-    uint32 i, j;
+    uint32 i;
+    pstrain_rng_t rng;
 
     if (!observations || !out_centroids || n_obs == 0 || veclen == 0) {
         E_ERROR("Invalid arguments to pstrain_kmeans\n");
@@ -110,9 +112,9 @@ pstrain_kmeans(const float32 *observations,
     }
 
     /* Initialize means from random observations */
-    srand48(0);
+    pstrain_srand48(&rng, 0);
     for (i = 0; i < n_clusters; i++) {
-        uint32 idx = (uint32)(drand48() * n_obs);
+        uint32 idx = (uint32)(pstrain_drand48(&rng) * n_obs);
         if (idx >= n_obs) idx = n_obs - 1;
         memcpy(mean[i], observations + idx * veclen, veclen * sizeof(float32));
     }

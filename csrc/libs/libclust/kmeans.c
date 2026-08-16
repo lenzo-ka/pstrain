@@ -100,8 +100,10 @@ k_means(vector_t *mean,			/* initial set of means */
 	E_INFO("kmtrineq iter [%u] %e ...\n", i, conv_ratio);
 
 	ret = k_means_update(mean, n_mean, veclen, label, n_obs);
-	if (ret != K_MEANS_SUCCESS)
+	if (ret != K_MEANS_SUCCESS) {
+	    ckd_free(label);
 	    return (float64)ret;
+	}
 
 	p_sqerr = sqerr;
 	sqerr = k_means_label(label, mean, n_mean, n_obs, veclen);
@@ -155,8 +157,11 @@ k_means_trineq(vector_t *mean,			/* initial set of means */
 	E_INFO("km iter [%u] %e ...\n", i, conv_ratio);
 
 	ret = k_means_update(mean, n_mean, veclen, label, n_obs);
-	if (ret != K_MEANS_SUCCESS)
+	if (ret != K_MEANS_SUCCESS) {
+	    ckd_free_2d((void **)nnmap);
+	    ckd_free(label);
 	    return (float64)ret;
+	}
 
 	nn_sort_kmeans(mean, n_mean, veclen, nnmap);
 
@@ -167,7 +172,7 @@ k_means_trineq(vector_t *mean,			/* initial set of means */
     }
     E_INFO("kmtrineq n_iter %u sqerr %e conv_ratio %e\n", i, sqerr, conv_ratio);
 
-    ckd_free(nnmap);
+    ckd_free_2d((void **)nnmap);
 
     if (out_label) {
 	*out_label = label;

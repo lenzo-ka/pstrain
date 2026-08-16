@@ -30,7 +30,7 @@
  */
 fe_t *pstrain_fe_create(float samprate, int nfilt, int nfft,
                         float lowerf, float upperf, int ncep,
-                        float alpha, int lifter, int dither, int remove_dc,
+                        float alpha, int lifter, int dither, int seed, int remove_dc,
                         int remove_noise, const char *transform, int frate, float wlen);
 
 /**

@@ -70,14 +70,14 @@
 fe_t *
 pstrain_fe_create(float samprate, int nfilt, int nfft,
               float lowerf, float upperf, int ncep,
-              float alpha, int lifter, int dither, int remove_dc,
+              float alpha, int lifter, int dither, int seed, int remove_dc,
               int remove_noise, const char *transform, int frate, float wlen)
 {
     cmd_ln_t *config;
     fe_t *fe;
     char samprate_str[32], nfilt_str[16], nfft_str[16];
     char lowerf_str[32], upperf_str[32], ncep_str[16];
-    char alpha_str[32], lifter_str[16], frate_str[16], wlen_str[32];
+    char alpha_str[32], lifter_str[16], seed_str[16], frate_str[16], wlen_str[32];
     const char *dither_str = dither ? "yes" : "no";
     const char *remove_dc_str = remove_dc ? "yes" : "no";
     const char *remove_noise_str = remove_noise ? "yes" : "no";
@@ -91,6 +91,7 @@ pstrain_fe_create(float samprate, int nfilt, int nfft,
     snprintf(ncep_str, sizeof(ncep_str), "%d", ncep);
     snprintf(alpha_str, sizeof(alpha_str), "%f", alpha);
     snprintf(lifter_str, sizeof(lifter_str), "%d", lifter);
+    snprintf(seed_str, sizeof(seed_str), "%d", seed);
     snprintf(frate_str, sizeof(frate_str), "%d", frate);
     snprintf(wlen_str, sizeof(wlen_str), "%f", wlen);
 
@@ -107,6 +108,7 @@ pstrain_fe_create(float samprate, int nfilt, int nfft,
                          "-lifter", lifter_str,
                          "-transform", transform,
                          "-dither", dither_str,
+                         "-seed", seed_str,
                          "-remove_dc", remove_dc_str,
                          "-remove_noise", remove_noise_str,
                          "-frate", frate_str,
@@ -143,6 +145,7 @@ pstrain_fe_create_default(void)
         0.97f,     /* alpha */
         22,        /* lifter */
         TRUE,      /* dither */
+        -1,        /* seed: established front-end default */
         TRUE,      /* remove_dc */
         TRUE,      /* remove_noise */
         "dct",    /* transform */

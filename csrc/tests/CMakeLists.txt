@@ -70,6 +70,55 @@ add_test(
   COMMAND test_prunetree_order
 )
 
+add_executable(test_rng test_rng.c)
+target_link_libraries(test_rng pstrainc)
+add_test(NAME rng_golden_and_libc_cross_check COMMAND test_rng)
+
+add_executable(test_kmeans_init_continuation test_kmeans_init_continuation.c)
+target_link_libraries(test_kmeans_init_continuation pstrainc)
+
+set(KMEANS_CONTINUATION_DIR ${CMAKE_CURRENT_BINARY_DIR}/kmeans_continuation)
+add_test(
+  NAME kmeans_init_continuation_setup
+  COMMAND test_kmeans_init_continuation setup ${KMEANS_CONTINUATION_DIR}
+)
+set_tests_properties(kmeans_init_continuation_setup PROPERTIES
+  FIXTURES_SETUP kmeans_continuation_input
+)
+
+add_test(
+  NAME kmeans_init_continuation_run
+  COMMAND kmeans_init
+    -gthobj state
+    -omoddeffn ${KMEANS_CONTINUATION_DIR}/mdef
+    -ts2cbfn .cont.
+    -tsoff 0
+    -tscnt 2
+    -segdmpdirs ${KMEANS_CONTINUATION_DIR}
+    -segdmpfn obs.dump
+    -segidxfn obs.idx
+    -feat 1s_c
+    -ceplen 1
+    -stride 1
+    -ntrial 5
+    -ndensity 2
+    -reest no
+    -vartiethr 0
+    -meanfn ${KMEANS_CONTINUATION_DIR}/means
+)
+set_tests_properties(kmeans_init_continuation_run PROPERTIES
+  FIXTURES_REQUIRED kmeans_continuation_input
+  FIXTURES_SETUP kmeans_continuation_output
+)
+
+add_test(
+  NAME kmeans_init_rng_continuation
+  COMMAND test_kmeans_init_continuation check ${KMEANS_CONTINUATION_DIR}
+)
+set_tests_properties(kmeans_init_rng_continuation PROPERTIES
+  FIXTURES_REQUIRED kmeans_continuation_output
+)
+
 add_executable(test_bw_state_seq_build test_bw_state_seq_build.c)
 target_link_libraries(test_bw_state_seq_build pstrainc)
 target_include_directories(test_bw_state_seq_build

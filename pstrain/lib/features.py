@@ -55,6 +55,7 @@ class FEParams:
     alpha: float = 0.97
     lifter: int = 22
     dither: bool = True
+    seed: int = -1
     remove_dc: bool = True
     remove_noise: bool = True
     transform: str = "dct"
@@ -141,6 +142,7 @@ class FeatureExtractor:
             float(cfg.alpha),
             cfg.lifter,
             cfg.dither,
+            cfg.seed,
             cfg.remove_dc,
             cfg.remove_noise,
             cfg.transform.encode(),

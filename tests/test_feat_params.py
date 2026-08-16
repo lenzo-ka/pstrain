@@ -28,6 +28,7 @@ def test_default_feat_params_contains_complete_training_front_end() -> None:
         "-upperf": "6800.0",
         "-alpha": "0.97",
         "-dither": "yes",
+        "-seed": "-1",
         "-remove_dc": "yes",
         "-remove_noise": "yes",
         "-frate": "100",

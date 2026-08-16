@@ -90,7 +90,7 @@
 
 
 #include <string.h>
-#ifndef WIN32
+#if !defined(_WIN32) && !defined(WIN32)
 #include <unistd.h>
 #else
 #include <stdlib.h>
@@ -102,7 +102,7 @@
 #include "corpus.h"
 typedef struct kb_s kb_t;
 
-#if (defined(WIN32) && !defined(__CYGWIN__))
+#if ((defined(_WIN32) || defined(WIN32)) && !defined(__CYGWIN__))
 #define SLEEP_SEC(sec)  (0)                     /* Why doesn't Sleep((sec)*1000) work? */
 #else
 #define SLEEP_SEC(sec)  sleep(sec)              /* sec must be integer */

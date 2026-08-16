@@ -105,6 +105,7 @@ set(LIB_SRCS
 
   # libpstrain - pstrain helper functions
   libs/libpstrain/pstrain_cffi.c
+  libs/libpstrain/pstrain_rng.c
   libs/libpstrain/pstrain_fe.c
   libs/libpstrain/pstrain_session.c
   libs/libpstrain/pstrain_bw.c
@@ -246,6 +247,13 @@ if(WIN32)
     "${CMAKE_CURRENT_SOURCE_DIR}/pstrain.exports.def")
   set_target_properties(pstrainc_shared PROPERTIES
     LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/pstrain.exports.def")
+  if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+    # The PocketSphinx import library exports compatibility routines that are
+    # intentionally also provided by pstrain's vendored sphinxbase sources.
+    # link.exe accepts these local definitions; give lld-link the equivalent
+    # selection rule so clang-cl produces the same shared core.
+    target_link_options(pstrainc_shared PRIVATE "LINKER:/FORCE:MULTIPLE")
+  endif()
 elseif(APPLE)
   set_target_properties(pstrainc_shared PROPERTIES
     INSTALL_RPATH "@loader_path"

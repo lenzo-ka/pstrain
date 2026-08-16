@@ -1,6 +1,6 @@
 {
   "contract": "pstrain complete-model feat.params",
-  "required_count": 22,
+  "required_count": 23,
   "optional_fields": [],
   "fields": [
     {"name": "-samprate", "basis": "training field", "effect": "input sample rate"},
@@ -12,6 +12,7 @@
     {"name": "-upperf", "basis": "training field", "effect": "upper filter-bank frequency"},
     {"name": "-alpha", "basis": "training field", "effect": "pre-emphasis coefficient"},
     {"name": "-dither", "basis": "training field", "effect": "input dithering"},
+    {"name": "-seed", "basis": "training field", "effect": "input dither sequence"},
     {"name": "-remove_dc", "basis": "training field", "effect": "frame DC removal"},
     {"name": "-remove_noise", "basis": "training field", "effect": "spectral noise removal"},
     {"name": "-frate", "basis": "training field", "effect": "feature frame rate"},

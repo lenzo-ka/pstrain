@@ -19,6 +19,7 @@ _FIELD_SPECS: tuple[tuple[str, str | None, str, str | None], ...] = (
     ("-upperf", "upperf", "number", "upperf"),
     ("-alpha", "alpha", "number", "alpha"),
     ("-dither", "dither", "boolean", "dither"),
+    ("-seed", "seed", "number", "seed"),
     ("-remove_dc", "remove_dc", "boolean", "remove_dc"),
     ("-remove_noise", "remove_noise", "boolean", "remove_noise"),
     ("-frate", "frate", "number", "frate"),

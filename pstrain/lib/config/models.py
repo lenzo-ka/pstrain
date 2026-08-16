@@ -28,6 +28,7 @@ class FeatureConfig(StrictModel):
     upperf: Annotated[float, Field(gt=0, description="Upper filter-bank frequency in Hz")] = 6800.0
     alpha: Annotated[float, Field(description="Pre-emphasis coefficient")] = 0.97
     dither: Annotated[bool, Field(description="Add half-bit dither to input audio")] = True
+    seed: Annotated[int, Field(description="Seed for deterministic input dithering")] = -1
     remove_dc: Annotated[bool, Field(description="Remove DC offset from each frame")] = True
     remove_noise: Annotated[bool, Field(description="Remove noise with spectral subtraction")] = (
         True
