@@ -6,6 +6,7 @@ import pytest
 
 from pstrain.lib.filetypes import FileType, detect_file_type
 from pstrain.lib.model import MODEL_FILES_REQUIRED
+from pstrain.lib.model import require_complete_model as real_require_complete_model
 from pstrain.lib.pipeline.context import FeatParams
 from pstrain.lib.pipeline.feat_params import feat_params_lines, write_feat_params
 from pstrain.lib.steps.package import package_model
@@ -81,6 +82,46 @@ def test_packaging_copies_trained_feat_params_despite_config_drift(tmp_path: Pat
 
     assert result["feat_params"].read_bytes() == expected
     assert "Created:" not in result["readme"].read_text()
+
+
+def test_packaging_fails_if_required_file_disappears_after_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    for filename in MODEL_FILES_REQUIRED:
+        (model_dir / filename).write_text(filename)
+    write_feat_params(model_dir / "feat.params", FeatParams())
+    removed = model_dir / MODEL_FILES_REQUIRED[-1]
+
+    def validate_then_remove(path: Path) -> Path:
+        feat_params = real_require_complete_model(path)
+        removed.unlink()
+        return feat_params
+
+    monkeypatch.setattr("pstrain.lib.steps.package.require_complete_model", validate_then_remove)
+
+    with pytest.raises(FileNotFoundError, match=str(removed)):
+        package_model(model_dir, tmp_path / "dist")
+
+
+def test_packaging_allows_absent_optional_dictionaries(tmp_path: Path) -> None:
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    for filename in MODEL_FILES_REQUIRED:
+        (model_dir / filename).write_text(filename)
+    write_feat_params(model_dir / "feat.params", FeatParams())
+
+    result = package_model(
+        model_dir,
+        tmp_path / "dist",
+        dictionary_path=tmp_path / "missing.dict",
+        filler_dict_path=tmp_path / "missing.filler",
+    )
+
+    assert "dictionary" not in result
+    assert "filler_dict" not in result
+    assert result["noisedict"].read_text() == "<sil> SIL\n<s> SIL\n</s> SIL\n"
 
 
 @pytest.mark.parametrize(
