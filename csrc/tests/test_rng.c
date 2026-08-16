@@ -127,15 +127,20 @@ check_mixed(void)
 }
 
 static int
-check_default(void)
+check_seeded_default_state(void)
 {
+    static const unsigned short default_state[3] = {0x330e, 0xabcd, 0x1234};
+    unsigned short libc_state[3] = {
+        default_state[0], default_state[1], default_state[2]
+    };
     pstrain_rng_t rng;
     int i;
 
     pstrain_rng_init(&rng);
+    (void)seed48(libc_state);
     for (i = 0; i < TEST_SEQUENCE_LENGTH; ++i) {
         if (pstrain_drand48(&rng) != drand48()) {
-            fprintf(stderr, "default drand48 draw %d differs\n", i);
+            fprintf(stderr, "seeded default-state drand48 draw %d differs\n", i);
             return 1;
         }
     }
@@ -176,7 +181,7 @@ check_libc(void)
     static const unsigned short zero_state[3] = {0, 0, 0};
     static const unsigned short max_state[3] = {0xffff, 0xffff, 0xffff};
 
-    return check_default() ||
+    return check_seeded_default_state() ||
            check_seeded_drand48(-123456789) ||
            check_seeded_drand48(INT32_MIN) ||
            check_seeded_drand48(INT32_MAX) ||

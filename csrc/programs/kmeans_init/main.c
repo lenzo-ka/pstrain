@@ -405,6 +405,11 @@ main_initialize(int argc,
     uint32 n_cb;
     const char *ts2cbfn;
 
+    *out_lex = NULL;
+    *out_omdef = NULL;
+    *out_dmdef = NULL;
+    *out_feat = NULL;
+
     parse_cmd_ln(argc, argv);
 
     feat =
@@ -421,7 +426,7 @@ main_initialize(int argc,
         if (feat_read_lda(feat,
                           cmd_ln_str("-lda"),
                           cmd_ln_int32("-ldadim")) < 0)
-            return -1;
+            goto error;
     }
 
     if (cmd_ln_str("-svspec")) {
@@ -429,9 +434,11 @@ main_initialize(int argc,
         E_INFO("Using subvector specification %s\n",
                cmd_ln_str("-svspec"));
         if ((subvecs = parse_subvecs(cmd_ln_str("-svspec"))) == NULL)
-            return -1;
-        if ((feat_set_subvecs(feat, subvecs)) < 0)
-            return -1;
+            goto error;
+        if ((feat_set_subvecs(feat, subvecs)) < 0) {
+            subvecs_free(subvecs);
+            goto error;
+        }
     }
 
     if (cmd_ln_exists("-agcthresh")
@@ -471,7 +478,7 @@ main_initialize(int argc,
 	   transition matrix tying and state level tying. */
 	if (model_def_read(&omdef,
 			   cmd_ln_str("-omoddeffn")) != S3_SUCCESS) {
-	    return S3_ERROR;
+	    goto error;
 	}
 
 	if (cmd_ln_str("-dmoddeffn")) {
@@ -479,7 +486,7 @@ main_initialize(int argc,
 
 	    if (model_def_read(&dmdef,
 			       cmd_ln_str("-dmoddeffn")) != S3_SUCCESS) {
-		return S3_ERROR;
+		goto error;
 	    }
 	    setup_d2o_map(dmdef, omdef);
 	}
@@ -508,7 +515,7 @@ main_initialize(int argc,
 				  &omdef->cb,
 				  &n_ts,
 				  &n_cb) != S3_SUCCESS) {
-		return S3_ERROR;
+		goto error;
 	    }
 
 	    if (omdef->n_tied_state != n_ts) {
@@ -533,7 +540,7 @@ main_initialize(int argc,
 			   fn,
 			   omdef->acmod_set);
 	if (lex == NULL)
-	    return S3_ERROR;
+	    goto error;
     }
 
     fn = cmd_ln_str("-fdictfn");
@@ -549,6 +556,16 @@ main_initialize(int argc,
     stride = cmd_ln_int32("-stride");
 
     return S3_SUCCESS;
+
+error:
+    if (lex != NULL)
+        lexicon_free(lex);
+    if (dmdef != NULL)
+        model_def_free(dmdef);
+    if (omdef != NULL)
+        model_def_free(omdef);
+    feat_free(feat);
+    return S3_ERROR;
 }
 
 #include <s3/kmeans.h>
@@ -1510,10 +1527,10 @@ init_state(const char *obsdmp,
 int
 main(int argc, char *argv[])
 {
-    lexicon_t *lex;
-    model_def_t *omdef;
-    model_def_t *dmdef;
-    feat_t *feat;
+    lexicon_t *lex = NULL;
+    model_def_t *omdef = NULL;
+    model_def_t *dmdef = NULL;
+    feat_t *feat = NULL;
     uint32 n_stream, blksize;
     uint32 *veclen;
     uint32 ts_off;
@@ -1521,6 +1538,7 @@ main(int argc, char *argv[])
     FILE *fp;
 
     if (main_initialize(argc, argv, &lex, &omdef, &dmdef, &feat) != S3_SUCCESS) {
+	cmd_ln_free();
 	return -1;
     }
 
@@ -1599,6 +1617,7 @@ main(int argc, char *argv[])
 	    }
 
 	    fprintf(fp, "%d %d\n", ts_off, ts_cnt);
+	    fclose(fp);
 	}
 	else if (ts_cnt != omdef->n_tied_state) {
 	    E_WARN("Subset of tied states specified, but no -tsrngfn arg");
@@ -1653,6 +1672,15 @@ main(int argc, char *argv[])
 	    E_INFOCONT("\n");
 	}
     }
+
+    if (lex != NULL)
+	lexicon_free(lex);
+    if (dmdef != NULL)
+	model_def_free(dmdef);
+    if (omdef != NULL)
+	model_def_free(omdef);
+    feat_free(feat);
+    cmd_ln_free();
 
     return 0;
 }
