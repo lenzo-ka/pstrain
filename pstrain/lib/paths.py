@@ -86,12 +86,21 @@ def _find_bin_dir() -> Path | None:
         if bin_dir.is_dir() and any(bin_dir.iterdir()):
             return bin_dir
 
-    # 3. Development build
+    # 3. Development build. Multi-config Windows generators place both the
+    #    DLL and CLI executables in a configuration subdirectory.
     project_root = _get_project_root()
     if project_root:
         dev_bin = project_root / "build" / "bin"
-        if dev_bin.is_dir() and any(dev_bin.iterdir()):
-            return dev_bin
+        candidates = []
+        if sys.platform == "win32":
+            candidates.extend(
+                dev_bin / configuration
+                for configuration in ("Release", "Debug", "RelWithDebInfo", "MinSizeRel")
+            )
+        candidates.append(dev_bin)
+        for candidate in candidates:
+            if candidate.is_dir() and any(candidate.iterdir()):
+                return candidate
 
     # 4. System libexec locations
     prefixes = [

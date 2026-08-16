@@ -5,6 +5,19 @@ from pathlib import Path
 from pstrain.lib import paths
 
 
+def test_find_bin_dir_finds_windows_release_subdirectory(tmp_path: Path, monkeypatch) -> None:
+    """Visual Studio CLI executables are discovered beside the Release DLL."""
+    runtime_dir = tmp_path / "build" / "bin" / "Release"
+    runtime_dir.mkdir(parents=True)
+    (runtime_dir / "agg_seg.exe").write_bytes(b"executable")
+    monkeypatch.delenv("PSTRAIN_BIN_DIR", raising=False)
+    monkeypatch.setattr(paths.sys, "platform", "win32")
+    monkeypatch.setattr(paths, "_get_bundled_lib_dir", lambda: None)
+    monkeypatch.setattr(paths, "_get_project_root", lambda: tmp_path)
+
+    assert paths._find_bin_dir() == runtime_dir
+
+
 def test_find_lib_path_finds_windows_runtime_in_build_bin(tmp_path: Path, monkeypatch) -> None:
     """A development Windows DLL is discoverable in the runtime directory."""
     runtime = tmp_path / "build" / "bin" / "pstrainc.dll"
