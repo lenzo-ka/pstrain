@@ -76,9 +76,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # PRs test boundary Python versions on Ubuntu; other events run the full matrix.
-        python: ${{ github.event_name == 'pull_request' && fromJSON('["3.11","3.13"]') || fromJSON('["3.11","3.12","3.13"]') }}
-        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest","macos-latest"]') }}
+        # PRs test boundary Python versions on Ubuntu plus one representative
+        # framework-Python leg on macOS; other events run the full matrix.
+        include: ${{ github.event_name == 'pull_request' && fromJSON('[{"python":"3.11","os":"ubuntu-latest"},{"python":"3.13","os":"ubuntu-latest"},{"python":"3.13","os":"macos-latest"}]') || fromJSON('[{"python":"3.11","os":"ubuntu-latest"},{"python":"3.11","os":"macos-latest"},{"python":"3.12","os":"ubuntu-latest"},{"python":"3.12","os":"macos-latest"},{"python":"3.13","os":"ubuntu-latest"},{"python":"3.13","os":"macos-latest"}]') }}
     steps:
       - uses: actions/checkout@v7
 
