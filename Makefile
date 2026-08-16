@@ -64,8 +64,19 @@ lint:
 # Canonical local merge-gate verification. Keep the Ruff format scope aligned
 # with the blocking lint job in .github/workflows/tests.yml.
 .PHONY: verified
-verified: build-c verified-test config-check lint
+verified: ambient-import-check build-c verified-test config-check lint
 	ruff format --check pstrain tests
+
+# This is intentionally part of the in-tree verified flow, not the installed-
+# package CI flow.  Installed-wheel jobs legitimately resolve from site-packages.
+.PHONY: ambient-import-check
+ambient-import-check:
+	python scripts/check_ambient_import.py
+
+# These verified legs may run concurrently with one another, but none may begin
+# until the ambient-import gate has completed successfully.
+AMBIENT_IMPORT_PREREQUISITE ?= ambient-import-check
+build-c verified-test config-check lint: | $(AMBIENT_IMPORT_PREREQUISITE)
 
 .PHONY: format
 format:
@@ -94,6 +105,8 @@ cffi-exports-gen:
 .PHONY: cffi-exports-check
 cffi-exports-check:
 	python scripts/generate_cffi_exports.py --check
+
+docs-gen cffi-exports-check: | $(AMBIENT_IMPORT_PREREQUISITE)
 
 .PHONY: config-check
 config-check: cffi-exports-check

@@ -6,13 +6,15 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
-from pstrain.benchmarks.arctic import paired_delta_ci
-
-
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from pstrain.benchmarks.arctic import paired_delta_ci  # noqa: E402
+
 DEFAULT_RECORD = ROOT / "docs/benchmarks/arctic-pin/record.json"
 DEFAULT_ORACLE = ROOT / "docs/benchmarks/arctic-pin/oracle-sidecar.json"
 DEFAULT_OUTPUT = ROOT / "docs/benchmarks/arctic-pin/paired-analysis.json"
