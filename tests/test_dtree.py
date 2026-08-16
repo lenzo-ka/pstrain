@@ -147,6 +147,67 @@ class TestMakeQuests:
 
 
 @pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
+def test_init_mixw_rejects_uninitialized_destination(tmp_path: Path) -> None:
+    """A destination phone absent from the source must prevent all output."""
+    src_mdef = tmp_path / "src.mdef"
+    src_mdef.write_text(
+        """0.3
+1 n_base
+0 n_tri
+2 n_state_map
+1 n_tied_state
+1 n_tied_ci_state
+1 n_tied_tmat
+AA - - - n/a 0 0 N
+"""
+    )
+    dest_mdef = tmp_path / "dest.mdef"
+    dest_mdef.write_text(
+        """0.3
+2 n_base
+0 n_tri
+4 n_state_map
+2 n_tied_state
+2 n_tied_ci_state
+2 n_tied_tmat
+AA - - - n/a 0 0 N
+BB - - - n/a 1 1 N
+"""
+    )
+
+    src_mixw = tmp_path / "src_mixw"
+    src_mean = tmp_path / "src_mean"
+    src_var = tmp_path / "src_var"
+    src_tmat = tmp_path / "src_tmat"
+    assert _pstrainc.write_mixw(str(src_mixw), np.ones((1, 1, 2), dtype=np.float32)) == 0
+    assert _pstrainc.write_gau(str(src_mean), np.zeros((1, 1, 2, 3), dtype=np.float32)) == 0
+    assert _pstrainc.write_gau(str(src_var), np.ones((1, 1, 2, 3), dtype=np.float32)) == 0
+    assert (
+        _pstrainc.write_tmat(str(src_tmat), np.array([[[0.5, 0.5], [0.0, 1.0]]], dtype=np.float32))
+        == 0
+    )
+
+    outputs = [tmp_path / name for name in ("mixw", "means", "variances", "tmat")]
+    with pytest.raises(native_worker.PstrainNativeError) as raised:
+        dtree.init_mixw(
+            src_mdef,
+            src_mixw,
+            src_mean,
+            src_var,
+            src_tmat,
+            dest_mdef,
+            outputs[0],
+            outputs[1],
+            outputs[2],
+            outputs[3],
+        )
+
+    assert raised.value.operation == "init_mixw"
+    assert raised.value.input_path == str(src_mdef)
+    assert not any(path.exists() for path in outputs)
+
+
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
 class TestBuildTree:
     """Tests for decision tree building."""
 
