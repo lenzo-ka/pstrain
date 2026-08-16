@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
+from importlib.util import find_spec
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,6 +46,12 @@ def _site_packages(python: Path) -> Path:
     return Path(result.stdout.strip())
 
 
+def _copy_yaml_dependency(python: Path) -> None:
+    spec = find_spec("yaml")
+    assert spec is not None and spec.origin is not None
+    shutil.copytree(Path(spec.origin).parent, _site_packages(python) / "yaml")
+
+
 def test_ambient_import_gate_accepts_clean_or_checkout_local_import(
     tmp_path: Path,
 ) -> None:
@@ -52,7 +60,8 @@ def test_ambient_import_gate_accepts_clean_or_checkout_local_import(
     assert clean.returncode == 0, clean.stderr
     assert "ambient pstrain import:" in clean.stdout
 
-    checkout_local = _run(Path(sys.executable), pythonpath=ROOT)
+    _copy_yaml_dependency(python)
+    checkout_local = _run(python, pythonpath=ROOT)
     assert checkout_local.returncode == 0, checkout_local.stderr
     assert "checkout-local" in checkout_local.stdout
 
