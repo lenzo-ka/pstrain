@@ -261,12 +261,12 @@
   },
   "engine": {
     "decode_dictionary_sha256": "24ff2852a707b63f499fd968294d5e4c02d44e0eb1ec511e40be1f380d785846",
-    "git_describe": "f81acc7-dirty",
+    "git_describe": "578f6a9",
     "native_library_fp_contract_declared": "off",
     "native_library_sha256": "c17b54055fb1d9c4c0f309b30a9e947c05271b7ddbb1ba272edd180f4a64b5b7",
     "native_program_agg_seg_sha256": "dcbec9816c4bc237c2e8900deccfa38c36c8f3d335747ee86bcd0b047568ff6f",
     "native_program_bldtree_sha256": "e8393f9165433b9a5868aeec27ddd7be9949aae679b5bc366ae093e16880fb0a",
-    "native_program_bw_sha256": "c1b47b885a7e17c851a5198c2f78abfad7e46c569c9cfc85ec20d52536d3e329",
+    "native_program_bw_sha256": "ab9b4f5ad7d6e6e537b1a98dd89357a72b038e06d04de18b493a2788210a9f0e",
     "native_program_delint_sha256": "bf48bda7eda752ec04c27e2dda43ecc38d4cef66e3c40be56657bcd300bccdd3",
     "native_program_inc_comp_sha256": "9d7ecd0f312f297fe4256762c0e7f5ef1658694b8c9d2df5eff8dc7831e68dae",
     "native_program_init_gau_sha256": "9ffc162ac646aaba068061ec4956776c61f59ffef0462d2dc0a77a50d612b6a3",
@@ -278,7 +278,7 @@
     "native_program_mk_mdef_gen_sha256": "df370852d7efe496cba05b2e95ec4079bba4425295d21707349f4656a20a0426",
     "native_program_mk_ts2cb_sha256": "8766d9c7532649e7a738c948a3217070f71602069a293c5c4fcd72ad082b019b",
     "native_program_mllr_solve_sha256": "609b6e10e38c20cd30503c2c8a558d9d7f37e72f0861336039b01b374221b60f",
-    "native_program_mllr_transform_sha256": "6d49c6965f7de472acdec26203bd02f75189de989388f95ca1e8dfade53da6bd",
+    "native_program_mllr_transform_sha256": "807db3b404926bd1750f981c49c8954bb658294e24d9e382163a3fb4058c632e",
     "native_program_norm_sha256": "f68c71dc38a4e2a5f0f6826ef0a165e83f3185b0ecd31cc9f76a766a2a563038",
     "native_program_param_cnt_sha256": "a6c4135868360cefe134fb75329c0e17987a6ab2cee159bde78abea26499a3a5",
     "native_program_printp_sha256": "3c0a24f1ed4971cd414c4fcce8b42c035416291dd7a7efa269a67bd51a096c88",
@@ -289,7 +289,7 @@
     "native_program_tiestate_sha256": "0cd7eb05f4bffa7cd64d695785fdb9dff71b9d680fd09bfdf177b55ec3b2e6d1",
     "pocketsphinx_version": "5.1.1+511126b492dcb267cf30d49d631946d7b61a9530",
     "python_version": "3.12.12 (main, Jan 18 2026, 13:43:01) [Clang 17.0.0 (clang-1700.6.3.2)]",
-    "tracked_modifications_sha256": "f50ca7462058baaf97ccf94488a20751cf25a8b7387a5870edc807403b284632",
+    "tracked_modifications_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "version": "0.1.0"
   },
   "resources": {
