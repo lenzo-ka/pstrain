@@ -129,7 +129,7 @@ def train_test_split(
     _write_fileids(train_fileids, train)
     _write_fileids(test_fileids, test)
     _write_generated_metadata(output_dir)
-    _write_validation(output_dir, "generated")
+    _write_validation(output_dir, "generated", n_train=len(train), n_test=len(test))
 
     return SplitResult(
         train_fileids=train_fileids,
@@ -226,7 +226,7 @@ def validate_external_split(
     test_entries = list(test.items())
     decoder = output_dir / "test.decoder.transcription"
     _write_decoder_transcription(decoder, test_entries)
-    _write_validation(output_dir, "external")
+    _write_validation(output_dir, "external", n_train=len(train_ids), n_test=len(test_ids))
     return SplitResult(
         train_fileids=output_dir / "train.fileids",
         test_fileids=output_dir / "test.fileids",
@@ -305,12 +305,14 @@ def _write_generated_metadata(output_dir: Path) -> None:
     )
 
 
-def _write_validation(output_dir: Path, mode: str) -> None:
+def _write_validation(output_dir: Path, mode: str, *, n_train: int, n_test: int) -> None:
     output_dir = Path(output_dir)
     (output_dir / VALIDATED_SPLIT).write_text(
         json.dumps(
             {
                 "mode": mode,
+                "n_test": n_test,
+                "n_train": n_train,
                 "sha256": {name: _sha256(output_dir / name) for name in SPLIT_FILENAMES},
             },
             indent=2,
