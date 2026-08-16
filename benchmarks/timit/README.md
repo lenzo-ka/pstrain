@@ -32,3 +32,24 @@ boundaries remain in tolerance-recall denominators, and insertions remain in
 precision denominators.  Report matched-boundary mean/median absolute error
 together with coverage, edit counts, and recall/precision/F1 at 10, 20, 25,
 and 50 ms.
+
+## Canonical-split dither adjudication
+
+`scripts/bench_timit.py` prepares the manifests above, installs them as the
+authoritative external split in two isolated pstrain projects, and trains a
+fixed-seed pair that differs only in `features.dither`.  Separate projects are
+required so neither cell can reuse the other's feature cache.  By default the
+stage stops at `ci-1g`, which is a useful, bounded training adjudication; pass
+`--target cd-8g` for the full acoustic-model ladder.
+
+On a 36-logical-core compute host, leaving two cores free:
+
+```console
+python scripts/bench_timit.py /path/to/timit --work-dir /path/to/results -j 34
+```
+
+`results.json` records the canonical split counts, a content hash of each
+cell's MFC tree, and a content hash of the acoustic parameter files (excluding
+configuration/provenance files).  Equal seeds make reruns repeatable; different
+feature or model hashes adjudicate whether enabling dither changes that
+stage's numeric result.
