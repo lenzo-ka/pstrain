@@ -34,7 +34,7 @@ def test_project_installs_canonical_external_split(tmp_path: Path) -> None:
     prepare_project(project, corpus, data, dither=True, seed=243)
     assert project.joinpath("audio").resolve() == corpus
     split = project / "experiments" / "default" / "etc"
-    assert split.joinpath("all.transcription").read_text().splitlines() == [
+    assert project.joinpath("etc/all.transcription").read_text().splitlines() == [
         "train/dr1/fabc0/sx1 hello",
         "test/dr2/mdef0/sx2 world",
     ]

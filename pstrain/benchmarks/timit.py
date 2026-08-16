@@ -71,7 +71,7 @@ def prepare_project(project: Path, corpus: Path, data: Path, *, dither: bool, se
     shared.mkdir(parents=True, exist_ok=True)
     train = data / "train.transcription"
     test = data / "test.transcription"
-    (etc / "all.transcription").write_text(
+    (config_etc / "all.transcription").write_text(
         train.read_text(encoding="utf-8") + test.read_text(encoding="utf-8"), encoding="utf-8"
     )
     for name in SPLIT_FILENAMES:
