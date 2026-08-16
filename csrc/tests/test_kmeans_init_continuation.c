@@ -120,6 +120,7 @@ check_means(const char *dir)
     state2_first = means[1][0][0][0];
     state2_second = means[1][0][1][0];
     ckd_free(veclen);
+    ckd_free(means[0][0][0]);
     ckd_free_3d((void ***)means);
 
     /* State 1 consumes draws 1-10.  Its successor must begin with draw 11
