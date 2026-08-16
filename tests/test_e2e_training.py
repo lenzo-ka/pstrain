@@ -18,6 +18,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+pytest.importorskip(
+    "resource", reason="POSIX-only training resource accounting requires the resource module"
+)
+
 from tests.clib import requires_c_library
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_arctic"

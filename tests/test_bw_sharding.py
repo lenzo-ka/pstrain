@@ -9,6 +9,10 @@ from typing import Any
 
 import pytest
 
+pytest.importorskip(
+    "resource", reason="POSIX-only training resource accounting requires the resource module"
+)
+
 from pstrain.lib.compare import compare_models
 from pstrain.lib.contract_docs import contract_scope
 from pstrain.lib.steps.train import (

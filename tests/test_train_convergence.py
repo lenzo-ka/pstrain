@@ -1,5 +1,11 @@
 """Tests for SphinxTrain-compatible Baum-Welch convergence semantics."""
 
+import pytest
+
+pytest.importorskip(
+    "resource", reason="POSIX-only training resource accounting requires the resource module"
+)
+
 from pstrain.lib.steps.train import _convergence_delta, _has_converged
 
 

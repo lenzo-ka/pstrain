@@ -19,6 +19,8 @@ from typing import Any
 import pytest
 import yaml
 
+pytest.importorskip("fcntl", reason="POSIX-only pipeline locking requires the fcntl module")
+
 from pstrain.lib.pipeline import PipelineContext
 from pstrain.lib.pipeline.context import (
     DEFAULT_CONFIGS,

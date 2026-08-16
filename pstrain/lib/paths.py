@@ -86,12 +86,21 @@ def _find_bin_dir() -> Path | None:
         if bin_dir.is_dir() and any(bin_dir.iterdir()):
             return bin_dir
 
-    # 3. Development build
+    # 3. Development build. Multi-config Windows generators place both the
+    #    DLL and CLI executables in a configuration subdirectory.
     project_root = _get_project_root()
     if project_root:
         dev_bin = project_root / "build" / "bin"
-        if dev_bin.is_dir() and any(dev_bin.iterdir()):
-            return dev_bin
+        candidates = []
+        if sys.platform == "win32":
+            candidates.extend(
+                dev_bin / configuration
+                for configuration in ("Release", "Debug", "RelWithDebInfo", "MinSizeRel")
+            )
+        candidates.append(dev_bin)
+        for candidate in candidates:
+            if candidate.is_dir() and any(candidate.iterdir()):
+                return candidate
 
     # 4. System libexec locations
     prefixes = [
@@ -130,9 +139,12 @@ def _find_lib_path() -> Path | None:
     4. LD_LIBRARY_PATH / DYLD_LIBRARY_PATH
     5. System library paths
     """
-    lib_names = ["libpstrainc.dylib", "libpstrainc.so"]
     if sys.platform == "win32":
-        lib_names.append("pstrainc.dll")
+        lib_names = ["pstrainc.dll"]
+    elif sys.platform == "darwin":
+        lib_names = ["libpstrainc.dylib"]
+    else:
+        lib_names = ["libpstrainc.so"]
 
     # 1. Environment variable override
     if "PSTRAIN_LIB_PATH" in os.environ:
@@ -162,9 +174,12 @@ def _find_lib_path() -> Path | None:
     ]
     for vendored in vendored_dirs:
         if vendored.is_dir():
-            patterns = ["libpstrainc*.so", "libpstrainc*.dylib"]
             if sys.platform == "win32":
-                patterns.append("pstrainc*.dll")
+                patterns = ["pstrainc*.dll"]
+            elif sys.platform == "darwin":
+                patterns = ["libpstrainc*.dylib"]
+            else:
+                patterns = ["libpstrainc*.so"]
             for pattern in patterns:
                 hits = sorted(vendored.glob(pattern))
                 if hits:
