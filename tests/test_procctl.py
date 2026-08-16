@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib.util
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 
@@ -48,7 +50,7 @@ def test_stop_verified_process(tmp_path: Path) -> None:
     fingerprint, _pid = _launch(tmp_path)
     result = _run("stop", str(fingerprint), "--timeout", "2")
     assert result.returncode == 0, result.stderr
-    assert "sent SIGTERM to verified PID" in result.stdout
+    assert "sent SIGTERM to verified process group" in result.stdout
     assert "stopped" in result.stdout
 
 
@@ -107,13 +109,9 @@ def test_refuses_stale_fingerprint_without_signalling(tmp_path: Path) -> None:
     ("mutation", "expected_message"),
     [
         ({"start_time": "Mon Jan  1 00:00:00 1990"}, "start_time"),
-        (
-            {
-                "requested_command": "unrelated --one",
-                "observed_command": "unrelated --two",
-            },
-            "command",
-        ),
+        ({"host": "different-host"}, "host"),
+        ({"user": "different-user"}, "user"),
+        ({"attempt_path": "/different/attempt"}, "attempt_path"),
     ],
 )
 def test_stop_refuses_identity_mismatch_without_signalling(
@@ -126,13 +124,13 @@ def test_stop_refuses_identity_mismatch_without_signalling(
     stale = json.loads(fingerprint.read_text())
     stale.update(mutation)
     fingerprint.write_text(json.dumps(stale))
-    kill = Mock(side_effect=AssertionError("stop must not signal a mismatched process"))
-    monkeypatch.setattr(os, "kill", kill)
+    killpg = Mock(side_effect=AssertionError("stop must not signal a mismatched process"))
+    monkeypatch.setattr(os, "killpg", killpg)
     args = argparse.Namespace(fingerprint=fingerprint, timeout=0.01)
     try:
         with pytest.raises(procctl.Refusal, match=expected_message):
             procctl.stop(args)
-        kill.assert_not_called()
+        killpg.assert_not_called()
     finally:
         subprocess.run(["kill", str(pid)], check=False, capture_output=True)
 
@@ -143,12 +141,12 @@ def test_stop_refuses_dead_pid_without_signalling(
     fingerprint, pid = _launch(tmp_path)
     subprocess.run(["kill", str(pid)], check=True, capture_output=True)
     time.sleep(0.1)
-    kill = Mock(side_effect=AssertionError("stop must not signal a dead PID"))
-    monkeypatch.setattr(os, "kill", kill)
+    killpg = Mock(side_effect=AssertionError("stop must not signal a dead PID"))
+    monkeypatch.setattr(os, "killpg", killpg)
 
     with pytest.raises(procctl.Refusal, match="is not running"):
         procctl.stop(argparse.Namespace(fingerprint=fingerprint, timeout=0.01))
-    kill.assert_not_called()
+    killpg.assert_not_called()
 
 
 @pytest.mark.parametrize("matching_field", ("requested_command", "observed_command"))
@@ -159,6 +157,7 @@ def test_stop_accepts_either_recorded_command(
         "host": "host",
         "user": "user",
         "pid": 42,
+        "pgid": 42,
         "start_time": "start",
         "requested_command": "requested",
         "observed_command": "observed",
@@ -172,16 +171,93 @@ def test_stop_accepts_either_recorded_command(
         "command": fingerprint[matching_field],
         "attempt_path": "/attempt",
     }
-    kill = Mock()
+    killpg = Mock()
     monkeypatch.setattr(procctl, "_read_fingerprint", lambda _path: fingerprint)
     monkeypatch.setattr(procctl, "_live_fingerprint", lambda _pid: live)
-    monkeypatch.setattr(procctl, "_process_details", Mock(side_effect=procctl.Refusal("stopped")))
-    monkeypatch.setattr(procctl.os, "kill", kill)
+    monkeypatch.setattr(procctl, "_wait_for_process_group_exit", lambda _pgid, _timeout: True)
+    monkeypatch.setattr(procctl.os, "killpg", killpg)
 
     result = procctl.stop(argparse.Namespace(fingerprint=Path("unused"), timeout=0.01))
 
     assert result == 0
-    kill.assert_called_once_with(42, procctl.signal.SIGTERM)
+    killpg.assert_called_once_with(42, procctl.signal.SIGTERM)
+
+
+def test_stop_accepts_command_drift_when_strong_identity_matches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fingerprint = {
+        "host": "host",
+        "user": "user",
+        "pid": 42,
+        "pgid": 42,
+        "start_time": "start",
+        "requested_command": "wrapper target",
+        "observed_command": "wrapper target",
+        "attempt_path": "/attempt",
+    }
+    live = {
+        "host": "host",
+        "user": "user",
+        "pid": 42,
+        "start_time": "start",
+        "command": "target",
+        "attempt_path": "/attempt",
+    }
+    killpg = Mock()
+    monkeypatch.setattr(procctl, "_read_fingerprint", lambda _path: fingerprint)
+    monkeypatch.setattr(procctl, "_live_fingerprint", lambda _pid: live)
+    monkeypatch.setattr(procctl, "_wait_for_process_group_exit", lambda _pgid, _timeout: True)
+    monkeypatch.setattr(procctl.os, "killpg", killpg)
+
+    result = procctl.stop(argparse.Namespace(fingerprint=Path("unused"), timeout=0.01))
+
+    assert result == 0
+    killpg.assert_called_once_with(42, procctl.signal.SIGTERM)
+
+
+def test_stop_terminates_sigterm_ignoring_process_group(tmp_path: Path) -> None:
+    child_pid_path = tmp_path / "child.pid"
+    wrapper_path = tmp_path / "wrapper.py"
+    wrapper_path.write_text("""
+import os
+import signal
+import time
+
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+child = os.fork()
+if child == 0:
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    while True:
+        time.sleep(1)
+else:
+    with open('child.pid', 'w', encoding='utf-8') as stream:
+        stream.write(str(child))
+    while True:
+        time.sleep(1)
+""")
+    fingerprint, pid = _launch(tmp_path, sys.executable, str(wrapper_path))
+    pgid = os.getpgid(pid)
+    deadline = time.monotonic() + 2
+    while not child_pid_path.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert child_pid_path.exists()
+
+    try:
+        result = _run("stop", str(fingerprint), "--timeout", "0.1")
+        assert result.returncode == 0, result.stderr
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            try:
+                os.killpg(pgid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.01)
+        else:
+            pytest.fail(f"process group {pgid} survived stop")
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(pgid, signal.SIGKILL)
 
 
 def test_launch_failure_escalates_and_confirms_exit(
@@ -189,10 +265,15 @@ def test_launch_failure_escalates_and_confirms_exit(
 ) -> None:
     process = Mock(pid=42)
     process.wait.side_effect = (subprocess.TimeoutExpired("procctl", 2), 0)
+    killpg = Mock()
+    monkeypatch.setattr(procctl, "_wait_for_process_group_exit", Mock(side_effect=(False, True)))
+    monkeypatch.setattr(procctl.os, "killpg", killpg)
 
-    message = procctl._terminate_failed_launch(process)
+    message = procctl._terminate_failed_launch(process, 42)
 
-    process.terminate.assert_called_once_with()
-    process.kill.assert_called_once_with()
+    assert killpg.call_args_list == [
+        call(42, procctl.signal.SIGTERM),
+        call(42, procctl.signal.SIGKILL),
+    ]
     assert process.wait.call_count == 2
-    assert message == "sent SIGTERM then SIGKILL to PID 42; exit confirmed"
+    assert message == "sent SIGTERM then SIGKILL to process group 42; exit confirmed"

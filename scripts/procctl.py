@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import signal
@@ -19,6 +20,7 @@ FIELDS = (
     "host",
     "user",
     "pid",
+    "pgid",
     "start_time",
     "requested_command",
     "observed_command",
@@ -113,21 +115,44 @@ def _settled_live_fingerprint(pid: int) -> dict[str, Any]:
     raise Refusal(f"process identity for PID {pid} did not settle after launch")
 
 
-def _terminate_failed_launch(process: subprocess.Popen[bytes]) -> str:
+def _process_group_exists(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _wait_for_process_group_exit(pgid: int, timeout: float) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not _process_group_exists(pgid):
+            return True
+        time.sleep(0.05)
+    return not _process_group_exists(pgid)
+
+
+def _terminate_failed_launch(process: subprocess.Popen[bytes], pgid: int) -> str:
     """Terminate a child after launch bookkeeping fails, escalating if needed."""
-    process.terminate()
+    os.killpg(pgid, signal.SIGTERM)
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        process.wait(timeout=LAUNCH_CLEANUP_TIMEOUT)
+    if _wait_for_process_group_exit(pgid, LAUNCH_CLEANUP_TIMEOUT):
+        return f"sent SIGTERM to process group {pgid}; exit confirmed"
+    os.killpg(pgid, signal.SIGKILL)
     try:
         process.wait(timeout=LAUNCH_CLEANUP_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        try:
-            process.wait(timeout=LAUNCH_CLEANUP_TIMEOUT)
-        except subprocess.TimeoutExpired as error:
-            raise RuntimeError(
-                f"PID {process.pid} survived SIGTERM and SIGKILL after launch failure"
-            ) from error
-        return f"sent SIGTERM then SIGKILL to PID {process.pid}; exit confirmed"
-    return f"sent SIGTERM to PID {process.pid}; exit confirmed"
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError(
+            f"process group {pgid} survived SIGTERM and SIGKILL after launch failure"
+        ) from error
+    if not _wait_for_process_group_exit(pgid, LAUNCH_CLEANUP_TIMEOUT):
+        raise RuntimeError(
+            f"process group {pgid} survived SIGTERM and SIGKILL after launch failure"
+        )
+    return f"sent SIGTERM then SIGKILL to process group {pgid}; exit confirmed"
 
 
 def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
@@ -157,15 +182,20 @@ def launch(args: argparse.Namespace) -> int:
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
+    pgid = os.getpgid(process.pid)
+    if pgid != process.pid:
+        cleanup = _terminate_failed_launch(process, pgid)
+        raise RuntimeError(f"detached process did not lead its process group; {cleanup}")
     try:
         fingerprint = _settled_live_fingerprint(process.pid)
         if fingerprint["attempt_path"] != str(attempt):
             raise RuntimeError("detached process did not start in the attempt path")
         fingerprint["observed_command"] = fingerprint.pop("command")
         fingerprint["requested_command"] = " ".join(args.command)
+        fingerprint["pgid"] = pgid
         _write_json_atomic(fingerprint_path, fingerprint)
     except BaseException:
-        cleanup = _terminate_failed_launch(process)
+        cleanup = _terminate_failed_launch(process, pgid)
         print(f"launch failed; {cleanup}", file=sys.stderr)
         raise
     print(f"launched PID {process.pid}; fingerprint: {fingerprint_path}")
@@ -181,13 +211,24 @@ def _read_fingerprint(path: Path) -> dict[str, Any]:
         raise Refusal("fingerprint must be a JSON object")
     missing = [field for field in FIELDS if field not in value]
     extra = [field for field in value if field not in FIELDS]
+    integer_fields = ("pid", "pgid")
     invalid_strings = [
-        field for field in FIELDS if field != "pid" and not isinstance(value.get(field), str)
+        field
+        for field in FIELDS
+        if field not in integer_fields and not isinstance(value.get(field), str)
     ]
-    if missing or extra or type(value.get("pid")) is not int or invalid_strings:
+    invalid_integers = [field for field in integer_fields if type(value.get(field)) is not int]
+    if (
+        missing
+        or extra
+        or invalid_integers
+        or invalid_strings
+        or value.get("pgid") != value.get("pid")
+    ):
         raise Refusal(
             "invalid fingerprint fields "
-            f"(missing={missing}, extra={extra}, non_strings={invalid_strings})"
+            f"(missing={missing}, extra={extra}, non_strings={invalid_strings}, "
+            f"non_integers={invalid_integers}, pgid_must_equal_pid={value.get('pgid') != value.get('pid')})"
         )
     return value
 
@@ -201,26 +242,20 @@ def stop(args: argparse.Namespace) -> int:
         for field in identity_fields
         if expected[field] != live[field]
     ]
-    accepted_commands = (expected["requested_command"], expected["observed_command"])
-    if live["command"] not in accepted_commands:
-        mismatches.append(
-            "command: "
-            f"fingerprint requested={accepted_commands[0]!r}, "
-            f"observed={accepted_commands[1]!r}, live={live['command']!r}"
-        )
     if mismatches:
         raise Refusal("fingerprint mismatch; no signal sent:\n  " + "\n  ".join(mismatches))
-    os.kill(expected["pid"], signal.SIGTERM)
-    print(f"sent SIGTERM to verified PID {expected['pid']}")
-    deadline = time.monotonic() + args.timeout
-    while time.monotonic() < deadline:
-        try:
-            _process_details(expected["pid"])
-        except Refusal:
-            print(f"PID {expected['pid']} stopped")
-            return 0
-        time.sleep(0.05)
-    print(f"PID {expected['pid']} still running after {args.timeout:g}s", file=sys.stderr)
+    pgid = expected["pgid"]
+    os.killpg(pgid, signal.SIGTERM)
+    print(f"sent SIGTERM to verified process group {pgid}")
+    if _wait_for_process_group_exit(pgid, args.timeout):
+        print(f"process group {pgid} stopped")
+        return 0
+    os.killpg(pgid, signal.SIGKILL)
+    print(f"sent SIGKILL to verified process group {pgid}", file=sys.stderr)
+    if _wait_for_process_group_exit(pgid, args.timeout):
+        print(f"process group {pgid} stopped")
+        return 0
+    print(f"process group {pgid} survived SIGKILL", file=sys.stderr)
     return 1
 
 

@@ -7,17 +7,19 @@ The original implementation on `main` already recorded one live observation, but
 single immediate sample could capture a pre-exec wrapper. The fix samples for up to two
 seconds and requires consecutive equal observations spanning at least one second;
 transient reader failures are retried inside that budget. `procctl stop` retains PID,
-start time, and user as its primary identity core and accepts a live command matching
-either recorded command.
+start time, and user as its primary identity core, also requires host and working
+directory to match, and treats live command drift as a legitimate `exec` after that
+strong identity matches.
 
-If fingerprint creation fails, launch cleanup now sends SIGTERM, waits for a bounded
-period, escalates to SIGKILL if necessary, confirms exit, and reports the action. A
-failure to confirm exit is reported as such.
+The fingerprint also records the fresh session's process-group ID. Normal stop and
+launch cleanup send SIGTERM to the group, wait for a bounded period, escalate the group
+to SIGKILL if necessary, confirm exit, and report the action. A failure to confirm exit
+is reported as such.
 
 ## Verification
 
-- `python scripts/run_verified_tests.py tests/test_procctl.py`: 10 passed.
-- `make verified`: passed on macOS; 686 tests passed, 1 skipped, and 1 deselected
+- `python scripts/run_verified_tests.py tests/test_procctl.py`: 14 passed.
+- `make verified`: passed on macOS; 692 tests passed, 1 skipped, and 1 deselected
   in the main verified suite, followed by 41 configuration tests passing, CTest
   6/6 passing, floating-point contraction verification passing, generated-file
   checks passing, Ruff passing, mypy passing, and Ruff format checks passing.
@@ -46,3 +48,18 @@ time, the same user, command, and working directory. Start time is the primary r
 guard, not a proof against that indistinguishable case. An exec after the two-second
 window is outside the contract and requires human verification and a manual kill by
 PID; procctl provides no force flag.
+
+## Round 3 — 2026-08-16
+
+Stop now treats host, PID, start time, user, and working directory as the strong process
+identity. When those fields still match, live command drift is accepted as a legitimate
+wrapper-to-target `exec`, even if it occurs after launch settlement. Dead processes and
+every strong-identity mismatch still refuse without signaling; command text cannot
+override those checks.
+
+Launch records the fresh session's process-group ID, which must equal its leader PID.
+Normal stop and failed-launch cleanup signal that complete group. Both paths send
+SIGTERM, wait for a bounded period, escalate surviving group members to SIGKILL, and
+wait again to confirm the group has exited. The process regression uses a TERM-ignoring
+wrapper and child and requires that no group member survive stop; the late-exec
+regression uses a deterministic mocked identity sequence.
