@@ -34,10 +34,12 @@ Unlike stock SphinxTrain's first-pronunciation-observed inventory, represented
 by pstrain's `linear` policy, it does not omit contexts that are reachable only
 through alternative pronunciations. Stock SphinxTrain does observe only the
 first pronunciation while producing its untied inventory, even when later
-training uses pronunciation alternatives. Multipron-off configurations with
-no explicit inventory select `linear`; explicit `linear` and `all-triphone`
-choices remain honored. The inventory producer and its interaction with
-training mode are specified in
+training uses pronunciation alternatives. Within a configuration layer, an
+explicit inventory is honored. However, a later layer that sets
+`multipron_training=false` without also setting an inventory triggers the
+resolver's `linear` auto-substitution and can override the earlier explicit
+choice. This is a known pre-existing resolver behavior tracked as a follow-up.
+The inventory producer and its interaction with training mode are specified in
 [multiple-pronunciation training](multi-pron-training.md).
 
 ## Training front-end boundary
