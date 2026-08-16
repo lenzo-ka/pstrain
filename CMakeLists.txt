@@ -252,6 +252,11 @@ target_include_directories(pocketsphinx BEFORE PUBLIC
   PRIVATE "${pocketsphinx_source_BINARY_DIR}"
 )
 target_compile_definitions(pocketsphinx PRIVATE HAVE_CONFIG_H)
+if(MSVC)
+  # PocketSphinx's pio.c uses the POSIX spellings, while the MSVC CRT exports
+  # only the underscore-prefixed pipe APIs.
+  target_compile_definitions(pocketsphinx PRIVATE popen=_popen pclose=_pclose)
+endif()
 if(WIN32)
   # Mirror PocketSphinx's own top-level shared-library build. Its export.h
   # selects dllexport while src/CMakeLists.txt supplies POCKETSPHINX_EXPORTS.
