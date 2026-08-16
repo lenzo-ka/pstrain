@@ -198,7 +198,7 @@ pstrain_bw_init(const char *mdef_path,
             { "-timing", ARG_BOOLEAN, "no", "Enable timing" },
             { NULL, 0, NULL, NULL }
         };
-        cmd_ln_parse(args, 0, NULL, FALSE);
+        cmd_ln_parse(args, 0, NULL, TRUE);
     }
 
     /* Initialize feature extraction - 1s_c_d_dd is 39-dim (13 * 3) */

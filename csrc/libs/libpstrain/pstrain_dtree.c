@@ -260,7 +260,7 @@ pstrain_build_tree(const char *mdef_path,
         argv[argc++] = type_str;
         argv[argc++] = "-varfloor";
         argv[argc++] = varfloor_str;
-        cmd_ln_parse(args, argc, (char **)argv, FALSE);
+        cmd_ln_parse(args, argc, (char **)argv, TRUE);
     }
 
     /* Read model definition */
@@ -703,7 +703,7 @@ pstrain_tie_states(const char *input_mdef_path,
         argv[argc++] = "yes";
     }
 
-    cmd_ln_parse(args, argc, (char **)argv, FALSE);
+    cmd_ln_parse(args, argc, (char **)argv, TRUE);
 
     ret = tiestate_run();
 
@@ -799,7 +799,7 @@ pstrain_make_quests(const char *mdef_path,
         argv[argc++] = var_path;
     }
 
-    cmd_ln_parse(args, argc, (char **)argv, FALSE);
+    cmd_ln_parse(args, argc, (char **)argv, TRUE);
 
     ret = make_quests_run();
 
@@ -867,7 +867,7 @@ pstrain_prune_tree(const char *mdef_path,
         argv[argc++] = "yes";
     }
 
-    cmd_ln_parse(args, argc, (char **)argv, FALSE);
+    cmd_ln_parse(args, argc, (char **)argv, TRUE);
 
     ret = prunetree_run();
 

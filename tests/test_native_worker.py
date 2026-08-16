@@ -169,6 +169,19 @@ def test_nonzero_exit_is_fatal_and_the_worker_is_replaced(tmp_path: Path) -> Non
 
 
 @requires_c_library
+def test_wrapper_unknown_option_dies_loudly(tmp_path: Path) -> None:
+    """A defect in wrapper-built argv must fail across the contained boundary."""
+    with pytest.raises(native_worker.PstrainNativeFatalError) as raised:
+        native_worker.call(
+            "_mdef_gen_parse_unknown_probe",
+            (),
+            (tmp_path / "wrapper-argv",),
+        )
+    assert raised.value.returncode == 255
+    assert "Unknown argument name '-wrapper-unknown'" in raised.value.diagnostic
+
+
+@requires_c_library
 def test_exit_zero_during_request_is_protocol_error(tmp_path: Path) -> None:
     """A clean child exit with a request outstanding is never a success."""
     with pytest.raises(native_worker.PstrainWorkerProtocolError) as raised:

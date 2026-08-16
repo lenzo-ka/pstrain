@@ -196,7 +196,7 @@ cleanup:
 
 /* Helper to initialize cmd_ln with required args */
 static cmd_ln_t *
-init_cmd_ln(uint32 n_state)
+init_cmd_ln(uint32 n_state, int inject_unknown)
 {
     char n_state_str[16];
     snprintf(n_state_str, sizeof(n_state_str), "%u", n_state);
@@ -210,10 +210,22 @@ init_cmd_ln(uint32 n_state)
     };
 
     /* Use global cmd_ln since mk_mdef_gen uses it */
-    const char *argv[] = { "pstrain_mdef_gen", "-n_state_pm", n_state_str };
-    cmd_ln_parse(args, 3, (char **)argv, FALSE);
+    const char *argv[5] = { "pstrain_mdef_gen", "-n_state_pm", n_state_str };
+    int argc = 3;
+    if (inject_unknown) {
+        argv[argc++] = "-wrapper-unknown";
+        argv[argc++] = "value";
+    }
+    cmd_ln_parse(args, argc, (char **)argv, TRUE);
 
     return NULL;  /* Using global cmd_ln */
+}
+
+int
+pstrain_mdef_gen_parse_unknown_probe(void)
+{
+    init_cmd_ln(3, TRUE);
+    return 0;
 }
 
 
@@ -233,7 +245,7 @@ pstrain_mdef_gen_ci(const char *phone_list_path,
         return -1;
     }
 
-    init_cmd_ln(n_state);
+    init_cmd_ln(n_state, FALSE);
 
     /* Parse phone list to get CI phones */
     if (make_ci_list_cd_hash_frm_phnlist(phone_list_path, &CIlist,
@@ -281,7 +293,7 @@ pstrain_mdef_gen_alltriphones(const char *phone_list_path,
         return -1;
     }
 
-    init_cmd_ln(n_state);
+    init_cmd_ln(n_state, FALSE);
 
     /* Set ignorewpos if requested */
     if (ignore_wpos) {
@@ -363,7 +375,7 @@ pstrain_mdef_gen_untied(const char *phone_list_path,
         return -1;
     }
 
-    init_cmd_ln(n_state);
+    init_cmd_ln(n_state, FALSE);
 
     if (ignore_wpos) {
         cmd_ln_set_boolean("-ignorewpos", TRUE);
@@ -451,7 +463,7 @@ pstrain_mdef_count_triphones(const char *phone_list_path,
         return -1;
     }
 
-    init_cmd_ln(3);  /* n_state doesn't matter for counting */
+    init_cmd_ln(3, FALSE);  /* n_state doesn't matter for counting */
 
     if (ignore_wpos) {
         cmd_ln_set_boolean("-ignorewpos", TRUE);

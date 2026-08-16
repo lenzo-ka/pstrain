@@ -78,6 +78,7 @@
     pstrain_mdef_count_triphones;
     pstrain_mdef_gen_alltriphones;
     pstrain_mdef_gen_ci;
+    pstrain_mdef_gen_parse_unknown_probe;
     pstrain_mdef_gen_untied;
     pstrain_norm_gau;
     pstrain_param_cnt;

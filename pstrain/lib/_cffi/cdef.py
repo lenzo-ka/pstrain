@@ -381,6 +381,7 @@ void pstrain_cffi_ckd_free_3d(void *ptr);
 void pstrain_session_reset(void);
 int pstrain_session_probe_set(void);
 int pstrain_session_probe_is_set(void);
+int pstrain_mdef_gen_parse_unknown_probe(void);
 
 // ============================================================
 // MDEF GENERATION (mk_mdef_gen)

@@ -130,7 +130,7 @@ int pstrain_param_cnt(const char *mdef_path,
     if (part > 0) { argv[argc++] = "-part"; argv[argc++] = part_str; }
     if (n_part > 0) { argv[argc++] = "-npart"; argv[argc++] = n_part_str; }
 
-    cmd_ln_parse(defn, argc, (char **)argv, FALSE);
+    cmd_ln_parse(defn, argc, (char **)argv, TRUE);
 
     ret = param_cnt_run();
 
