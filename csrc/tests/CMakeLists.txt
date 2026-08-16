@@ -70,6 +70,10 @@ add_test(
   COMMAND test_prunetree_order
 )
 
+add_executable(test_rng test_rng.c)
+target_link_libraries(test_rng pstrainc)
+add_test(NAME rng_golden_and_libc_cross_check COMMAND test_rng)
+
 add_executable(test_bw_state_seq_build test_bw_state_seq_build.c)
 target_link_libraries(test_bw_state_seq_build pstrainc)
 target_include_directories(test_bw_state_seq_build

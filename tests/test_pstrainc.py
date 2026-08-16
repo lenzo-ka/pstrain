@@ -325,6 +325,7 @@ def test_pstrain_fe_create_default() -> None:
         0.97,
         22,
         True,
+        -1,
         True,
         True,
         b"dct",
@@ -357,8 +358,6 @@ def test_pstrain_fe_create_default() -> None:
         default_features = extract(fe)
         explicit_features = extract(explicit_fe)
         assert default_features.shape[0] > 0
-        # Dither uses a fresh random seed for each front end, so identical
-        # configuration guarantees shape and finite output, not equal values.
         assert default_features.shape == explicit_features.shape
         assert np.isfinite(default_features).all()
         assert np.isfinite(explicit_features).all()
@@ -381,6 +380,7 @@ def test_pstrain_fe_create_custom() -> None:
         0.97,  # alpha
         22,  # lifter
         True,  # dither
+        -1,  # seed
         True,  # remove_dc
         True,  # remove_noise
         b"dct",  # transform
@@ -410,6 +410,7 @@ def test_pstrain_fe_create_8khz() -> None:
         0.97,  # alpha
         22,  # lifter
         True,  # dither
+        -1,  # seed
         True,  # remove_dc
         True,  # remove_noise
         b"dct",  # transform

@@ -100,6 +100,11 @@ features
    :Default: ``16000``
    :Description: Audio sample rate in Hz
 
+``features.seed``
+   :Type: ``int``
+   :Default: ``-1``
+   :Description: Seed for deterministic input dithering
+
 ``features.transform``
    :Type: ``str``
    :Default: ``'dct'``

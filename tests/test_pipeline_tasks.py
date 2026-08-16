@@ -476,6 +476,7 @@ def test_training_fingerprint_payload_composition_is_pinned(empty_project: Path)
             "features.remove_dc",
             "features.remove_noise",
             "features.samprate",
+            "features.seed",
             "features.transform",
             "features.upperf",
             "features.varnorm",

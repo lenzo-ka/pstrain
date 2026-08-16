@@ -151,6 +151,7 @@ class FeatParams:
     # Pre-emphasis coefficient (`-alpha`). 0.97 is the engine default.
     alpha: float = field(default_factory=lambda: Profile().features.alpha)
     dither: bool = field(default_factory=lambda: Profile().features.dither)
+    seed: int = field(default_factory=lambda: Profile().features.seed)
     remove_dc: bool = field(default_factory=lambda: Profile().features.remove_dc)
     remove_noise: bool = field(default_factory=lambda: Profile().features.remove_noise)
     frate: int = field(default_factory=lambda: Profile().features.frate)

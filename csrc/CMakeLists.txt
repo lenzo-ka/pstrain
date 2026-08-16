@@ -105,6 +105,7 @@ set(LIB_SRCS
 
   # libpstrain - pstrain helper functions
   libs/libpstrain/pstrain_cffi.c
+  libs/libpstrain/pstrain_rng.c
   libs/libpstrain/pstrain_fe.c
   libs/libpstrain/pstrain_session.c
   libs/libpstrain/pstrain_bw.c

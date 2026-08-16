@@ -58,6 +58,7 @@ COMPLETE_MODEL_FEAT_PARAMS_REQUIRED = frozenset(
         "-remove_noise",
         "-round_filters",
         "-samprate",
+        "-seed",
         "-transform",
         "-unit_area",
         "-upperf",
@@ -71,6 +72,7 @@ _BOOLEAN_FEAT_PARAMS = frozenset(
 )
 _POSITIVE_INTEGER_FEAT_PARAMS = frozenset({"-ceplen", "-ncep", "-nfilt", "-nfft", "-frate"})
 _NONNEGATIVE_INTEGER_FEAT_PARAMS = frozenset({"-lifter"})
+_SIGNED_INTEGER_FEAT_PARAMS = frozenset({"-seed"})
 _NONNEGATIVE_FLOAT_FEAT_PARAMS = frozenset({"-lowerf"})
 _POSITIVE_FLOAT_FEAT_PARAMS = frozenset({"-samprate", "-upperf", "-wlen"})
 
@@ -98,7 +100,11 @@ def _validate_complete_feat_params(feat_params: Path, parsed: dict[str, str]) ->
     the recorded number.
     """
     integer_numbers: dict[str, int] = {}
-    for name in _POSITIVE_INTEGER_FEAT_PARAMS | _NONNEGATIVE_INTEGER_FEAT_PARAMS:
+    for name in (
+        _POSITIVE_INTEGER_FEAT_PARAMS
+        | _NONNEGATIVE_INTEGER_FEAT_PARAMS
+        | _SIGNED_INTEGER_FEAT_PARAMS
+    ):
         value = parsed[name]
         try:
             number = int(value)
@@ -109,9 +115,10 @@ def _validate_complete_feat_params(feat_params: Path, parsed: dict[str, str]) ->
                 value,
                 "must use an exact integer spelling (native truncation is not accepted)",
             ) from None
-        minimum = 0 if name in _NONNEGATIVE_INTEGER_FEAT_PARAMS else 1
-        if number < minimum:
-            raise _invalid_feat_param(feat_params, name, value, f"must be >= {minimum}")
+        if name not in _SIGNED_INTEGER_FEAT_PARAMS:
+            minimum = 0 if name in _NONNEGATIVE_INTEGER_FEAT_PARAMS else 1
+            if number < minimum:
+                raise _invalid_feat_param(feat_params, name, value, f"must be >= {minimum}")
         integer_numbers[name] = number
 
     numbers: dict[str, float | int] = dict(integer_numbers)

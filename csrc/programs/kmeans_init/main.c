@@ -68,6 +68,7 @@
 #include <s3/vector.h>
 
 #include <sys_compat/file.h>
+#include <pstrain/rng.h>
 #include <sys_compat/misc.h>
 
 #include <stdlib.h>
@@ -561,7 +562,8 @@ random_kmeans(uint32 n_trial,
 	      uint32 n_mean,
 	      float32 min_ratio,
 	      uint32 max_iter,
-	      codew_t **out_label)
+	      codew_t **out_label,
+	      pstrain_rng_t *rng)
 {
     uint32 t, k, kk;
     float32 rr;
@@ -583,7 +585,7 @@ random_kmeans(uint32 n_trial,
 	do {
 	    /* pick a (pseudo-)random set of initial means from the corpus */
 	    for (k = 0; k < n_mean; k++) {
-		rr = drand48();	/* random numbers in the interval [0, 1) */
+		rr = (float32)pstrain_drand48(rng);
 		cc = rr * n_obs;
 		assert((cc >= 0) && (cc < n_obs));
 		c = get_obs(cc);
@@ -818,10 +820,12 @@ cluster(int32 ts,
     float64 sum_sqerr, sqerr=0;
     uint32 s, n_frame;
     const char *meth;
+    pstrain_rng_t rng;
 
     *out_label = NULL;
 
     k_means_set_get_obs(&get_obs);
+    pstrain_rng_init(&rng);
 
     for (s = 0, sum_sqerr = 0; s < n_stream; s++, sum_sqerr += sqerr) {
 	meth = cmd_ln_str("-method");
@@ -836,7 +840,8 @@ cluster(int32 ts,
 				  n_density,
 				  cmd_ln_float32("-minratio"),
 				  cmd_ln_int32("-maxiter"),
-				  out_label);
+				  out_label,
+				  &rng);
 	    if (sqerr < 0) {
 		E_ERROR("Too few observations for kmeans\n");
 

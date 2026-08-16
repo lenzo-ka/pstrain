@@ -12,6 +12,7 @@ profiles:
       upperf: 6800
       alpha: 0.97
       dither: true
+      seed: -1
       remove_dc: true
       remove_noise: true
       frate: 100

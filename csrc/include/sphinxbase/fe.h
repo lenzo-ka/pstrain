@@ -48,10 +48,7 @@
  *
  */
 
-#if defined(_WIN32) && !defined(GNUWINCE)
-#define srand48(x) srand(x)
-#define lrand48() rand()
-#endif
+#include <sys_compat/misc.h>
 
 #ifndef _NEW_FE_H_
 #define _NEW_FE_H_

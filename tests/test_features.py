@@ -156,6 +156,19 @@ class TestFeatureExtractor:
         assert with_dc_removal.shape == without_dc_removal.shape
         assert np.count_nonzero(with_dc_removal != without_dc_removal) > 0
 
+    def test_dither_seed_is_repeatable_and_effective(self, sample_audio_path: Path) -> None:
+        """A resolved seed selects a repeatable native dither sequence."""
+        audio = _read_wav(sample_audio_path)
+        with FeatureExtractor(seed=17) as first:
+            expected = first.process_audio(audio)
+        with FeatureExtractor(seed=17) as repeated:
+            actual = repeated.process_audio(audio)
+        with FeatureExtractor(seed=18) as changed:
+            other = changed.process_audio(audio)
+
+        assert np.array_equal(actual, expected)
+        assert np.count_nonzero(other != expected) > 0
+
     @pytest.mark.parametrize(
         ("override", "shape_changes"),
         [

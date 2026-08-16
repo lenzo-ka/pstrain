@@ -47,6 +47,8 @@
 #ifndef MISC_H
 #define MISC_H
 
+#include <pstrain/rng.h>
+
 #ifndef M_PI
 #define M_PI       (3.14159265358979323846)
 #endif
@@ -56,8 +58,6 @@
 #include <windows.h>
 
 #define sleep(x) Sleep((x)*1000)
-
-#define drand48() ((double)rand()/RAND_MAX)
 
 #else
 
