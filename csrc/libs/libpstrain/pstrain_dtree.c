@@ -1177,17 +1177,21 @@ pstrain_init_mixw(const char *src_mdef_path,
         }
     }
 
-    /* Check for uninitialized states */
+    /* Refuse to write a model with uninitialized states or codebooks. */
     for (m = 0; m < n_mixw_dest; m++) {
         if (init_mixw_dest_list[m] == NULL) {
-            E_WARN("Destination state %u has not been initialized!\n", m);
+            E_ERROR("Destination state %u has not been initialized\n", m);
+            ret = -1;
         }
     }
     for (m = 0; m < n_cb_dest; m++) {
         if (init_cb_dest_list[m] == NULL) {
-            E_WARN("Destination codebook %u has not been initialized!\n", m);
+            E_ERROR("Destination codebook %u has not been initialized\n", m);
+            ret = -1;
         }
     }
+    if (ret != 0)
+        goto cleanup;
 
     /* Initialize uninitialized transition matrices from source */
     if (src_tmat && n_tmat_src > 0) {
