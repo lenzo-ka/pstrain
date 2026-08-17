@@ -498,20 +498,27 @@ def resolve_config(
         )
 
     merged = default
+    inventory_was_explicit = False
     for kind, source, layer in layers:
         if not layer:
             continue
         training_layer = layer.get("training")
-        if (
-            isinstance(training_layer, dict)
-            and training_layer.get("multipron_training") is False
-            and "untied_inventory" not in training_layer
-        ):
-            layer = copy.deepcopy(layer)
-            layer["training"]["untied_inventory"] = "linear"
+        if isinstance(training_layer, dict) and "untied_inventory" in training_layer:
+            inventory_was_explicit = True
         merged = _deep_merge(merged, layer)
         for path, value in _leaves(layer):
             candidates.setdefault(path, []).append(Candidate(kind, source, path, value))
+    if not inventory_was_explicit and merged["training"]["multipron_training"] is False:
+        merged["training"]["untied_inventory"] = "linear"
+        multipron_source = candidates["training.multipron_training"][-1]
+        candidates["training.untied_inventory"].append(
+            Candidate(
+                multipron_source.source_kind,
+                multipron_source.source,
+                "training.untied_inventory",
+                "linear",
+            )
+        )
     try:
         profile = Profile.model_validate(merged)
     except ValidationError as exc:

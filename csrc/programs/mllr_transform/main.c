@@ -331,7 +331,7 @@ main(int argc, char *argv[])
     const char 	*mllrmatfn, *cb2mllrfn, *moddeffn;
     uint32     	cdonly, inverse;
 
-    printf("----- Compiled on %s, %s\n\n",__DATE__,__TIME__);
+    printf("----- pstrain mllr_transform\n\n");
 
     if (initialize(argc, argv) != S3_SUCCESS) {
 	E_ERROR("Errors initializing.\n");

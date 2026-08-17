@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import tarfile
@@ -45,7 +46,7 @@ def resolve_data_dir(*, package_root: Path | None = None, repo_root: Path | None
 
 
 DATA_DIR = resolve_data_dir()
-RECORD_SCHEMA_VERSION = 5
+RECORD_SCHEMA_VERSION = 6
 BENCHMARK_BASIS = {
     "name": "MULTIPRON-ONLY",
     "live_cells": ["on/slt55", "on/big"],
@@ -328,6 +329,92 @@ def _tracked_modifications_hash() -> str:
     return digest.hexdigest()
 
 
+def reproducible_binary_sha256(path: Path) -> str:
+    """Hash a native binary after removing Mach-O's randomized build UUID."""
+    data = bytearray(path.read_bytes())
+    magics = {
+        b"\xce\xfa\xed\xfe": ("<", False),
+        b"\xcf\xfa\xed\xfe": ("<", True),
+        b"\xfe\xed\xfa\xce": (">", False),
+        b"\xfe\xed\xfa\xcf": (">", True),
+    }
+
+    def normalize_macho(offset: int) -> None:
+        layout = magics.get(bytes(data[offset : offset + 4]))
+        if layout is None:
+            return
+        byte_order, is_64_bit = layout
+        header_size = 32 if is_64_bit else 28
+        if offset + header_size > len(data):
+            raise RuntimeError(f"truncated Mach-O header: {path}")
+        command_count = struct.unpack_from(f"{byte_order}I", data, offset + 16)[0]
+        cursor = offset + header_size
+        for _ in range(command_count):
+            if cursor + 8 > len(data):
+                raise RuntimeError(f"truncated Mach-O load commands: {path}")
+            command, command_size = struct.unpack_from(f"{byte_order}II", data, cursor)
+            if command_size < 8 or cursor + command_size > len(data):
+                raise RuntimeError(f"invalid Mach-O load command: {path}")
+            if command == 0x1B:  # LC_UUID
+                if command_size != 24:
+                    raise RuntimeError(f"invalid Mach-O LC_UUID command: {path}")
+                data[cursor + 8 : cursor + 24] = b"\0" * 16
+            elif command == 0x1D:  # LC_CODE_SIGNATURE
+                if command_size != 16:
+                    raise RuntimeError(f"invalid Mach-O LC_CODE_SIGNATURE command: {path}")
+                signature_offset, signature_size = struct.unpack_from(
+                    f"{byte_order}II", data, cursor + 8
+                )
+                signature_end = signature_offset + signature_size
+                if signature_end > len(data):
+                    raise RuntimeError(f"invalid Mach-O code signature: {path}")
+                # Ad-hoc signatures cover LC_UUID and consequently inherit its randomness.
+                data[signature_offset:signature_end] = b"\0" * signature_size
+            cursor += command_size
+
+    magic = bytes(data[:4])
+    if magic in magics:
+        normalize_macho(0)
+    elif magic in {b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca"}:
+        byte_order = ">" if magic == b"\xca\xfe\xba\xbe" else "<"
+        if len(data) < 8:
+            raise RuntimeError(f"truncated universal Mach-O header: {path}")
+        architecture_count = struct.unpack_from(f"{byte_order}I", data, 4)[0]
+        for index in range(architecture_count):
+            entry = 8 + index * 20
+            if entry + 20 > len(data):
+                raise RuntimeError(f"truncated universal Mach-O architectures: {path}")
+            architecture_offset = struct.unpack_from(f"{byte_order}I", data, entry + 8)[0]
+            normalize_macho(architecture_offset)
+    return hashlib.sha256(data).hexdigest()
+
+
+def model_directory_identity(model: Path) -> dict[str, Any]:
+    """Return a deterministic manifest of every produced acoustic-model artifact."""
+    if not model.is_dir():
+        raise RuntimeError(f"trained model directory is absent: {model}")
+    operational_metadata = {"provenance.json", "bw_telemetry.json"}
+    files = [
+        path
+        for path in sorted(model.rglob("*"))
+        if path.is_file()
+        and path.name not in operational_metadata
+        and not (path.name.startswith(".") and path.name.endswith(".complete"))
+    ]
+    manifest = [
+        {
+            "path": path.relative_to(model).as_posix(),
+            "size": path.stat().st_size,
+            "sha256": sha256(path),
+        }
+        for path in files
+    ]
+    digest = hashlib.sha256(
+        json.dumps(manifest, separators=(",", ":"), sort_keys=True).encode()
+    ).hexdigest()
+    return {"sha256": digest, "files": manifest}
+
+
 def engine_identity(dictionary: Path | None = None) -> dict[str, str]:
     """Identify all executable and package inputs used for a benchmark run."""
     from pstrain import __version__
@@ -341,7 +428,9 @@ def engine_identity(dictionary: Path | None = None) -> dict[str, str]:
 
     identity["pocketsphinx_version"] = pocketsphinx_version()
     native = get_lib_path()
-    identity["native_library_sha256"] = sha256(native) if native is not None else "absent"
+    identity["native_library_sha256"] = (
+        reproducible_binary_sha256(native) if native is not None else "absent"
+    )
     if native is not None:
         from pstrain.lib.runtime import fp_contract_policy
 
@@ -351,7 +440,7 @@ def engine_identity(dictionary: Path | None = None) -> dict[str, str]:
     for name in PSTRAIN_BINARIES.values():
         program = resolve_binary(name)
         identity[f"native_program_{name}_sha256"] = (
-            sha256(program) if program is not None else "absent"
+            reproducible_binary_sha256(program) if program is not None else "absent"
         )
     try:
         describe = subprocess.run(
@@ -1157,10 +1246,10 @@ def validate_record(record: dict[str, Any]) -> None:
     """Validate the complete, versioned benchmark-record schema."""
     if record.get("schema_version") != RECORD_SCHEMA_VERSION:
         raise RuntimeError(f"unsupported benchmark record schema: {record.get('schema_version')!r}")
-    for field in ("basis", "engine", "conditions", "resources", "results"):
+    for field in ("basis", "engine", "conditions", "resources", "models", "results"):
         if field not in record:
             raise RuntimeError(f"benchmark record missing required field: {field}")
-    for field in ("engine", "conditions", "resources", "results"):
+    for field in ("engine", "conditions", "resources", "models", "results"):
         if not isinstance(record[field], dict):
             raise RuntimeError(f"benchmark record field must be an object: {field}")
     _require_equal("basis", record["basis"], BENCHMARK_BASIS)
@@ -1292,6 +1381,7 @@ def compare_results(
     """
     validate_record(record)
     _require_equal("resources", actual.get("resources"), record.get("resources"))
+    _require_equal("models", actual.get("models"), record.get("models"))
     actual_conditions = actual.get("conditions")
     if not isinstance(actual_conditions, dict):
         raise RuntimeError("conditions mismatch: actual conditions are not an object")
@@ -1414,6 +1504,7 @@ def make_record(
         "engine": output["engine"],
         "conditions": output["conditions"],
         "resources": output["resources"],
+        "models": output["models"],
         "results": record_results,
     }
     validate_record(record)
@@ -1459,6 +1550,7 @@ def run(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     actual: dict[str, Any] = {}
+    models: dict[str, Any] = {}
     resolved_configs: dict[str, dict[str, Any]] = {}
     audio_roots = {
         voice: corpus / f"cmu_us_{voice}_arctic" / "wav" for voice in ("slt", "bdl", "rms", "clb")
@@ -1499,6 +1591,7 @@ def run(
             (project / "resolved-config.json").read_text(encoding="utf-8")
         )
         model = project / "shared" / "models" / "cd-8g" / mode
+        models[mode] = model_directory_identity(model)
         slt = load_transcripts(DATA_DIR / "slt55.transcription")
         big = load_transcripts(DATA_DIR / "big.transcription")
         actual[mode] = {
@@ -1514,6 +1607,7 @@ def run(
         "schema_version": RECORD_SCHEMA_VERSION,
         "results": actual,
         "resources": manifest,
+        "models": models,
         "engine": engine_identity(dictionary),
         "conditions": benchmark_conditions(band, resolved_configs=resolved_configs),
         "resource_manifest": str(work_dir / "resource-manifest.json"),

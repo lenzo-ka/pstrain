@@ -263,34 +263,76 @@
     "decode_dictionary_sha256": "24ff2852a707b63f499fd968294d5e4c02d44e0eb1ec511e40be1f380d785846",
     "git_describe": "578f6a9",
     "native_library_fp_contract_declared": "off",
-    "native_library_sha256": "c17b54055fb1d9c4c0f309b30a9e947c05271b7ddbb1ba272edd180f4a64b5b7",
-    "native_program_agg_seg_sha256": "dcbec9816c4bc237c2e8900deccfa38c36c8f3d335747ee86bcd0b047568ff6f",
-    "native_program_bldtree_sha256": "e8393f9165433b9a5868aeec27ddd7be9949aae679b5bc366ae093e16880fb0a",
-    "native_program_bw_sha256": "ab9b4f5ad7d6e6e537b1a98dd89357a72b038e06d04de18b493a2788210a9f0e",
-    "native_program_delint_sha256": "bf48bda7eda752ec04c27e2dda43ecc38d4cef66e3c40be56657bcd300bccdd3",
-    "native_program_inc_comp_sha256": "9d7ecd0f312f297fe4256762c0e7f5ef1658694b8c9d2df5eff8dc7831e68dae",
-    "native_program_init_gau_sha256": "9ffc162ac646aaba068061ec4956776c61f59ffef0462d2dc0a77a50d612b6a3",
-    "native_program_kdtree_sha256": "f17ca3f23d6597a2958eac53b32cb544313c82886231b7704afd0717ee89874e",
-    "native_program_kmeans_init_sha256": "ca298b2ed9ea3c120c7de226f55a0554bfe2b27371e5fd2c19abc8f28f717672",
-    "native_program_make_quests_sha256": "6aae038a6414d2a8a8ac83b226ef68affdcfb99395cd3005e35d74bacf0665c9",
-    "native_program_map_adapt_sha256": "b2343a3152270fe8e0f99c0d54e7ef6a5f0b2a5751b28d5c64646e309bb31055",
-    "native_program_mk_flat_sha256": "b45515e3c24dc1dec8cd2ea44bc82ca45f676f013e63d662663d37d920c178bf",
-    "native_program_mk_mdef_gen_sha256": "df370852d7efe496cba05b2e95ec4079bba4425295d21707349f4656a20a0426",
-    "native_program_mk_ts2cb_sha256": "8766d9c7532649e7a738c948a3217070f71602069a293c5c4fcd72ad082b019b",
-    "native_program_mllr_solve_sha256": "609b6e10e38c20cd30503c2c8a558d9d7f37e72f0861336039b01b374221b60f",
-    "native_program_mllr_transform_sha256": "807db3b404926bd1750f981c49c8954bb658294e24d9e382163a3fb4058c632e",
-    "native_program_norm_sha256": "f68c71dc38a4e2a5f0f6826ef0a165e83f3185b0ecd31cc9f76a766a2a563038",
-    "native_program_param_cnt_sha256": "a6c4135868360cefe134fb75329c0e17987a6ab2cee159bde78abea26499a3a5",
-    "native_program_printp_sha256": "3c0a24f1ed4971cd414c4fcce8b42c035416291dd7a7efa269a67bd51a096c88",
-    "native_program_prunetree_sha256": "0517ab6d1ec3a6c3631b8e57bc52e1dcd2f524592e48a678403c019531fc21a7",
-    "native_program_sphinx3_align_sha256": "0d5f6e03056889b258aab48573d31696c50c94c3e8fa3c14cd0b36d371b3d10e",
-    "native_program_sphinx_cepview_sha256": "cbf4e8c559a4ea8fb20ffc68784f8608406d51c05d362421fb0d8b3c1cca2b98",
-    "native_program_sphinx_fe_sha256": "02649905701606abe8a3bc86c5207558f59bb8c91e19eaaf40451ed5c2728d1c",
-    "native_program_tiestate_sha256": "0cd7eb05f4bffa7cd64d695785fdb9dff71b9d680fd09bfdf177b55ec3b2e6d1",
+    "native_library_sha256": "0173a40a7b506464b6372ed5467eed8ddee37f9c89d62b91cc6ff3b8df9af14a",
+    "native_program_agg_seg_sha256": "1219f79957e45cd6f3aa065cf397f4ab3a65f35a77914273e7117d03ebef26a4",
+    "native_program_bldtree_sha256": "26a19ae7da8400d14ae3729c02c773b371b3277cee548a1b4e36ecaba5910012",
+    "native_program_bw_sha256": "02155130d3e0b4bcffea28216ad89ca9016399d89ae638a402d2f3511d052748",
+    "native_program_delint_sha256": "0a707d6dcd8c906857488233ab2e495087b46b005a50aae122dbb8094d719ef7",
+    "native_program_inc_comp_sha256": "09b9cf512b623593c069b57b27d8479446d8ba8bd67de275abd79b76353195f3",
+    "native_program_init_gau_sha256": "a406400d98a32c961286229f83e73a70fc5fcdf5d58a43634eea58cdc5cb43be",
+    "native_program_kdtree_sha256": "65cab3822fde4329bb10db56fe73ba5d02419e7c64822bb4c72a7ba4e6eb3779",
+    "native_program_kmeans_init_sha256": "03a6711805a6407ebe471a7b580ced400f37a55945b1d7b7a5e30bd4437e3150",
+    "native_program_make_quests_sha256": "51a358b4c374b9b22e7bd4271447accd42c85b74fe49d0dc2b1a7b2ca5f922a4",
+    "native_program_map_adapt_sha256": "0266e809be55c2412e6dfcfecdc930693045dcdbd24d65ccf17d42b41112f0ad",
+    "native_program_mk_flat_sha256": "9e0836a5ed96103d7f25d600fd70d91f3f85a5d910ce37e497752261542b0b4b",
+    "native_program_mk_mdef_gen_sha256": "7eaf4109ca2d71bc3cee2b664dae3a7e9e7fec871afef7d144ba86459bb8a6f4",
+    "native_program_mk_ts2cb_sha256": "7d84b11a6e04c8c32ddf58b28683a130fccd5e584ffa951b6bb57f75ce7239c6",
+    "native_program_mllr_solve_sha256": "cfcb16bf68f9465d5577384d27a0d6db9e33417627cbccf0222467809130587c",
+    "native_program_mllr_transform_sha256": "2d2f0794bb5898eb15de792edf478fc19c7b7ef494b3e1c0085daf6d659c82ac",
+    "native_program_norm_sha256": "e7ccd3be12f46ae9e1963837149b761f093a1693144e5babc5354cc99fe2e4e5",
+    "native_program_param_cnt_sha256": "87be2bb35c21a6850fdd1b68a1a3d5a6b04d39e7a3d21c04c792f281b7792307",
+    "native_program_printp_sha256": "8351ec75dacbf3e76fdb82a807c3f2ff4d59a7108b04830417e0a941c060fd0d",
+    "native_program_prunetree_sha256": "61eb96058740d6147b29ac4eb65bae82801cf0905c5aa41190d76b43c939db70",
+    "native_program_sphinx3_align_sha256": "ac1a1a6fb4751fcb416c44f6aa4ab0e57a8d73d26f71facc4c5ec519f8842db2",
+    "native_program_sphinx_cepview_sha256": "86fb248ce9ad9d08a19186d151014f900866e745b5571da085e4f13afdb4064e",
+    "native_program_sphinx_fe_sha256": "7dc9960dd172785174efcdf27fe3a1112cc1615c7e93eea54661fef0dc58f6c1",
+    "native_program_tiestate_sha256": "4debe7c7b931b5b5e59c78c55d0243cc5369adccd933b2cb1961491742994885",
     "pocketsphinx_version": "5.1.1+511126b492dcb267cf30d49d631946d7b61a9530",
     "python_version": "3.12.12 (main, Jan 18 2026, 13:43:01) [Clang 17.0.0 (clang-1700.6.3.2)]",
     "tracked_modifications_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "version": "0.1.0"
+  },
+  "models": {
+    "on": {
+      "files": [
+        {
+          "path": "feat.params",
+          "sha256": "c5381b9ec3ee8938db7ee292ef6b4a0c326d80b34af66bd25fc4c9f3883fe500",
+          "size": 303
+        },
+        {
+          "path": "gauden_counts",
+          "sha256": "6b7ff28a49b2e637436607eb3556bec01d3ec33e79acc61ff2bb1af030d5de4c",
+          "size": 10304
+        },
+        {
+          "path": "mdef",
+          "sha256": "05075485817a4d32c7ffa323e345975ea0adf875a57f0540eecd1185a7b7a066",
+          "size": 2275181
+        },
+        {
+          "path": "means",
+          "sha256": "72a9f926f5ac972c2f1a2c3f5447333f9d6f99ead3e902503f2a0505dc7418a9",
+          "size": 399428
+        },
+        {
+          "path": "mixture_weights",
+          "sha256": "3834bc166f2c72b7d78983d8693ab2ec7e46c34a3849c0e31549bd7ff3ad3c0c",
+          "size": 10304
+        },
+        {
+          "path": "transition_matrices",
+          "sha256": "84bc227efe274df20e57a2ac0bf406c66857439e54d0a3882b345a8e981da561",
+          "size": 1984
+        },
+        {
+          "path": "variances",
+          "sha256": "3825f7b62e19d9c5905b03b8523f50dd86021a21c6d4de0ffdc48cad661dfcb5",
+          "size": 399428
+        }
+      ],
+      "sha256": "3349213b750c4deeb74edcd667b82ebfd7e615f22d7b710d3eb2364c9fffeba3"
+    }
   },
   "resources": {
     "archives": {
@@ -35199,5 +35241,5 @@
       }
     }
   },
-  "schema_version": 5
+  "schema_version": 6
 }
