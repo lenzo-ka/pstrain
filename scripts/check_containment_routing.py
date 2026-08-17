@@ -5,10 +5,13 @@ This scanner certifies calls whose callee is a literal name or attribute chain, 
 literal/module-constant ``getattr`` name, a literal-key dictionary selection, a direct
 ``FFI().dlopen``, or a single-assignment local alias of a known native leaf/loader. It
 also flags several runtime ``getattr``, ``__getattribute__``, subscript, and explicit
-``__call__`` spellings directly on conventionally named library handles. A locally
-assigned ordinary Python value suppresses that name convention. It is silent on
-multi-step dataflow, attribute binding provenance, function pointers produced by
-``ffi.addressof``, and aliases that cross module boundaries or arise from dynamic imports.
+``__call__`` spellings directly on conventionally named library handles. In source
+order, a plain assignment of an ordinary Python value suppresses that name convention
+for later visited expressions. This is a visitor heuristic, not lexical-scope binding
+analysis. It is silent on binding forms such as annotated assignments and named
+expressions, multi-step dataflow, attribute binding provenance, function pointers
+produced by ``ffi.addressof``, and aliases that cross module boundaries or arise from
+dynamic imports.
 """
 
 from __future__ import annotations
@@ -176,6 +179,9 @@ class Scanner(ast.NodeVisitor):
                 worker_only = True
 
     def visit_Assign(self, node: ast.Assign) -> None:
+        # Python evaluates the RHS before rebinding assignment targets. Preserve that
+        # ordering so dispatch through the pre-rebind native handle remains visible.
+        self.visit(node.value)
         if (
             not self.functions
             and isinstance(node.value, ast.Constant)
@@ -199,7 +205,8 @@ class Scanner(ast.NodeVisitor):
                     self.shadowed_handles[-1].discard(target)
                 else:
                     self.shadowed_handles[-1].add(target)
-        self.generic_visit(node)
+        for target in node.targets:
+            self.visit(target)
 
     def _string(self, node: ast.AST) -> str | None:
         if isinstance(node, ast.Constant) and isinstance(node.value, str):

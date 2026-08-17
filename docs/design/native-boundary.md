@@ -21,13 +21,16 @@ checks specified syntactic patterns under a reserved `lib`/`_lib` name conventio
 name and attribute-chain calls to the CDEF-derived native surface and loader helpers;
 statically resolvable `getattr` and literal-key dictionary selections; and direct dynamic
 `getattr`, `builtins.getattr`, `__getattribute__`, subscript, and explicit `__call__` forms
-on those reserved handle names. A visibly local assignment of an ordinary Python value to
-`lib` or `_lib` suppresses the convention for that scope.
+on those reserved handle names. In source order, a plain assignment of an ordinary Python
+value to `lib` or `_lib` suppresses the convention for expressions visited afterward. This
+is a visitor heuristic, not lexical-scope binding analysis.
 
 This is a source-pattern gate, not proof of containment for every possible Python-to-CFFI
-call. It is silent on multi-step dataflow, attribute binding provenance (including a Python
-registry stored as `self._lib`), function pointers from `ffi.addressof`, cross-module aliases,
-dynamic imports, and semantically equivalent spellings outside the enumerated patterns.
+call. Annotated assignments, named expressions, and other binding forms are measured
+silences. The gate is also silent on multi-step dataflow, attribute binding provenance
+(including a Python registry stored as `self._lib`), function pointers from `ffi.addressof`,
+cross-module aliases, dynamic imports, and semantically equivalent spellings outside the
+enumerated patterns.
 The shipped PocketSphinx decoder in `pstrain.lib.testing.decoder` remains in-process and
 is used by benchmark, CLI testing, and decode-shard paths; decoder containment is not
 certified and decoder behavior is unchanged. This decoder-exemption wording is

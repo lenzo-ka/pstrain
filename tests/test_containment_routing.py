@@ -101,6 +101,24 @@ lib[runtime_name](ctx)
     assert scanner.callsites == []
 
 
+def test_assignment_rhs_uses_the_pre_rebind_native_handle() -> None:
+    sources = (
+        'lib = {"r": getattr(lib, runtime_name)(ctx)}',
+        'lib = {"r": lib[runtime_name](ctx)}',
+    )
+
+    observed = []
+    for source in sources:
+        scanner = Scanner("pstrain/_construction.py")
+        scanner.visit(ast.parse(source))
+        observed.extend((item.symbol, item.disposition) for item in scanner.callsites)
+
+    assert observed == [
+        ("getattr(lib, <dynamic>)", "violation"),
+        ("lib[<dynamic>]", "violation"),
+    ]
+
+
 def test_single_assignment_native_and_loader_aliases_are_detected() -> None:
     source = """
 fn = lib.s3mixw_read
