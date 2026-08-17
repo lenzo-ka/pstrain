@@ -1,6 +1,8 @@
-# pstrain — the Peace Train
+# pstrain — Peace Train
 
 [![Tests](https://github.com/lenzo-ka/pstrain/actions/workflows/tests.yml/badge.svg)](https://github.com/lenzo-ka/pstrain/actions/workflows/tests.yml)
+
+The name **pstrain** is short for *PocketSphinx train*; we pronounce it *"peace train."*
 
 pstrain is a toolkit for training continuous-density HMM/GMM acoustic models.
 It combines a C library for the numerical work with a Python interface for
@@ -18,8 +20,8 @@ defaults except for `split.test_count=0` (including multiple-pronunciation
 training) shows no statistically significant regression on either cell versus
 stock SphinxTrain. On SLT-55, aggregate WER and error count are identical even
 though 26 of 55 per-utterance error rows differ. The
-[benchmark pin](docs/benchmarks/arctic-pin.md) and its
-[machine-readable record](docs/benchmarks/arctic-pin/record.json) preserve the
+[benchmark pin](https://github.com/lenzo-ka/pstrain/blob/main/docs/benchmarks/arctic-pin.md) and its
+[machine-readable record](https://github.com/lenzo-ka/pstrain/blob/main/docs/benchmarks/arctic-pin/record.json) preserve the
 evidence and measurement conditions. Run `make verified` for the repository's
 aggregate verification command; its Arctic gate authenticates the pinned
 measurement conditions against the current checkout and re-derives the recorded
@@ -41,11 +43,19 @@ pstrain provides an in-process training pipeline for:
 
 pstrain supports macOS and Linux. Windows support is planned; today, WSL
 provides a Linux environment on Windows. See the
-[support policy](docs/support.md) for details.
+[support policy](https://github.com/lenzo-ka/pstrain/blob/main/docs/support.md) for details.
 
 ## Quickstart
 
-From a checkout, install pstrain and the decoding dependencies:
+Install from PyPI:
+
+```bash
+pip install pstrain
+```
+
+The commands below use the small CMU ARCTIC fixture bundled in the
+[repository](https://github.com/lenzo-ka/pstrain) for a complete local run; from
+a checkout, install with the decoding extra instead:
 
 ```bash
 python -m pip install ".[test]"
@@ -74,26 +84,26 @@ pstrain test cd-8g --project-dir /tmp/pstrain-demo --no-lm
 For a project of your own, `pstrain train --help` describes the accepted audio,
 prompt, dictionary, phoneset, and configuration inputs. The lower-level
 `setup`, `validate`, and `build` commands remain available for decomposed workflows. The
-[getting-started guide](docs/getting-started.md) continues from project setup.
+[getting-started guide](https://github.com/lenzo-ka/pstrain/blob/main/docs/getting-started.md) continues from project setup.
 
 The default `pstrain train` target is `cd-8g`. Use `--target ci-1g` when only
 the faster context-independent bootstrap model is wanted.
 
 ## Benchmark pin
 
-The [ARCTIC benchmark pin](docs/benchmarks/arctic-pin.md) freezes the corpus,
+The [ARCTIC benchmark pin](https://github.com/lenzo-ka/pstrain/blob/main/docs/benchmarks/arctic-pin.md) freezes the corpus,
 training modes, model identities, decoder, and per-utterance measurements used
 as the comparison baseline.
 
 ## Documentation
 
-- [Getting started](docs/getting-started.md)
-- [Input formats](docs/input-formats.md)
-- [Examples](docs/examples.md)
-- [API reference](docs/api/index.rst)
-- [Design documents](docs/design/README.md)
-- [Development guide](docs/development.md)
-- [Support and dependency policy](docs/support.md)
+- [Getting started](https://github.com/lenzo-ka/pstrain/blob/main/docs/getting-started.md)
+- [Input formats](https://github.com/lenzo-ka/pstrain/blob/main/docs/input-formats.md)
+- [Examples](https://github.com/lenzo-ka/pstrain/blob/main/docs/examples.md)
+- [API reference](https://github.com/lenzo-ka/pstrain/blob/main/docs/api/index.rst)
+- [Design documents](https://github.com/lenzo-ka/pstrain/blob/main/docs/design/README.md)
+- [Development guide](https://github.com/lenzo-ka/pstrain/blob/main/docs/development.md)
+- [Support and dependency policy](https://github.com/lenzo-ka/pstrain/blob/main/docs/support.md)
 
 The documentation can be built locally with `make -C docs html`.
 
@@ -101,7 +111,7 @@ The documentation can be built locally with `make -C docs html`.
 
 New pstrain code is available under the BSD 2-Clause license. CMU-derived code
 retains its applicable CMU BSD-style license alongside the license for pstrain
-modifications. See [LICENSE](LICENSE),
-[csrc/LICENSE.sphinx](csrc/LICENSE.sphinx), and
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the complete terms and
+modifications. See [LICENSE](https://github.com/lenzo-ka/pstrain/blob/main/LICENSE),
+[csrc/LICENSE.sphinx](https://github.com/lenzo-ka/pstrain/blob/main/csrc/LICENSE.sphinx), and
+[THIRD_PARTY_NOTICES.md](https://github.com/lenzo-ka/pstrain/blob/main/THIRD_PARTY_NOTICES.md) for the complete terms and
 credits.
