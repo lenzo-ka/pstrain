@@ -14,6 +14,14 @@ The pin was accepted on a re-derived basis: its measured deltas are the
 documented baseline. They are not a claim that every cell is at zero delta
 from the preserved upstream model.
 
+The record's `record_binding` is a self-recomputable consistency and
+tamper-evidence digest over the schema, identities, conditions, models, and
+measurement rows. It catches an edited field when the digest is left stale,
+but it does not prove historical provenance: anyone able to relabel the record
+can recompute it. Actual producing-run provenance rests on the retained
+resolved configuration, training log, model definition, and artifact hashes,
+together with the re-derivation gate described below.
+
 ## Measurement identity
 
 The decode path is a defining condition of this measurement. Audio is decoded
@@ -84,7 +92,9 @@ and pin training
 The 1,043-utterance training fileids hash is
 `8ce9a55c5929f6f86579ee1b244c38fd4d0a9d41e436e2057337f74c1bb4d631`.
 The JSON record is authoritative for the complete frozen configuration,
-model-file identities, and resource metadata.
+model-file identities, and resource metadata. Its internal digest does not
+replace the retained producing-run evidence or establish who produced its
+measurement rows.
 
 ## Baseline
 

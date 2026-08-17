@@ -337,6 +337,7 @@
   "record_binding": {
     "algorithm": "sha256-canonical-json-v1",
     "fields": [
+      "schema_version",
       "basis",
       "engine",
       "conditions",
@@ -344,7 +345,7 @@
       "models",
       "results"
     ],
-    "sha256": "b0b6f5e98802ad26dcde51a2ec4a2bdc6d6726168b5e668f96e397b984113b08"
+    "sha256": "9606ea926e1b987f7107af0d214e5fd31fd826ea14ba1b1deaf3b5912a9578e8"
   },
   "resources": {
     "archives": {

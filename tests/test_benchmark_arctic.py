@@ -508,7 +508,7 @@ def test_adopt_uncovered_keeps_cell_provenance_consistent(tmp_path: Path) -> Non
         ),
         (
             lambda record: record["conditions"]["decoder"].__setitem__("wip", 0.3),
-            "engine/corpus/result binding mismatch",
+            "record consistency digest mismatch",
         ),
     ],
 )
@@ -654,7 +654,13 @@ def test_pin_check_rejects_tampered_producing_identity(tmp_path: Path, identity:
         text=True,
     )
     assert completed.returncode != 0
-    assert "engine/corpus/result binding mismatch" in completed.stderr
+    assert "record consistency digest mismatch" in completed.stderr
+
+    # Rebinding the mislabeled record passes document-integrity validation.
+    # The digest is deliberately only tamper evidence: it has no external
+    # witness capable of proving that the declared producer made these rows.
+    bind_record(record)
+    validate_record(record)
 
 
 def test_comparison_uses_true_cross_run_matched_pairs() -> None:

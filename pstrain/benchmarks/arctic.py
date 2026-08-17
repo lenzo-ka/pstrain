@@ -49,7 +49,15 @@ def resolve_data_dir(*, package_root: Path | None = None, repo_root: Path | None
 DATA_DIR = resolve_data_dir()
 RECORD_SCHEMA_VERSION = 7
 RECORD_BINDING_ALGORITHM = "sha256-canonical-json-v1"
-RECORD_BINDING_FIELDS = ("basis", "engine", "conditions", "resources", "models", "results")
+RECORD_BINDING_FIELDS = (
+    "schema_version",
+    "basis",
+    "engine",
+    "conditions",
+    "resources",
+    "models",
+    "results",
+)
 BENCHMARK_BASIS = {
     "name": "MULTIPRON-ONLY",
     "live_cells": ["on/slt55", "on/big"],
@@ -1152,14 +1160,19 @@ def _require_equal(label: str, actual: Any, recorded: Any) -> None:
 
 
 def record_binding_sha256(record: dict[str, Any]) -> str:
-    """Bind measurement rows to their declared engine, corpus, and model inputs."""
+    """Digest record fields together for internal consistency and tamper evidence.
+
+    This self-recomputable digest is not a provenance witness. Producing-run
+    provenance rests on retained configuration, logs, model definition, and
+    artifacts plus re-derivation of the measurement rows.
+    """
     payload = {field: record.get(field) for field in RECORD_BINDING_FIELDS}
     canonical = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
 
 
 def bind_record(record: dict[str, Any]) -> None:
-    """Attach the canonical identity-to-measurement binding to a record."""
+    """Attach a self-recomputable consistency digest, not provenance proof."""
     record["record_binding"] = {
         "algorithm": RECORD_BINDING_ALGORITHM,
         "fields": list(RECORD_BINDING_FIELDS),
@@ -1344,7 +1357,7 @@ def validate_record(record: dict[str, Any]) -> None:
         "fields": list(RECORD_BINDING_FIELDS),
         "sha256": record_binding_sha256(record),
     }
-    _require_equal("engine/corpus/result binding", binding, expected_binding)
+    _require_equal("record consistency digest", binding, expected_binding)
 
 
 def authenticate_conditions(actual: dict[str, Any], recorded: dict[str, Any]) -> list[str]:
