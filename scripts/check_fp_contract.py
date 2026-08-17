@@ -65,6 +65,7 @@ COFF_MACHINES = {
     b"\x64\x86",  # amd64
     b"\x64\xaa",  # arm64
 }
+PE_MAGIC = b"MZ"
 
 
 def build_artifacts(build_dir: Path) -> list[Path]:
@@ -87,7 +88,12 @@ def _is_native(path: Path) -> bool:
         start = path.read_bytes()[:8]
     except OSError:
         return False
-    return start[:4] in NATIVE_MAGICS or start == b"!<arch>\n" or start[:2] in COFF_MACHINES
+    return (
+        start[:4] in NATIVE_MAGICS
+        or start == b"!<arch>\n"
+        or start[:2] in COFF_MACHINES
+        or start[:2] == PE_MAGIC
+    )
 
 
 def object_artifacts(object_dir: Path) -> list[Path]:
@@ -152,7 +158,7 @@ def _objdumps(path: Path) -> list[str]:
     """Return disassemblers in the preferred order for this file."""
     llvm = _llvm_objdumps()
     generic = shutil.which("objdump")
-    if path.read_bytes()[:2] in COFF_MACHINES:
+    if path.read_bytes()[:2] in COFF_MACHINES | {PE_MAGIC}:
         candidates = llvm + ([generic] if generic is not None else [])
     else:
         candidates = ([generic] if generic is not None else []) + llvm
