@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +11,7 @@ import pytest
 from pstrain.lib.pipeline import PipelineContext
 from pstrain.lib.pipeline.tasks import build_pipeline
 from pstrain.lib.setup import setup_project
-from pstrain.lib.testing.decoder import DecodingResult
+from pstrain.lib.testing.decoder import Decoder, DecodingResult
 from pstrain.lib.testing.test import _decode_files, _decode_shard, _DecodeConfig
 from tests.conftest import requires_c_library
 
@@ -104,14 +105,21 @@ def test_parallel_merge_is_canonical_and_uses_distinct_executor_path(
 
 
 @requires_c_library
-def test_dithered_decode_hypotheses_are_independent_of_shard_order(tmp_path: Path) -> None:
-    """Gate live dithered decode against the natural one-decoder traversal.
+def test_mini_arctic_dithered_decode_smoke_across_selected_shard_arrangements(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Smoke-test live dithered decode across selected shard arrangements.
 
     REFERENCE: one decoder traversing all ten mini_arctic utterances in natural
-    order with a vocabulary-matched CI model trained by this checkout. AXIS:
-    reversed traversal and legal round-robin two- and three-shard assignments,
-    each shard using a fresh decoder. SILENT ON: feature-byte identity, larger
-    corpora and models, other PocketSphinx versions, and nondithered decoding.
+    order with a vocabulary-matched CI model trained by this checkout. AXES:
+    reversed and rotated traversal; round-robin two- and three-shard assignments;
+    swapped two-shard execution order; and a contiguous two-shard partition.
+    Every nonempty shard gets exactly one decoder, reused for all its utterances.
+    A reseeded-decoder canary checks whether changed dither RNG segments affect
+    this fixture's hypotheses. If none change, this is deliberately only an
+    output smoke test, not evidence of general dithered-decode determinism.
+    SILENT ON: feature-byte identity, larger corpora and models, other legal
+    arrangements, other PocketSphinx versions, and nondithered decoding.
     """
     project = tmp_path / "project"
     setup_project(
@@ -126,7 +134,6 @@ def test_dithered_decode_hypotheses_are_independent_of_shard_order(tmp_path: Pat
     assert build_pipeline(context).run("ci-1g", jobs=1) == 0
 
     model = context.model_dir("ci-1g")
-    assert "-dither yes" in (model / "feat.params").read_text().splitlines()
     config = _DecodeConfig(
         model,
         context.shared_dir / "dictionary.dict",
@@ -136,8 +143,37 @@ def test_dithered_decode_hypotheses_are_independent_of_shard_order(tmp_path: Pat
     files = sorted((FIXTURE / "wav").glob("*.wav"))
     indexed = [(position, path.stem, path) for position, path in enumerate(files)]
 
-    def decode(shards: list[list[tuple[int, str, Path]]]) -> dict[str, str]:
-        decoded = [item for shard in shards for item in _decode_shard(config, shard)]
+    real_decoder = Decoder
+    constructed: list[Decoder] = []
+    decoded_paths: dict[int, list[Path]] = {}
+
+    class TrackedDecoder(real_decoder):
+        def __init__(self, **kwargs: Any) -> None:
+            super().__init__(**kwargs)
+            self.effective_dither = self._lib.pstrain_decoder_config_int(self._decoder, b"dither")
+            self.effective_seed = self._lib.pstrain_decoder_config_int(self._decoder, b"seed")
+            constructed.append(self)
+            decoded_paths[id(self)] = []
+
+        def decode_file(self, path: Path) -> DecodingResult:
+            decoded_paths[id(self)].append(path)
+            return super().decode_file(path)
+
+    monkeypatch.setattr("pstrain.lib.testing.test.Decoder", TrackedDecoder)
+
+    def decode(
+        shards: list[list[tuple[int, str, Path]]],
+        decode_config: _DecodeConfig = config,
+    ) -> dict[str, str]:
+        before = len(constructed)
+        decoded = [item for shard in shards for item in _decode_shard(decode_config, shard)]
+        shard_decoders = constructed[before:]
+        nonempty_shards = [shard for shard in shards if shard]
+        assert len(shard_decoders) == len(nonempty_shards)
+        assert [decoded_paths[id(decoder)] for decoder in shard_decoders] == [
+            [path for _, _, path in shard] for shard in nonempty_shards
+        ]
+        assert all(decoder.effective_dither == 1 for decoder in shard_decoders)
         assert all(result.success for _, _, result in decoded)
         return {utterance_id: result.hypothesis for _, utterance_id, result in decoded}
 
@@ -147,8 +183,43 @@ def test_dithered_decode_hypotheses_are_independent_of_shard_order(tmp_path: Pat
 
     arrangements = [
         [list(reversed(indexed))],
+        [indexed[1:] + indexed[:1]],
         [indexed[worker::2] for worker in range(2)],
+        list(reversed([indexed[worker::2] for worker in range(2)])),
         [indexed[worker::3] for worker in range(3)],
+        [indexed[: len(indexed) // 2], indexed[len(indexed) // 2 :]],
     ]
     for shards in arrangements:
         assert decode(shards) == natural
+
+    # Reseed an otherwise identical shard decoder.  The live configuration
+    # query proves that this mutation selects a different dither stream rather
+    # than merely changing serialized input text.
+    perturbed_model = tmp_path / "perturbed-model"
+    shutil.copytree(model, perturbed_model)
+    feat_params = perturbed_model / "feat.params"
+    feat_params.write_text(
+        "\n".join(
+            "-seed 17" if line.startswith("-seed ") else line
+            for line in feat_params.read_text().splitlines()
+        )
+        + "\n"
+    )
+    perturbed_config = _DecodeConfig(
+        perturbed_model, config.dict_file, config.filler_dict, config.lm
+    )
+    before = len(constructed)
+    perturbed = decode([indexed], perturbed_config)
+    assert {decoder.effective_seed for decoder in constructed[:before]} == {-1}
+    assert {decoder.effective_seed for decoder in constructed[before:]} == {17}
+    changed = {
+        utterance_id
+        for utterance_id, hypothesis in natural.items()
+        if perturbed[utterance_id] != hypothesis
+    }
+    if not changed:
+        pytest.xfail(
+            "mini_arctic hypotheses are insensitive to deliberately changed dither RNG "
+            "segments; selected-arrangement equality is only a narrow output smoke test"
+        )
+    assert changed
