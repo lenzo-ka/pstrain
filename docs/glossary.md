@@ -82,7 +82,9 @@ A list of utterance IDs, one per line. Used to specify which files to process.
 Same as ctl file - a list of utterance identifiers.
 
 ### transcription
-Text file mapping utterance IDs to their word transcripts. Format: `<s> word1 word2 ... </s> (utterance_id)`
+Text file mapping utterance IDs to their word transcripts. Pstrain accepts
+Sphinx `[<s>] words [</s>] (utterance_id)` with optional sentence markers and
+dict-style `utterance_id words`; see [Input formats](input-formats.md#transcripts).
 
 ### feat.params
 The complete training-time front-end record carried by a trained model. Pstrain's

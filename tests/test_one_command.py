@@ -6,12 +6,14 @@ import json
 import shlex
 import shutil
 import sys
+import wave
 from pathlib import Path
 
 import pytest
 
 from pstrain.cli.cli import main
 from pstrain.lib.one_command import (
+    InputReport,
     PromptFormatError,
     detect_prompt_format,
     input_identity,
@@ -23,6 +25,26 @@ from pstrain.lib.one_command import (
 from pstrain.lib.testing import check_pocketsphinx
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_arctic"
+
+
+def _write_wav(path: Path, *, sample_rate: int, channels: int = 1) -> None:
+    with wave.open(str(path), "wb") as wav_file:
+        wav_file.setnchannels(channels)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(b"\0\0" * channels * 16)
+
+
+def _validate_wav_inputs(tmp_path: Path, rates: list[int], *, channels: int = 1) -> InputReport:
+    audio = tmp_path / "audio"
+    audio.mkdir()
+    prompts = tmp_path / "prompts.txt"
+    prompts.write_text("".join(f"utt{index} WORD\n" for index in range(len(rates))))
+    dictionary = tmp_path / "dictionary.dict"
+    dictionary.write_text("WORD W\n")
+    for index, rate in enumerate(rates):
+        _write_wav(audio / f"utt{index}.wav", sample_rate=rate, channels=channels)
+    return validate_inputs(audio, prompts, dictionary, "leading-id")[0]
 
 
 @pytest.mark.parametrize(
@@ -37,6 +59,26 @@ def test_unambiguous_prompt_format_detection(tmp_path: Path, content: str, expec
     prompts = tmp_path / "prompts.txt"
     prompts.write_text(content)
     assert detect_prompt_format(prompts) == expected
+
+
+def test_audio_accepts_nondefault_consistent_sample_rate(tmp_path: Path) -> None:
+    report = _validate_wav_inputs(tmp_path, [22050, 22050])
+
+    assert report.valid
+
+
+def test_audio_rejects_stereo(tmp_path: Path) -> None:
+    report = _validate_wav_inputs(tmp_path, [16000], channels=2)
+
+    assert "Unsupported WAV properties; expected mono PCM WAV" in report.errors
+
+
+def test_audio_rejects_mixed_sample_rates(tmp_path: Path) -> None:
+    report = _validate_wav_inputs(tmp_path, [16000, 22050])
+
+    assert any(
+        "sample rate must be consistent across the corpus" in error for error in report.errors
+    )
 
 
 def test_comma_requires_explicit_prompt_format(tmp_path: Path) -> None:

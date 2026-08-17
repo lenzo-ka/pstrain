@@ -27,7 +27,12 @@ def parse_transcription_file(transcription_path: Path) -> dict[str, str]:
 
     Supports two formats:
     1. Simple: ``<fileid> <word1> <word2> ...``
-    2. Sphinx: ``<s> <word1> <word2> </s> (<fileid>)``
+    2. Sphinx: ``[<s>] <word1> <word2> [</s>] (<fileid>)``
+
+    The Sphinx begin/end silence markers are optional, following the
+    convention used by the arpabo language-model tools. A trailing
+    ``(<fileid>)`` token selects this form; otherwise the first whitespace
+    token is the file ID.
     """
     transcripts = {}
     with transcription_path.open(encoding="utf-8") as f:
@@ -36,10 +41,11 @@ def parse_transcription_file(transcription_path: Path) -> dict[str, str]:
             if not line:
                 continue
 
-            # Format 2: Sphinx format (<s> words </s> (fileid)) - check this first
-            match = re.match(r"<s>\s+(.*?)\s+</s>\s+\(([^)]+)\)", line)
+            # Format 2: trailing (fileid), with optional sentence markers.
+            match = re.fullmatch(r"(.*?)\s+\(([^)]+)\)", line)
             if match:
-                text = match.group(1)
+                text = re.sub(r"^<s>(?:\s+|$)", "", match.group(1))
+                text = re.sub(r"(?:^|\s+)</s>$", "", text)
                 fileid = match.group(2)
                 transcripts[fileid] = text
                 continue

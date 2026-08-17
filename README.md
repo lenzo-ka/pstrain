@@ -85,6 +85,7 @@ as the comparison baseline.
 ## Documentation
 
 - [Getting started](docs/getting-started.md)
+- [Input formats](docs/input-formats.md)
 - [Examples](docs/examples.md)
 - [API reference](docs/api/index.rst)
 - [Design documents](docs/design/README.md)

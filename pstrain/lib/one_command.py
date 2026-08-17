@@ -187,11 +187,14 @@ def validate_inputs(
         f"{rate}Hz/{channels}ch/{width * 8}bit": count
         for (rate, channels, width), count in properties.items()
     }
-    unsupported = [props for props in properties if props[0] not in {8000, 16000} or props[1] != 1]
-    if unsupported:
-        report.errors.append("Unsupported WAV properties; expected mono 8 kHz or 16 kHz PCM")
-    if len(properties) > 1:
-        report.errors.append(f"Inconsistent WAV properties: {len(properties)} distinct formats")
+    if any(channels != 1 for _, channels, _ in properties):
+        report.errors.append("Unsupported WAV properties; expected mono PCM WAV")
+    sample_rates = {rate for rate, _, _ in properties}
+    if len(sample_rates) > 1:
+        report.errors.append(
+            "Inconsistent WAV sample rates; sample rate must be consistent across the corpus "
+            "(default 16 kHz)"
+        )
 
     dictionary = Dictionary.from_file(dictionary_path)
     filler = Dictionary.from_file(filler_path) if filler_path else None
