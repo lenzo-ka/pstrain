@@ -2,7 +2,7 @@
 
 [![Tests](https://github.com/lenzo-ka/pstrain/actions/workflows/tests.yml/badge.svg)](https://github.com/lenzo-ka/pstrain/actions/workflows/tests.yml)
 
-The name **pstrain** is short for *PocketSphinx train*; we pronounce it *"peace train."*
+The name **pstrain** is short for *PocketSphinx train*; it is pronounced *"peace train."*
 
 pstrain is a toolkit for training continuous-density HMM/GMM acoustic models.
 It combines a C library for the numerical work with a Python interface for
