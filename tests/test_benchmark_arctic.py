@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import struct
 import subprocess
 import sys
 import tarfile
@@ -38,9 +39,11 @@ from pstrain.benchmarks.arctic import (
     load_transcripts,
     main,
     make_record,
+    model_directory_identity,
     paired_delta_ci,
     render_configuration_provenance,
     render_results_report,
+    reproducible_binary_sha256,
     resolve_data_dir,
     resolved_configuration_provenance,
     run,
@@ -152,6 +155,45 @@ def test_engine_identity_is_in_default_test_suite() -> None:
     assert identity["native_library_fp_contract_declared"] == "off"
     assert identity["decode_dictionary_sha256"] == sha256(dictionary)
     assert any(key.startswith("native_program_") for key in identity)
+
+
+def test_macho_fingerprint_excludes_random_build_metadata(tmp_path: Path) -> None:
+    def macho(uuid: bytes, signature: bytes, payload: bytes) -> bytes:
+        header = struct.pack("<IiiIIIII", 0xFEEDFACF, 0, 0, 0, 2, 40, 0, 0)
+        signature_offset = len(header) + 40 + len(payload)
+        return (
+            header
+            + struct.pack("<II", 0x1B, 24)
+            + uuid
+            + struct.pack("<IIII", 0x1D, 16, signature_offset, len(signature))
+            + payload
+            + signature
+        )
+
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    changed = tmp_path / "changed"
+    first.write_bytes(macho(b"a" * 16, b"signature one", b"stable machine code"))
+    second.write_bytes(macho(b"b" * 16, b"signature two", b"stable machine code"))
+    changed.write_bytes(macho(b"b" * 16, b"signature two", b"different machine code"))
+
+    assert reproducible_binary_sha256(first) == reproducible_binary_sha256(second)
+    assert reproducible_binary_sha256(first) != reproducible_binary_sha256(changed)
+
+
+def test_model_directory_identity_is_complete_and_deterministic(tmp_path: Path) -> None:
+    model = tmp_path / "model"
+    (model / "nested").mkdir(parents=True)
+    (model / "mdef").write_bytes(b"model definition")
+    (model / "nested" / "means").write_bytes(b"means")
+
+    first = model_directory_identity(model)
+    second = model_directory_identity(model)
+
+    assert first == second
+    assert [row["path"] for row in first["files"]] == ["mdef", "nested/means"]
+    (model / "nested" / "means").write_bytes(b"changed means")
+    assert model_directory_identity(model)["sha256"] != first["sha256"]
 
 
 def test_pin_band_resources_and_hashes() -> None:
@@ -338,6 +380,9 @@ def test_emitted_record_uses_child_resolved_cli_override(
             cli_overrides={"runner": {"jobs": jobs}},
         )
         output.write_text(json.dumps(resolved.benchmark_document()))
+        model = project / "shared" / "models" / "cd-8g" / mode
+        model.mkdir(parents=True)
+        (model / "mdef").write_text("model\n")
 
     monkeypatch.setattr("pstrain.benchmarks.arctic._run_trusted_child", surface_resolved)
     emitted = tmp_path / "record.json"
@@ -546,6 +591,7 @@ def _comparison_documents() -> tuple[dict[str, object], dict[str, object]]:
             "bootstrap": {"resamples": 500, "seed": 11},
         },
         "engine": {"version": "1"},
+        "models": {"on": {"sha256": "model", "files": []}},
     }
     record = {
         "schema_version": RECORD_SCHEMA_VERSION,
@@ -557,6 +603,7 @@ def _comparison_documents() -> tuple[dict[str, object], dict[str, object]]:
         "resources": actual["resources"],
         "conditions": actual["conditions"],
         "engine": actual["engine"],
+        "models": actual["models"],
         "results": {
             mode: {dataset: _cell((1, 1, 1, 1), recorded=True) for dataset in ("slt55", "big")}
             for mode in ("off", "on")

@@ -19,7 +19,7 @@ from the preserved upstream model.
 The decode path is a defining condition of this measurement. Audio is decoded
 from WAV through pinned PocketSphinx 5.1.1 using Python 3.12.12 and native
 library SHA-256
-`6a5da2377c3b2b033b35d93a12a57bb869413bbc98f045d6c3f3652585792be3`.
+`0173a40a7b506464b6372ed5467eed8ddee37f9c89d62b91cc6ff3b8df9af14a`.
 The engine is pstrain 0.1.0. Its exact commit and artifact hashes are recorded
 in the machine-readable record. A
 result obtained through another decode path is not the same measurement even
@@ -152,6 +152,9 @@ change is refused.
 
 ## Replicability
 
-The benchmark uses canonical ordering and is deterministic: the same checkout
-and the same resource band produce the same record, modulo the explicitly
-recorded environment identity.
+The benchmark uses canonical ordering and is deterministic. Native Mach-O
+fingerprints omit randomized UUID and derived code-signature bytes, and model
+identity covers every acoustic-model artifact while excluding timing,
+provenance, and completion metadata. The same checkout and resource band
+therefore produce the same pinned content identities; environment identity is
+recorded separately.

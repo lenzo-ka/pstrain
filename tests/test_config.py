@@ -140,6 +140,43 @@ def test_fugu_project_profile_beats_user_reproduction(tmp_path: Path) -> None:
     assert resolved.fields["features.ncep"].winner.source_kind == "project-profile"
 
 
+def test_cli_multipron_off_preserves_project_explicit_inventory(tmp_path: Path) -> None:
+    (tmp_path / "etc").mkdir()
+    (tmp_path / "etc" / "config.yaml").write_text(
+        "config_version: 1\ntraining:\n  untied_inventory: all-triphone\n"
+    )
+
+    resolved = resolve_config(
+        tmp_path,
+        cli_overrides={"training": {"multipron_training": False}},
+        user_config_path=tmp_path / "absent-user.yaml",
+    )
+
+    assert resolved.profile.training.untied_inventory == "all-triphone"
+    assert resolved.fields["training.untied_inventory"].winner.source_kind == "project"
+
+
+def test_later_multipron_on_restores_default_inventory(tmp_path: Path) -> None:
+    (tmp_path / "etc").mkdir()
+    (tmp_path / "experiments" / "trial").mkdir(parents=True)
+    (tmp_path / "etc" / "config.yaml").write_text(
+        "config_version: 1\ntraining:\n  multipron_training: false\n"
+    )
+    (tmp_path / "experiments" / "trial" / "config.yaml").write_text(
+        "config_version: 1\ntraining:\n  multipron_training: true\n"
+    )
+
+    resolved = resolve_config(
+        tmp_path,
+        experiment="trial",
+        user_config_path=tmp_path / "absent-user.yaml",
+    )
+
+    assert resolved.profile.training.multipron_training is True
+    assert resolved.profile.training.untied_inventory == "transcript-reachable"
+    assert resolved.fields["training.untied_inventory"].winner.source_kind == "schema-default"
+
+
 def test_deep_merge_requires_extends(tmp_path: Path) -> None:
     project = tmp_path
     (project / "etc").mkdir()

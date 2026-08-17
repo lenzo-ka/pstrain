@@ -200,7 +200,7 @@ main_initialize(int argc,
     float32 ****sxfrm_a = NULL;
     float32 ***sxfrm_b = NULL;
 
-    E_INFO("Compiled on %s at %s\n", __DATE__, __TIME__);
+    E_INFO("pstrain bw\n");
 
     /* define, parse and (partially) validate the command line */
     train_cmd_ln_parse(argc, argv);
