@@ -126,7 +126,7 @@
         "features.upperf": "project-profile",
         "features.varnorm": "project-profile",
         "features.wlen": "project-profile",
-        "runner.jobs": "cli",
+        "runner.jobs": "project-profile",
         "runner.nice": "project-profile",
         "sharding.partition_position": "project-profile",
         "split.seed": "project-profile",
@@ -198,7 +198,7 @@
           "wlen": 0.025625
         },
         "runner": {
-          "jobs": 32,
+          "jobs": null,
           "nice": 5
         },
         "sharding": {
@@ -17913,14 +17913,6 @@
         "configuration_provenance": {
           "diff_from_shipped_defaults": [
             {
-              "setting": "runner.jobs",
-              "shipped_default": null,
-              "source": {
-                "kind": "cli"
-              },
-              "value": 32
-            },
-            {
               "setting": "split.test_count",
               "shipped_default": null,
               "source": {
@@ -34938,14 +34930,6 @@
         "cer": null,
         "configuration_provenance": {
           "diff_from_shipped_defaults": [
-            {
-              "setting": "runner.jobs",
-              "shipped_default": null,
-              "source": {
-                "kind": "cli"
-              },
-              "value": 32
-            },
             {
               "setting": "split.test_count",
               "shipped_default": null,

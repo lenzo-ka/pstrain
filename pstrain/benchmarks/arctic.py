@@ -275,9 +275,6 @@ PIN_CONFIGS: dict[str, dict[str, Any]] = {
     },
 }
 
-# The published Arctic pin was measured with this command-line execution override.
-PIN_CLI_OVERRIDES: dict[str, dict[str, Any]] = {"runner": {"jobs": 32}}
-
 
 def _complete_pin_profiles() -> dict[str, dict[str, Any]]:
     """Materialize every schema default so benchmark profiles are fully frozen."""
@@ -502,7 +499,6 @@ def benchmark_conditions(
                 mode: resolve_config(
                     project,
                     profile_name=mode,
-                    cli_overrides=PIN_CLI_OVERRIDES,
                     user_config_path=project / "absent-user.yaml",
                 ).benchmark_document()
                 for mode in ("on",)

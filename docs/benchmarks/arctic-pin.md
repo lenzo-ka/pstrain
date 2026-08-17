@@ -44,9 +44,9 @@ when the acoustic-model bytes are identical.
 ### Configuration provenance by result cell
 
 The live cells `on/slt55` and `on/big` come from the named benchmark profile
-`on`. The remeasurement set `runner.jobs=32` at the command line. These are
-the complete differences from the shipped schema defaults; an unlisted setting
-equals its shipped default. The record's
+`on`. There are no run-time overrides. These are the complete differences from
+the shipped schema defaults; an unlisted setting equals its shipped default.
+The record's
 conditions and each cell's provenance come from the same resolved build-child
 snapshot, and validation rejects disagreement between them. Its only semantic
 difference from shipped product defaults is `split.test_count=0`, which keeps
@@ -54,7 +54,6 @@ the established external evaluation cells intact.
 
 | Cells | Setting | Shipped default | Cell value | Winning source kind |
 |---|---|---:|---:|---|
-| on/slt55, on/big | `runner.jobs` | `null` | `32` | `cli` |
 | on/slt55, on/big | `split.test_count` | `null` | `0` | `project-profile` |
 
 ## Provenance correction
