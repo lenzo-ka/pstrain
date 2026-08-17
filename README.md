@@ -21,8 +21,11 @@ though 26 of 55 per-utterance error rows differ. The
 [benchmark pin](docs/benchmarks/arctic-pin.md) and its
 [machine-readable record](docs/benchmarks/arctic-pin/record.json) preserve the
 evidence and measurement conditions. Run `make verified` for the repository's
-aggregate verification command; its Arctic gate compares current pstrain with
-the pinned pstrain baseline, not with upstream SphinxTrain.
+aggregate verification command; its Arctic gate authenticates the pinned
+measurement conditions against the current checkout and re-derives the recorded
+paired statistics from the stored per-utterance rows without re-decoding. The
+end-to-end pstrain-versus-baseline WER comparison is produced by the full
+`scripts/bench_arctic.py` benchmark run, not by `make verified`.
 
 ## What pstrain does
 
