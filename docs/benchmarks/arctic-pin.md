@@ -17,9 +17,9 @@ from the preserved upstream model.
 ## Measurement identity
 
 The decode path is a defining condition of this measurement. Audio is decoded
-from WAV through pinned PocketSphinx 5.1.1 using Python 3.12.12 and native
+from WAV through pinned PocketSphinx 5.1.1 using Python 3.12.3 and native
 library SHA-256
-`0173a40a7b506464b6372ed5467eed8ddee37f9c89d62b91cc6ff3b8df9af14a`.
+`5ed31754a35151f9c3ff0feed011ee35ee0fe1f4e83d5d3868c50d9e25b89132`.
 The engine is pstrain 0.1.0. Its exact commit and artifact hashes are recorded
 in the machine-readable record. A
 result obtained through another decode path is not the same measurement even
@@ -44,9 +44,9 @@ when the acoustic-model bytes are identical.
 ### Configuration provenance by result cell
 
 The live cells `on/slt55` and `on/big` come from the named benchmark profile
-`on`. There
-are no run-time overrides. These are the complete differences from the shipped
-schema defaults; an unlisted setting equals its shipped default. The record's
+`on`. There are no run-time overrides. These are the complete differences from
+the shipped schema defaults; an unlisted setting equals its shipped default.
+The record's
 conditions and each cell's provenance come from the same resolved build-child
 snapshot, and validation rejects disagreement between them. Its only semantic
 difference from shipped product defaults is `split.test_count=0`, which keeps
@@ -55,6 +55,20 @@ the established external evaluation cells intact.
 | Cells | Setting | Shipped default | Cell value | Winning source kind |
 |---|---|---:|---:|---|
 | on/slt55, on/big | `split.test_count` | `null` | `0` | `project-profile` |
+
+## Provenance correction
+
+The previous record carried its on-mode numbers from a `7f13286`
+all-triphone run but mislabeled them as a `578f6a9` transcript-reachable run.
+On 2026-08-17, the pin was remeasured on shrub at `bbb2fef` under the declared
+transcript-reachable profile. The retained run includes its resolved
+configuration, training log, and an 11,883-row CD-untied mdef. It reproduced
+the published rows byte-for-byte: `on/big` SHA-256
+`11d512dbd1c412bd56a94717b3d91b9fbfdb2ee97c2c169db9c0a9e749e4a977`
+and `on/slt55` SHA-256
+`f3fa77a1a2cbf51138f0f7c375b8392a9ce707d41a3bba41613cfbb44cdd0d54`.
+The WER results are unchanged; the record now carries the measured engine,
+configuration, and native-library provenance.
 
 The corpus archive identities are BDL
 `26b91aaf48b2799b2956792b4632c2f926cd0542f402b5452d5adecb60942904`,
