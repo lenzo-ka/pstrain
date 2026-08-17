@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -116,13 +115,20 @@ def test_mini_arctic_dithered_decode_smoke_across_selected_shard_arrangements(
     order with a vocabulary-matched CI model trained by this checkout. AXES:
     reversed and rotated traversal; round-robin two- and three-shard assignments;
     swapped two-shard execution order; and a contiguous two-shard partition.
-    Every nonempty shard gets exactly one native decoder, whose instrumented
-    native-init generation must remain unchanged across its utterances. An
+    Every nonempty shard gets exactly one decoder through our wrapper, whose
+    instrumented wrapper-init generation must remain unchanged across its
+    utterances. This witnesses that this decode path does not reinitialize the
+    native decoder per utterance through ``init_native_decoder``; it does not
+    instrument hypothetical direct ``ps_reinit`` or ``ps_free``/``ps_init``
+    calls, which this path does not make. An
     A-to-B-to-A fixed-seed canary checks whether changed dither RNG segments
     affect this fixture's hypotheses. If none change, this is deliberately only
     an output smoke test, not evidence of general dithered-decode determinism.
-    SILENT ON: feature-byte identity, larger corpora and models, other legal
-    arrangements, other PocketSphinx versions, and nondithered decoding.
+    The effective-config query below checks the decoder's seed configuration
+    value, not whether the frontend consumes that RNG stream. SILENT ON:
+    feature-byte identity and frontend RNG consumption, larger corpora and
+    models, other legal arrangements, other PocketSphinx versions, and
+    nondithered decoding.
     """
     project = tmp_path / "project"
     setup_project(
@@ -133,7 +139,11 @@ def test_mini_arctic_dithered_decode_smoke_across_selected_shard_arrangements(
         phoneset_path=FIXTURE / "phoneset.txt",
         filler_dict_path=FIXTURE / "filler.dict",
     )
-    context = PipelineContext.from_config(project)
+    # The default feature seed is -1 (automatic). Pin it before ci-1g training
+    # so the trained fixture itself is reproducible across test runs.
+    context = PipelineContext.from_config(
+        project, cli_overrides={"features": {"seed": FIXED_SEED_A}}
+    )
     assert build_pipeline(context).run("ci-1g", jobs=1) == 0
 
     model = context.model_dir("ci-1g")
@@ -197,6 +207,9 @@ def test_mini_arctic_dithered_decode_smoke_across_selected_shard_arrangements(
         ]
         assert all(decoder.effective_dither == 1 for decoder in shard_decoders)
         assert all(decoder.effective_seed == decode_seed for decoder in shard_decoders)
+        # This counter is advanced by our init_native_decoder wrapper. It
+        # scopes the assertion to wrapper-mediated initialization; it is not
+        # instrumentation for every possible native lifecycle entry point.
         assert [native_generations[id(decoder)] for decoder in shard_decoders] == [
             [(1, 1)] * len(shard) for shard in nonempty_shards
         ]
@@ -218,16 +231,13 @@ def test_mini_arctic_dithered_decode_smoke_across_selected_shard_arrangements(
     for shards in arrangements:
         assert decode(shards, FIXED_SEED_A) == natural
 
-    # Decode fixed seed A, perturb only the dither seed to fixed seed B, then
-    # return to A.  The live configuration query proves that each decoder uses
-    # the intended stream rather than merely changing serialized input text.
-    perturbed_model = tmp_path / "perturbed-model"
-    shutil.copytree(model, perturbed_model)
-    set_model_seed(perturbed_model, FIXED_SEED_B)
-    perturbed_config = _DecodeConfig(
-        perturbed_model, config.dict_file, config.filler_dict, config.lm
-    )
-    perturbed = decode([indexed], FIXED_SEED_B, perturbed_config)
+    # On one constant model root, decode fixed seed A, change only the in-place
+    # seed to B, then restore A. The effective-config query checks that each
+    # fresh decoder has the intended seed value; this black-box test does not
+    # establish that the frontend consumes the corresponding RNG stream.
+    set_model_seed(model, FIXED_SEED_B)
+    perturbed = decode([indexed], FIXED_SEED_B)
+    set_model_seed(model, FIXED_SEED_A)
     restored = decode([indexed], FIXED_SEED_A)
     assert restored == natural
     changed = {
