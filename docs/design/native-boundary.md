@@ -26,8 +26,9 @@ value to `lib` or `_lib` suppresses the convention for expressions visited after
 is a visitor heuristic, not lexical-scope binding analysis.
 
 This is a source-pattern gate, not proof of containment for every possible Python-to-CFFI
-call. Annotated assignments, named expressions, and other binding forms are measured
-silences. The gate is also silent on multi-step dataflow, attribute binding provenance
+call. Annotated assignments, named expressions, chained assignments whose target
+expression contains a native call while another target rebinds the handle, and other
+binding forms are measured silences. The gate is also silent on multi-step dataflow, attribute binding provenance
 (including a Python registry stored as `self._lib`), function pointers from `ffi.addressof`,
 cross-module aliases, dynamic imports, and semantically equivalent spellings outside the
 enumerated patterns.

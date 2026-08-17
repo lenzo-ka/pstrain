@@ -8,8 +8,9 @@ also flags several runtime ``getattr``, ``__getattribute__``, subscript, and exp
 ``__call__`` spellings directly on conventionally named library handles. In source
 order, a plain assignment of an ordinary Python value suppresses that name convention
 for later visited expressions. This is a visitor heuristic, not lexical-scope binding
-analysis. It is silent on binding forms such as annotated assignments and named
-expressions, multi-step dataflow, attribute binding provenance, function pointers
+analysis. It is silent on binding forms such as annotated assignments, named
+expressions, and chained assignments whose target expression contains a native call
+while another target rebinds the handle, multi-step dataflow, attribute binding provenance, function pointers
 produced by ``ffi.addressof``, and aliases that cross module boundaries or arise from
 dynamic imports.
 """
