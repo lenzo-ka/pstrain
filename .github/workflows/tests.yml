@@ -1,17 +1,11 @@
-# Docs-only changes skip Tests entirely; Build is already path-scoped.
+# Always report required test contexts; expensive steps no-op for docs-only changes.
 name: Tests
 
 on:
   push:
     branches: [master, main]
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
   pull_request:
     branches: [master, main]
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
   workflow_dispatch:
 
 # Cancel superseded branch/PR runs; never auto-cancel default-branch runs so mainline gets a complete verdict.
@@ -20,9 +14,27 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
 
 jobs:
+  changes:
+    name: Detect code changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Classify changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            code:
+              - '!**.md'
+              - '!docs/**'
+
   # C library tests
   c-tests:
     name: C tests on ${{ matrix.os }}
+    needs: changes
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -32,28 +44,34 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Configure
+        if: needs.changes.outputs.code == 'true'
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_CLI=ON
 
       - name: Build
+        if: needs.changes.outputs.code == 'true'
         run: cmake --build build
 
       - name: Test
+        if: needs.changes.outputs.code == 'true'
         # --no-tests=error guards against silently passing on an empty test
         # set (the previous failure mode: no add_test() anywhere).
         run: ctest --test-dir build --output-on-failure --no-tests=error
 
       - name: Verify emitted floating-point contraction policy
+        if: needs.changes.outputs.code == 'true'
         run: python scripts/check_fp_contract.py build
 
   # Linux-only sanitizer coverage. AppleClang is excluded because ASan hangs
   # before main on macOS in this project.
   c-tests-sanitizers:
     name: C tests with ASan and UBSan on Linux
+    needs: changes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
       - name: Configure
+        if: needs.changes.outputs.code == 'true'
         run: >-
           cmake -S . -B build
           -DCMAKE_BUILD_TYPE=Debug
@@ -61,9 +79,11 @@ jobs:
           -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
 
       - name: Build
+        if: needs.changes.outputs.code == 'true'
         run: cmake --build build
 
       - name: Test
+        if: needs.changes.outputs.code == 'true'
         env:
           ASAN_OPTIONS: halt_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
@@ -72,6 +92,7 @@ jobs:
   # Python tests across versions
   python-tests:
     name: Python ${{ matrix.python }} on ${{ matrix.os }}
+    needs: changes
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -83,27 +104,33 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up Python ${{ matrix.python }}
+        if: needs.changes.outputs.code == 'true'
         uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
 
       - name: Install dependencies
+        if: needs.changes.outputs.code == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install pytest pytest-cov
 
       - name: Build C library
+        if: needs.changes.outputs.code == 'true'
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_CLI=ON
           cmake --build build
 
       - name: Verify emitted floating-point contraction policy
+        if: needs.changes.outputs.code == 'true'
         run: python scripts/check_fp_contract.py build
 
       - name: Install package (editable)
+        if: needs.changes.outputs.code == 'true'
         run: pip install -e ".[dev]"
 
       - name: Run tests
+        if: needs.changes.outputs.code == 'true'
         # PSTRAIN_REQUIRE_CLIB=1 turns "C library not loadable" from a silent
         # skip into a hard failure, so this job can't go green while the
         # entire CFFI/parity tier is quietly skipped.
@@ -113,14 +140,14 @@ jobs:
         run: pytest -v --cov=pstrain --cov-report=xml
 
       - name: Verify canonical config consumers and generated reference
-        if: matrix.python == '3.11' && matrix.os == 'ubuntu-latest'
+        if: needs.changes.outputs.code == 'true' && matrix.python == '3.11' && matrix.os == 'ubuntu-latest'
         # This is an installed-package job; the ambient gate is exercised by
         # the in-tree verified flow and must reject this editable installation.
         run: make AMBIENT_IMPORT_PREREQUISITE= config-check
 
       - name: Upload coverage
         uses: codecov/codecov-action@v7
-        if: matrix.python == '3.12' && matrix.os == 'ubuntu-latest'
+        if: needs.changes.outputs.code == 'true' && matrix.python == '3.12' && matrix.os == 'ubuntu-latest'
         with:
           files: ./coverage.xml
           fail_ci_if_error: false
@@ -128,42 +155,51 @@ jobs:
   # Lint checks
   lint:
     name: Lint
+    needs: changes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
       - name: Set up Python
+        if: needs.changes.outputs.code == 'true'
         uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
       - name: Install dependencies
+        if: needs.changes.outputs.code == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install ruff mypy
 
       - name: Run ruff
+        if: needs.changes.outputs.code == 'true'
         run: ruff check pstrain/ tests/
 
       - name: Run ruff format check
+        if: needs.changes.outputs.code == 'true'
         run: ruff format --check pstrain/ tests/
 
   # Type checking (strict mypy, blocking).
   typecheck:
     name: Type check
+    needs: changes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
       - name: Set up Python
+        if: needs.changes.outputs.code == 'true'
         uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
       - name: Install dependencies
+        if: needs.changes.outputs.code == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
       - name: Run mypy
+        if: needs.changes.outputs.code == 'true'
         run: mypy pstrain/ --ignore-missing-imports
