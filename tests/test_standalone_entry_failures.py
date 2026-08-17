@@ -59,6 +59,27 @@ def test_param_cnt_output_open_failure_is_unsuccessful(tmp_path: Path) -> None:
     assert f"Couldn't open {output} for writing" in result.stderr
 
 
+def test_param_cnt_requires_transcript_source(tmp_path: Path) -> None:
+    fixture = Path(__file__).parent / "fixtures" / "multipron_final_state"
+    ctl = tmp_path / "empty.ctl"
+    ctl.write_text("test\n")
+
+    result = _run(
+        "param_cnt",
+        "-paramtype",
+        "phone",
+        "-ctlfn",
+        str(ctl),
+        "-moddeffn",
+        str(fixture / "model" / "mdef"),
+    )
+
+    assert result.returncode != 0, result.stderr
+    assert "You must specify a transcript source: -lsnfn, or -sentdir with -sentext" in (
+        result.stderr
+    )
+
+
 @pytest.mark.parametrize(
     ("contents", "name"),
     [
