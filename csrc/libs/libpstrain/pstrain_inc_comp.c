@@ -53,6 +53,7 @@
 #include <sphinxbase/err.h>
 
 #include <s3/s3gau_io.h>
+#include <s3/gauden.h>
 #include <s3/s3mixw_io.h>
 #include <s3/gauden.h>
 #include <s3/vector.h>
@@ -222,6 +223,8 @@ pstrain_inc_comp(const char *in_mean_path,
         E_ERROR("Failed to read variances\n");
         goto cleanup;
     }
+    gauden_floor_variance_array(var, n_mgau, n_feat, n_density, veclen,
+                                GAUDEN_EVAL_VAR_FLOOR);
 
     /* Read density counts */
     E_INFO("Reading density counts from %s\n", dcount_path);

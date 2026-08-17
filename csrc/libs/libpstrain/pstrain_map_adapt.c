@@ -162,6 +162,8 @@ int pstrain_map_adapt(const char *meanfn,
     }
     check_consistency(varfn, n_cb, n_cb_rd, n_stream, n_stream_rd,
                       n_density, n_density_rd, veclen, veclen_rd);
+    gauden_floor_variance_array(si_var, n_cb_rd, n_stream_rd, n_density_rd,
+                                veclen_rd, varfloor);
 
     /* Read and normalize SI mixture weights */
     if (mixwfn) {

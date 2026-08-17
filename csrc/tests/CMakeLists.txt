@@ -30,6 +30,17 @@ add_test(
   COMMAND test_gauden_scaling
 )
 
+add_executable(test_variance_floor_consumers test_variance_floor_consumers.c)
+target_link_libraries(test_variance_floor_consumers pstrainc)
+target_include_directories(test_variance_floor_consumers
+  PRIVATE ${CMAKE_BINARY_DIR}
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+add_test(
+  NAME variance_floor_consumers
+  COMMAND test_variance_floor_consumers ${CMAKE_CURRENT_BINARY_DIR}
+)
+
 add_executable(test_state_seq_ownership test_state_seq_ownership.c)
 target_link_libraries(test_state_seq_ownership pstrainc)
 target_include_directories(test_state_seq_ownership

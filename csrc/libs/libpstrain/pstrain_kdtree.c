@@ -40,6 +40,7 @@
 
 #include <s3/common.h>
 #include <s3/s3gau_io.h>
+#include <s3/gauden.h>
 #include <s3/kdtree.h>
 
 #include <stdio.h>
@@ -105,6 +106,10 @@ int pstrain_kdtree_build(const char *meanfn,
             goto cleanup;
         }
     }
+
+    gauden_floor_variance_array(variances, r_n_mgau, r_n_feat,
+                                r_n_density, r_veclen,
+                                GAUDEN_EVAL_VAR_FLOOR);
 
     /* Build one kd-tree for each feature stream */
     root = ckd_calloc(n_feat, sizeof(*root));
