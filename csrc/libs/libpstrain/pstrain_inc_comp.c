@@ -53,7 +53,6 @@
 #include <sphinxbase/err.h>
 
 #include <s3/s3gau_io.h>
-#include <s3/gauden.h>
 #include <s3/s3mixw_io.h>
 #include <s3/gauden.h>
 #include <s3/vector.h>
@@ -219,6 +218,8 @@ pstrain_inc_comp(const char *in_mean_path,
 
     /* Read variances */
     E_INFO("Reading variances from %s\n", in_var_path);
+    ckd_free(veclen);
+    veclen = NULL;
     if (s3gau_read(in_var_path, &var, &n_mgau, &n_feat, &n_density, &veclen) != S3_SUCCESS) {
         E_ERROR("Failed to read variances\n");
         goto cleanup;
