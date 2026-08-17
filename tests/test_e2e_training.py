@@ -60,7 +60,7 @@ def _word_edit_distance(reference: str, hypothesis: str) -> int:
 
 
 def _measurement_fingerprint() -> dict[str, object]:
-    """Describe the toolchain and deterministic native policy used by this test."""
+    """Describe the coarse platform and declared-policy tuple used by this test."""
     return {
         "python": f"{sys.version_info.major}.{sys.version_info.minor}",
         "os": platform.system(),
@@ -99,9 +99,9 @@ def _assert_measurement_gate(
     assert aggregate["decoded"] == expected_aggregate["decoded"] == 10
     assert aggregate["ref_words"] == expected_aggregate["ref_words"]
     fingerprint = current_fingerprint or _measurement_fingerprint()
-    reference_toolchain = fingerprint == golden["reference_fingerprint"]
+    reference_tuple_match = fingerprint == golden["reference_fingerprint"]
     explicitly_strict = os.environ.get("PSTRAIN_STRICT_MEASUREMENT_GOLDEN") == "1"
-    if reference_toolchain or explicitly_strict:
+    if reference_tuple_match or explicitly_strict:
         assert measured == expected
     else:
         assert abs(aggregate["errors"] - expected_aggregate["errors"]) <= (PORTABLE_ERROR_TOLERANCE)
@@ -110,7 +110,7 @@ def _assert_measurement_gate(
 def test_default_measurement_gate_rejects_reference_regression(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The intrinsic reference tier excludes the edge of the portable band."""
+    """A reference-tuple match excludes the edge of the portable band."""
     monkeypatch.delenv("PSTRAIN_STRICT_MEASUREMENT_GOLDEN", raising=False)
     golden = json.loads(MEASUREMENT_GOLDEN.read_text(encoding="utf-8"))
     transcripts = {
@@ -135,10 +135,10 @@ def test_default_measurement_gate_rejects_reference_regression(
         )
 
 
-def test_reference_platform_intrinsic_measurement_gate_rejects_regression(
+def test_reference_tuple_intrinsic_measurement_gate_rejects_regression(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The real detector selects and enforces the reference tier."""
+    """The platform and declared-policy tuple selects the exact tier."""
     golden = json.loads(MEASUREMENT_GOLDEN.read_text(encoding="utf-8"))
     reference_fingerprint = golden["reference_fingerprint"]
     assert isinstance(reference_fingerprint, dict)
