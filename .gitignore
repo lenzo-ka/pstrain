@@ -87,3 +87,6 @@ benchmarks/timit/pilot/
 !tests/fixtures/mini_arctic/wav/*.wav
 !pstrain/data/sample/*.wav
 .claude
+
+# Stray lane report artifacts (never commit these to the repo root)
+/*-report-*.md
