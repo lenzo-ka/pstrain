@@ -37,7 +37,7 @@ from pathlib import Path
 FMA = re.compile(
     r"\b(?:"
     r"v?f(?:madd|msub|nmadd|nmsub)[a-z0-9.]*"
-    r"|v4fn?madd(?:ps|ss|pd|sd)"
+    r"|v4fn?madd(?:ps|ss)"
     r"|f(?:mad|msb|nmad|nmsb|nmla|nmls)[a-z0-9.]*"
     r"|f(?:mla|mls)(?:l2?|lb|lt)?[a-z0-9.]*"
     r"|fcmla[a-z0-9.]*|fmmla[a-z0-9.]*"
