@@ -105,6 +105,7 @@ int pstrain_decoder_end_utt(pstrain_decoder_t *decoder);
 const char *pstrain_decoder_hyp(pstrain_decoder_t *decoder);
 const char *pstrain_decoder_config_str(pstrain_decoder_t *decoder, const char *name);
 long pstrain_decoder_config_int(pstrain_decoder_t *decoder, const char *name);
+uint64_t pstrain_decoder_native_init_generation(pstrain_decoder_t *decoder);
 void pstrain_decoder_free(pstrain_decoder_t *decoder);
 const char *pstrain_pocketsphinx_version(void);
 const char *pstrain_fp_contract_policy(void);

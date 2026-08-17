@@ -16,6 +16,8 @@ from pstrain.lib.testing.test import _decode_files, _decode_shard, _DecodeConfig
 from tests.conftest import requires_c_library
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_arctic"
+FIXED_SEED_A = 243
+FIXED_SEED_B = 17
 
 
 def _config() -> _DecodeConfig:
@@ -114,10 +116,11 @@ def test_mini_arctic_dithered_decode_smoke_across_selected_shard_arrangements(
     order with a vocabulary-matched CI model trained by this checkout. AXES:
     reversed and rotated traversal; round-robin two- and three-shard assignments;
     swapped two-shard execution order; and a contiguous two-shard partition.
-    Every nonempty shard gets exactly one decoder, reused for all its utterances.
-    A reseeded-decoder canary checks whether changed dither RNG segments affect
-    this fixture's hypotheses. If none change, this is deliberately only an
-    output smoke test, not evidence of general dithered-decode determinism.
+    Every nonempty shard gets exactly one native decoder, whose instrumented
+    native-init generation must remain unchanged across its utterances. An
+    A-to-B-to-A fixed-seed canary checks whether changed dither RNG segments
+    affect this fixture's hypotheses. If none change, this is deliberately only
+    an output smoke test, not evidence of general dithered-decode determinism.
     SILENT ON: feature-byte identity, larger corpora and models, other legal
     arrangements, other PocketSphinx versions, and nondithered decoding.
     """
@@ -134,6 +137,18 @@ def test_mini_arctic_dithered_decode_smoke_across_selected_shard_arrangements(
     assert build_pipeline(context).run("ci-1g", jobs=1) == 0
 
     model = context.model_dir("ci-1g")
+
+    def set_model_seed(model_dir: Path, seed: int) -> None:
+        feat_params = model_dir / "feat.params"
+        feat_params.write_text(
+            "\n".join(
+                f"-seed {seed}" if line.startswith("-seed ") else line
+                for line in feat_params.read_text().splitlines()
+            )
+            + "\n"
+        )
+
+    set_model_seed(model, FIXED_SEED_A)
     config = _DecodeConfig(
         model,
         context.shared_dir / "dictionary.dict",
@@ -146,6 +161,7 @@ def test_mini_arctic_dithered_decode_smoke_across_selected_shard_arrangements(
     real_decoder = Decoder
     constructed: list[Decoder] = []
     decoded_paths: dict[int, list[Path]] = {}
+    native_generations: dict[int, list[tuple[int, int]]] = {}
 
     class TrackedDecoder(real_decoder):
         def __init__(self, **kwargs: Any) -> None:
@@ -154,15 +170,21 @@ def test_mini_arctic_dithered_decode_smoke_across_selected_shard_arrangements(
             self.effective_seed = self._lib.pstrain_decoder_config_int(self._decoder, b"seed")
             constructed.append(self)
             decoded_paths[id(self)] = []
+            native_generations[id(self)] = []
 
         def decode_file(self, path: Path) -> DecodingResult:
             decoded_paths[id(self)].append(path)
-            return super().decode_file(path)
+            before = self._lib.pstrain_decoder_native_init_generation(self._decoder)
+            result = super().decode_file(path)
+            after = self._lib.pstrain_decoder_native_init_generation(self._decoder)
+            native_generations[id(self)].append((before, after))
+            return result
 
     monkeypatch.setattr("pstrain.lib.testing.test.Decoder", TrackedDecoder)
 
     def decode(
         shards: list[list[tuple[int, str, Path]]],
+        decode_seed: int,
         decode_config: _DecodeConfig = config,
     ) -> dict[str, str]:
         before = len(constructed)
@@ -174,10 +196,14 @@ def test_mini_arctic_dithered_decode_smoke_across_selected_shard_arrangements(
             [path for _, _, path in shard] for shard in nonempty_shards
         ]
         assert all(decoder.effective_dither == 1 for decoder in shard_decoders)
+        assert all(decoder.effective_seed == decode_seed for decoder in shard_decoders)
+        assert [native_generations[id(decoder)] for decoder in shard_decoders] == [
+            [(1, 1)] * len(shard) for shard in nonempty_shards
+        ]
         assert all(result.success for _, _, result in decoded)
         return {utterance_id: result.hypothesis for _, utterance_id, result in decoded}
 
-    natural = decode([indexed])
+    natural = decode([indexed], FIXED_SEED_A)
     assert len(natural) == 10
     assert all(natural.values())
 
@@ -190,28 +216,20 @@ def test_mini_arctic_dithered_decode_smoke_across_selected_shard_arrangements(
         [indexed[: len(indexed) // 2], indexed[len(indexed) // 2 :]],
     ]
     for shards in arrangements:
-        assert decode(shards) == natural
+        assert decode(shards, FIXED_SEED_A) == natural
 
-    # Reseed an otherwise identical shard decoder.  The live configuration
-    # query proves that this mutation selects a different dither stream rather
-    # than merely changing serialized input text.
+    # Decode fixed seed A, perturb only the dither seed to fixed seed B, then
+    # return to A.  The live configuration query proves that each decoder uses
+    # the intended stream rather than merely changing serialized input text.
     perturbed_model = tmp_path / "perturbed-model"
     shutil.copytree(model, perturbed_model)
-    feat_params = perturbed_model / "feat.params"
-    feat_params.write_text(
-        "\n".join(
-            "-seed 17" if line.startswith("-seed ") else line
-            for line in feat_params.read_text().splitlines()
-        )
-        + "\n"
-    )
+    set_model_seed(perturbed_model, FIXED_SEED_B)
     perturbed_config = _DecodeConfig(
         perturbed_model, config.dict_file, config.filler_dict, config.lm
     )
-    before = len(constructed)
-    perturbed = decode([indexed], perturbed_config)
-    assert {decoder.effective_seed for decoder in constructed[:before]} == {-1}
-    assert {decoder.effective_seed for decoder in constructed[before:]} == {17}
+    perturbed = decode([indexed], FIXED_SEED_B, perturbed_config)
+    restored = decode([indexed], FIXED_SEED_A)
+    assert restored == natural
     changed = {
         utterance_id
         for utterance_id, hypothesis in natural.items()
@@ -219,7 +237,9 @@ def test_mini_arctic_dithered_decode_smoke_across_selected_shard_arrangements(
     }
     if not changed:
         pytest.xfail(
-            "mini_arctic hypotheses are insensitive to deliberately changed dither RNG "
-            "segments; selected-arrangement equality is only a narrow output smoke test"
+            f"mini_arctic changed 0/{len(natural)} hypotheses for fixed seed "
+            f"{FIXED_SEED_A} -> {FIXED_SEED_B}, while restored seed {FIXED_SEED_A} "
+            "reproduced all hypotheses; selected-arrangement equality is only a narrow "
+            "output smoke test"
         )
     assert changed

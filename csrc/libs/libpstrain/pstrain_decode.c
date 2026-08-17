@@ -5,7 +5,18 @@
 
 struct pstrain_decoder_s {
     ps_decoder_t *ps;
+    uint64_t native_init_generation;
 };
+
+static int
+init_native_decoder(pstrain_decoder_t *decoder, ps_config_t *config)
+{
+    decoder->ps = ps_init(config);
+    if (decoder->ps == NULL)
+        return 0;
+    ++decoder->native_init_generation;
+    return 1;
+}
 
 static int
 set_str(ps_config_t *config, const char *name, const char *value)
@@ -54,7 +65,7 @@ pstrain_decoder_create(const pstrain_decoder_config_t *options)
     }
     decoder = calloc(1, sizeof(*decoder));
     if (decoder != NULL)
-        decoder->ps = ps_init(config);
+        (void)init_native_decoder(decoder, config);
     ps_config_free(config);
     if (decoder == NULL || decoder->ps == NULL) {
         free(decoder);
@@ -98,6 +109,12 @@ long
 pstrain_decoder_config_int(pstrain_decoder_t *decoder, const char *name)
 {
     return decoder == NULL ? 0 : ps_config_int(ps_get_config(decoder->ps), name);
+}
+
+uint64_t
+pstrain_decoder_native_init_generation(pstrain_decoder_t *decoder)
+{
+    return decoder == NULL ? 0 : decoder->native_init_generation;
 }
 
 void

@@ -58,6 +58,7 @@ EXPORTS
     pstrain_decoder_end_utt
     pstrain_decoder_free
     pstrain_decoder_hyp
+    pstrain_decoder_native_init_generation
     pstrain_decoder_process_raw
     pstrain_decoder_start_utt
     pstrain_delint
