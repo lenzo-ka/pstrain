@@ -91,9 +91,10 @@ class HMM:
     def load(cls, model_dir: Path) -> Self:
         """Load runtime probability parameters from a model directory.
 
-        Serialized mixture and transition rows may contain upstream-style raw
-        occupancy counts. Nonzero rows are normalized here so the public HMM
-        API retains its probability-array contract.
+        Serialized variances may contain direct, unfloored normalization
+        output, and mixture and transition rows may contain upstream-style raw
+        occupancy counts. Variances are floored and nonzero count rows are
+        normalized here so the public HMM API retains its evaluation contract.
         """
         model_dir = Path(model_dir)
 
@@ -105,7 +106,10 @@ class HMM:
             raise ValueError("HMM.load currently requires a single feature stream")
         # Reshape to (n_cb, n_density, veclen)
         means = means_raw.reshape(n_cb, n_density, veclens[0])
-        variances = variances_raw.reshape(n_cb, n_density, veclens[0])
+        variances = np.maximum(
+            variances_raw.reshape(n_cb, n_density, veclens[0]),
+            np.float32(1e-4),
+        )
 
         mixw_raw, n_mixw, n_feat_stream, n_density_mw = _pstrainc.read_mixw(
             str(model_dir / "mixture_weights")

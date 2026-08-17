@@ -605,7 +605,9 @@ def _assert_bw_model(model_dir: Path) -> None:
     # Gaussian artifacts contain direct, unfloored normalization output.  Mixw
     # and tmat artifacts follow upstream and retain raw BW accumulators; the
     # next engine load normalizes and applies the evaluation floors.
-    assert (np.maximum(arrays["variances"], np.float32(1e-4)) >= 1e-4).all()
+    evaluation = HMM.load(model_dir)
+    assert np.isfinite(evaluation.variances).all()
+    assert (evaluation.variances >= np.float32(1e-4)).all()
     mixw_sums = arrays["mixture_weights"].sum(axis=-1)
     tmat_sums = arrays["transition_matrices"].sum(axis=-1)
     assert np.any(mixw_sums > 1.0)
@@ -1181,23 +1183,27 @@ def _tree_leaf(
     while nodes[node][1] != "-":
         fields = nodes[node]
         expression = " ".join(fields[5:])
-        terms = re.findall(r"(!?[A-Za-z0-9_]+) (-?\d+)", expression)
-        matched = True
-        for raw_name, raw_context in terms:
-            negated = raw_name.startswith("!")
-            name = raw_name.removeprefix("!")
-            if name in position_by_name:
-                value = pos == position_by_name[name]
-            else:
-                value = phone_by_context[int(raw_context)] in questions[name]
-            matched &= not value if negated else value
+        conjunctions = re.findall(r"\(([^()]*)\)", expression)
+        matched = False
+        for conjunction in conjunctions:
+            terms = re.findall(r"(!?[A-Za-z0-9_]+) (-?\d+)", conjunction)
+            term_values = []
+            for raw_name, raw_context in terms:
+                negated = raw_name.startswith("!")
+                name = raw_name.removeprefix("!")
+                if name in position_by_name:
+                    value = pos == position_by_name[name]
+                else:
+                    value = phone_by_context[int(raw_context)] in questions[name]
+                term_values.append(not value if negated else value)
+            matched |= all(term_values)
         node = int(fields[1] if matched else fields[2])
     return leaf_labels[node]
 
 
 @requires_c_library
 def test_tied_assignments_match_independent_tree_walk(full_project: PipelineContext) -> None:
-    """Declined-A1 debt: sampled mdef assignments equal independently walked leaves."""
+    """Declined-A1 debt: all eligible mdef assignments equal independently walked leaves."""
     question_path = full_project.trees_dir / "questions"
     questions = {
         fields[0]: set(fields[1:])
@@ -1238,11 +1244,17 @@ def test_tied_assignments_match_independent_tree_walk(full_project: PipelineCont
                 right,
                 pos,
             )
-            assert int(assigned) == offsets[(base, state)] + leaf
+            assert int(assigned) == offsets[(base, state)] + leaf, (
+                base,
+                left,
+                right,
+                pos,
+                state,
+                assigned,
+                leaf,
+            )
             checked += 1
-        if checked >= 60:
-            break
-    assert checked >= 60
+    assert checked > 0
 
 
 def _bw_contract_state(pass_row: dict[str, Any]) -> dict[str, object]:

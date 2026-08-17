@@ -112,9 +112,12 @@ regenerating commit must state why the baseline changed.
    same input, not another accounted utterance.
 4. **Per-pass update.** Means, variances, mixture weights, and transition
    matrices remain finite after every retained BW pass, including CI passes.
-   Mixture-weight and populated transition rows sum to one, variances remain at
-   or above the native `1e-4` floor, and every senone/codebook density has
-   positive reported occupancy.
+   The serialized layer retains direct, unfloored variance normalization output
+   and raw BW counts for mixture weights and transition matrices; unobserved
+   densities can therefore have zero means, variances, and occupancy. On model
+   load, the engine applies the native `1e-4` evaluation variance floor and
+   normalizes nonzero mixture-weight and transition rows. Occupancy guarantees
+   apply only to densities selected by the relevant fixture or training policy.
 5. **Splitting and propagation.** The shared full build checks the exact
    1→2→4→8 schedule after training each stage. Senone counts remain fixed,
    density/count dimensions match the scheduled value, occupancies are
@@ -130,8 +133,8 @@ proof that posterior summation changes the trained sufficient statistics.
 
 The tied-state check does not call the native tie implementation. It parses
 the committed question syntax and pruned trees, reproduces preorder leaf
-labels, independently walks a sample of at least 60 triphone states, and
-compares the result with the tied mdef assignment.
+labels, independently walks every eligible triphone-state row, and compares
+the result with the tied mdef assignment.
 
 ## Per-pass utterance exclusions
 
