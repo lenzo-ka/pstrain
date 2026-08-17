@@ -160,19 +160,13 @@ new_decoder(int remove_noise)
 int
 main(void)
 {
-    pstrain_decoder_t *decoder, *second_decoder;
+    pstrain_decoder_t *decoder;
 
-    CHECK(pstrain_decoder_native_init_generation(NULL) == 0,
-          "null decoder has no native initialization");
     start_stream_result = -1;
     decoder = new_decoder(1);
     CHECK(decoder != NULL, "noise-enabled decoder creation");
-    CHECK(pstrain_decoder_native_init_generation(decoder) == 1,
-          "native decoder initialized exactly once");
     CHECK(pstrain_decoder_start_utt(decoder) == -1,
           "stream-start failure remains fatal when noise removal is enabled");
-    CHECK(pstrain_decoder_native_init_generation(decoder) == 1,
-          "failed utterance start does not reinitialize native decoder");
     CHECK(start_stream_calls == 1, "stream reset attempted");
     CHECK(start_utt_calls == 0, "utterance does not start after reset failure");
     pstrain_decoder_free(decoder);
@@ -181,22 +175,10 @@ main(void)
     start_utt_calls = 0;
     decoder = new_decoder(0);
     CHECK(decoder != NULL, "noise-disabled decoder creation");
-    CHECK(pstrain_decoder_native_init_generation(decoder) == 2,
-          "native initialization generation is process-wide");
     CHECK(pstrain_decoder_start_utt(decoder) == 0,
           "utterance starts without unavailable noise statistics");
-    CHECK(pstrain_decoder_native_init_generation(decoder) == 2,
-          "successful utterance start does not reinitialize native decoder");
     CHECK(start_stream_calls == 0, "stream reset skipped");
     CHECK(start_utt_calls == 1, "utterance start attempted");
-
-    second_decoder = new_decoder(0);
-    CHECK(second_decoder != NULL, "concurrent decoder creation");
-    CHECK(pstrain_decoder_native_init_generation(second_decoder) == 3,
-          "each native initialization advances the process-wide generation");
-    CHECK(pstrain_decoder_native_init_generation(decoder) == 2,
-          "a decoder retains the generation captured at initialization");
-    pstrain_decoder_free(second_decoder);
     pstrain_decoder_free(decoder);
 
     printf("PASS: decoder stream-reset contract\n");

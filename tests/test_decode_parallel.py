@@ -115,13 +115,10 @@ def test_mini_arctic_dithered_decode_smoke_across_selected_shard_arrangements(
     order with a vocabulary-matched CI model trained by this checkout. AXES:
     reversed and rotated traversal; round-robin two- and three-shard assignments;
     swapped two-shard execution order; and a contiguous two-shard partition.
-    Every nonempty shard gets exactly one decoder through our wrapper. Its
-    captured process-wide native-init generation must remain unchanged across
-    its utterances, detecting wrapper-mediated native reinitialization or
-    whole-decoder replacement. It does not instrument hypothetical direct
-    ``ps_reinit`` or ``ps_free``/``ps_init`` calls, which this path does not
-    make. An
-    A-to-B-to-A fixed-seed canary checks whether changed dither RNG segments
+    This smoke test does not witness the one-decoder-per-shard native lifecycle;
+    that invariant is covered separately by
+    ``test_decode_shard_constructs_one_decoder_and_reuses_it``. An A-to-B-to-A
+    fixed-seed canary checks whether changed dither RNG segments
     affect this fixture's hypotheses. If none change, this is deliberately only
     an output smoke test, not evidence of general dithered-decode determinism.
     The effective-config query below checks the decoder's seed configuration
@@ -171,27 +168,18 @@ def test_mini_arctic_dithered_decode_smoke_across_selected_shard_arrangements(
     real_decoder = Decoder
     constructed: list[Decoder] = []
     decoded_paths: dict[int, list[Path]] = {}
-    native_generations: dict[int, list[tuple[int, int]]] = {}
 
     class TrackedDecoder(real_decoder):
         def __init__(self, **kwargs: Any) -> None:
             super().__init__(**kwargs)
             self.effective_dither = self._lib.pstrain_decoder_config_int(self._decoder, b"dither")
             self.effective_seed = self._lib.pstrain_decoder_config_int(self._decoder, b"seed")
-            self.native_init_generation = self._lib.pstrain_decoder_native_init_generation(
-                self._decoder
-            )
             constructed.append(self)
             decoded_paths[id(self)] = []
-            native_generations[id(self)] = []
 
         def decode_file(self, path: Path) -> DecodingResult:
             decoded_paths[id(self)].append(path)
-            before = self._lib.pstrain_decoder_native_init_generation(self._decoder)
-            result = super().decode_file(path)
-            after = self._lib.pstrain_decoder_native_init_generation(self._decoder)
-            native_generations[id(self)].append((before, after))
-            return result
+            return super().decode_file(path)
 
     monkeypatch.setattr("pstrain.lib.testing.test.Decoder", TrackedDecoder)
 
@@ -210,14 +198,6 @@ def test_mini_arctic_dithered_decode_smoke_across_selected_shard_arrangements(
         ]
         assert all(decoder.effective_dither == 1 for decoder in shard_decoders)
         assert all(decoder.effective_seed == decode_seed for decoder in shard_decoders)
-        # Each wrapper captures the process-wide generation assigned by its
-        # native construction. Reinitializing in place or replacing its native
-        # decoder through the wrapper would expose a newer value here.
-        assert all(
-            native_generations[id(decoder)]
-            == [(decoder.native_init_generation, decoder.native_init_generation)] * len(shard)
-            for decoder, shard in zip(shard_decoders, nonempty_shards, strict=True)
-        )
         assert all(result.success for _, _, result in decoded)
         return {utterance_id: result.hypothesis for _, utterance_id, result in decoded}
 
