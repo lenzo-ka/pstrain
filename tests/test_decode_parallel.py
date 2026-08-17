@@ -7,8 +7,14 @@ from typing import Any
 
 import pytest
 
+from pstrain.lib.pipeline import PipelineContext
+from pstrain.lib.pipeline.tasks import build_pipeline
+from pstrain.lib.setup import setup_project
 from pstrain.lib.testing.decoder import DecodingResult
 from pstrain.lib.testing.test import _decode_files, _decode_shard, _DecodeConfig
+from tests.conftest import requires_c_library
+
+FIXTURE = Path(__file__).parent / "fixtures" / "mini_arctic"
 
 
 def _config() -> _DecodeConfig:
@@ -95,3 +101,54 @@ def test_parallel_merge_is_canonical_and_uses_distinct_executor_path(
     assert {utt_id: result.hypothesis for utt_id, result in parallel} == {
         utt_id: result.hypothesis for utt_id, result in serial
     }
+
+
+@requires_c_library
+def test_dithered_decode_hypotheses_are_independent_of_shard_order(tmp_path: Path) -> None:
+    """Gate live dithered decode against the natural one-decoder traversal.
+
+    REFERENCE: one decoder traversing all ten mini_arctic utterances in natural
+    order with a vocabulary-matched CI model trained by this checkout. AXIS:
+    reversed traversal and legal round-robin two- and three-shard assignments,
+    each shard using a fresh decoder. SILENT ON: feature-byte identity, larger
+    corpora and models, other PocketSphinx versions, and nondithered decoding.
+    """
+    project = tmp_path / "project"
+    setup_project(
+        project,
+        transcription_path=FIXTURE / "transcription.txt",
+        audio_path=FIXTURE / "wav",
+        dictionary_path=FIXTURE / "dictionary.dict",
+        phoneset_path=FIXTURE / "phoneset.txt",
+        filler_dict_path=FIXTURE / "filler.dict",
+    )
+    context = PipelineContext.from_config(project)
+    assert build_pipeline(context).run("ci-1g", jobs=1) == 0
+
+    model = context.model_dir("ci-1g")
+    assert "-dither yes" in (model / "feat.params").read_text().splitlines()
+    config = _DecodeConfig(
+        model,
+        context.shared_dir / "dictionary.dict",
+        context.filler_dict,
+        Path(__file__).parent.parent / "benchmarks" / "arctic" / "data" / "training-unigram.lm",
+    )
+    files = sorted((FIXTURE / "wav").glob("*.wav"))
+    indexed = [(position, path.stem, path) for position, path in enumerate(files)]
+
+    def decode(shards: list[list[tuple[int, str, Path]]]) -> dict[str, str]:
+        decoded = [item for shard in shards for item in _decode_shard(config, shard)]
+        assert all(result.success for _, _, result in decoded)
+        return {utterance_id: result.hypothesis for _, utterance_id, result in decoded}
+
+    natural = decode([indexed])
+    assert len(natural) == 10
+    assert all(natural.values())
+
+    arrangements = [
+        [list(reversed(indexed))],
+        [indexed[worker::2] for worker in range(2)],
+        [indexed[worker::3] for worker in range(3)],
+    ]
+    for shards in arrangements:
+        assert decode(shards) == natural
