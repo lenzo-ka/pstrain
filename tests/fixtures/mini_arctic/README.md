@@ -1,16 +1,31 @@
 # mini_arctic — tiny end-to-end training fixture
 
-A 10-utterance slice of the **CMU ARCTIC** `slt` (US English female) speech
-database, used by `tests/test_e2e_training.py` to exercise the full
+A 10-utterance slice from a single speaker in the CMU_ARCTIC corpus: **CMU
+ARCTIC `slt`**, a US English female speaker. It is used by
+`tests/test_e2e_training.py` to exercise the full
 `features → flat → ci-1g` training pipeline on real audio in CI.
 
 ## Provenance / license
 
-CMU ARCTIC databases (http://festvox.org/cmu_arctic/) were constructed at the
-Carnegie Mellon University Language Technologies Institute and are distributed
-under a permissive, free-to-use license (attribution appreciated). Only a
-handful of utterances are included here, downsampled to what the trainer
-needs, purely as a test asset.
+Source: http://festvox.org/cmu_arctic/
+
+CMU ARCTIC was constructed at the Carnegie Mellon University Language
+Technologies Institute. The corpus is free for any use; attribution is
+appreciated. Only these utterances are included, prepared in the format the
+trainer needs, purely as a test asset.
+
+## Included utterances
+
+- `arctic_a0001` — author of the danger trail philip steels etc
+- `arctic_a0002` — not at this particular case tom apologized whittemore
+- `arctic_a0003` — for the twentieth time that evening the two men shook hands
+- `arctic_a0004` — lord but i'm glad to see you again phil
+- `arctic_a0005` — will we ever forget it
+- `arctic_a0006` — god bless em i hope i'll go on seeing them forever
+- `arctic_a0007` — and you always want to see it in the superlative degree
+- `arctic_a0008` — gad your letter came just in time
+- `arctic_a0009` — he turned sharply and faced gregson across the table
+- `arctic_a0010` — i'm playing a single hand in what looks like a losing game
 
 ## Contents
 

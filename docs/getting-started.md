@@ -24,6 +24,9 @@ pstrain train my_project \
 
 Pass `--target ci-1g` to stop at the context-independent bootstrap stage.
 
+See [Input formats](input-formats.md) for the accepted dictionary, transcript,
+phoneset, and audio formats.
+
 ### CLI Usage
 
 ```bash
@@ -59,8 +62,9 @@ my_project/experiments/default/etc/test.transcription
 ```
 
 Each `.fileids` file contains one utterance ID per line. Its matching
-`.transcription` contains the same IDs in exactly the same order, followed by
-the transcript text from `etc/all.transcription`. Together, train and test must
+`.transcription` uses one of the [accepted transcript forms](input-formats.md#transcripts)
+and contains the same IDs in exactly the same order, with the transcript text
+from `etc/all.transcription`. Together, train and test must
 partition `all.transcription` exactly, may not overlap, and every ID must have a
 matching `audio/<fileid>.wav` (nested file IDs are supported).
 
