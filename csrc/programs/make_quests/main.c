@@ -900,6 +900,9 @@ make_quests_init(float32 *****out_mixw,
                E_FATAL("Feature length %d in var file != %d in mean file for feature %d\n",t_veclen[i],l_veclen[i],i);
         if (l_nstates != t_nstates)
            E_FATAL("Total no. of states %d in var file != %d in mean file\n",t_nstates,l_nstates);
+        if (l_nstates != n_in_mixw)
+           E_FATAL("Mean/mixture-weight state-count mismatch: mean=%d mixw=%d\n",
+                   l_nstates, n_in_mixw);
 
         if (t_nfeat > 1)
             E_FATAL("N-Feat = %d! N-Feat > 1 not implemented yet..\n",t_nfeat);
@@ -923,45 +926,31 @@ make_quests_init(float32 *****out_mixw,
                 featvar = var[j][k];
                 dnom  = 0;
                 for (n = 0; n < n_density; n++) {
-                    /* Bounds check to prevent segfault */
-                    if (j >= n_model || k >= n_state) {
-                        E_ERROR("Bounds error: j=%d k=%d (max: %d,%d)\n", j, k, n_model, n_state);
-                        continue;
-                    }
                     float32 mw = mixw_occ[j][k][0][n];
-                    /* Check for valid weight */
                     if (!isfinite(mw) || mw < 0) {
-                        E_WARN("Invalid mixture weight [%d][%d][0][%d] = %f, using 0\n", j, k, n, mw);
-                        mw = 0;
+                        E_FATAL("Invalid mixture weight [%d][%d][0][%d] = %f\n",
+                                j, k, n, mw);
                     }
                     dnom += mw;
                     for (nn = 0; nn < l_veclen[0]; nn++) {
-                        /* Bounds check on fullmean access */
-                        if (m >= n_in_mixw) {
-                            E_ERROR("fullmean index m=%d >= n_in_mixw=%d\n", m, n_in_mixw);
-                            continue;
-                        }
                         float32 mean_val = fullmean[m][0][n][nn];
                         if (!isfinite(mean_val)) {
-                            E_WARN("Non-finite mean at [%d][0][%d][%d], skipping\n", m, n, nn);
-                            continue;
+                            E_FATAL("Non-finite mean at [%d][0][%d][%d] = %f\n",
+                                    m, n, nn, mean_val);
                         }
                         featmean[nn] += mw * mean_val;
 			if (var_is_full) {
-			    if (fullvar_full && fullvar_full[m] && fullvar_full[m][0] &&
-			        fullvar_full[m][0][n] && fullvar_full[m][0][n][nn]) {
-			        float32 var_val = fullvar_full[m][0][n][nn][nn];
-			        if (isfinite(var_val)) {
-			            featvar[nn] += mw * (mean_val * mean_val + var_val);
-			        }
-			    }
+			    float32 var_val = fullvar_full[m][0][n][nn][nn];
+			    if (!isfinite(var_val))
+			        E_FATAL("Non-finite full variance at [%d][0][%d][%d][%d] = %f\n",
+			                m, n, nn, nn, var_val);
+			    featvar[nn] += mw * (mean_val * mean_val + var_val);
 			} else {
-			    if (fullvar && fullvar[m] && fullvar[m][0] && fullvar[m][0][n]) {
-			        float32 var_val = fullvar[m][0][n][nn];
-			        if (isfinite(var_val)) {
-			            featvar[nn] += mw * (mean_val * mean_val + var_val);
-			        }
-			    }
+			    float32 var_val = fullvar[m][0][n][nn];
+			    if (!isfinite(var_val))
+			        E_FATAL("Non-finite variance at [%d][0][%d][%d] = %f\n",
+			                m, n, nn, var_val);
+			    featvar[nn] += mw * (mean_val * mean_val + var_val);
 			}
                     }
                 }
@@ -1083,12 +1072,6 @@ make_quests_run(void)
     npermute = cmd_ln_int32("-npermute");
     nquests_per_state = cmd_ln_int32("-qstperstt");
 
-    /* Test and cleanup outfile */
-    if ((fp = fopen(outfile,"w")) == NULL)
-        E_FATAL("Unable to open %s for writing!\n",outfile);
-    fprintf(fp,"WDBNDRY_B\nWDBNDRY_E\nWDBNDRY_S\nWDBNDRY_I\nSILENCE   SIL\n");
-    fclose(fp);
-
     if (make_quests_init(&mixw,
              &means,
              &vars,
@@ -1101,6 +1084,13 @@ make_quests_run(void)
 	     continuous) != S3_SUCCESS) {
 	E_FATAL("Initialization failed\n");
     }
+
+    /* Do not leave a plausible question artifact behind when input
+     * validation in make_quests_init fails. */
+    if ((fp = fopen(outfile,"w")) == NULL)
+        E_FATAL("Unable to open %s for writing!\n",outfile);
+    fprintf(fp,"WDBNDRY_B\nWDBNDRY_E\nWDBNDRY_S\nWDBNDRY_I\nSILENCE   SIL\n");
+    fclose(fp);
 
     for (state = 0; state < n_state; state++){
         phoneids = (int32 *) ckd_calloc(n_model,sizeof(int32));
