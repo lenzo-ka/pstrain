@@ -218,10 +218,14 @@ pstrain_inc_comp(const char *in_mean_path,
 
     /* Read variances */
     E_INFO("Reading variances from %s\n", in_var_path);
+    ckd_free(veclen);
+    veclen = NULL;
     if (s3gau_read(in_var_path, &var, &n_mgau, &n_feat, &n_density, &veclen) != S3_SUCCESS) {
         E_ERROR("Failed to read variances\n");
         goto cleanup;
     }
+    gauden_floor_variance_array(var, n_mgau, n_feat, n_density, veclen,
+                                GAUDEN_EVAL_VAR_FLOOR);
 
     /* Read density counts */
     E_INFO("Reading density counts from %s\n", dcount_path);
