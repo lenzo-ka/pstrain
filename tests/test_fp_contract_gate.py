@@ -12,6 +12,20 @@ from pathlib import Path
 
 import pytest
 
+from scripts.check_fp_contract import FMA
+
+
+def test_fused_mnemonic_token_stream_coverage() -> None:
+    """Regex-level construction covers FMA3 and AVX512-4FMAPS without broad matches."""
+    fused = "  v4fmaddps %zmm0, %zmm1\n  vfmadd213ps %zmm2, %zmm3, %zmm4\n"
+    clean = "  vmulps %zmm0, %zmm1, %zmm2\n  vaddps %zmm2, %zmm3, %zmm4\n"
+
+    assert [match.group(0) for match in FMA.finditer(fused)] == [
+        "v4fmaddps",
+        "vfmadd213ps",
+    ]
+    assert FMA.search(clean) is None
+
 
 def test_contraction_enabled_build_makes_gate_red(tmp_path: Path) -> None:
     """A contraction-enabled native artifact must make the shipped gate fail."""

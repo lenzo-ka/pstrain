@@ -66,10 +66,20 @@ lib.cont_ts2cb(n_tied_state)
     ]
 
 
-def test_unresolvable_indirect_callee_is_an_explicitly_silent_axis() -> None:
+def test_runtime_dispatch_on_native_handles_is_flagged() -> None:
     scanner = Scanner("pstrain/_construction.py")
-    scanner.visit(ast.parse("getattr(lib, runtime_name)(ctx)"))
-    assert scanner.callsites == []
+    scanner.visit(
+        ast.parse(
+            "getattr(lib, runtime_name)(ctx)\n"
+            "lib[runtime_name](ctx)\n"
+            "getattr(self._lib, runtime_name)(ctx)\n"
+        )
+    )
+    assert [(item.symbol, item.disposition) for item in scanner.callsites] == [
+        ("getattr(lib, <dynamic>)", "violation"),
+        ("lib[<dynamic>]", "violation"),
+        ("getattr(self._lib, <dynamic>)", "violation"),
+    ]
 
 
 def test_single_assignment_native_and_loader_aliases_are_detected() -> None:

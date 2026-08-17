@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Statically enforce containment of literal Python-to-CFFI call expressions.
+"""Statically enforce containment of Python-to-CFFI call expressions.
 
 This scanner certifies calls whose callee is a literal name or attribute chain, a
 literal/module-constant ``getattr`` name, a literal-key dictionary selection, a direct
 ``FFI().dlopen``, or a single-assignment local alias of a known native leaf/loader. It
-is silent on multi-step dataflow, function pointers produced by ``ffi.addressof``, and
-aliases that cross module boundaries or arise from dynamic imports.
+also flags runtime ``getattr`` and subscript dispatch directly on conventionally named
+library handles. It is silent on multi-step dataflow, function pointers produced by
+``ffi.addressof``, and aliases that cross module boundaries or arise from dynamic
+imports.
 """
 
 from __future__ import annotations
@@ -225,10 +227,28 @@ class Scanner(ast.NodeVisitor):
                     return _name(candidate_value)
         return ""
 
+    def _dynamic_native_callee(self, node: ast.AST) -> str:
+        """Describe runtime dispatch directly on a conventionally named CFFI handle."""
+        if isinstance(node, ast.Call) and _name(node.func) == "getattr" and len(node.args) >= 2:
+            base = _name(node.args[0])
+            if self._native_handle(base) and self._string(node.args[1]) is None:
+                return f"getattr({base}, <dynamic>)"
+        if isinstance(node, ast.Subscript):
+            base = _name(node.value)
+            if self._native_handle(base):
+                return f"{base}[<dynamic>]"
+        return ""
+
+    @staticmethod
+    def _native_handle(name: str) -> bool:
+        return name.rsplit(".", 1)[-1] in {"lib", "_lib"}
+
     def visit_Call(self, node: ast.Call) -> None:
         symbol = self._callee(node.func)
         leaf = symbol.rsplit(".", 1)[-1]
-        if leaf in NATIVE_ENTRY_NAMES:
+        dynamic_symbol = self._dynamic_native_callee(node.func)
+        if leaf in NATIVE_ENTRY_NAMES or dynamic_symbol:
+            symbol = dynamic_symbol or symbol
             if self.path in INFRASTRUCTURE:
                 disposition, reason = "infrastructure", "implements the low-level worker boundary"
             elif self.path in DECLARED_EXCEPTIONS:
