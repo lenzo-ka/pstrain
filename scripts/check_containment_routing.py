@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-"""Statically enforce containment of literal Python-to-CFFI call expressions.
+"""Check specified native-call syntax under the reserved ``lib``/``_lib`` convention.
 
 This scanner certifies calls whose callee is a literal name or attribute chain, a
 literal/module-constant ``getattr`` name, a literal-key dictionary selection, a direct
 ``FFI().dlopen``, or a single-assignment local alias of a known native leaf/loader. It
-is silent on multi-step dataflow, function pointers produced by ``ffi.addressof``, and
-aliases that cross module boundaries or arise from dynamic imports.
+also flags several runtime ``getattr``, ``__getattribute__``, subscript, and explicit
+``__call__`` spellings directly on conventionally named library handles. In source
+order, a plain assignment of an ordinary Python value suppresses that name convention
+for later visited expressions. This is a visitor heuristic, not lexical-scope binding
+analysis. It is silent on binding forms such as annotated assignments, named
+expressions, and chained assignments whose target expression contains a native call
+while another target rebinds the handle, multi-step dataflow, attribute binding provenance, function pointers
+produced by ``ffi.addressof``, and aliases that cross module boundaries or arise from
+dynamic imports.
 """
 
 from __future__ import annotations
@@ -122,6 +129,7 @@ class Scanner(ast.NodeVisitor):
         self.worker_depth = 0
         self.constants: dict[str, str] = {}
         self.aliases: list[dict[str, str]] = [{}]
+        self.shadowed_handles: list[set[str]] = [set()]
 
     def _decorated(self) -> bool:
         return any(
@@ -134,7 +142,9 @@ class Scanner(ast.NodeVisitor):
         self.worker_depth = 0
         self.functions.append(node)
         self.aliases.append({})
+        self.shadowed_handles.append(set())
         self._visit_statements(node.body)
+        self.shadowed_handles.pop()
         self.aliases.pop()
         self.functions.pop()
         self.worker_depth = prior
@@ -170,6 +180,9 @@ class Scanner(ast.NodeVisitor):
                 worker_only = True
 
     def visit_Assign(self, node: ast.Assign) -> None:
+        # Python evaluates the RHS before rebinding assignment targets. Preserve that
+        # ordering so dispatch through the pre-rebind native handle remains visible.
+        self.visit(node.value)
         if (
             not self.functions
             and isinstance(node.value, ast.Constant)
@@ -186,7 +199,15 @@ class Scanner(ast.NodeVisitor):
                 self.aliases[-1][target] = value
             else:
                 self.aliases[-1].pop(target, None)
-        self.generic_visit(node)
+            if target in {"lib", "_lib"}:
+                source_name = _name(node.value.func) if isinstance(node.value, ast.Call) else value
+                native_source = source_name.rsplit(".", 1)[-1] in {"_init", "get_lib", "dlopen"}
+                if native_source:
+                    self.shadowed_handles[-1].discard(target)
+                else:
+                    self.shadowed_handles[-1].add(target)
+        for target in node.targets:
+            self.visit(target)
 
     def _string(self, node: ast.AST) -> str | None:
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -225,10 +246,45 @@ class Scanner(ast.NodeVisitor):
                     return _name(candidate_value)
         return ""
 
+    def _dynamic_native_callee(self, node: ast.AST) -> str:
+        """Describe runtime dispatch directly on a conventionally named CFFI handle."""
+        if isinstance(node, ast.Attribute) and node.attr == "__call__":
+            return self._dynamic_native_callee(node.value)
+        if (
+            isinstance(node, ast.Call)
+            and _name(node.func) in {"getattr", "builtins.getattr"}
+            and len(node.args) >= 2
+        ):
+            base = _name(node.args[0])
+            if self._native_handle(base) and self._string(node.args[1]) is None:
+                return f"getattr({base}, <dynamic>)"
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "__getattribute__"
+            and node.args
+        ):
+            base = _name(node.func.value)
+            if self._native_handle(base) and self._string(node.args[0]) is None:
+                return f"{base}.__getattribute__(<dynamic>)"
+        if isinstance(node, ast.Subscript):
+            base = _name(node.value)
+            if self._native_handle(base) and not isinstance(node.slice, ast.Constant):
+                return f"{base}[<dynamic>]"
+        return ""
+
+    def _native_handle(self, name: str) -> bool:
+        leaf = name.rsplit(".", 1)[-1]
+        return leaf in {"lib", "_lib"} and not (
+            "." not in name and leaf in self.shadowed_handles[-1]
+        )
+
     def visit_Call(self, node: ast.Call) -> None:
         symbol = self._callee(node.func)
         leaf = symbol.rsplit(".", 1)[-1]
-        if leaf in NATIVE_ENTRY_NAMES:
+        dynamic_symbol = self._dynamic_native_callee(node.func)
+        if leaf in NATIVE_ENTRY_NAMES or dynamic_symbol:
+            symbol = dynamic_symbol or symbol
             if self.path in INFRASTRUCTURE:
                 disposition, reason = "infrastructure", "implements the low-level worker boundary"
             elif self.path in DECLARED_EXCEPTIONS:

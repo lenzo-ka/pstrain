@@ -66,10 +66,57 @@ lib.cont_ts2cb(n_tied_state)
     ]
 
 
-def test_unresolvable_indirect_callee_is_an_explicitly_silent_axis() -> None:
+def test_specified_runtime_dispatch_patterns_on_reserved_handles_are_flagged() -> None:
     scanner = Scanner("pstrain/_construction.py")
-    scanner.visit(ast.parse("getattr(lib, runtime_name)(ctx)"))
+    scanner.visit(
+        ast.parse(
+            "getattr(lib, runtime_name)(ctx)\n"
+            "lib[runtime_name](ctx)\n"
+            "getattr(self._lib, runtime_name)(ctx)\n"
+            "builtins.getattr(lib, runtime_name)(ctx)\n"
+            "lib.__getattribute__(runtime_name)(ctx)\n"
+            "getattr(lib, runtime_name).__call__(ctx)\n"
+            "lib[runtime_name].__call__(ctx)\n"
+        )
+    )
+    assert [(item.symbol, item.disposition) for item in scanner.callsites] == [
+        ("getattr(lib, <dynamic>)", "violation"),
+        ("lib[<dynamic>]", "violation"),
+        ("getattr(self._lib, <dynamic>)", "violation"),
+        ("getattr(lib, <dynamic>)", "violation"),
+        ("lib.__getattribute__(<dynamic>)", "violation"),
+        ("getattr(lib, <dynamic>)", "violation"),
+        ("lib[<dynamic>]", "violation"),
+    ]
+
+
+def test_literal_subscript_and_visibly_shadowed_handle_are_not_violations() -> None:
+    source = """
+lib["worker"](ctx)
+lib = {"worker": python_worker}
+lib[runtime_name](ctx)
+"""
+    scanner = Scanner("pstrain/_construction.py")
+    scanner.visit(ast.parse(source))
     assert scanner.callsites == []
+
+
+def test_assignment_rhs_uses_the_pre_rebind_native_handle() -> None:
+    sources = (
+        'lib = {"r": getattr(lib, runtime_name)(ctx)}',
+        'lib = {"r": lib[runtime_name](ctx)}',
+    )
+
+    observed = []
+    for source in sources:
+        scanner = Scanner("pstrain/_construction.py")
+        scanner.visit(ast.parse(source))
+        observed.extend((item.symbol, item.disposition) for item in scanner.callsites)
+
+    assert observed == [
+        ("getattr(lib, <dynamic>)", "violation"),
+        ("lib[<dynamic>]", "violation"),
+    ]
 
 
 def test_single_assignment_native_and_loader_aliases_are_detected() -> None:

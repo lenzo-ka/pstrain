@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reject FP instructions that multiply and accumulate without intermediate rounding.
+"""Reject fused-multiply-add mnemonics found in raw disassembly text.
 
 That criterion follows the fused-operation semantics in the Arm Architecture
 Reference Manual.  The enumerated boundary covers x86 FMA3/FMA4 and Arm
@@ -16,6 +16,10 @@ the boundary because each multiplication is rounded before its products are
 summed.  Arm SDOT, UDOT, USDOT, and SUDOT are integer operations.  Arm BFDOT,
 BFMMLALB/BFMMLALT, and BFMMLA are retained because their products are not
 rounded before accumulation.
+
+The gate scans the complete disassembler output rather than parsing instruction
+fields. Consequently, a symbol label named exactly like a fused mnemonic is an
+accepted limitation and can trigger the gate even though it is not an instruction.
 
 GitHub's ubuntu-latest runner supplies versioned LLVM toolsets, including
 llvm-objdump, alongside GNU binutils. COFF scans prefer LLVM because GNU
@@ -37,6 +41,7 @@ from pathlib import Path
 FMA = re.compile(
     r"\b(?:"
     r"v?f(?:madd|msub|nmadd|nmsub)[a-z0-9.]*"
+    r"|v4fn?madd(?:ps|ss)"
     r"|f(?:mad|msb|nmad|nmsb|nmla|nmls)[a-z0-9.]*"
     r"|f(?:mla|mls)(?:l2?|lb|lt)?[a-z0-9.]*"
     r"|fcmla[a-z0-9.]*|fmmla[a-z0-9.]*"
@@ -182,7 +187,11 @@ def disassemblies(path: Path) -> list[tuple[str, str]]:
 
 
 def inspect(paths: list[tuple[str, Path]]) -> tuple[list[str], dict[str, list[str]]]:
-    """Return inspected labels and fused instructions grouped by architecture."""
+    """Scan raw disassembly text and group fused-mnemonic matches by architecture.
+
+    The scan does not distinguish the instruction mnemonic field from symbol labels;
+    a label named exactly like a fused mnemonic is an accepted limitation.
+    """
     checked: list[str] = []
     fused: dict[str, list[str]] = {}
     for source, path in paths:

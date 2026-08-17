@@ -12,6 +12,30 @@ from pathlib import Path
 
 import pytest
 
+from scripts.check_fp_contract import FMA
+
+
+def test_fused_mnemonic_token_stream_coverage() -> None:
+    """Regex covers the real 4FMAPS family without accepting nearby raw-text tokens."""
+    fused = (
+        "  v4fmaddps %zmm0, %zmm1\n  v4fmaddss %xmm0, %xmm1\n"
+        "  v4fnmaddps %zmm0, %zmm1\n  v4fnmaddss %xmm0, %xmm1\n"
+        "  vfmadd213ps %zmm2, %zmm3, %zmm4\n"
+    )
+    clean = (
+        "0000 <v4fmaddps_fallback>:\n  v4fmaddpd %zmm0, %zmm1\n"
+        "  v4fnmaddsd %xmm0, %xmm1\n  v4fmaddsubps %zmm0, %zmm1\n"
+    )
+
+    assert [match.group(0) for match in FMA.finditer(fused)] == [
+        "v4fmaddps",
+        "v4fmaddss",
+        "v4fnmaddps",
+        "v4fnmaddss",
+        "vfmadd213ps",
+    ]
+    assert FMA.search(clean) is None
+
 
 def test_contraction_enabled_build_makes_gate_red(tmp_path: Path) -> None:
     """A contraction-enabled native artifact must make the shipped gate fail."""

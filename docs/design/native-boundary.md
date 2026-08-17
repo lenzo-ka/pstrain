@@ -15,11 +15,23 @@ whenever it dies. Its address space is the blast radius. See
 
 ## Phase contract: `contained-all-operations`
 
-Supported Python operations implemented by pstrain route their literal direct CFFI call
+Supported Python operations implemented by pstrain route their known direct CFFI call
 expressions through the helper, except for the decoder described below. The static gate
-certifies literal name and attribute-chain calls to `_init`, `get_lib`, and `pstrain_*`,
-plus `getattr` calls with literal/module-constant names and literal-key dictionary selections.
-It is silent when a callee name or selected value depends on runtime data.
+checks specified syntactic patterns under a reserved `lib`/`_lib` name convention: literal
+name and attribute-chain calls to the CDEF-derived native surface and loader helpers;
+statically resolvable `getattr` and literal-key dictionary selections; and direct dynamic
+`getattr`, `builtins.getattr`, `__getattribute__`, subscript, and explicit `__call__` forms
+on those reserved handle names. In source order, a plain assignment of an ordinary Python
+value to `lib` or `_lib` suppresses the convention for expressions visited afterward. This
+is a visitor heuristic, not lexical-scope binding analysis.
+
+This is a source-pattern gate, not proof of containment for every possible Python-to-CFFI
+call. Annotated assignments, named expressions, chained assignments whose target
+expression contains a native call while another target rebinds the handle, and other
+binding forms are measured silences. The gate is also silent on multi-step dataflow, attribute binding provenance
+(including a Python registry stored as `self._lib`), function pointers from `ffi.addressof`,
+cross-module aliases, dynamic imports, and semantically equivalent spellings outside the
+enumerated patterns.
 The shipped PocketSphinx decoder in `pstrain.lib.testing.decoder` remains in-process and
 is used by benchmark, CLI testing, and decode-shard paths; decoder containment is not
 certified and decoder behavior is unchanged. This decoder-exemption wording is
