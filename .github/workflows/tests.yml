@@ -21,15 +21,52 @@ jobs:
       code: ${{ steps.filter.outputs.code }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Classify changed paths
         id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            code:
-              - '!**.md'
-              - '!docs/**'
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.event.after }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Fail safe: anything we cannot classify runs the full test suite.
+          code=true
+          changed_files="$(mktemp)"
+          diff_ok=false
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            if git diff --name-only -z "$PR_BASE_SHA...$PR_HEAD_SHA" > "$changed_files"; then
+              diff_ok=true
+            fi
+          elif [[ "$EVENT_NAME" == "push" ]]; then
+            if [[ "$BEFORE_SHA" == "0000000000000000000000000000000000000000" ]]; then
+              echo "New branch push; running the full test suite."
+            elif git diff --name-only -z "$BEFORE_SHA..$AFTER_SHA" > "$changed_files"; then
+              diff_ok=true
+            fi
+          else
+            echo "Unsupported event '$EVENT_NAME'; running the full test suite."
+          fi
+
+          if [[ "$diff_ok" == "true" ]]; then
+            code=false
+            echo "Changed files:"
+            while IFS= read -r -d '' path; do
+              printf '  %q\n' "$path"
+              if [[ "$path" != *.md && "$path" != docs/* ]]; then
+                code=true
+              fi
+            done < "$changed_files"
+          else
+            echo "Could not determine the changed files; running the full test suite."
+          fi
+
+          echo "code=$code"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
 
   # C library tests
   c-tests:
