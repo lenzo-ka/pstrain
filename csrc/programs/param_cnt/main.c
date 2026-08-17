@@ -86,9 +86,14 @@ initialize_from_cmd_ln(lexicon_t **out_lex,
 
     if (cmd_ln_str("-lsnfn"))
 	corpus_set_lsn_filename(cmd_ln_str("-lsnfn"));
-    else {
+    else if (cmd_ln_str("-sentdir")) {
 	corpus_set_sent_dir(cmd_ln_str("-sentdir"));
 	corpus_set_sent_ext(cmd_ln_str("-sentext"));
+    }
+    else {
+	E_ERROR("You must specify a transcript source: -lsnfn, "
+		"or -sentdir with -sentext\n");
+	return S3_ERROR;
     }
 
     ctlfn = cmd_ln_str("-ctlfn");
