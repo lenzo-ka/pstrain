@@ -12,7 +12,24 @@ from pathlib import Path
 
 import pytest
 
-from scripts.check_fp_contract import FMA
+from scripts.check_fp_contract import FMA, wheel_artifacts
+
+
+def test_windows_wheel_artifact_names_satisfy_completeness_gate(tmp_path: Path) -> None:
+    """The wheel gate discovers PE files and accepts CMake's Windows names."""
+    wheel = tmp_path / "pstrain-0.1.0-cp313-cp313-win_amd64.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        for name in ("bw.exe", "norm.exe", "sphinx_fe.exe", "pstrainc.dll"):
+            archive.writestr(f"pstrain/_lib/bin/{name}", b"MZ" + b"\0" * 62)
+
+    found = wheel_artifacts(wheel, tmp_path / "extracted")
+
+    assert {path.name for path in found} == {
+        "bw.exe",
+        "norm.exe",
+        "sphinx_fe.exe",
+        "pstrainc.dll",
+    }
 
 
 def test_fused_mnemonic_token_stream_coverage() -> None:

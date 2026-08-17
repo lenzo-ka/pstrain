@@ -65,6 +65,7 @@ COFF_MACHINES = {
     b"\x64\x86",  # amd64
     b"\x64\xaa",  # arm64
 }
+PE_MAGIC = b"MZ"
 
 
 def build_artifacts(build_dir: Path) -> list[Path]:
@@ -87,7 +88,12 @@ def _is_native(path: Path) -> bool:
         start = path.read_bytes()[:8]
     except OSError:
         return False
-    return start[:4] in NATIVE_MAGICS or start == b"!<arch>\n" or start[:2] in COFF_MACHINES
+    return (
+        start[:4] in NATIVE_MAGICS
+        or start == b"!<arch>\n"
+        or start[:2] in COFF_MACHINES
+        or start[:2] == PE_MAGIC
+    )
 
 
 def object_artifacts(object_dir: Path) -> list[Path]:
@@ -100,12 +106,17 @@ def object_artifacts(object_dir: Path) -> list[Path]:
 
 def _require_training_artifacts(found: set[Path], source: Path) -> None:
     names = {path.name for path in found}
-    missing = [name for name in REQUIRED if name not in names]
+    # Installed Windows programs carry the conventional .exe suffix.
+    executable_names = {
+        Path(name).stem if name.lower().endswith(".exe") else name for name in names
+    }
+    missing = [name for name in REQUIRED if name not in executable_names]
     if missing:
         raise RuntimeError(
             f"required standalone artifacts absent from {source}: {', '.join(missing)}"
         )
-    if not any(name.startswith("libpstrainc") for name in names):
+    # CMake omits the Unix "lib" prefix for Windows DLLs.
+    if not any(name.startswith("libpstrainc") or name == "pstrainc.dll" for name in names):
         raise RuntimeError(f"required libpstrainc artifact absent from {source}")
 
 
@@ -147,7 +158,7 @@ def _objdumps(path: Path) -> list[str]:
     """Return disassemblers in the preferred order for this file."""
     llvm = _llvm_objdumps()
     generic = shutil.which("objdump")
-    if path.read_bytes()[:2] in COFF_MACHINES:
+    if path.read_bytes()[:2] in COFF_MACHINES | {PE_MAGIC}:
         candidates = llvm + ([generic] if generic is not None else [])
     else:
         candidates = ([generic] if generic is not None else []) + llvm
