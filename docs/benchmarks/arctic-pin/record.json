@@ -334,6 +334,18 @@
       "sha256": "3349213b750c4deeb74edcd667b82ebfd7e615f22d7b710d3eb2364c9fffeba3"
     }
   },
+  "record_binding": {
+    "algorithm": "sha256-canonical-json-v1",
+    "fields": [
+      "basis",
+      "engine",
+      "conditions",
+      "resources",
+      "models",
+      "results"
+    ],
+    "sha256": "b0b6f5e98802ad26dcde51a2ec4a2bdc6d6726168b5e668f96e397b984113b08"
+  },
   "resources": {
     "archives": {
       "awb": {
@@ -35241,5 +35253,5 @@
       }
     }
   },
-  "schema_version": 6
+  "schema_version": 7
 }

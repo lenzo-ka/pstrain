@@ -30,6 +30,7 @@ from pstrain.benchmarks.arctic import (
     authenticate_pin_resources,
     band_resources,
     benchmark_conditions,
+    bind_record,
     bootstrap_ci,
     compare_results,
     configuration_provenance,
@@ -361,12 +362,21 @@ def test_emitted_record_uses_child_resolved_cli_override(
     monkeypatch.setattr("pstrain.benchmarks.arctic.ARCHIVES", ())
     monkeypatch.setattr("pstrain.benchmarks.arctic.band_resources", lambda _band: (dictionary, lm))
     monkeypatch.setattr("pstrain.benchmarks.arctic.authenticate_pin_resources", lambda *_args: None)
-    monkeypatch.setattr("pstrain.benchmarks.arctic.training_corpus_identity", lambda: {})
+    monkeypatch.setattr(
+        "pstrain.benchmarks.arctic.training_corpus_identity",
+        lambda: {"transcription": {"sha256": "3" * 64}},
+    )
     monkeypatch.setattr("pstrain.benchmarks.arctic.audit_monotonicity", lambda _project: [])
     monkeypatch.setattr(
         "pstrain.benchmarks.arctic.score_model", lambda *_args: _cell((1,), recorded=False)
     )
-    monkeypatch.setattr("pstrain.benchmarks.arctic.engine_identity", lambda _dictionary: {})
+    monkeypatch.setattr(
+        "pstrain.benchmarks.arctic.engine_identity",
+        lambda _dictionary: {
+            "git_describe": "abc1234",
+            "native_library_sha256": "4" * 64,
+        },
+    )
 
     def surface_resolved(command: list[str], **_kwargs: object) -> None:
         project = Path(command[command.index("--project-dir") + 1])
@@ -442,6 +452,7 @@ def test_adopt_uncovered_keeps_cell_provenance_consistent(tmp_path: Path) -> Non
             provenance["diff_from_shipped_defaults"] = [
                 row for row in provenance["diff_from_shipped_defaults"] if row["setting"] != setting
             ]
+    bind_record(record)
     validate_record(record)
     measurements = {
         mode: {
@@ -497,7 +508,7 @@ def test_adopt_uncovered_keeps_cell_provenance_consistent(tmp_path: Path) -> Non
         ),
         (
             lambda record: record["conditions"]["decoder"].__setitem__("wip", 0.3),
-            "conditions.decoder.wip mismatch",
+            "engine/corpus/result binding mismatch",
         ),
     ],
 )
@@ -531,6 +542,7 @@ def test_adopt_record_refuses_any_retired_cell_drift(tmp_path: Path) -> None:
     record = json.loads(Path("docs/benchmarks/arctic-pin/record.json").read_text())
     candidate = json.loads(json.dumps(record))
     candidate["results"]["off"]["big"]["bootstrap_ci_95"][0] += 0.01
+    bind_record(candidate)
     target = tmp_path / "record.json"
     source = tmp_path / "candidate.json"
     target.write_text(json.dumps(record))
@@ -585,12 +597,20 @@ def _comparison_documents() -> tuple[dict[str, object], dict[str, object]]:
     }
     actual = {
         "results": results,
-        "resources": {"x": "y"},
+        "resources": {
+            "dictionary_sha256": "1" * 64,
+            "lm_sha256": "2" * 64,
+            "training_corpus": {"transcription": {"sha256": "3" * 64}},
+        },
         "conditions": {
             "band": "BM1",
             "bootstrap": {"resamples": 500, "seed": 11},
         },
-        "engine": {"version": "1"},
+        "engine": {
+            "version": "1",
+            "git_describe": "abc1234",
+            "native_library_sha256": "4" * 64,
+        },
         "models": {"on": {"sha256": "model", "files": []}},
     }
     record = {
@@ -612,7 +632,29 @@ def _comparison_documents() -> tuple[dict[str, object], dict[str, object]]:
     for mode, cells in record["results"].items():
         for cell in cells.values():
             cell["status"] = "live" if mode == "on" else "retired/historical"
+    bind_record(record)
     return actual, record
+
+
+@pytest.mark.parametrize("identity", ["git", "native-library", "corpus"])
+def test_pin_check_rejects_tampered_producing_identity(tmp_path: Path, identity: str) -> None:
+    record = json.loads(Path("docs/benchmarks/arctic-pin/record.json").read_text())
+    if identity == "git":
+        record["engine"]["git_describe"] = "different-engine"
+    elif identity == "native-library":
+        record["engine"]["native_library_sha256"] = "0" * 64
+    else:
+        record["resources"]["training_corpus"]["transcription"]["sha256"] = "0" * 64
+    path = tmp_path / "record.json"
+    path.write_text(json.dumps(record))
+
+    completed = subprocess.run(
+        [sys.executable, "scripts/check_arctic_pin.py", "--record", str(path)],
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    assert "engine/corpus/result binding mismatch" in completed.stderr
 
 
 def test_comparison_uses_true_cross_run_matched_pairs() -> None:

@@ -1,0 +1,50 @@
+{
+  "aggregate": {
+    "decoded": 10,
+    "errors": 15,
+    "ref_words": 91,
+    "wer": 0.16483516483516483
+  },
+  "utterances": {
+    "arctic_a0001": {
+      "errors": 0,
+      "hypothesis": "author of the danger trail philip steels etc"
+    },
+    "arctic_a0002": {
+      "errors": 12,
+      "hypothesis": "and to see just to see a single the just in time"
+    },
+    "arctic_a0003": {
+      "errors": 0,
+      "hypothesis": "for the twentieth time that evening the two men shook hands"
+    },
+    "arctic_a0004": {
+      "errors": 0,
+      "hypothesis": "lord but i'm glad to see you again phil"
+    },
+    "arctic_a0005": {
+      "errors": 0,
+      "hypothesis": "will we ever forget it"
+    },
+    "arctic_a0006": {
+      "errors": 1,
+      "hypothesis": "god bless i hope i'll go on seeing them forever"
+    },
+    "arctic_a0007": {
+      "errors": 2,
+      "hypothesis": "and you always want to see it superlative degree"
+    },
+    "arctic_a0008": {
+      "errors": 0,
+      "hypothesis": "gad your letter came just in time"
+    },
+    "arctic_a0009": {
+      "errors": 0,
+      "hypothesis": "he turned sharply and faced gregson across the table"
+    },
+    "arctic_a0010": {
+      "errors": 0,
+      "hypothesis": "i'm playing a single hand in what looks like a losing game"
+    }
+  }
+}

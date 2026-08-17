@@ -4,6 +4,13 @@ A 10-utterance slice from a single speaker in the CMU_ARCTIC corpus: **CMU
 ARCTIC `slt`**, a US English female speaker. It is used by
 `tests/test_e2e_training.py` to exercise the full
 `features → flat → ci-1g` training pipeline on real audio in CI.
+The same suite also trains `ci-1g`, builds a language model from these ten
+transcripts, decodes all ten WAVs through the production decoder, and scores
+the hypotheses against `tests/golden/mini_arctic_ci_1g_decode.json`. The
+portable CI tier requires all utterances and reference words and permits at
+most two aggregate word errors of toolchain variation around the 15-error
+golden. Set `PSTRAIN_STRICT_MEASUREMENT_GOLDEN=1` to require exact hypotheses,
+per-utterance errors, aggregate counts, and WER.
 
 ## Provenance / license
 

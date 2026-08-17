@@ -12,6 +12,8 @@ the only requirement is a built C library.
 
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import replace
 from pathlib import Path
 
@@ -25,6 +27,8 @@ pytest.importorskip(
 from tests.clib import requires_c_library
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_arctic"
+MEASUREMENT_GOLDEN = Path(__file__).parent / "golden" / "mini_arctic_ci_1g_decode.json"
+PORTABLE_ERROR_TOLERANCE = 2
 MODEL_FILES = (
     "mdef",
     "means",
@@ -33,6 +37,71 @@ MODEL_FILES = (
     "transition_matrices",
     "feat.params",
 )
+
+
+@requires_c_library
+def test_ci_1g_decode_matches_real_measurement_golden(tmp_path: Path) -> None:
+    """Train, decode, score, and compare the real mini-Arctic corpus."""
+    from pstrain.lib.lm import build_lm
+    from pstrain.lib.pipeline import PipelineContext
+    from pstrain.lib.pipeline.tasks import build_pipeline
+    from pstrain.lib.setup import setup_project
+    from pstrain.lib.testing import test_model
+
+    project_dir = tmp_path / "proj"
+    setup_project(
+        project_dir,
+        transcription_path=FIXTURE / "transcription.txt",
+        audio_path=FIXTURE / "wav",
+        dictionary_path=FIXTURE / "dictionary.dict",
+        phoneset_path=FIXTURE / "phoneset.txt",
+        filler_dict_path=FIXTURE / "filler.dict",
+    )
+    ctx = PipelineContext.from_config(project_dir)
+    pipeline = build_pipeline(ctx)
+    assert pipeline.run("ci-1g", jobs=1) == 0
+    transcripts = {
+        fields[0]: " ".join(fields[1:])
+        for line in (FIXTURE / "transcription.txt").read_text(encoding="utf-8").splitlines()
+        if (fields := line.split())
+    }
+    lm_path = build_lm(transcripts, ctx.lm_dir / "train.arpa")
+
+    result = test_model(
+        model_dir=ctx.model_dir("ci-1g"),
+        test_audio_dir=FIXTURE / "wav",
+        test_transcripts=transcripts,
+        dict_file=ctx.shared_dir / "dictionary.dict",
+        filler_dict=ctx.filler_dict,
+        lm=lm_path,
+        verbose=True,
+        jobs=1,
+    )
+    assert result.per_utterance is not None
+    measured = {
+        "aggregate": {
+            "decoded": result.n_decoded,
+            "errors": result.errors,
+            "ref_words": result.ref_words,
+            "wer": result.wer,
+        },
+        "utterances": {
+            utterance: {
+                "hypothesis": row["hypothesis"],
+                "errors": row["substitutions"] + row["deletions"] + row["insertions"],
+            }
+            for utterance, row in result.per_utterance.items()
+        },
+    }
+    golden = json.loads(MEASUREMENT_GOLDEN.read_text(encoding="utf-8"))
+    assert measured["aggregate"]["decoded"] == golden["aggregate"]["decoded"] == 10
+    assert measured["aggregate"]["ref_words"] == golden["aggregate"]["ref_words"]
+    assert (
+        abs(measured["aggregate"]["errors"] - golden["aggregate"]["errors"])
+        <= PORTABLE_ERROR_TOLERANCE
+    )
+    if os.environ.get("PSTRAIN_STRICT_MEASUREMENT_GOLDEN") == "1":
+        assert measured == golden
 
 
 def _mdef_counts(path: Path) -> dict[str, int]:
