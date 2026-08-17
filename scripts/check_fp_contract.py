@@ -100,12 +100,17 @@ def object_artifacts(object_dir: Path) -> list[Path]:
 
 def _require_training_artifacts(found: set[Path], source: Path) -> None:
     names = {path.name for path in found}
-    missing = [name for name in REQUIRED if name not in names]
+    # Installed Windows programs carry the conventional .exe suffix.
+    executable_names = {
+        Path(name).stem if name.lower().endswith(".exe") else name for name in names
+    }
+    missing = [name for name in REQUIRED if name not in executable_names]
     if missing:
         raise RuntimeError(
             f"required standalone artifacts absent from {source}: {', '.join(missing)}"
         )
-    if not any(name.startswith("libpstrainc") for name in names):
+    # CMake omits the Unix "lib" prefix for Windows DLLs.
+    if not any(name.startswith("libpstrainc") or name == "pstrainc.dll" for name in names):
         raise RuntimeError(f"required libpstrainc artifact absent from {source}")
 
 

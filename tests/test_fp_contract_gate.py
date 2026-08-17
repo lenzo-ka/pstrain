@@ -12,7 +12,19 @@ from pathlib import Path
 
 import pytest
 
-from scripts.check_fp_contract import FMA
+from scripts.check_fp_contract import FMA, _require_training_artifacts
+
+
+def test_windows_wheel_artifact_names_satisfy_completeness_gate(tmp_path: Path) -> None:
+    """The wheel gate accepts CMake's native Windows output names."""
+    found = {
+        tmp_path / "bw.exe",
+        tmp_path / "norm.exe",
+        tmp_path / "sphinx_fe.exe",
+        tmp_path / "pstrainc.dll",
+    }
+
+    _require_training_artifacts(found, tmp_path)
 
 
 def test_fused_mnemonic_token_stream_coverage() -> None:

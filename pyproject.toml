@@ -131,8 +131,12 @@ archs = ["x86_64"]
 manylinux-x86_64-image = "manylinux_2_28"
 repair-wheel-command = "python {project}/scripts/repair_linux_wheel.py {wheel} {dest_dir}"
 
-# Windows is unsupported for now (vendored C does not build under MSVC); the
-# build-wheels matrix omits the Windows runner. See .github/workflows/build.yml.
+[tool.cibuildwheel.windows]
+# cibuildwheel 4 installs delvewheel itself, but keeping the installation
+# explicit documents and preserves the self-contained-wheel requirement if the
+# action's defaults change.
+before-build = "pip install delvewheel"
+repair-wheel-command = "delvewheel repair -w {dest_dir} -v {wheel}"
 
 [tool.ruff]
 target-version = "py311"
