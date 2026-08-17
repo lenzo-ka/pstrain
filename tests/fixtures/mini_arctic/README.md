@@ -4,6 +4,27 @@ A 10-utterance slice from a single speaker in the CMU_ARCTIC corpus: **CMU
 ARCTIC `slt`**, a US English female speaker. It is used by
 `tests/test_e2e_training.py` to exercise the full
 `features → flat → ci-1g` training pipeline on real audio in CI.
+The same suite also trains `ci-1g`, builds a language model from these ten
+transcripts, decodes all ten WAVs through the production decoder, and scores
+the hypotheses against `tests/golden/mini_arctic_ci_1g_decode.json`. The
+gate requires exactly the expected utterance IDs, checks each live hypothesis
+with an independent word edit-distance implementation, and checks aggregate
+errors and WER against those rows. The golden records a coarse reference tuple:
+Linux x86-64, Python 3.11, the declared FP-contraction policy (`off`), and one
+native job. The classifier matches only that platform and declared-policy tuple;
+it does not identify the compiler or hash the native library. A tuple match
+requires exact hypotheses, per-utterance errors, aggregate counts, and WER. A
+nonmatching tuple permits at most two aggregate word errors around the 15-error
+golden. That portable band cannot mask a matching-tuple regression; it is a
+provisional allowance until a cross-platform dispersion matrix can refine the
+threshold. `native_jobs` records the deterministic execution policy but does not
+affect the measurement result. FP contraction being off is not merely assumed:
+`scripts/check_fp_contract.py` verifies the built native library repo-wide from
+the Makefile and CI test jobs, so a contraction-enabled library cannot pass the
+repository gates. Because compiler identity is outside the tuple, changing the
+compiler on the reference runner requires regenerating this golden as an
+operational step. Set `PSTRAIN_STRICT_MEASUREMENT_GOLDEN=1` to require exact
+results for any tuple.
 
 ## Provenance / license
 

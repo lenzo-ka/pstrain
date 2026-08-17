@@ -12,6 +12,11 @@ the only requirement is a built C library.
 
 from __future__ import annotations
 
+import json
+import os
+import platform
+import sys
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 
@@ -25,6 +30,8 @@ pytest.importorskip(
 from tests.clib import requires_c_library
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_arctic"
+MEASUREMENT_GOLDEN = Path(__file__).parent / "golden" / "mini_arctic_ci_1g_decode.json"
+PORTABLE_ERROR_TOLERANCE = 2
 MODEL_FILES = (
     "mdef",
     "means",
@@ -33,6 +40,192 @@ MODEL_FILES = (
     "transition_matrices",
     "feat.params",
 )
+
+
+def _word_edit_distance(reference: str, hypothesis: str) -> int:
+    """Compute word-level Levenshtein distance independently of the scorer."""
+    previous = list(range(len(hypothesis.split()) + 1))
+    for row_index, reference_word in enumerate(reference.split(), start=1):
+        current = [row_index]
+        for column_index, hypothesis_word in enumerate(hypothesis.split(), start=1):
+            current.append(
+                min(
+                    current[-1] + 1,
+                    previous[column_index] + 1,
+                    previous[column_index - 1] + (reference_word != hypothesis_word),
+                )
+            )
+        previous = current
+    return previous[-1]
+
+
+def _measurement_fingerprint() -> dict[str, object]:
+    """Describe the coarse platform and declared-policy tuple used by this test."""
+    return {
+        "python": f"{sys.version_info.major}.{sys.version_info.minor}",
+        "os": platform.system(),
+        "arch": platform.machine().lower(),
+        "fp_contract": "off",
+        "native_jobs": 1,
+    }
+
+
+def _assert_measurement_gate(
+    measured: dict[str, object],
+    golden: dict[str, object],
+    transcripts: dict[str, str],
+    *,
+    current_fingerprint: dict[str, object] | None = None,
+) -> None:
+    """Validate internal scoring and apply the reference or portable tier."""
+    utterances = measured["utterances"]
+    assert isinstance(utterances, dict)
+    assert set(utterances) == set(transcripts)
+    independently_scored = {
+        utterance: _word_edit_distance(transcripts[utterance], row["hypothesis"])
+        for utterance, row in utterances.items()
+    }
+    assert {utterance: row["errors"] for utterance, row in utterances.items()} == (
+        independently_scored
+    )
+    aggregate = measured["aggregate"]
+    assert isinstance(aggregate, dict)
+    assert aggregate["errors"] == sum(independently_scored.values())
+    assert aggregate["wer"] == pytest.approx(aggregate["errors"] / aggregate["ref_words"])
+
+    expected = {key: value for key, value in golden.items() if key != "reference_fingerprint"}
+    expected_aggregate = expected["aggregate"]
+    assert isinstance(expected_aggregate, dict)
+    assert aggregate["decoded"] == expected_aggregate["decoded"] == 10
+    assert aggregate["ref_words"] == expected_aggregate["ref_words"]
+    fingerprint = current_fingerprint or _measurement_fingerprint()
+    reference_tuple_match = fingerprint == golden["reference_fingerprint"]
+    explicitly_strict = os.environ.get("PSTRAIN_STRICT_MEASUREMENT_GOLDEN") == "1"
+    if reference_tuple_match or explicitly_strict:
+        assert measured == expected
+    else:
+        assert abs(aggregate["errors"] - expected_aggregate["errors"]) <= (PORTABLE_ERROR_TOLERANCE)
+
+
+def test_default_measurement_gate_rejects_reference_regression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reference-tuple match excludes the edge of the portable band."""
+    monkeypatch.delenv("PSTRAIN_STRICT_MEASUREMENT_GOLDEN", raising=False)
+    golden = json.loads(MEASUREMENT_GOLDEN.read_text(encoding="utf-8"))
+    transcripts = {
+        fields[0]: " ".join(fields[1:])
+        for line in (FIXTURE / "transcription.txt").read_text(encoding="utf-8").splitlines()
+        if (fields := line.split())
+    }
+    expected = {key: value for key, value in golden.items() if key != "reference_fingerprint"}
+    _assert_measurement_gate(
+        expected, golden, transcripts, current_fingerprint=golden["reference_fingerprint"]
+    )
+
+    regressed = deepcopy(expected)
+    for utterance in ("arctic_a0001", "arctic_a0003"):
+        regressed["utterances"][utterance]["hypothesis"] += " extra"
+        regressed["utterances"][utterance]["errors"] += 1
+    regressed["aggregate"]["errors"] = 17
+    regressed["aggregate"]["wer"] = 17 / 91
+    with pytest.raises(AssertionError):
+        _assert_measurement_gate(
+            regressed, golden, transcripts, current_fingerprint=golden["reference_fingerprint"]
+        )
+
+
+def test_reference_tuple_intrinsic_measurement_gate_rejects_regression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The platform and declared-policy tuple selects the exact tier."""
+    golden = json.loads(MEASUREMENT_GOLDEN.read_text(encoding="utf-8"))
+    reference_fingerprint = golden["reference_fingerprint"]
+    assert isinstance(reference_fingerprint, dict)
+    reference_platform = (
+        platform.system() == reference_fingerprint["os"]
+        and platform.machine().lower() == reference_fingerprint["arch"]
+        and f"{sys.version_info.major}.{sys.version_info.minor}" == reference_fingerprint["python"]
+    )
+    if not reference_platform:
+        pytest.skip("requires the golden reference platform")
+
+    monkeypatch.delenv("PSTRAIN_STRICT_MEASUREMENT_GOLDEN", raising=False)
+    assert _measurement_fingerprint() == reference_fingerprint
+    transcripts = {
+        fields[0]: " ".join(fields[1:])
+        for line in (FIXTURE / "transcription.txt").read_text(encoding="utf-8").splitlines()
+        if (fields := line.split())
+    }
+    expected = {key: value for key, value in golden.items() if key != "reference_fingerprint"}
+    _assert_measurement_gate(expected, golden, transcripts)
+
+    regressed = deepcopy(expected)
+    for utterance in ("arctic_a0001", "arctic_a0003"):
+        regressed["utterances"][utterance]["hypothesis"] += " extra"
+        regressed["utterances"][utterance]["errors"] += 1
+    regressed["aggregate"]["errors"] = 17
+    regressed["aggregate"]["wer"] = 17 / 91
+    with pytest.raises(AssertionError):
+        _assert_measurement_gate(regressed, golden, transcripts)
+
+
+@requires_c_library
+def test_ci_1g_decode_matches_real_measurement_golden(tmp_path: Path) -> None:
+    """Train, decode, score, and compare the real mini-Arctic corpus."""
+    from pstrain.lib.lm import build_lm
+    from pstrain.lib.pipeline import PipelineContext
+    from pstrain.lib.pipeline.tasks import build_pipeline
+    from pstrain.lib.setup import setup_project
+    from pstrain.lib.testing import test_model
+
+    project_dir = tmp_path / "proj"
+    setup_project(
+        project_dir,
+        transcription_path=FIXTURE / "transcription.txt",
+        audio_path=FIXTURE / "wav",
+        dictionary_path=FIXTURE / "dictionary.dict",
+        phoneset_path=FIXTURE / "phoneset.txt",
+        filler_dict_path=FIXTURE / "filler.dict",
+    )
+    ctx = PipelineContext.from_config(project_dir)
+    pipeline = build_pipeline(ctx)
+    assert pipeline.run("ci-1g", jobs=1) == 0
+    transcripts = {
+        fields[0]: " ".join(fields[1:])
+        for line in (FIXTURE / "transcription.txt").read_text(encoding="utf-8").splitlines()
+        if (fields := line.split())
+    }
+    lm_path = build_lm(transcripts, ctx.lm_dir / "train.arpa")
+
+    result = test_model(
+        model_dir=ctx.model_dir("ci-1g"),
+        test_audio_dir=FIXTURE / "wav",
+        test_transcripts=transcripts,
+        dict_file=ctx.shared_dir / "dictionary.dict",
+        filler_dict=ctx.filler_dict,
+        lm=lm_path,
+        verbose=True,
+        jobs=1,
+    )
+    assert result.per_utterance is not None
+    measured = {
+        "aggregate": {
+            "decoded": result.n_decoded,
+            "errors": result.errors,
+            "ref_words": result.ref_words,
+            "wer": result.wer,
+        },
+        "utterances": {
+            utterance: {
+                "hypothesis": row["hypothesis"],
+                "errors": row["substitutions"] + row["deletions"] + row["insertions"],
+            }
+            for utterance, row in result.per_utterance.items()
+        },
+    }
+    golden = json.loads(MEASUREMENT_GOLDEN.read_text(encoding="utf-8"))
+    _assert_measurement_gate(measured, golden, transcripts)
 
 
 def _mdef_counts(path: Path) -> dict[str, int]:

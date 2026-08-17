@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -46,7 +47,17 @@ def resolve_data_dir(*, package_root: Path | None = None, repo_root: Path | None
 
 
 DATA_DIR = resolve_data_dir()
-RECORD_SCHEMA_VERSION = 6
+RECORD_SCHEMA_VERSION = 7
+RECORD_BINDING_ALGORITHM = "sha256-canonical-json-v1"
+RECORD_BINDING_FIELDS = (
+    "schema_version",
+    "basis",
+    "engine",
+    "conditions",
+    "resources",
+    "models",
+    "results",
+)
 BENCHMARK_BASIS = {
     "name": "MULTIPRON-ONLY",
     "live_cells": ["on/slt55", "on/big"],
@@ -1148,6 +1159,27 @@ def _require_equal(label: str, actual: Any, recorded: Any) -> None:
         raise RuntimeError(f"benchmark {label} mismatch: recorded={recorded!r}, actual={actual!r}")
 
 
+def record_binding_sha256(record: dict[str, Any]) -> str:
+    """Digest record fields together for internal consistency and tamper evidence.
+
+    This self-recomputable digest is not a provenance witness. Producing-run
+    provenance rests on retained configuration, logs, model definition, and
+    artifacts plus re-derivation of the measurement rows.
+    """
+    payload = {field: record.get(field) for field in RECORD_BINDING_FIELDS}
+    canonical = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def bind_record(record: dict[str, Any]) -> None:
+    """Attach a self-recomputable consistency digest, not provenance proof."""
+    record["record_binding"] = {
+        "algorithm": RECORD_BINDING_ALGORITHM,
+        "fields": list(RECORD_BINDING_FIELDS),
+        "sha256": record_binding_sha256(record),
+    }
+
+
 def _validate_cell(cell: Any, label: str, *, recorded: bool) -> None:
     required = {
         "wer",
@@ -1252,6 +1284,24 @@ def validate_record(record: dict[str, Any]) -> None:
     for field in ("engine", "conditions", "resources", "models", "results"):
         if not isinstance(record[field], dict):
             raise RuntimeError(f"benchmark record field must be an object: {field}")
+    engine = record["engine"]
+    if not isinstance(engine.get("git_describe"), str) or not engine["git_describe"]:
+        raise RuntimeError("benchmark record engine.git_describe is absent")
+    resources = record["resources"]
+    training_corpus = resources.get("training_corpus")
+    corpus_hashes = {
+        "engine.native_library_sha256": engine.get("native_library_sha256"),
+        "resources.dictionary_sha256": resources.get("dictionary_sha256"),
+        "resources.lm_sha256": resources.get("lm_sha256"),
+        "resources.training_corpus.transcription.sha256": (
+            training_corpus.get("transcription", {}).get("sha256")
+            if isinstance(training_corpus, dict)
+            else None
+        ),
+    }
+    for label, value in corpus_hashes.items():
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+            raise RuntimeError(f"benchmark record {label} is not a SHA-256")
     _require_equal("basis", record["basis"], BENCHMARK_BASIS)
     bootstrap = record["conditions"].get("bootstrap")
     if (
@@ -1301,6 +1351,13 @@ def validate_record(record: dict[str, Any]) -> None:
             f"off/{dataset} status", off_cells[dataset].get("status"), "retired/historical"
         )
         _validate_cell(off_cells[dataset], f"off/{dataset}", recorded=True)
+    binding = record.get("record_binding")
+    expected_binding = {
+        "algorithm": RECORD_BINDING_ALGORITHM,
+        "fields": list(RECORD_BINDING_FIELDS),
+        "sha256": record_binding_sha256(record),
+    }
+    _require_equal("record consistency digest", binding, expected_binding)
 
 
 def authenticate_conditions(actual: dict[str, Any], recorded: dict[str, Any]) -> list[str]:
@@ -1507,6 +1564,7 @@ def make_record(
         "models": output["models"],
         "results": record_results,
     }
+    bind_record(record)
     validate_record(record)
     return record
 

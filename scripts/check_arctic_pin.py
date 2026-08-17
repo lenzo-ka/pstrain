@@ -15,6 +15,7 @@ from pstrain.benchmarks.arctic import (  # noqa: E402
     adopt_uncovered_conditions,
     authenticate_conditions,
     benchmark_conditions,
+    bind_record,
     resolved_configuration_provenance,
     validate_record,
 )
@@ -78,6 +79,7 @@ def main() -> int:
             )
             for cell in datasets.values():
                 cell["configuration_provenance"] = provenance
+        bind_record(record)
         validate_record(record)
         args.record.write_text(
             json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
