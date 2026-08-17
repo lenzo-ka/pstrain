@@ -127,7 +127,7 @@ jobs:
 
       - name: Install package (editable)
         if: needs.changes.outputs.code == 'true'
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,test]"
 
       - name: Run tests
         if: needs.changes.outputs.code == 'true'
