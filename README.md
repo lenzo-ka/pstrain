@@ -41,8 +41,7 @@ pstrain provides an in-process training pipeline for:
 - multiple-pronunciation training, where pronunciation variants participate as
   parallel paths in each utterance's training graph.
 
-pstrain supports macOS and Linux. Windows support is planned; today, WSL
-provides a Linux environment on Windows. See the
+pstrain supports macOS and Linux, and now Windows. See
 [support policy](https://github.com/lenzo-ka/pstrain/blob/main/docs/support.md) for details.
 
 ## Quickstart
