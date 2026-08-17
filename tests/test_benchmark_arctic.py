@@ -538,6 +538,30 @@ def test_adopt_uncovered_refuses_existing_drift(
     assert path.read_bytes() == before
 
 
+def test_adopt_uncovered_refuses_stale_engine_identity_binding(tmp_path: Path) -> None:
+    record = json.loads(Path("docs/benchmarks/arctic-pin/record.json").read_text())
+    record["engine"]["git_describe"] = "stale-unbound-engine-identity"
+    path = tmp_path / "record.json"
+    path.write_text(json.dumps(record))
+    before = path.read_bytes()
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/check_arctic_pin.py",
+            "--record",
+            str(path),
+            "--adopt-uncovered",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode != 0
+    assert "record consistency digest mismatch" in completed.stderr
+    assert path.read_bytes() == before
+
+
 def test_adopt_record_refuses_any_retired_cell_drift(tmp_path: Path) -> None:
     record = json.loads(Path("docs/benchmarks/arctic-pin/record.json").read_text())
     candidate = json.loads(json.dumps(record))
