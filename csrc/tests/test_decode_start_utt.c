@@ -160,7 +160,7 @@ new_decoder(int remove_noise)
 int
 main(void)
 {
-    pstrain_decoder_t *decoder;
+    pstrain_decoder_t *decoder, *second_decoder;
 
     CHECK(pstrain_decoder_native_init_generation(NULL) == 0,
           "null decoder has no native initialization");
@@ -181,12 +181,22 @@ main(void)
     start_utt_calls = 0;
     decoder = new_decoder(0);
     CHECK(decoder != NULL, "noise-disabled decoder creation");
+    CHECK(pstrain_decoder_native_init_generation(decoder) == 2,
+          "native initialization generation is process-wide");
     CHECK(pstrain_decoder_start_utt(decoder) == 0,
           "utterance starts without unavailable noise statistics");
-    CHECK(pstrain_decoder_native_init_generation(decoder) == 1,
+    CHECK(pstrain_decoder_native_init_generation(decoder) == 2,
           "successful utterance start does not reinitialize native decoder");
     CHECK(start_stream_calls == 0, "stream reset skipped");
     CHECK(start_utt_calls == 1, "utterance start attempted");
+
+    second_decoder = new_decoder(0);
+    CHECK(second_decoder != NULL, "concurrent decoder creation");
+    CHECK(pstrain_decoder_native_init_generation(second_decoder) == 3,
+          "each native initialization advances the process-wide generation");
+    CHECK(pstrain_decoder_native_init_generation(decoder) == 2,
+          "a decoder retains the generation captured at initialization");
+    pstrain_decoder_free(second_decoder);
     pstrain_decoder_free(decoder);
 
     printf("PASS: decoder stream-reset contract\n");

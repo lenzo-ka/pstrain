@@ -8,13 +8,15 @@ struct pstrain_decoder_s {
     uint64_t native_init_generation;
 };
 
+static uint64_t native_init_generation;
+
 static int
 init_native_decoder(pstrain_decoder_t *decoder, ps_config_t *config)
 {
     decoder->ps = ps_init(config);
     if (decoder->ps == NULL)
         return 0;
-    ++decoder->native_init_generation;
+    decoder->native_init_generation = ++native_init_generation;
     return 1;
 }
 
