@@ -136,7 +136,6 @@ jobs:
         # entire CFFI/parity tier is quietly skipped.
         env:
           PSTRAIN_REQUIRE_CLIB: "1"
-          PSTRAIN_GOLDEN_X86_64_STRICT: ${{ matrix.python == '3.11' && matrix.os == 'ubuntu-latest' && '1' || '0' }}
         run: pytest -v --cov=pstrain --cov-report=xml
 
       - name: Verify canonical config consumers and generated reference

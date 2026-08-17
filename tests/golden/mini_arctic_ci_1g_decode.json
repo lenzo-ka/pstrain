@@ -1,4 +1,11 @@
 {
+  "reference_fingerprint": {
+    "python": "3.11",
+    "os": "Linux",
+    "arch": "x86_64",
+    "fp_contract": "off",
+    "native_jobs": 1
+  },
   "aggregate": {
     "decoded": 10,
     "errors": 15,

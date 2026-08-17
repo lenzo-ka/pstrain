@@ -7,10 +7,17 @@ ARCTIC `slt`**, a US English female speaker. It is used by
 The same suite also trains `ci-1g`, builds a language model from these ten
 transcripts, decodes all ten WAVs through the production decoder, and scores
 the hypotheses against `tests/golden/mini_arctic_ci_1g_decode.json`. The
-portable CI tier requires all utterances and reference words and permits at
-most two aggregate word errors of toolchain variation around the 15-error
-golden. Set `PSTRAIN_STRICT_MEASUREMENT_GOLDEN=1` to require exact hypotheses,
-per-utterance errors, aggregate counts, and WER.
+gate requires exactly the expected utterance IDs, checks each live hypothesis
+with an independent word edit-distance implementation, and checks aggregate
+errors and WER against those rows. The golden records the reference fingerprint:
+Linux x86-64, Python 3.11, FP contraction disabled, and a single native job. The
+test detects that fingerprint itself and requires exact hypotheses,
+per-utterance errors, aggregate counts, and WER on a match. Only positively
+identified non-reference toolchains permit at most two aggregate word errors
+around the 15-error golden. That portable band cannot mask a same-reference
+regression; it is a provisional allowance until a cross-toolchain dispersion
+matrix can refine the threshold. Set `PSTRAIN_STRICT_MEASUREMENT_GOLDEN=1` to
+require exact results on any toolchain.
 
 ## Provenance / license
 
