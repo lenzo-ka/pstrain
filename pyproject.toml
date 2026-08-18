@@ -37,11 +37,13 @@ dependencies = [
 # Forced alignment runs entirely against libpstrainc via CFFI; no extra
 # Python dependencies are required beyond the core ones.
 align = []
-# PocketSphinx is needed only by the unconstrained-decoding path used
-# by `pstrain test` (pstrain.lib.testing.decoder). Forced alignment does not
-# touch it.
+# The pip PocketSphinx package is required only to resolve the dictionary for
+# the `pip-en-us` benchmark band. Decoding itself goes through libpstrainc.
 test = [
     "jiwer>=3.0.0",
+]
+bench = [
+    "pocketsphinx>=5.1.1",
 ]
 dev = [
     "pytest>=7.0",
@@ -56,7 +58,7 @@ docs = [
     "myst-parser>=1.0",
 ]
 all = [
-    "pstrain[align,test,dev,docs]",
+    "pstrain[align,test,bench,dev,docs]",
 ]
 
 [project.scripts]
