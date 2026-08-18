@@ -204,6 +204,56 @@ def test_a0302_band_does_not_accept_another_utterance(tmp_path: Path) -> None:
 
 
 @requires_c_library
+def test_optional_final_silence_flip_changes_native_bw_artifact(tmp_path: Path) -> None:
+    """Prove the native graph builder consumes ``optional_final_silence``."""
+    from pstrain.lib.bw import BWConfig
+    from pstrain.lib.pipeline import PipelineContext
+    from pstrain.lib.pipeline.tasks import build_pipeline
+    from pstrain.lib.setup import setup_project
+    from pstrain.lib.steps.train import run_bw_training
+
+    project = tmp_path / "project"
+    setup_project(
+        project,
+        transcription_path=FIXTURE / "transcription.txt",
+        audio_path=FIXTURE / "wav",
+        dictionary_path=FIXTURE / "dictionary.dict",
+        phoneset_path=FIXTURE / "phoneset.txt",
+        filler_dict_path=FIXTURE / "filler.dict",
+    )
+    context = PipelineContext.from_config(project)
+    assert build_pipeline(context).run("flat", jobs=1) == 0
+
+    fileid = "arctic_a0001"
+    fileids = context.etc_dir / "optional-final-silence.fileids"
+    transcription = context.etc_dir / "optional-final-silence.transcription"
+    fileids.write_text(f"{fileid}\n")
+    transcription.write_text(f"{fileid} author of the danger trail philip steels etc\n")
+
+    results = {}
+    for enabled in (True, False):
+        results[enabled] = run_bw_training(
+            model_dir=context.model_dir("flat"),
+            output_dir=tmp_path / f"optional-final-silence-{enabled}",
+            features_dir=context.features_dir,
+            train_fileids=fileids,
+            transcription=transcription,
+            dictionary=context.shared_dir / "dictionary.dict",
+            first_pass_2passvar=True,
+            filler_dict=context.filler_dict,
+            n_iter=1,
+            config=BWConfig(
+                pass2var=True,
+                unobserved_gaussian_policy="zero",
+                optional_final_silence=enabled,
+            ),
+        )
+        assert results[enabled].final_utts == 1
+
+    assert results[True].final_likelihood != results[False].final_likelihood
+
+
+@requires_c_library
 def test_native_failed_pass_then_retry_matches_clean_wide_beam_model(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
