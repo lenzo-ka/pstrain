@@ -71,6 +71,8 @@ from pstrain.lib import (
     validate_file_type,
     validate_project,
 )
+from pstrain.lib.features import extract_features
+from pstrain.lib.flat import init_flat_model
 from pstrain.lib.validate import ValidationReport
 
 __all__: list[str] = [
@@ -94,6 +96,9 @@ __all__: list[str] = [
     "CDModel",
     "create_model",
     "get_model_class",
+    "init_flat_model",
+    # Feature extraction
+    "extract_features",
     # Paths
     "PstrainPaths",
     "get_paths",

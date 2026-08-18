@@ -65,7 +65,7 @@ class FlatCommand(ModelCommand):
 
     def execute(self, ctx: CommandContext) -> CommandResult:
         """Initialize flat model using pure Python."""
-        from pstrain.lib.flat import init_flat_model
+        from pstrain.api import init_flat_model
 
         model = self.get_model(ctx)
         self.get_config(ctx)  # Validate the selected canonical profile.

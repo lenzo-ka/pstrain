@@ -292,7 +292,7 @@ class FeatureExtractAction(PstrainAction):
         ]
 
     def execute(self) -> None:
-        from pstrain.lib.features import extract_features
+        from pstrain.api import extract_features
 
         extract_features(self.input_file, self.output_file)
 
