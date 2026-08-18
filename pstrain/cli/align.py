@@ -99,8 +99,8 @@ class AlignCommand(Command):
         )
 
     def execute(self, ctx: CommandContext) -> CommandResult:
+        from pstrain.api.config import resolve_config
         from pstrain.lib.alignment import align_corpus, load_transcripts, save_ctm, save_textgrid
-        from pstrain.lib.config import resolve_config
 
         project_dir = Path(ctx.args.project_dir).resolve() if ctx.args.project_dir else Path.cwd()
         if not project_dir.exists():

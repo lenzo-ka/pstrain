@@ -26,6 +26,7 @@ Example::
     )
 """
 
+from pstrain.api.config import resolve_config
 from pstrain.api.steps import (
     run_step_cd_hmm_untied,
     run_step_ci_hmm,
@@ -65,7 +66,6 @@ from pstrain.lib import (
     get_paths,
     parse_transcription_file,
     print_stats,
-    resolve_config,
     # Project setup
     setup_project,
     validate_file_type,

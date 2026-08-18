@@ -9,7 +9,7 @@ from typing import Any
 
 import yaml
 
-from pstrain.lib.config import (
+from pstrain.api.config import (
     CURRENT_CONFIG_VERSION,
     generate_markdown_docs,
     generate_rst_docs,
