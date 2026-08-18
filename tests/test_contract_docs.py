@@ -9,6 +9,7 @@ from pstrain.lib.contract_docs import (
     _declarations,
     contract_check_fields,
     contract_check_files,
+    generate_arctic_coverage,
     generate_bw_sharding_contract,
 )
 
@@ -27,6 +28,12 @@ def test_bw_sharding_contract_matches_gate_declarations() -> None:
     )
     if actual != expected:
         pytest.fail(f"contract document differs from generated gate scope:\n{diff}", pytrace=False)
+
+
+def test_arctic_coverage_matches_pin_record() -> None:
+    root = Path(__file__).parents[1]
+    expected = (root / "docs/benchmarks/arctic-pin.md").read_text()
+    assert generate_arctic_coverage(root) == expected
 
 
 def test_checked_file_helper_negative_control(tmp_path: Path) -> None:
