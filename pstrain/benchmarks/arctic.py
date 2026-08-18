@@ -919,7 +919,7 @@ def pocketsphinx_dictionary() -> Path:
         from pocketsphinx import get_model_path
     except ImportError as exc:
         raise RuntimeError(
-            "BM1 requires the pip requirement 'pocketsphinx' (install pstrain[test])"
+            "BM1 requires the pip requirement 'pocketsphinx' (install pstrain[bench])"
         ) from exc
     path = Path(get_model_path()) / "en-us" / "cmudict-en-us.dict"
     if not path.is_file():

@@ -24,6 +24,8 @@ explicitly labeled alternative band `--band=pip-en-us`; it is not the PIN band.
 
 Install the project with its test dependencies, then run:
 
+The alternative `--band=pip-en-us` additionally requires `pip install ".[bench]"`.
+
 ```console
 python scripts/bench_arctic.py --record docs/benchmarks/<record>.json
 ```
