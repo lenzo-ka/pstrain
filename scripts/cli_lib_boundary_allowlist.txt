@@ -2,4 +2,3 @@
 pstrain/cli/info.py::pstrain.lib._cffi.core  # PR-b: needs a public replacement or a documented carve-out, not a re-export
 pstrain/cli/info.py::pstrain.lib.commands
 pstrain/cli/info.py::pstrain.lib.runtime
-pstrain/cli/test.py::pstrain.lib.testing
