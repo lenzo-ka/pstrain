@@ -7,5 +7,8 @@ from tomllib import load
 try:
     __version__ = version("pstrain")
 except PackageNotFoundError:  # An unpackaged source checkout.
-    with (Path(__file__).parents[1] / "pyproject.toml").open("rb") as pyproject:
-        __version__ = load(pyproject)["project"]["version"]
+    try:
+        with (Path(__file__).parents[1] / "pyproject.toml").open("rb") as pyproject:
+            __version__ = load(pyproject)["project"]["version"]
+    except (FileNotFoundError, KeyError):
+        __version__ = "0.0.0+unknown"
