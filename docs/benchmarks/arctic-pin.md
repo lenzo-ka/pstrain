@@ -1,9 +1,13 @@
 # Arctic benchmark pin
 
 This pins the from-checkout, turnkey Arctic benchmark run by
-`scripts/bench_arctic.py` on current main. Its basis is `MULTIPRON-ONLY`: the
-live cells are multipron-on SLT-55 and big; the two off-mode cells are retained
-as `retired/historical` and are neither trained nor decoded. The
+`scripts/bench_arctic.py` on current main. Its basis is `MULTIPRON-ONLY`.
+<!-- BEGIN GENERATED COVERAGE -->
+The live cells are `on/big` and `on/slt55`. The `off/big` and `off/slt55` cells are retained as
+`retired/historical`; the off-mode cells are neither trained nor decoded by the
+current benchmark run.
+<!-- END GENERATED COVERAGE -->
+The
 machine-readable [record](../../evidence/arctic-pin/record.json), upstream-oracle
 [sidecar](../../evidence/arctic-pin/oracle-sidecar.json), and generated
 [paired analysis](../../evidence/arctic-pin/paired-analysis.json) preserve the per-utterance

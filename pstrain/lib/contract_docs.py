@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import json
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import suppress
 from pathlib import Path
@@ -11,6 +12,8 @@ from typing import TypeVar
 _F = TypeVar("_F", bound=Callable[..., object])
 _START = "<!-- BEGIN GENERATED GATE SCOPE -->"
 _END = "<!-- END GENERATED GATE SCOPE -->"
+_COVERAGE_START = "<!-- BEGIN GENERATED COVERAGE -->"
+_COVERAGE_END = "<!-- END GENERATED COVERAGE -->"
 
 
 def contract_scope(**_scope: object) -> Callable[[_F], _F]:
@@ -245,3 +248,49 @@ def write_bw_sharding_contract(root: Path | None = None) -> None:
     root = root or Path.cwd()
     path = root / "docs/design/bw-sharding-contract.md"
     path.write_text(generate_bw_sharding_contract(root))
+
+
+def generate_arctic_coverage(root: Path | None = None) -> str:
+    """Generate the Arctic pin's coverage statement from its record."""
+    root = root or Path.cwd()
+    document = root / "docs/benchmarks/arctic-pin.md"
+    record = json.loads((root / "evidence/arctic-pin/record.json").read_text())
+    results = record["results"]
+    cells_by_status: dict[str, list[str]] = {}
+    for mode, datasets in results.items():
+        for dataset, cell in datasets.items():
+            cells_by_status.setdefault(cell["status"], []).append(f"{mode}/{dataset}")
+
+    live = sorted(cells_by_status.pop("live", ()))
+    retired = sorted(cells_by_status.pop("retired/historical", ()))
+    if cells_by_status or not live or not retired:
+        raise ValueError(f"unexpected Arctic coverage statuses: {cells_by_status}")
+    declared_retired = sorted(record["basis"]["retired_cells"])
+    if retired != declared_retired:
+        raise ValueError(
+            f"retired result cells {retired!r} disagree with basis {declared_retired!r}"
+        )
+    if any(not cell.startswith("off/") for cell in retired):
+        raise ValueError(f"retired Arctic cells are not all off-mode: {retired!r}")
+
+    generated = [
+        _COVERAGE_START,
+        f"The live cells are {_names(live)}. The {_names(retired)} cells are retained as",
+        "`retired/historical`; the off-mode cells are neither trained nor decoded by the",
+        "current benchmark run.",
+        _COVERAGE_END,
+    ]
+    text = document.read_text()
+    before, separator, remainder = text.partition(_COVERAGE_START)
+    if not separator:
+        raise ValueError(f"missing generated coverage start marker in {document}")
+    _, separator, after = remainder.partition(_COVERAGE_END)
+    if not separator:
+        raise ValueError(f"missing generated coverage end marker in {document}")
+    return before + "\n".join(generated) + after
+
+
+def write_arctic_coverage(root: Path | None = None) -> None:
+    root = root or Path.cwd()
+    path = root / "docs/benchmarks/arctic-pin.md"
+    path.write_text(generate_arctic_coverage(root))

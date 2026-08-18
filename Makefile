@@ -109,7 +109,7 @@ cffi-exports-check:
 docs-gen cffi-exports-check: | $(AMBIENT_IMPORT_PREREQUISITE)
 
 .PHONY: config-check
-config-check: cffi-exports-check
+config-check: cffi-exports-check coverage-check
 	python scripts/run_verified_tests.py tests/test_config.py \
 		tests/test_pipeline_runner.py::test_config_reference_names_runner_keys_used_by_context \
 		tests/test_decoder_config.py \
@@ -132,6 +132,15 @@ contract-check:
 	pytest tests/test_contract_docs.py
 	$(MAKE) contract-docs-gen
 	git diff --exit-code -- docs/design/bw-sharding-contract.md
+
+.PHONY: coverage-docs-gen
+coverage-docs-gen:
+	python -c "from pstrain.lib.contract_docs import write_arctic_coverage; write_arctic_coverage()"
+
+.PHONY: coverage-check
+coverage-check:
+	$(MAKE) coverage-docs-gen
+	git diff --exit-code -- docs/benchmarks/arctic-pin.md
 
 .PHONY: docs
 docs:
