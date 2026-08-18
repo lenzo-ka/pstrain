@@ -8,9 +8,8 @@ from __future__ import annotations
 
 import argparse
 
+from pstrain.api.pipeline import PipelineContext, UnknownTargetError, build_pipeline
 from pstrain.cli.base import CommandContext, CommandResult, ProjectCommand
-from pstrain.lib.pipeline import PipelineContext, UnknownTargetError
-from pstrain.lib.pipeline.tasks import build_pipeline
 
 
 class FeaturesCommand(ProjectCommand):
