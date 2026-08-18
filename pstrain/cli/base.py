@@ -909,7 +909,7 @@ class Command(ABC):
 
     def run(self, args: argparse.Namespace) -> int:
         """Run command with error handling."""
-        from pstrain.lib.config.user import get_user_config
+        from pstrain.api.config import get_user_config
 
         # Load user config for defaults
         user_config = get_user_config()
