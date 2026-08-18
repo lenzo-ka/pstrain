@@ -5,8 +5,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from pstrain.api.corpus import split_is_external, train_test_split, validate_external_split
 from pstrain.cli.base import CommandContext, CommandResult, ProjectCommand
-from pstrain.lib.corpus import split_is_external, train_test_split, validate_external_split
 
 
 class SplitCommand(ProjectCommand):

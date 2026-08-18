@@ -5,9 +5,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from pstrain.api import validate_project
+from pstrain.api import setup_project, validate_project
 from pstrain.cli.base import Command, CommandContext, CommandResult
-from pstrain.lib.setup import setup_project
 
 
 class SetupCommand(Command):
