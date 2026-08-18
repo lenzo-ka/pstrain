@@ -131,6 +131,46 @@ def test_omit_position_reports_failure_and_does_not_retry(
     assert "omit-me ignored after failed alignment" in caplog.text
 
 
+def test_retry_beam_factor_flip_changes_the_accept_or_skip_outcome() -> None:
+    """Prove-the-treatment: flipping ``retry_beam_factor`` changes whether the
+    SAME failing utterance is rescued or skipped.
+
+    The shipped ``1e10`` rescues a final-state-not-reached utterance on a
+    widened retry; the parity/stock setting of ``1`` must instead disable the
+    retry and refuse the utterance (the ``retry_beam_factor <= 1.0`` branch in
+    ``_process_with_final_state_retry``). No other retry test exercises that
+    branch, so a regression that ignored the factor and retried regardless
+    would pass every case above yet be caught here.
+    """
+    mfcc = np.zeros((4, 13), dtype=np.float32)
+    transcript = "<s> TEST </s>"
+
+    rescued = TightBeamTrainer()
+    assert _process_with_final_state_retry(
+        rescued,  # type: ignore[arg-type]
+        mfcc,
+        transcript,
+        normal_beam=1e-90,
+        retry_beam_factor=1e10,
+        fileid="knob-flip",
+        failed_alignment="recover",
+    )
+    assert rescued.attempt_beams == [pytest.approx(1e-90), pytest.approx(1e-100)]
+
+    disabled = TightBeamTrainer()
+    with pytest.raises(TerminalAlignmentError, match="retry is disabled"):
+        _process_with_final_state_retry(
+            disabled,  # type: ignore[arg-type]
+            mfcc,
+            transcript,
+            normal_beam=1e-90,
+            retry_beam_factor=1.0,
+            fileid="knob-flip",
+            failed_alignment="recover",
+        )
+    assert disabled.attempt_beams == [pytest.approx(1e-90)]
+
+
 def test_a0302_exception_reports_current_value_inside_band(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Path
 ) -> None:
