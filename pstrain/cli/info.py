@@ -14,6 +14,12 @@ from typing import Any
 
 from pstrain import __version__
 from pstrain.api import PstrainPaths, get_paths
+from pstrain.api.diagnostics import (
+    PSTRAIN_BINARIES,
+    fp_contract_policy,
+    native_library_available,
+    resolve_binary,
+)
 from pstrain.cli.base import Command, CommandContext, CommandResult
 
 
@@ -120,11 +126,7 @@ class InfoCommand(Command):
 
         fp_contract = None
         if lib_available:
-            from pstrain.lib.runtime import fp_contract_policy
-
             fp_contract = fp_contract_policy()
-
-        from pstrain.lib.commands import PSTRAIN_BINARIES, resolve_binary
 
         native_programs: dict[str, dict[str, str]] = {}
         for name in PSTRAIN_BINARIES.values():
@@ -164,13 +166,7 @@ class InfoCommand(Command):
 
     def _check_lib_available(self) -> bool:
         """Check if the C library can be loaded."""
-        try:
-            from pstrain.lib._cffi.core import _find_library
-
-            _find_library()
-            return True
-        except RuntimeError:
-            return False
+        return native_library_available()
 
     def _print_info(self, info: dict[str, Any]) -> None:
         """Print info in human-readable format."""
