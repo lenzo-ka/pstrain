@@ -131,6 +131,46 @@ def test_omit_position_reports_failure_and_does_not_retry(
     assert "omit-me ignored after failed alignment" in caplog.text
 
 
+def test_retry_beam_factor_flip_changes_the_accept_or_skip_outcome() -> None:
+    """Prove-the-treatment: flipping ``retry_beam_factor`` changes whether the
+    SAME failing utterance is rescued or skipped.
+
+    The shipped ``1e10`` rescues a final-state-not-reached utterance on a
+    widened retry; the parity/stock setting of ``1`` must instead disable the
+    retry and refuse the utterance (the ``retry_beam_factor <= 1.0`` branch in
+    ``_process_with_final_state_retry``). No other retry test exercises that
+    branch, so a regression that ignored the factor and retried regardless
+    would pass every case above yet be caught here.
+    """
+    mfcc = np.zeros((4, 13), dtype=np.float32)
+    transcript = "<s> TEST </s>"
+
+    rescued = TightBeamTrainer()
+    assert _process_with_final_state_retry(
+        rescued,  # type: ignore[arg-type]
+        mfcc,
+        transcript,
+        normal_beam=1e-90,
+        retry_beam_factor=1e10,
+        fileid="knob-flip",
+        failed_alignment="recover",
+    )
+    assert rescued.attempt_beams == [pytest.approx(1e-90), pytest.approx(1e-100)]
+
+    disabled = TightBeamTrainer()
+    with pytest.raises(TerminalAlignmentError, match="retry is disabled"):
+        _process_with_final_state_retry(
+            disabled,  # type: ignore[arg-type]
+            mfcc,
+            transcript,
+            normal_beam=1e-90,
+            retry_beam_factor=1.0,
+            fileid="knob-flip",
+            failed_alignment="recover",
+        )
+    assert disabled.attempt_beams == [pytest.approx(1e-90)]
+
+
 def test_a0302_exception_reports_current_value_inside_band(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Path
 ) -> None:
@@ -161,6 +201,56 @@ def test_a0302_band_does_not_accept_another_utterance(tmp_path: Path) -> None:
         _accept_arctic_a0302_exception(fileid="arctic_a0587", model_dir=tmp_path, band=(4548, 4623))
         is None
     )
+
+
+@requires_c_library
+def test_optional_final_silence_flip_changes_native_bw_artifact(tmp_path: Path) -> None:
+    """Prove the native graph builder consumes ``optional_final_silence``."""
+    from pstrain.lib.bw import BWConfig
+    from pstrain.lib.pipeline import PipelineContext
+    from pstrain.lib.pipeline.tasks import build_pipeline
+    from pstrain.lib.setup import setup_project
+    from pstrain.lib.steps.train import run_bw_training
+
+    project = tmp_path / "project"
+    setup_project(
+        project,
+        transcription_path=FIXTURE / "transcription.txt",
+        audio_path=FIXTURE / "wav",
+        dictionary_path=FIXTURE / "dictionary.dict",
+        phoneset_path=FIXTURE / "phoneset.txt",
+        filler_dict_path=FIXTURE / "filler.dict",
+    )
+    context = PipelineContext.from_config(project)
+    assert build_pipeline(context).run("flat", jobs=1) == 0
+
+    fileid = "arctic_a0001"
+    fileids = context.etc_dir / "optional-final-silence.fileids"
+    transcription = context.etc_dir / "optional-final-silence.transcription"
+    fileids.write_text(f"{fileid}\n")
+    transcription.write_text(f"{fileid} author of the danger trail philip steels etc\n")
+
+    results = {}
+    for enabled in (True, False):
+        results[enabled] = run_bw_training(
+            model_dir=context.model_dir("flat"),
+            output_dir=tmp_path / f"optional-final-silence-{enabled}",
+            features_dir=context.features_dir,
+            train_fileids=fileids,
+            transcription=transcription,
+            dictionary=context.shared_dir / "dictionary.dict",
+            first_pass_2passvar=True,
+            filler_dict=context.filler_dict,
+            n_iter=1,
+            config=BWConfig(
+                pass2var=True,
+                unobserved_gaussian_policy="zero",
+                optional_final_silence=enabled,
+            ),
+        )
+        assert results[enabled].final_utts == 1
+
+    assert results[True].final_likelihood != results[False].final_likelihood
 
 
 @requires_c_library
