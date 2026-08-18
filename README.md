@@ -46,22 +46,39 @@ pstrain supports macOS and Linux, and now Windows. See
 
 ## Quickstart
 
-Install from PyPI:
+### From PyPI
 
 ```bash
 pip install pstrain
 ```
 
-The commands below use the small CMU ARCTIC fixture bundled in the
-[repository](https://github.com/lenzo-ka/pstrain) for a complete local run; from
-a checkout, install with the decoding extra instead:
+Train with your own audio, prompt list, pronunciation dictionary, phoneset, and
+filler dictionary:
 
 ```bash
-python -m pip install ".[test]"
+pstrain train /tmp/pstrain-project \
+  --audio your-audio/ \
+  --prompts your-prompts.txt \
+  --dictionary your-dictionary.dict \
+  --phoneset your-phoneset.txt \
+  --filler-dict your-filler.dict \
+  -j 1
 ```
 
-The repository includes a small CMU ARCTIC fixture for a complete local run.
-Set up a project and train the default eight-Gaussian context-dependent model:
+Prompt lists are assumed to be pre-normalized to match the lexicon.
+
+### From a checkout
+
+Clone the repository and install it in editable mode with the decoding extra:
+
+```bash
+git clone https://github.com/lenzo-ka/pstrain.git
+cd pstrain
+python -m pip install -e ".[test]"
+```
+
+The checkout includes a small CMU ARCTIC fixture for a complete local run. Set
+up a project and train the default eight-Gaussian context-dependent model:
 
 ```bash
 pstrain train /tmp/pstrain-demo \
