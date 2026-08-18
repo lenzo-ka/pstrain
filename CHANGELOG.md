@@ -3,7 +3,16 @@
 Release-relevant changes are recorded here. The project is currently an alpha;
 the version in `pyproject.toml` is authoritative.
 
-## 0.1.0 - Unreleased
+## 0.1.1 - 2026-08-17
+
+- Added self-contained Windows wheels with bundled native dependencies
+  (2026-08-17).
+- Extended build and PyPI release workflows to cover Windows wheels
+  (2026-08-17).
+- Added PE artifact checks to the native floating-point contract gate
+  (2026-08-17).
+
+## 0.1.0 - 2026-08-17
 
 - Imported the original pstrain/SphinxTrain-derived codebase (2026-07-03).
 - Adopted the BSD 2-Clause license for new pstrain code while preserving the
