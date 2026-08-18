@@ -13,7 +13,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from pstrain.api import validate_project
+from pstrain.api import setup_project, validate_project
 from pstrain.cli.base import Command, CommandContext, CommandResult
 from pstrain.lib.one_command import (
     PROMPT_FORMATS,
@@ -28,7 +28,6 @@ from pstrain.lib.one_command import (
 from pstrain.lib.pipeline import PipelineContext, UnknownTargetError
 from pstrain.lib.pipeline.context import DEFAULT_CONFIGS
 from pstrain.lib.pipeline.tasks import DEFAULT_TARGET, TARGETS, build_pipeline
-from pstrain.lib.setup import setup_project
 
 _TEMPFILE_TOKEN_PATTERN = r"[a-z0-9_]{8}"
 _REQUIRED_STAGING_DIRECTORIES = (

@@ -12,7 +12,6 @@ pstrain/cli/flat.py::pstrain.lib.flat
 pstrain/cli/info.py::pstrain.lib._cffi.core  # PR-b: needs a public replacement or a documented carve-out, not a re-export
 pstrain/cli/info.py::pstrain.lib.commands
 pstrain/cli/info.py::pstrain.lib.runtime
-pstrain/cli/setup.py::pstrain.lib.setup
 pstrain/cli/split.py::pstrain.lib.corpus
 pstrain/cli/test.py::pstrain.lib.testing
 pstrain/cli/timings.py::pstrain.lib.pipeline.timings
@@ -20,4 +19,3 @@ pstrain/cli/train.py::pstrain.lib.one_command
 pstrain/cli/train.py::pstrain.lib.pipeline
 pstrain/cli/train.py::pstrain.lib.pipeline.context
 pstrain/cli/train.py::pstrain.lib.pipeline.tasks
-pstrain/cli/train.py::pstrain.lib.setup
