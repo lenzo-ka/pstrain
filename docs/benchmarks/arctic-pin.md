@@ -4,9 +4,9 @@ This pins the from-checkout, turnkey Arctic benchmark run by
 `scripts/bench_arctic.py` on current main. Its basis is `MULTIPRON-ONLY`: the
 live cells are multipron-on SLT-55 and big; the two off-mode cells are retained
 as `retired/historical` and are neither trained nor decoded. The
-machine-readable [record](arctic-pin/record.json), upstream-oracle
-[sidecar](arctic-pin/oracle-sidecar.json), and generated
-[paired analysis](arctic-pin/paired-analysis.json) preserve the per-utterance
+machine-readable [record](../../evidence/arctic-pin/record.json), upstream-oracle
+[sidecar](../../evidence/arctic-pin/oracle-sidecar.json), and generated
+[paired analysis](../../evidence/arctic-pin/paired-analysis.json) preserve the per-utterance
 rows, live comparisons, and the complete engine, model, corpus, transcript,
 language-model, dictionary, and decoder identities.
 

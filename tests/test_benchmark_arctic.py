@@ -442,7 +442,7 @@ def test_record_rejects_provenance_that_disagrees_with_conditions() -> None:
 
 
 def test_adopt_uncovered_keeps_cell_provenance_consistent(tmp_path: Path) -> None:
-    source = Path("docs/benchmarks/arctic-pin/record.json")
+    source = Path("evidence/arctic-pin/record.json")
     record = json.loads(source.read_text())
     setting = "training.optional_final_silence"
     for mode in ("on",):
@@ -515,7 +515,7 @@ def test_adopt_uncovered_keeps_cell_provenance_consistent(tmp_path: Path) -> Non
 def test_adopt_uncovered_refuses_existing_drift(
     tmp_path: Path, mutation: Callable[[dict[str, Any]], object], message: str
 ) -> None:
-    record = json.loads(Path("docs/benchmarks/arctic-pin/record.json").read_text())
+    record = json.loads(Path("evidence/arctic-pin/record.json").read_text())
     mutation(record)
     path = tmp_path / "record.json"
     path.write_text(json.dumps(record))
@@ -539,7 +539,7 @@ def test_adopt_uncovered_refuses_existing_drift(
 
 
 def test_adopt_uncovered_refuses_stale_engine_identity_binding(tmp_path: Path) -> None:
-    record = json.loads(Path("docs/benchmarks/arctic-pin/record.json").read_text())
+    record = json.loads(Path("evidence/arctic-pin/record.json").read_text())
     record["engine"]["git_describe"] = "stale-unbound-engine-identity"
     path = tmp_path / "record.json"
     path.write_text(json.dumps(record))
@@ -563,7 +563,7 @@ def test_adopt_uncovered_refuses_stale_engine_identity_binding(tmp_path: Path) -
 
 
 def test_adopt_record_refuses_any_retired_cell_drift(tmp_path: Path) -> None:
-    record = json.loads(Path("docs/benchmarks/arctic-pin/record.json").read_text())
+    record = json.loads(Path("evidence/arctic-pin/record.json").read_text())
     candidate = json.loads(json.dumps(record))
     candidate["results"]["off"]["big"]["bootstrap_ci_95"][0] += 0.01
     bind_record(candidate)
@@ -662,7 +662,7 @@ def _comparison_documents() -> tuple[dict[str, object], dict[str, object]]:
 
 @pytest.mark.parametrize("identity", ["git", "native-library", "corpus"])
 def test_pin_check_rejects_tampered_producing_identity(tmp_path: Path, identity: str) -> None:
-    record = json.loads(Path("docs/benchmarks/arctic-pin/record.json").read_text())
+    record = json.loads(Path("evidence/arctic-pin/record.json").read_text())
     if identity == "git":
         record["engine"]["git_describe"] = "different-engine"
     elif identity == "native-library":
@@ -769,7 +769,7 @@ def test_condition_authentication_reports_schema_addition_without_failing() -> N
 
 
 def test_committed_record_covers_and_authenticates_live_conditions() -> None:
-    record_path = Path(__file__).parents[1] / "docs/benchmarks/arctic-pin/record.json"
+    record_path = Path(__file__).parents[1] / "evidence/arctic-pin/record.json"
     record = json.loads(record_path.read_text())
     assert authenticate_conditions(benchmark_conditions(), record["conditions"]) == []
 
