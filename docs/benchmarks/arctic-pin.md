@@ -9,7 +9,8 @@ current benchmark run.
 <!-- END GENERATED COVERAGE -->
 The
 machine-readable [record](../../evidence/arctic-pin/record.json), upstream-oracle
-[sidecar](../../evidence/arctic-pin/oracle-sidecar.json), and generated
+[sidecar](../../evidence/arctic-pin/oracle-sidecar.json), its documented
+[provenance and reconstruction limits](oracle-provenance.md), and generated
 [paired analysis](../../evidence/arctic-pin/paired-analysis.json) preserve the per-utterance
 rows, live comparisons, and the complete engine, model, corpus, transcript,
 language-model, dictionary, and decoder identities.
