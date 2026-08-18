@@ -15,9 +15,9 @@ sys.path.insert(0, str(ROOT))
 
 from pstrain.benchmarks.arctic import paired_delta_ci  # noqa: E402
 
-DEFAULT_RECORD = ROOT / "docs/benchmarks/arctic-pin/record.json"
-DEFAULT_ORACLE = ROOT / "docs/benchmarks/arctic-pin/oracle-sidecar.json"
-DEFAULT_OUTPUT = ROOT / "docs/benchmarks/arctic-pin/paired-analysis.json"
+DEFAULT_RECORD = ROOT / "evidence/arctic-pin/record.json"
+DEFAULT_ORACLE = ROOT / "evidence/arctic-pin/oracle-sidecar.json"
+DEFAULT_OUTPUT = ROOT / "evidence/arctic-pin/paired-analysis.json"
 
 
 def _sha256(path: Path) -> str:

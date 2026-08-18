@@ -20,7 +20,7 @@ from pstrain.benchmarks.arctic import (  # noqa: E402
     validate_record,
 )
 
-DEFAULT_RECORD = ROOT / "docs/benchmarks/arctic-pin/record.json"
+DEFAULT_RECORD = ROOT / "evidence/arctic-pin/record.json"
 
 
 def main() -> int:

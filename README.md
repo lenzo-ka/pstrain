@@ -21,7 +21,7 @@ training) shows no statistically significant regression on either cell versus
 stock SphinxTrain. On SLT-55, aggregate WER and error count are identical even
 though 26 of 55 per-utterance error rows differ. The
 [benchmark pin](https://github.com/lenzo-ka/pstrain/blob/main/docs/benchmarks/arctic-pin.md) and its
-[machine-readable record](https://github.com/lenzo-ka/pstrain/blob/main/docs/benchmarks/arctic-pin/record.json) preserve the
+[machine-readable record](https://github.com/lenzo-ka/pstrain/blob/main/evidence/arctic-pin/record.json) preserve the
 evidence and measurement conditions. Run `make verified` for the repository's
 aggregate verification command; its Arctic gate authenticates the pinned
 measurement conditions against the current checkout and re-derives the recorded
