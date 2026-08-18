@@ -1,6 +1,7 @@
 """Tests for decision tree building functionality."""
 
 import contextlib
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -11,6 +12,7 @@ pytest.importorskip(
 )
 
 from pstrain.lib import _pstrainc, dtree, mdef, native_worker
+from pstrain.lib.commands import resolve_binary
 from pstrain.lib.steps import cd_pipeline
 
 # Check if library exists
@@ -144,6 +146,132 @@ class TestMakeQuests:
             dtree.make_quests(bad_mdef, mixw, tmp_path / "questions.txt", continuous=False)
         assert raised.value.operation == "make_quests"
         assert raised.value.diagnostic
+
+    @staticmethod
+    def _continuous_inputs(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
+        model = tmp_path / "mdef"
+        model.write_text(
+            """0.3
+2 n_base
+0 n_tri
+4 n_state_map
+2 n_tied_state
+2 n_tied_ci_state
+2 n_tied_tmat
+AA - - - n/a 0 0 N
+SIL - - - filler 1 1 N
+"""
+        )
+        mixw = tmp_path / "mixture_weights"
+        means = tmp_path / "means"
+        variances = tmp_path / "variances"
+        assert _pstrainc.write_mixw(str(mixw), np.ones((2, 1, 2), dtype=np.float32)) == 0
+        assert _pstrainc.write_gau(str(means), np.zeros((2, 1, 2, 3), dtype=np.float32)) == 0
+        assert _pstrainc.write_gau(str(variances), np.ones((2, 1, 2, 3), dtype=np.float32)) == 0
+        return model, mixw, means, variances
+
+    @pytest.mark.parametrize(
+        ("bad_artifact", "message"),
+        [
+            ("mixture_weights", "Invalid mixture weight"),
+            ("means", "Non-finite mean"),
+            ("variances", "Non-finite variance"),
+            ("short_means_and_variances", "Mean/mixture-weight state-count mismatch"),
+        ],
+    )
+    def test_make_quests_rejects_degraded_statistics(
+        self, tmp_path: Path, bad_artifact: str, message: str
+    ) -> None:
+        """Malformed files must reach the real accumulator and stop artifact creation."""
+        model, mixw, means, variances = self._continuous_inputs(tmp_path)
+        if bad_artifact == "mixture_weights":
+            values = np.ones((2, 1, 2), dtype=np.float32)
+            values[0, 0, 0] = np.nan
+            assert _pstrainc.write_mixw(str(mixw), values) == 0
+        elif bad_artifact == "means":
+            values = np.zeros((2, 1, 2, 3), dtype=np.float32)
+            values[0, 0, 0, 0] = np.nan
+            assert _pstrainc.write_gau(str(means), values) == 0
+        elif bad_artifact == "variances":
+            values = np.ones((2, 1, 2, 3), dtype=np.float32)
+            values[0, 0, 0, 0] = np.inf
+            assert _pstrainc.write_gau(str(variances), values) == 0
+        else:
+            short = np.ones((1, 1, 2, 3), dtype=np.float32)
+            assert _pstrainc.write_gau(str(means), short) == 0
+            assert _pstrainc.write_gau(str(variances), short) == 0
+
+        output = tmp_path / "questions"
+        with pytest.raises(native_worker.PstrainNativeFatalError) as raised:
+            dtree.make_quests(model, mixw, output, means, variances)
+
+        assert message in raised.value.diagnostic
+        assert not output.exists()
+
+    def test_make_quests_good_input_is_deterministic(self, tmp_path: Path) -> None:
+        model, mixw, means, variances = self._continuous_inputs(tmp_path)
+        first = tmp_path / "questions.first"
+        second = tmp_path / "questions.second"
+
+        dtree.make_quests(model, mixw, first, means, variances)
+        dtree.make_quests(model, mixw, second, means, variances)
+
+        assert first.read_bytes() == second.read_bytes()
+
+    def test_make_quests_rejects_nonfinite_full_variance(self, tmp_path: Path) -> None:
+        """The standalone full-covariance path is constructible and fails loudly."""
+        model, mixw, means, variances = self._continuous_inputs(tmp_path)
+        values = np.zeros((2, 1, 2, 3, 3), dtype=np.float32)
+        values[..., range(3), range(3)] = 1.0
+        values[0, 0, 0, 0, 0] = np.nan
+
+        ffi = _pstrainc.get_ffi()
+        lib = _pstrainc.get_lib()
+        mgau = ffi.new("float32 ****[]", 2)
+        feat = [ffi.new("float32 ***[]", 1) for _ in range(2)]
+        density = [[ffi.new("float32 **[]", 2)] for _ in range(2)]
+        rows = [[[ffi.new("float32 *[]", 3) for _ in range(2)]] for _ in range(2)]
+        for m in range(2):
+            mgau[m] = feat[m]
+            feat[m][0] = density[m][0]
+            for d in range(2):
+                density[m][0][d] = rows[m][0][d]
+                for row in range(3):
+                    rows[m][0][d][row] = ffi.cast(
+                        "float32 *", ffi.from_buffer(values[m, 0, d, row])
+                    )
+        veclen = ffi.new("uint32[]", [3])
+        assert lib.s3gau_write_full(str(variances).encode(), mgau, 2, 1, 2, veclen) == 0
+
+        output = tmp_path / "questions"
+        executable = resolve_binary("make_quests")
+        assert executable is not None
+        result = subprocess.run(
+            [
+                str(executable),
+                "-moddeffn",
+                str(model),
+                "-mixwfn",
+                str(mixw),
+                "-meanfn",
+                str(means),
+                "-varfn",
+                str(variances),
+                "-questfn",
+                str(output),
+                "-type",
+                ".cont.",
+                "-fullvar",
+                "yes",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        assert "Non-finite full variance" in result.stderr
+        assert not output.exists()
 
 
 @pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
