@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import argparse
 
+from pstrain.api.timings import format_summary, load_document
 from pstrain.cli.base import Command, CommandContext, CommandResult
-from pstrain.lib.pipeline.timings import format_summary, load_document
 
 
 class TimingsCommand(Command):

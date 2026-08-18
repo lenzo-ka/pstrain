@@ -3,7 +3,8 @@
 This is the recommended entry point for using pstrain programmatically.
 CLI and web clients should call into this API.
 
-All public functions return JSON-serializable data structures.
+The API exposes JSON-returning functions and typed objects and drivers, including
+models, configurations, and the training pipeline.
 
 Example::
 

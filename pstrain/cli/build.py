@@ -1,7 +1,6 @@
 """CLI command for building model targets.
 
-Drives `pstrain.lib.pipeline` directly (no subprocess). Targets are defined in
-`pstrain/lib/pipeline/tasks.py::TARGETS`.
+Drives `pstrain.api.pipeline` directly (no subprocess).
 
 Usage:
     pstrain build cd-8g                       # Build cd-8g model
@@ -18,9 +17,8 @@ import json
 import sys
 from pathlib import Path
 
+from pstrain.api.pipeline import TARGETS, PipelineContext, UnknownTargetError, build_pipeline
 from pstrain.cli.base import Command, CommandContext, CommandResult
-from pstrain.lib.pipeline import PipelineContext, UnknownTargetError
-from pstrain.lib.pipeline.tasks import TARGETS, build_pipeline
 
 
 def list_targets() -> None:
