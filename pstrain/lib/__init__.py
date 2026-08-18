@@ -43,6 +43,7 @@ from pstrain.lib.compare import (
     compare_tmat,
     load_senones,
     load_senones_from_model,
+    print_stats,
 )
 from pstrain.lib.config import (
     FeatureConfig,
@@ -140,6 +141,7 @@ __all__: list[str] = [
     "compare_models",
     "load_senones",
     "load_senones_from_model",
+    "print_stats",
     # Similarity metrics
     "GaussianState",
     "Senone",

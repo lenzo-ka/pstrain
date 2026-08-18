@@ -42,19 +42,33 @@ from pstrain.lib import (
     # Data structures
     Dictionary,
     FeatureConfig,
+    FileType,
     # Models
     Model,
+    ModelCompareResult,
     Phoneset,
     # Configuration
     Profile,
+    PstrainPaths,
     TrainingConfig,
+    compare_auto,
+    compare_features,
+    compare_gaussians,
+    compare_mixw,
+    compare_models,
+    compare_tmat,
     create_model,
+    describe_file,
+    detect_file_type,
     get_fileids,
     get_model_class,
+    get_paths,
     parse_transcription_file,
+    print_stats,
     resolve_config,
     # Project setup
     setup_project,
+    validate_file_type,
     validate_project,
 )
 from pstrain.lib.validate import ValidationReport
@@ -80,6 +94,23 @@ __all__: list[str] = [
     "CDModel",
     "create_model",
     "get_model_class",
+    # Paths
+    "PstrainPaths",
+    "get_paths",
+    # File types
+    "FileType",
+    "describe_file",
+    "detect_file_type",
+    "validate_file_type",
+    # Comparison
+    "ModelCompareResult",
+    "compare_auto",
+    "compare_features",
+    "compare_gaussians",
+    "compare_mixw",
+    "compare_models",
+    "compare_tmat",
+    "print_stats",
     # Steps
     "step_features",
     "step_ci_hmm",

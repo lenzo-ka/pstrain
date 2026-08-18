@@ -72,7 +72,8 @@ class CompareCommand(Command):
 
     @classmethod
     def execute(cls, ctx: CommandContext) -> CommandResult:
-        from pstrain.lib.compare import (
+        from pstrain.api import (
+            FileType,
             ModelCompareResult,
             compare_auto,
             compare_features,
@@ -80,12 +81,9 @@ class CompareCommand(Command):
             compare_mixw,
             compare_models,
             compare_tmat,
-            print_stats,
-        )
-        from pstrain.lib.filetypes import (
-            FileType,
             describe_file,
             detect_file_type,
+            print_stats,
             validate_file_type,
         )
 
