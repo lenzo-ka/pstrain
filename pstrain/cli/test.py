@@ -89,7 +89,7 @@ class TestCommand(Command):
 
     def execute(self, ctx: CommandContext) -> CommandResult:
         """Execute test command."""
-        from pstrain.lib.testing import (
+        from pstrain.api.testing import (
             check_pocketsphinx,
             create_report,
             load_transcripts,

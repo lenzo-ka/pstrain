@@ -14,16 +14,7 @@ import time
 from pathlib import Path
 
 from pstrain.api import setup_project, validate_project
-from pstrain.api.pipeline import (
-    DEFAULT_CONFIGS,
-    DEFAULT_TARGET,
-    TARGETS,
-    PipelineContext,
-    UnknownTargetError,
-    build_pipeline,
-)
-from pstrain.cli.base import Command, CommandContext, CommandResult
-from pstrain.lib.one_command import (
+from pstrain.api.one_command import (
     PROMPT_FORMATS,
     PromptFormatError,
     identity_difference,
@@ -33,6 +24,15 @@ from pstrain.lib.one_command import (
     write_training_transcription,
     write_validation_reports,
 )
+from pstrain.api.pipeline import (
+    DEFAULT_CONFIGS,
+    DEFAULT_TARGET,
+    TARGETS,
+    PipelineContext,
+    UnknownTargetError,
+    build_pipeline,
+)
+from pstrain.cli.base import Command, CommandContext, CommandResult
 
 _TEMPFILE_TOKEN_PATTERN = r"[a-z0-9_]{8}"
 _REQUIRED_STAGING_DIRECTORIES = (

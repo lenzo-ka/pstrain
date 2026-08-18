@@ -1,7 +1,7 @@
 """Align command: run forced alignment with an existing model.
 
 Pattern is the same as :mod:`pstrain.cli.test` -- resolve project paths,
-load transcripts, then drive :func:`pstrain.lib.alignment.align_corpus`
+load transcripts, then drive :func:`pstrain.api.alignment.align_corpus`
 with a single long-lived :class:`Aligner`.
 """
 
@@ -99,8 +99,13 @@ class AlignCommand(Command):
         )
 
     def execute(self, ctx: CommandContext) -> CommandResult:
+        from pstrain.api.alignment import (
+            align_corpus,
+            load_transcripts,
+            save_ctm,
+            save_textgrid,
+        )
         from pstrain.api.config import resolve_config
-        from pstrain.lib.alignment import align_corpus, load_transcripts, save_ctm, save_textgrid
 
         project_dir = Path(ctx.args.project_dir).resolve() if ctx.args.project_dir else Path.cwd()
         if not project_dir.exists():
