@@ -13,8 +13,8 @@ import sys
 from typing import Any
 
 from pstrain import __version__
+from pstrain.api import PstrainPaths, get_paths
 from pstrain.cli.base import Command, CommandContext, CommandResult
-from pstrain.lib.paths import PstrainPaths, get_paths
 
 
 class InfoCommand(Command):

@@ -64,7 +64,7 @@ lint:
 # Canonical local merge-gate verification. Keep the Ruff format scope aligned
 # with the blocking lint job in .github/workflows/tests.yml.
 .PHONY: verified
-verified: ambient-import-check build-c verified-test config-check lint
+verified: ambient-import-check cli-lib-boundary-check build-c verified-test config-check lint
 	ruff format --check pstrain tests
 
 # This is intentionally part of the in-tree verified flow, not the installed-
@@ -72,6 +72,10 @@ verified: ambient-import-check build-c verified-test config-check lint
 .PHONY: ambient-import-check
 ambient-import-check:
 	python scripts/check_ambient_import.py
+
+.PHONY: cli-lib-boundary-check
+cli-lib-boundary-check:
+	python scripts/check_cli_lib_boundary.py
 
 # These verified legs may run concurrently with one another, but none may begin
 # until the ambient-import gate has completed successfully.
