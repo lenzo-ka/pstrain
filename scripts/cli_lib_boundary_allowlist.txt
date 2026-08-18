@@ -4,5 +4,4 @@ pstrain/cli/info.py::pstrain.lib._cffi.core  # PR-b: needs a public replacement 
 pstrain/cli/info.py::pstrain.lib.commands
 pstrain/cli/info.py::pstrain.lib.runtime
 pstrain/cli/test.py::pstrain.lib.testing
-pstrain/cli/timings.py::pstrain.lib.pipeline.timings
 pstrain/cli/train.py::pstrain.lib.one_command
