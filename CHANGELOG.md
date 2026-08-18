@@ -3,6 +3,23 @@
 Release-relevant changes are recorded here. The project is currently an alpha;
 the version in `pyproject.toml` is authoritative.
 
+## 0.2.0 - 2026-08-18
+
+- Added a structured `pstrain.api` as the supported programmatic entry point;
+  the command-line interface now reaches the training library only through it,
+  enforced by a boundary check in the verified build (2026-08-18).
+- Added a `bench` extra providing PocketSphinx for the `pip-en-us` benchmark
+  band, and corrected the install hint the benchmark error printed (2026-08-17).
+- Split the README quickstart into "from PyPI" and "from a checkout" so a
+  pip-installed user can run it without the repository fixtures (2026-08-17).
+- `make_quests` now fails loudly on degraded input statistics instead of writing
+  a plausible-looking question file (2026-08-17).
+- Relocated the Arctic benchmark pin evidence under `evidence/` so a record
+  change runs its authenticating gate, and added a generated coverage statement
+  and an oracle-provenance note (2026-08-17, 2026-08-18).
+- The package version now falls back to `0.0.0+unknown` instead of raising at
+  import when the package is relocated without its metadata (2026-08-17).
+
 ## 0.1.1 - 2026-08-17
 
 - Added self-contained Windows wheels with bundled native dependencies
