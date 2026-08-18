@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Enforce the ratcheting boundary between pstrain.cli and pstrain.lib.
+"""Enforce the closed boundary between pstrain.cli and pstrain.lib.
+
+No direct imports are permitted; the empty allowlist makes this boundary
+zero-tolerance.
 
 The scanner fully covers ordinary ``import`` and ``from ... import`` statements
 that target ``pstrain.lib``, including relative imports. Dynamic-import

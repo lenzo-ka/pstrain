@@ -147,3 +147,7 @@ def test_cli_lib_boundary_gate_passes() -> None:
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_cli_lib_boundary_allowlist_is_empty() -> None:
+    assert boundary.read_allowlist() == set()
