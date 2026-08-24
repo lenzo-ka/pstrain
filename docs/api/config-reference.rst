@@ -7,6 +7,21 @@ All configuration parameters for pstrain.
 alignment
 ---------
 
+``alignment.beam``
+   :Type: ``float``
+   :Default: ``1e-64``
+   :Description: Viterbi pruning beam
+
+``alignment.failed_alignment``
+   :Type: ``recover | abort | omit``
+   :Default: ``'recover'``
+   :Description: Forced-alignment failure policy: ``recover`` retries final-state failures once; ``abort`` and ``omit`` do not retry
+
+``alignment.retry_beam_factor``
+   :Type: ``float``
+   :Default: ``1e+36``
+   :Description: Factor that widens the beam for one retry after an utterance fails to reach its final state; values at or below 1 disable the retry
+
 ``alignment.verbatim_tokens``
    :Type: ``bool``
    :Default: ``False``

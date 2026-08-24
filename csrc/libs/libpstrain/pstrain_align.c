@@ -78,6 +78,7 @@ extern arg_t *cmd_ln_get_defn_for_align(void);
 
 struct pstrain_align_context_s {
     cmd_ln_t *config;
+    double beam_current;
     int32 ncep;
     int32 want_phones;
     int32 want_states;
@@ -236,6 +237,7 @@ pstrain_align_init(const char *mdef_path,
 
     pstrain_align_context_t *ctx = ckd_calloc(1, sizeof(*ctx));
     ctx->config = c;
+    ctx->beam_current = cfg->beam;
     ctx->ncep = feat_cepsize(kbcore_fcb(kbc));
     ctx->want_phones = cfg->compute_phones;
     ctx->want_states = cfg->compute_states;
@@ -261,6 +263,17 @@ pstrain_align_free(pstrain_align_context_t *ctx)
     if (g_ctx == ctx) {
         g_ctx = NULL;
     }
+}
+
+double
+pstrain_align_set_beam(pstrain_align_context_t *ctx, double beam)
+{
+    if (ctx == NULL)
+        return 0.0;
+    double previous = ctx->beam_current;
+    align_set_beam(beam);
+    ctx->beam_current = beam;
+    return previous;
 }
 
 /* Trim leading/trailing whitespace and return a fresh malloc'd copy.
@@ -557,7 +570,7 @@ pstrain_align_mfcc(pstrain_align_context_t *ctx,
     if (rc != 0) {
         ckd_free(sent);
         set_error("pstrain_align_mfcc: align_utt_capture failed (rc=%d)", rc);
-        return -1;
+        return rc;
     }
 
     int built = build_result(ctx->want_phones, ctx->want_states,
@@ -602,7 +615,7 @@ pstrain_align_mfc_file(pstrain_align_context_t *ctx,
     if (rc != 0) {
         ckd_free(sent);
         set_error("pstrain_align_mfc_file: align_utt_capture failed (rc=%d)", rc);
-        return -1;
+        return rc;
     }
 
     int built = build_result(ctx->want_phones, ctx->want_states,

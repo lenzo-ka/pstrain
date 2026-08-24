@@ -94,8 +94,8 @@ class AlignCommand(Command):
         parser.add_argument(
             "--beam",
             type=float,
-            default=1e-64,
-            help="Viterbi pruning beam (default: 1e-64, matches sphinx3_align)",
+            default=None,
+            help="Viterbi pruning beam (default: alignment.beam from config)",
         )
 
     def execute(self, ctx: CommandContext) -> CommandResult:
@@ -166,6 +166,7 @@ class AlignCommand(Command):
             return CommandResult.fail("Audio directory not found. Tried: audio/, shared/wav/, wav/")
 
         include_phones = not ctx.args.no_phones
+        beam = ctx.args.beam if ctx.args.beam is not None else alignment_config.beam
 
         ctx.log_action("Align", str(model_dir))
         ctx.log(f"  Utterances: {len(transcripts)}")
@@ -186,6 +187,9 @@ class AlignCommand(Command):
             filler_dict=filler_dict,
             audio_ext=ctx.args.audio_ext,
             include_phones=include_phones,
+            beam=beam,
+            retry_beam_factor=alignment_config.retry_beam_factor,
+            failed_alignment=alignment_config.failed_alignment,
             verbatim_tokens=alignment_config.verbatim_tokens,
         )
 

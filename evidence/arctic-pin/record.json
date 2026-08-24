@@ -104,6 +104,9 @@
     "known_skips": [],
     "pin_condition_source_kinds": {
       "on": {
+        "alignment.beam": "project-profile",
+        "alignment.failed_alignment": "project-profile",
+        "alignment.retry_beam_factor": "project-profile",
         "alignment.verbatim_tokens": "project-profile",
         "description": "project-profile",
         "features.agc": "project-profile",
@@ -172,6 +175,9 @@
     "pin_conditions": {
       "on": {
         "alignment": {
+          "beam": 1e-64,
+          "failed_alignment": "recover",
+          "retry_beam_factor": 1e+36,
           "verbatim_tokens": false
         },
         "description": "BM1 product-default multipron pin",
@@ -345,7 +351,7 @@
       "models",
       "results"
     ],
-    "sha256": "9606ea926e1b987f7107af0d214e5fd31fd826ea14ba1b1deaf3b5912a9578e8"
+    "sha256": "cdfe45839f673c9e335864da184ed472bd8650b9fc0aebd60eb83d89d54fd733"
   },
   "resources": {
     "archives": {

@@ -310,6 +310,27 @@ class ShardingConfig(StrictModel):
 class AlignmentConfig(StrictModel):
     """Forced-alignment transcript policy."""
 
+    beam: Annotated[float, Field(gt=0, description="Viterbi pruning beam")] = 1e-64
+    retry_beam_factor: Annotated[
+        float,
+        Field(
+            gt=0,
+            description=(
+                "Factor that widens the beam for one retry after an utterance fails to reach "
+                "its final state; values at or below 1 disable the retry"
+            ),
+        ),
+    ] = 1e36
+    failed_alignment: Annotated[
+        Literal["recover", "abort", "omit"],
+        Field(
+            description=(
+                "Forced-alignment failure policy: ``recover`` retries final-state failures "
+                "once; ``abort`` and ``omit`` do not retry"
+            )
+        ),
+    ] = "recover"
+
     verbatim_tokens: Annotated[
         bool,
         Field(
