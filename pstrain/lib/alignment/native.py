@@ -23,7 +23,7 @@ from __future__ import annotations
 import contextlib
 import wave
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 import numpy as np
 
@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 
 
 _DEFAULT_BEAM = 1e-64
+_DEFAULT_RETRY_BEAM_FACTOR = 1e36
 _DEFAULT_FEAT_TYPE = "1s_c_d_dd"
 _DEFAULT_CMN = "batch"
 _DEFAULT_AGC = "none"
@@ -54,6 +55,10 @@ class Aligner:
         dict_path: Pronunciation dictionary path.
         filler_dict: Filler / non-speech dictionary path. Optional.
         beam: Pruning beam (default 1e-64, matches sphinx3_align).
+        retry_beam_factor: Factor that widens the beam for one retry after a
+            final-state failure. Values at or below 1 disable the retry.
+        failed_alignment: ``"recover"`` retries final-state failures;
+            ``"abort"`` and ``"omit"`` raise without retrying.
         insert_sil: Insert optional inter-word silences (default ``True``).
         include_phones: Return phone segmentation in the result.
         include_states: Return per-frame state segmentation.
@@ -85,6 +90,8 @@ class Aligner:
         *,
         filler_dict: Path | str | None = None,
         beam: float = _DEFAULT_BEAM,
+        retry_beam_factor: float = _DEFAULT_RETRY_BEAM_FACTOR,
+        failed_alignment: Literal["recover", "abort", "omit"] = "recover",
         insert_sil: bool = True,
         include_phones: bool = True,
         include_states: bool = False,
@@ -129,6 +136,8 @@ class Aligner:
                 {
                     "filler_dict": filler_dict,
                     "beam": beam,
+                    "retry_beam_factor": retry_beam_factor,
+                    "failed_alignment": failed_alignment,
                     "insert_sil": insert_sil,
                     "include_phones": include_phones,
                     "include_states": include_states,
@@ -192,6 +201,10 @@ class Aligner:
             raise RuntimeError(f"pstrain_align_init failed: {err or 'unknown'}")
 
         self._ctx = ctx
+        self._beam = beam
+        self._retry_beam_factor = retry_beam_factor
+        self._failed_alignment = failed_alignment
+        self._last_alignment_retried = False
         self._fe: FeatureExtractor | None = None
         self._sample_rate = int(self._fe_config["samprate"])
         self._frame_rate = int(feat_record["-frate"])
@@ -222,6 +235,28 @@ class Aligner:
             self._fe = None
         if Aligner._active is self:
             Aligner._active = None
+
+    def set_beam(self, beam: float) -> float:
+        """Set the live pruning beam and return its previous value."""
+        if hasattr(self, "_proxy"):
+            return float(self._proxy.call("set_beam", beam))
+        if self._ctx == self._ffi.NULL:
+            raise RuntimeError("Aligner is closed")
+        return float(self._lib.pstrain_align_set_beam(self._ctx, beam))
+
+    def _final_state_retry_beam(self, rc: int) -> float | None:
+        """Return the widened beam for one final-state retry, or ``None`` to skip it.
+
+        Mirrors Baum-Welch training: a final-state pruning failure (``rc == -3``)
+        under the ``recover`` policy is retried once at ``beam / retry_beam_factor``
+        (a smaller value is a wider beam). Any other rc or policy, or a factor at or
+        below 1, disables the retry.
+        """
+        self._last_alignment_retried = False
+        if rc != -3 or self._failed_alignment != "recover" or self._retry_beam_factor <= 1.0:
+            return None
+        self._last_alignment_retried = True
+        return self._beam / self._retry_beam_factor
 
     def __enter__(self) -> Self:
         return self
@@ -269,15 +304,35 @@ class Aligner:
         n_frames, ncep = arr.shape
 
         out_pp = self._ffi.new("pstrain_align_result_t **")
-        rc = self._lib.pstrain_align_mfcc(
-            self._ctx,
-            self._ffi.cast("float *", self._ffi.from_buffer(arr)),
-            n_frames,
-            ncep,
-            transcript.encode(),
-            utterance_id.encode(),
-            out_pp,
+        cepstra = self._ffi.cast("float *", self._ffi.from_buffer(arr))
+        rc = int(
+            self._lib.pstrain_align_mfcc(
+                self._ctx,
+                cepstra,
+                n_frames,
+                ncep,
+                transcript.encode(),
+                utterance_id.encode(),
+                out_pp,
+            )
         )
+        retry_beam = self._final_state_retry_beam(rc)
+        if retry_beam is not None:
+            previous_beam = self.set_beam(retry_beam)
+            try:
+                rc = int(
+                    self._lib.pstrain_align_mfcc(
+                        self._ctx,
+                        cepstra,
+                        n_frames,
+                        ncep,
+                        transcript.encode(),
+                        utterance_id.encode(),
+                        out_pp,
+                    )
+                )
+            finally:
+                self.set_beam(previous_beam)
         if rc != 0:
             err = self._last_error()
             raise RuntimeError(f"pstrain_align_mfcc failed: {err or f'rc={rc}'}")
@@ -306,13 +361,30 @@ class Aligner:
         mfc_path = Path(mfc_path)
         utt_id = utterance_id or mfc_path.stem
         out_pp = self._ffi.new("pstrain_align_result_t **")
-        rc = self._lib.pstrain_align_mfc_file(
-            self._ctx,
-            str(mfc_path).encode(),
-            transcript.encode(),
-            utt_id.encode(),
-            out_pp,
+        rc = int(
+            self._lib.pstrain_align_mfc_file(
+                self._ctx,
+                str(mfc_path).encode(),
+                transcript.encode(),
+                utt_id.encode(),
+                out_pp,
+            )
         )
+        retry_beam = self._final_state_retry_beam(rc)
+        if retry_beam is not None:
+            previous_beam = self.set_beam(retry_beam)
+            try:
+                rc = int(
+                    self._lib.pstrain_align_mfc_file(
+                        self._ctx,
+                        str(mfc_path).encode(),
+                        transcript.encode(),
+                        utt_id.encode(),
+                        out_pp,
+                    )
+                )
+            finally:
+                self.set_beam(previous_beam)
         if rc != 0:
             err = self._last_error()
             raise RuntimeError(f"pstrain_align_mfc_file failed: {err or f'rc={rc}'}")

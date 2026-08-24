@@ -11,8 +11,9 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
-from pstrain.lib.alignment.core import AlignmentResult
+from pstrain.lib.alignment.core import DEFAULT_BEAM, DEFAULT_RETRY_BEAM_FACTOR, AlignmentResult
 from pstrain.lib.alignment.native import Aligner
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,9 @@ def align_corpus(
     filler_dict: Path | None = None,
     audio_ext: str = ".wav",
     include_phones: bool = True,
+    beam: float = DEFAULT_BEAM,
+    retry_beam_factor: float = DEFAULT_RETRY_BEAM_FACTOR,
+    failed_alignment: Literal["recover", "abort", "omit"] = "recover",
     verbatim_tokens: bool = False,
 ) -> AlignmentJob:
     """Align an entire corpus.
@@ -82,6 +86,9 @@ def align_corpus(
         filler_dict: Path to filler dictionary (optional).
         audio_ext: Audio file extension (default ``".wav"``).
         include_phones: Capture phone-level segmentation.
+        beam: Viterbi pruning beam.
+        retry_beam_factor: Factor for one wider-beam final-state retry.
+        failed_alignment: Whether final-state failures are retried before being recorded.
         verbatim_tokens: Honor explicit pronunciation variants exactly.
 
     Returns:
@@ -121,6 +128,9 @@ def align_corpus(
             model_dir,
             dict_path,
             filler_dict=filler_dict,
+            beam=beam,
+            retry_beam_factor=retry_beam_factor,
+            failed_alignment=failed_alignment,
             include_phones=include_phones,
             verbatim_tokens=verbatim_tokens,
         )

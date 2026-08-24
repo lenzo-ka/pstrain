@@ -65,6 +65,9 @@ profiles:
     sharding:
       partition_position: remainder-first
     alignment:
+      beam: 1.0e-64
+      retry_beam_factor: 1.0e36
+      failed_alignment: recover
       verbatim_tokens: false
   wideband:
     extends: default

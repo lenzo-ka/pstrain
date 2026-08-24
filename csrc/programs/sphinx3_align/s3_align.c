@@ -203,6 +203,7 @@ static int32 n_active;
 
 static int32 curfrm;            /** Current frame */
 static int32 beam;              /** Pruning beamwidth */
+static logmath_t *lmath;        /** Log math used to convert the live beam */
 static int32 *score_scale;      /** Score by which state scores scaled in each frame */
 
 /** Lists of state, phone and word-level alignments for most recent utterance */
@@ -1357,6 +1358,7 @@ align_init(mdef_t * _mdef, tmat_t * _tmat, dict_t * _dict, cmd_ln_t *_config, lo
     mdef = _mdef;
     tmat = _tmat;
     dict = _dict;
+    lmath = _logmath;
 
     assert(mdef);
     assert(tmat);
@@ -1377,7 +1379,7 @@ align_init(mdef_t * _mdef, tmat_t * _tmat, dict_t * _dict, cmd_ln_t *_config, lo
     }
     fillwid[k] = BAD_S3WID;
 
-    beam = logs3(_logmath, cmd_ln_float64_r(_config, "-beam"));
+    beam = logs3(lmath, cmd_ln_float64_r(_config, "-beam"));
     E_INFO("logs3(beam)= %d\n", beam);
 
     score_scale = (int32 *) ckd_calloc(S3_MAX_FRAMES, sizeof(int32));
@@ -1389,6 +1391,12 @@ align_init(mdef_t * _mdef, tmat_t * _tmat, dict_t * _dict, cmd_ln_t *_config, lo
     align_wdseg = NULL;
 
     return 0;
+}
+
+void
+align_set_beam(float64 value)
+{
+    beam = logs3(lmath, value);
 }
 
 void

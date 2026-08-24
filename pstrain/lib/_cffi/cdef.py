@@ -748,6 +748,8 @@ pstrain_align_init(const char *mdef_path,
 
 void pstrain_align_free(pstrain_align_context_t *ctx);
 
+double pstrain_align_set_beam(pstrain_align_context_t *ctx, double beam);
+
 int
 pstrain_align_mfcc(pstrain_align_context_t *ctx,
                const float *mfcc,

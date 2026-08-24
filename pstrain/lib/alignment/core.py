@@ -14,11 +14,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 # Default pruning beam for the sphinx3 aligner. 1e-64 matches the
 # upstream sphinx3_align CLI default; it is wide enough for cd-1g
 # through cd-8g acoustic models on clean read speech.
 DEFAULT_BEAM = 1e-64
+DEFAULT_RETRY_BEAM_FACTOR = 1e36
 
 # Default retained for callers constructing segments independently of a result.
 FRAME_SHIFT_SECONDS = 0.01
@@ -100,6 +102,8 @@ def align_utterance(
     filler_dict: Path | None = None,
     include_phones: bool = True,
     beam: float = DEFAULT_BEAM,
+    retry_beam_factor: float = DEFAULT_RETRY_BEAM_FACTOR,
+    failed_alignment: Literal["recover", "abort", "omit"] = "recover",
     verbatim_tokens: bool = False,
 ) -> AlignmentResult:
     """Align a single utterance.
@@ -121,6 +125,9 @@ def align_utterance(
         filler_dict: Filler / non-speech dictionary (optional).
         include_phones: Return phone-level segments in the result.
         beam: Viterbi pruning beam (default 1e-64, sphinx3_align default).
+        retry_beam_factor: Factor for one wider-beam final-state retry.
+        failed_alignment: ``"recover"`` retries final-state failures once;
+            ``"abort"`` and ``"omit"`` do not retry.
         verbatim_tokens: Honor explicit pronunciation variants exactly. The
             default collapses suffixes and considers every alternative.
 
@@ -146,6 +153,8 @@ def align_utterance(
         dict_path,
         filler_dict=filler_dict,
         beam=beam,
+        retry_beam_factor=retry_beam_factor,
+        failed_alignment=failed_alignment,
         include_phones=include_phones,
         verbatim_tokens=verbatim_tokens,
     ) as aligner:

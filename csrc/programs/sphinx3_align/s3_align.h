@@ -157,6 +157,8 @@ typedef struct align_wdseg_s {
 
 int32 align_init(mdef_t * _mdef, tmat_t * _tmat, dict_t * _dict, cmd_ln_t *_config, logmath_t *_logmath);
 
+void align_set_beam(float64 value);
+
 void align_free(void);
 
 int32 align_build_sent_hmm(char *transcript,  /**< In: Word transcript */

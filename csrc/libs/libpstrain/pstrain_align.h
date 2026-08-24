@@ -95,6 +95,11 @@ pstrain_align_init(const char *mdef_path,
 void pstrain_align_free(pstrain_align_context_t *ctx);
 
 /**
+ * Set the live pruning beam and return its previous value.
+ */
+double pstrain_align_set_beam(pstrain_align_context_t *ctx, double beam);
+
+/**
  * Align one utterance from already-extracted MFCC frames.
  *
  * @param ctx Context.

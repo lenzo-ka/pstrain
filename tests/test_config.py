@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from pstrain.lib.config.models import FeatureConfig, Profile, TrainingConfig
+from pstrain.lib.config.models import AlignmentConfig, FeatureConfig, Profile, TrainingConfig
 from pstrain.lib.config.resolver import (
     CONSUMER_TOUCHES,
     CONSUMERS,
@@ -58,10 +58,19 @@ def test_active_names_and_defaults_are_canonical() -> None:
     assert profile.training.n_state == 3
     assert profile.runner.jobs is None
     assert profile.alignment.verbatim_tokens is False
+    assert profile.alignment.beam == 1e-64
+    assert profile.alignment.retry_beam_factor == 1e36
+    assert profile.alignment.failed_alignment == "recover"
     with pytest.raises(ValueError):
         FeatureConfig.model_validate({"num_ceps": 26})
     with pytest.raises(ValueError):
         TrainingConfig.model_validate({"n_states": 5})
+
+
+@pytest.mark.parametrize("retry_beam_factor", [0, -1.0])
+def test_alignment_retry_beam_factor_must_be_positive(retry_beam_factor: float) -> None:
+    with pytest.raises(ValueError):
+        AlignmentConfig(retry_beam_factor=retry_beam_factor)
 
 
 def test_alignment_verbatim_tokens_resolves_opt_in(tmp_path: Path) -> None:

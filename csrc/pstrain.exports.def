@@ -18,6 +18,7 @@ EXPORTS
     pstrain_align_mfc_file
     pstrain_align_mfcc
     pstrain_align_result_free
+    pstrain_align_set_beam
     pstrain_build_tree
     pstrain_bw_build_state_seq
     pstrain_bw_count_active_fallback_senones

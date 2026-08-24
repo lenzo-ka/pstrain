@@ -201,6 +201,71 @@ class TestAligner:
         with pytest.raises(FileNotFoundError):
             Aligner(tmp_path / "does-not-exist", dict_path)
 
+    def test_non_final_state_failure_is_not_retried(self) -> None:
+        aligner = object.__new__(Aligner)
+        aligner._beam = 1e-64
+        aligner._retry_beam_factor = 1e36
+        aligner._failed_alignment = "recover"
+
+        # A non-final-state failure (rc != -3) is never retried.
+        assert aligner._final_state_retry_beam(-2) is None
+        assert aligner._last_alignment_retried is False
+
+        # A final-state failure under "recover" widens the beam once.
+        assert aligner._final_state_retry_beam(-3) == 1e-64 / 1e36
+        assert aligner._last_alignment_retried is True
+
+        # A retry factor at or below 1 disables the retry.
+        aligner._retry_beam_factor = 1.0
+        assert aligner._final_state_retry_beam(-3) is None
+        assert aligner._last_alignment_retried is False
+
+    @pytest.mark.parametrize("utterance_id", ["arctic_a0336", "arctic_b0424"])
+    def test_final_state_failure_gets_one_wider_beam_retry(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        utterance_id: str,
+    ) -> None:
+        from pstrain.lib import native_worker
+
+        monkeypatch.setattr(native_worker, "in_worker", lambda: True)
+        fixture = _FIXTURES / "multipron_final_state"
+        transcript = next(
+            line.split(maxsplit=1)[1]
+            for line in (fixture / "transcription.txt").read_text().splitlines()
+            if line.startswith(f"{utterance_id} ")
+        )
+        model = _alignment_model(tmp_path)
+        kwargs = {
+            "filler_dict": fixture / "filler.dict",
+            "include_phones": True,
+            # Deliberately tight to induce the same final-state failure that a
+            # one-shot retry widening the beam to 1e-80 recovers.
+            "beam": 1e-40,
+        }
+
+        with (
+            Aligner(model, fixture / "dictionary.dict", retry_beam_factor=1.0, **kwargs) as aligner,
+            pytest.raises(RuntimeError, match=r"rc=-3"),
+        ):
+            aligner.align_mfc_file(fixture / f"{utterance_id}.mfc", transcript)
+
+        with Aligner(
+            model,
+            fixture / "dictionary.dict",
+            retry_beam_factor=1e40,
+            failed_alignment="recover",
+            **kwargs,
+        ) as aligner:
+            result = aligner.align_mfc_file(fixture / f"{utterance_id}.mfc", transcript)
+            aligner._retry_beam_factor = 1.0
+            with pytest.raises(RuntimeError, match=r"rc=-3"):
+                aligner.align_mfc_file(fixture / f"{utterance_id}.mfc", transcript)
+
+        assert result.phones
+        assert result.words[-1].end_frame == result.n_frames - 1
+
     def test_missing_model_files_raises(self, tmp_path: Path) -> None:
         empty_model = tmp_path / "model"
         empty_model.mkdir()
@@ -431,6 +496,40 @@ class TestLoadTranscripts:
 
 
 class TestAlignCorpus:
+    def test_retry_configuration_is_passed_to_aligner(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        audio = tmp_path / "audio"
+        audio.mkdir()
+        (audio / "utt.wav").touch()
+        captured: dict[str, object] = {}
+
+        class FakeAligner:
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                captured.update(kwargs)
+
+            def align_audio(self, *args: object, **kwargs: object) -> AlignmentResult:
+                return _sample_result("utt")
+
+            def close(self) -> None:
+                pass
+
+        monkeypatch.setattr("pstrain.lib.alignment.batch.Aligner", FakeAligner)
+        job = align_corpus(
+            {"utt": "hello world"},
+            audio,
+            tmp_path,
+            tmp_path / "dict",
+            beam=1e-80,
+            retry_beam_factor=1e20,
+            failed_alignment="omit",
+        )
+
+        assert job.n_aligned == 1
+        assert captured["beam"] == 1e-80
+        assert captured["retry_beam_factor"] == 1e20
+        assert captured["failed_alignment"] == "omit"
+
     def test_verbatim_unknown_variant_preserves_token(self, tmp_path: Path) -> None:
         model = _alignment_model(tmp_path)
         audio_dir = tmp_path / "audio"
