@@ -3,6 +3,21 @@
 Release-relevant changes are recorded here. The project is currently an alpha;
 the version in `pyproject.toml` is authoritative.
 
+## 0.3.0 - 2026-08-24
+
+- Forced alignment now retries once with a wider beam when an utterance cannot
+  reach its final state, recovering long or acoustically hard utterances that a
+  fixed beam would otherwise drop; this mirrors the Baum-Welch training retry.
+  Adds `alignment.beam`, `alignment.retry_beam_factor`, and
+  `alignment.failed_alignment` configuration and a native live-beam setter, and
+  wires the previously accepted-but-ignored `pstrain align --beam` (2026-08-24).
+- The decoder now caps its top-N Gaussian count at the model's density, so a
+  model with fewer densities than the default no longer logs a spurious `-topn`
+  warning on every decoded utterance; decoding results are unchanged (2026-08-24).
+- Added an end-to-end HMM/GMM training tutorial notebook covering corpus
+  preparation, feature extraction, training, forced alignment, decoding, and
+  packaging (2026-08-24).
+
 ## 0.2.0 - 2026-08-18
 
 - Added a structured `pstrain.api` as the supported programmatic entry point;

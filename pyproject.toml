@@ -1,6 +1,6 @@
 [project]
 name = "pstrain"
-version = "0.2.0"
+version = "0.3.0"
 description = "Continuous-density HMM/GMM acoustic model training toolkit"
 readme = "README.md"
 license = "BSD-2-Clause"
