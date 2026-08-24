@@ -94,6 +94,7 @@ typedef struct {
     const char *cmninit;
     int varnorm;
     int remove_noise;
+    long topn;
 } pstrain_decoder_config_t;
 
 pstrain_decoder_t *pstrain_decoder_create(const pstrain_decoder_config_t *config);

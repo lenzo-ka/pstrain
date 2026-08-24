@@ -52,6 +52,11 @@ pstrain_decoder_create(const pstrain_decoder_config_t *options)
         ps_config_free(config);
         return NULL;
     }
+    if (options->topn > 0
+        && ps_config_set_int(config, "topn", options->topn) == NULL) {
+        ps_config_free(config);
+        return NULL;
+    }
     decoder = calloc(1, sizeof(*decoder));
     if (decoder != NULL)
         decoder->ps = ps_init(config);

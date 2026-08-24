@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from pstrain.lib._cffi import read_gau
 from pstrain.lib.config.models import FeatureConfig
 from pstrain.lib.model import require_complete_model
 
@@ -71,6 +72,7 @@ class Decoder:
         beam: float | None = None,
         wbeam: float | None = None,
         pl_window: int | None = None,
+        topn: int | None = None,
         lw: float = 10.0,
         wip: float = 0.2,
         pbeam: float = 1e-80,
@@ -90,6 +92,7 @@ class Decoder:
             beam: Main beam width (None = auto-detect based on model type)
             wbeam: Word beam width (None = auto-detect based on model type)
             pl_window: Phone lookahead window (None = use default 5)
+            topn: Top-N Gaussians per state (None = at most 4, capped by the model)
             feature_config: Schema profile used only for settings not overridden by
                 the trained model's authoritative ``feat.params`` record.
 
@@ -160,6 +163,14 @@ class Decoder:
             config.agc, config.cmn, config.cmninit = strings[-3:]
             config.varnorm = feature_config.varnorm == "yes"
             config.remove_noise = feature_config.remove_noise
+            config.topn = 0
+            means = self.model_dir / "means"
+            if means.exists():
+                try:
+                    _, _, _, n_density, _ = read_gau(str(means))
+                    config.topn = topn if topn is not None else min(4, n_density)
+                except Exception:
+                    pass
             self._decoder = self._lib.pstrain_decoder_create(config)
             if self._decoder == self._ffi.NULL:
                 raise RuntimeError("PocketSphinx decoder initialization failed")

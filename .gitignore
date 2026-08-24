@@ -77,6 +77,7 @@ dist/
 *.mfc
 *.wav
 /data/
+/notebooks/_work/
 benchmarks/timit/data/
 benchmarks/timit/pilot/
 
@@ -90,3 +91,6 @@ benchmarks/timit/pilot/
 
 # Stray lane report artifacts (never commit these to the repo root)
 /*-report-*.md
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
