@@ -37,7 +37,7 @@ typedef struct pstrain_align_config_s {
     int     verbatim_tokens; /**< Honor explicit WORD(n).    Default 0.    */
 } pstrain_align_config_t;
 
-#define PSTRAIN_ABI_VERSION 2
+#define PSTRAIN_ABI_VERSION 3
 
 uint32 pstrain_abi_version(void);
 void pstrain_align_config_default(pstrain_align_config_t *config);

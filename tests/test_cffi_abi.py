@@ -22,6 +22,6 @@ def test_init_rejects_library_abi_version_skew(monkeypatch: pytest.MonkeyPatch) 
 
     with pytest.raises(
         RuntimeError,
-        match=r"Python expects ABI version 2, library reports 99",
+        match=rf"Python expects ABI version {core.PSTRAIN_ABI_VERSION}, library reports 99",
     ):
         core._init()

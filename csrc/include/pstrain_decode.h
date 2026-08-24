@@ -31,6 +31,7 @@ typedef struct {
     const char *cmninit;
     int varnorm;
     int remove_noise;
+    long topn; /* top-N Gaussians per state; 0 = leave PocketSphinx default */
 } pstrain_decoder_config_t;
 
 pstrain_decoder_t *pstrain_decoder_create(const pstrain_decoder_config_t *config);
