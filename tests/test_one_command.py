@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from pstrain.cli.cli import main
+from pstrain.lib.lm import build_lm_from_file
 from pstrain.lib.one_command import (
     InputReport,
     PromptFormatError,
@@ -496,9 +497,39 @@ def test_one_command_trains_default_cd_8g_and_decodes_without_transcript_munging
     if not available:
         pytest.skip(f"decode step needs PocketSphinx: {reason}")
 
+    # Decoding needs a language model. Without one the decoder selects no search
+    # module and every utterance fails, so asserting on the exit status alone
+    # passed while nothing decoded at all.
+    lm_path = tmp_path / "decode.arpa"
+    build_lm_from_file(decoder_transcript, lm_path)
+    report_path = tmp_path / "report.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "pstrain",
+            "test",
+            "cd-8g",
+            "--project-dir",
+            str(project),
+            "--lm",
+            str(lm_path),
+            "--output",
+            str(report_path),
+            "-j",
+            "1",
+        ],
+    )
+    assert main() == 0
+    counts = json.loads(report_path.read_text())["counts"]
+    assert counts["decoded"] == counts["utterances"]
+    assert counts["decoded"] > 0
+
+    # Without a language model the same command decodes nothing. It must now say
+    # so and fail, rather than exit zero reporting a fabricated error rate.
     monkeypatch.setattr(
         sys,
         "argv",
         ["pstrain", "test", "cd-8g", "--project-dir", str(project), "--no-lm", "-j", "1"],
     )
-    assert main() == 0
+    assert main() != 0
