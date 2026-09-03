@@ -1,5 +1,8 @@
-# local untracked cache
+# local untracked cache — house-style program docs live here (untracked/<program>/)
 untracked/
+
+# git worktree scratch root (.claude is already ignored below)
+.worktrees/
 
 # Python
 __pycache__/
