@@ -98,6 +98,10 @@ class PstrainNativeError(PstrainError):
         detail = diagnostic.strip() or "native operation failed"
         super().__init__(f"{operation} failed for {', '.join(input_paths)}: {detail}")
 
+    def __reduce__(self) -> tuple[object, tuple[object, ...]]:
+        """Preserve constructor-independent exception state when pickled."""
+        return _restore_native_error, (type(self), self.args, self.__dict__)
+
 
 class PstrainNativeFatalError(PstrainNativeError):
     """The native worker exited nonzero or returned a diagnosed failure."""
@@ -125,6 +129,17 @@ class PstrainInvalidInputError(PstrainNativeError):
 
 class PstrainWorkerError(PstrainError):
     """The contained worker or process-pool infrastructure is unavailable."""
+
+
+def _restore_native_error(
+    error_type: type[PstrainNativeError],
+    args: tuple[object, ...],
+    attributes: dict[str, object],
+) -> PstrainNativeError:
+    error = error_type.__new__(error_type)
+    BaseException.__init__(error, *args)
+    error.__dict__.update(attributes)
+    return error
 
 
 @dataclass(frozen=True)
