@@ -9,15 +9,71 @@ from __future__ import annotations
 
 import contextlib
 import os
+import pickle
 import signal
 import socket
 from collections.abc import Iterator
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import pytest
 
 from pstrain.lib import dtree, mdef, native_worker
 from tests.clib import requires_c_library
+
+
+def _raise_native_error() -> None:
+    raise native_worker.PstrainNativeError(
+        "bldtree", ("features", "questions"), "missing triphones", 1
+    )
+
+
+def _native_error_types() -> set[type[native_worker.PstrainNativeError]]:
+    pending = [native_worker.PstrainNativeError]
+    error_types: set[type[native_worker.PstrainNativeError]] = set()
+    while pending:
+        error_type = pending.pop()
+        error_types.add(error_type)
+        pending.extend(error_type.__subclasses__())
+    return error_types
+
+
+@pytest.mark.parametrize(
+    "error_type",
+    sorted(_native_error_types(), key=lambda cls: (cls.__module__, cls.__qualname__)),
+)
+def test_native_error_family_survives_pickle(
+    error_type: type[native_worker.PstrainNativeError],
+) -> None:
+    kwargs = (
+        {"signal": signal.SIGSEGV} if error_type is native_worker.PstrainNativeCrashError else {}
+    )
+    original = error_type("operation", ("first", "second"), "native diagnostic", 17, **kwargs)
+
+    restored = pickle.loads(pickle.dumps(original))
+
+    assert type(restored) is error_type
+    assert restored.args == original.args
+    assert str(restored) == str(original)
+    assert restored.operation == original.operation
+    assert restored.input_paths == original.input_paths
+    assert restored.input_path == original.input_path
+    assert restored.diagnostic == original.diagnostic
+    assert restored.returncode == original.returncode
+    if isinstance(original, native_worker.PstrainNativeCrashError):
+        assert restored.signal == original.signal
+
+
+def test_process_pool_delivers_native_error_to_parent() -> None:
+    with ProcessPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(_raise_native_error)
+
+        with pytest.raises(native_worker.PstrainNativeError) as raised:
+            future.result()
+
+    assert raised.value.operation == "bldtree"
+    assert raised.value.diagnostic == "missing triphones"
+    assert raised.value.returncode == 1
 
 
 @pytest.fixture(autouse=True)
