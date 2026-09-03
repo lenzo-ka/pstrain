@@ -11,7 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from pstrain.lib.model import MODEL_FILES_REQUIRED
+from pstrain.lib.model import MODEL_FILES_REQUIRED, require_complete_model
+from pstrain.lib.native_worker import PstrainError
 from pstrain.lib.testing.decoder import Decoder, DecodingResult, check_pocketsphinx
 from pstrain.lib.testing.wer import WERResult, aggregate_wer, calculate_wer
 
@@ -56,6 +57,9 @@ def _decode_files(
     config: _DecodeConfig, files: list[tuple[str, Path]], jobs: int | None
 ) -> list[tuple[str, DecodingResult]]:
     """Decode files serially or in stable process shards, preserving input order."""
+    if not files:
+        return []
+
     worker_count = min(_resolve_decode_jobs(jobs), len(files))
     indexed = [(position, utt_id, path) for position, (utt_id, path) in enumerate(files)]
     if worker_count <= 1:
@@ -209,10 +213,15 @@ def test_model(
     if not available:
         raise ImportError(msg)
 
-    # Validate model directory
+    # Validate model directory. Testing consumes the model for decoding, so the
+    # complete-model contract applies: the front-end record must be present and
+    # readable, not merely the files training writes. This is checked here rather
+    # than left to decoder construction, which does not happen when there is
+    # nothing to decode.
     for fname in MODEL_FILES_REQUIRED:
         if not (model_dir / fname).exists():
             raise FileNotFoundError(f"Model file not found: {model_dir / fname}")
+    require_complete_model(model_dir)
 
     # Determine model name from directory
     model_name = model_dir.parent.name if model_dir.name == "default" else model_dir.name
@@ -231,12 +240,15 @@ def test_model(
     wer_results: list[WERResult] = []
     per_utterance: dict[str, dict[str, Any]] = {}
     n_decoded = 0
+    decode_failures: list[tuple[str, str]] = []
 
     decode_inputs: list[tuple[str, Path]] = []
+    missing_audio: list[str] = []
     for utt_id in test_transcripts:
         audio_file = test_audio_dir / f"{utt_id}.wav"
         if not audio_file.exists():
             logger.warning("Audio file not found: %s", audio_file)
+            missing_audio.append(utt_id)
             continue
         decode_inputs.append((utt_id, audio_file))
 
@@ -266,7 +278,21 @@ def test_model(
                     "insertions": wer_result.insertions,
                 }
         else:
-            logger.warning("Decoding failed for %s: %s", utt_id, result.error)
+            reason = result.error or "unknown decoder failure"
+            decode_failures.append((utt_id, reason))
+            logger.warning("Decoding failed for %s: %s", utt_id, reason)
+
+    if test_transcripts and n_decoded == 0:
+        # Utterances were requested and none produced a hypothesis. Report every
+        # reason, including audio that was never found: a corpus whose audio is
+        # all missing decodes exactly as little as one that all failed, and
+        # neither has a word error rate worth reporting.
+        reasons = [f"{utt_id}: {reason}" for utt_id, reason in decode_failures]
+        reasons += [f"{utt_id}: audio file not found" for utt_id in missing_audio]
+        raise PstrainError(
+            f"Nothing decoded: all {len(test_transcripts)} requested utterances failed: "
+            + "; ".join(reasons)
+        )
 
     # Aggregate results
     if wer_results:
