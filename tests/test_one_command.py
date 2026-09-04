@@ -12,7 +12,6 @@ from pathlib import Path
 import pytest
 
 from pstrain.cli.cli import main
-from pstrain.lib.lm import build_lm_from_file
 from pstrain.lib.one_command import (
     InputReport,
     PromptFormatError,
@@ -497,11 +496,6 @@ def test_one_command_trains_default_cd_8g_and_decodes_without_transcript_munging
     if not available:
         pytest.skip(f"decode step needs PocketSphinx: {reason}")
 
-    # Decoding needs a language model. Without one the decoder selects no search
-    # module and every utterance fails, so asserting on the exit status alone
-    # passed while nothing decoded at all.
-    lm_path = tmp_path / "decode.arpa"
-    build_lm_from_file(decoder_transcript, lm_path)
     report_path = tmp_path / "report.json"
     monkeypatch.setattr(
         sys,
@@ -512,8 +506,6 @@ def test_one_command_trains_default_cd_8g_and_decodes_without_transcript_munging
             "cd-8g",
             "--project-dir",
             str(project),
-            "--lm",
-            str(lm_path),
             "--output",
             str(report_path),
             "-j",
@@ -524,9 +516,15 @@ def test_one_command_trains_default_cd_8g_and_decodes_without_transcript_munging
     counts = json.loads(report_path.read_text())["counts"]
     assert counts["decoded"] == counts["utterances"]
     assert counts["decoded"] > 0
+    report = json.loads(report_path.read_text())
+    assert "optimistic" in report["description"]
+    assert "not comparable" in report["description"]
+    assert (project / "experiments" / "default" / "lm" / "train.arpa").is_file()
 
-    # Without a language model the same command decodes nothing. It must now say
-    # so and fail, rather than exit zero reporting a fabricated error rate.
+    # --no-lm still means "decode with no language model", and without one the
+    # decoder selects no search module and nothing decodes. That must fail
+    # loudly rather than exit zero reporting a fabricated error rate, which is
+    # what it did before the decode-failure fix.
     monkeypatch.setattr(
         sys,
         "argv",

@@ -19,7 +19,7 @@ def run_build_lm(
     Uses arpabo with auto mode (optimized Katz backoff) by default.
 
     Args:
-        train_transcripts: Path to training transcription file (Sphinx format)
+        train_transcripts: Path to a simple or Sphinx-format training transcription file
         output_path: Path to write ARPA LM file
         max_order: N-gram order (default 3 for trigrams)
         smoothing: Smoothing method - "auto" (default), "good_turing", "kneser_ney"

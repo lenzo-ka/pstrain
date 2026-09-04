@@ -24,6 +24,7 @@ def parse_transcription_file(transcription_path: Path) -> dict[str, str]:
     Raises:
         FileNotFoundError: If transcription file does not exist
         UnicodeDecodeError: If file is not UTF-8 encoded
+        ValueError: If a nonempty line does not match a supported format
 
     Supports two formats:
     1. Simple: ``<fileid> <word1> <word2> ...``
@@ -36,7 +37,7 @@ def parse_transcription_file(transcription_path: Path) -> dict[str, str]:
     """
     transcripts = {}
     with transcription_path.open(encoding="utf-8") as f:
-        for line in f:
+        for line_number, line in enumerate(f, start=1):
             line = line.strip()
             if not line:
                 continue
@@ -55,6 +56,11 @@ def parse_transcription_file(transcription_path: Path) -> dict[str, str]:
             if len(parts) == 2:
                 fileid, text = parts
                 transcripts[fileid] = text
+                continue
+
+            raise ValueError(
+                f"Unrecognized transcription format at {transcription_path}:{line_number}: {line!r}"
+            )
 
     return transcripts
 

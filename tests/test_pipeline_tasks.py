@@ -774,6 +774,25 @@ def test_split_runs_end_to_end_and_partitions(tmp_path: Path) -> None:
     assert set(train_ids).isdisjoint(set(test_ids))
 
 
+def test_lm_target_succeeds_on_setup_project_layout(tmp_path: Path) -> None:
+    from pstrain.lib.setup import setup_project
+
+    fixture = Path(__file__).parent / "fixtures" / "mini_arctic"
+    project = tmp_path / "proj"
+    setup_project(
+        project,
+        transcription_path=fixture / "transcription.txt",
+        audio_path=fixture / "wav",
+        dictionary_path=fixture / "dictionary.dict",
+        phoneset_path=fixture / "phoneset.txt",
+        filler_dict_path=fixture / "filler.dict",
+    )
+
+    ctx = PipelineContext.from_config(project)
+    assert build_pipeline(ctx).run("lm", jobs=1) == 0
+    assert (ctx.lm_dir / "train.arpa").is_file()
+
+
 def test_editing_persistent_split_revalidates_and_changes_membership(tmp_path: Path) -> None:
     """A consistent edit becomes authoritative and invalidates the split marker."""
     project = tmp_path / "proj"

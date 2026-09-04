@@ -95,10 +95,10 @@ def build_lm_from_file(
     max_order: int = 3,
     smoothing: str = "auto",
 ) -> Path:
-    """Build an ARPA LM from a Sphinx-format transcription file.
+    """Build an ARPA LM from a supported transcription file.
 
     Args:
-        transcript_file: Path to transcription file (Sphinx format)
+        transcript_file: Path to a simple or Sphinx-format transcription file
         output_path: Path to write ARPA LM
         max_order: N-gram order (default 3)
         smoothing: Smoothing method (default "auto")
@@ -111,31 +111,22 @@ def build_lm_from_file(
 
 
 def load_transcripts(transcript_file: Path) -> dict[str, str]:
-    """Load transcripts from a Sphinx-format transcription file.
+    """Load transcripts from a supported transcription file.
 
-    Format: <s> word word word </s> (utterance_id)
+    Supports ``utterance_id words`` and ``<s> words </s> (utterance_id)``.
 
     Args:
         transcript_file: Path to transcription file
 
     Returns:
         Dict mapping utterance_id to transcript text
+
+    Raises:
+        ValueError: If a nonempty line does not match a supported format
     """
-    transcripts = {}
+    from pstrain.lib.transcription import parse_transcription_file
 
-    with transcript_file.open(encoding="utf-8", errors="replace") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-
-            # Parse: <s> text </s> (utt_id)
-            if "(" in line:
-                paren_start = line.rfind("(")
-                paren_end = line.rfind(")")
-                if paren_start > 0 and paren_end > paren_start:
-                    utt_id = line[paren_start + 1 : paren_end].strip()
-                    transcript = line[:paren_start].strip()
-                    transcripts[utt_id] = transcript
-
+    transcripts = parse_transcription_file(transcript_file)
+    if not transcripts:
+        raise ValueError(f"No recognizable transcripts in {transcript_file}")
     return transcripts
