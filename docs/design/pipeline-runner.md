@@ -65,23 +65,43 @@ in-process because each step depends on the previous one's output.
 
 ### Dry-run
 
-`--dry-run` prints the topologically-sorted plan with stale/up-to-date
-markers and never executes:
+`--dry-run` prints the topologically-sorted plan and never executes. The
+plan uses the same tab-separated shape as the run it predicts: two comment
+lines, a header row, then one row per stage.
 
 ```
 # Plan for target: cd-1g
-# 1108 task(s); 10 stale
-
-. [   1] extract:arctic_a0001  (up to date)
-. [   2] extract:arctic_a0002  (up to date)
+# 1263 task(s); 1263 stale
+index	stage	tasks	status	description
+1	provenance:split	1	not built yet	Record effective split configuration
+2	split	1	upstream 'provenance:split' will run	Partition all.transcription into train/test fileids + transcripts
+3	provenance:features	1	not built yet	Record effective features configuration
+4-1135	features	1132	stale
+1136	provenance:training	1	not built yet	Record effective training configuration
+1137	flat	1	upstream 'split' will run	Initialize flat (uniform) acoustic model
+1138	ci-1g	1	upstream 'flat' will run	Train CI-1g (1 Gaussian per state)
 ...
-* [1099] flat  (missing output: shared/models/flat/default/feat.params)
-* [1100] ci-1g  (missing output: shared/models/ci-1g/default/feat.params)
-...
-* [1108] cd-1g  (missing output: shared/models/cd-1g/default/feat.params)
-
-# Legend: * = will run, . = up to date
+1263	cd-1g	1	upstream 'cd-1g-init' will run	Train tied CD-1g model
 ```
+
+`index` is a position in the plan. A collapsed fan-out reports as one row
+carrying the range of positions it spans and the number of tasks in it, so
+a plan holding 1,132 per-utterance feature tasks still shows the shape of
+the build. `--verbose` lists every member instead.
+
+`status` speaks three vocabularies:
+
+* `not built yet` — a declared output does not exist. This is the normal
+  state of every stage in a fresh project, so it is not phrased as a fault.
+* `stale` — outputs exist but are older than inputs. A partly-cached
+  fan-out reports the fraction, `3 of 40 stale`, and a group with nothing
+  to do reports `up to date`.
+* `upstream '<task>' will run` — this stage is due only because something
+  it depends on is.
+
+There are no bullet markers and no continuation line for the description,
+so every row carries the same columns and a plan pastes as a TSV beside the
+progress rows it foretells.
 
 ## Why we built our own
 

@@ -309,7 +309,7 @@ class Pipeline:
                 plan = self.plan(target, force=force)
 
                 if dry_run:
-                    _print_plan(plan, target=str(target))
+                    _print_plan(plan, target=str(target), verbose=verbose)
                     return 0
 
                 to_run = [e for e in plan if e.stale]
@@ -327,6 +327,7 @@ class Pipeline:
                     jobs=_resolve_jobs(requested_jobs),
                     worker_nice=self._worker_nice,
                     cancel_requested=cancellation,
+                    verbose=verbose,
                 )
                 planned = len(to_run)
                 verified = execution.verified
@@ -401,7 +402,10 @@ class Pipeline:
         outputs = [Path(p) for p in task.outputs]
         missing = [p for p in outputs if not p.exists()]
         if missing:
-            return True, f"missing output: {missing[0]}"
+            # "not built yet" rather than "missing output": in a plan for a
+            # fresh project every stage is in this state, and naming the normal
+            # case after an absence reads as a fault report.
+            return True, "not built yet"
         marker = task.completion_marker
         if marker is not None and not marker.exists():
             return True, "missing completion marker"
@@ -416,18 +420,52 @@ class Pipeline:
         return False, "up to date"
 
 
-def _print_plan(plan: list[_PlanEntry], *, target: str) -> None:
-    """Print the plan in a Make-style format."""
+def _print_plan(plan: list[_PlanEntry], *, target: str, verbose: bool = False) -> None:
+    """Print the plan as one tab-separated row per stage.
+
+    The row shape matches the progress rows the run itself prints, so a plan
+    reads as the prediction of that run and pastes as a TSV. Everything a
+    stage has to say fits on its own row: no bullet markers to decode and no
+    continuation line for the description. A description's own whitespace is
+    collapsed, so a tab or a newline in one cannot invent a column.
+
+    A fan-out is summarized as one row rather than one row per member: a plan
+    for a few hundred utterances is meant to show the SHAPE of the build, and
+    a per-utterance listing hides it. ``verbose`` prints every member.
+    """
     print(f"# Plan for target: {target}")
     print(f"# {len(plan)} task(s); {sum(1 for e in plan if e.stale)} stale")
-    print()
-    for i, entry in enumerate(plan, 1):
-        marker = "*" if entry.stale else "."
-        print(f"{marker} [{i:2d}] {entry.task.name}  ({entry.reason})")
-        if entry.task.description:
-            print(f"        {entry.task.description}")
-    print()
-    print("# Legend: * = will run, . = up to date")
+    print("index\tstage\ttasks\tstatus\tdescription")
+
+    position = 0
+    while position < len(plan):
+        entry = plan[position]
+        group = entry.task.parallel_group
+        run_end = position
+        if group and not verbose:
+            while run_end + 1 < len(plan) and plan[run_end + 1].task.parallel_group == group:
+                run_end += 1
+
+        if run_end > position:
+            members = plan[position : run_end + 1]
+            stale = sum(1 for member in members if member.stale)
+            index = f"{position + 1}-{run_end + 1}"
+            stage = group or entry.task.name
+            tasks = len(members)
+            if not stale:
+                status = "up to date"
+            elif stale == tasks:
+                status = "stale"
+            else:
+                status = f"{stale} of {tasks} stale"
+        else:
+            index = str(position + 1)
+            stage = entry.task.name
+            tasks = 1
+            status = entry.reason
+        description = " ".join(entry.task.description.split())
+        print(f"{index}\t{stage}\t{tasks}\t{status}\t{description}")
+        position = run_end + 1
 
 
 def _resolve_jobs(jobs: int | None) -> int:
@@ -445,8 +483,16 @@ def _execute(
     jobs: int,
     worker_nice: int = 5,
     cancel_requested: threading.Event | None = None,
+    verbose: bool = False,
 ) -> _ExecutionResult:
-    """Execute entries, batching all dependency-ready members of a group."""
+    """Execute entries, batching all dependency-ready members of a group.
+
+    A fan-out group reports as a group, not as one line per member. A stage
+    like feature extraction creates a task per utterance, so a few hundred
+    utterances would otherwise bury the run in per-task chatter -- and the
+    serial path is the common one in a notebook, where ``jobs=1`` avoids the
+    spawn-pool hang. ``verbose`` restores the per-task lines.
+    """
     pending = list(entries)
     producer_by_output = {
         Path(output): entry.task.name for entry in entries for output in entry.task.outputs
@@ -455,13 +501,41 @@ def _execute(
     timings: list[TaskTiming] = []
     cancellation = cancel_requested or threading.Event()
 
+    group_sizes: dict[str, int] = {}
+    for planned_entry in entries:
+        planned_group = planned_entry.task.parallel_group
+        if planned_group:
+            group_sizes[planned_group] = group_sizes.get(planned_group, 0) + 1
+    open_group: str | None = None
+    group_started = 0.0
+    group_done = 0
+    header_written = False
+
+    def row(stage: str, tasks: int, seconds: float, status: str = "ok") -> None:
+        """One tab-separated row per stage, so a run pastes into a spreadsheet."""
+        nonlocal header_written
+        if not header_written:
+            print("stage\ttasks\twall\tstatus")
+            header_written = True
+        print(f"{stage}\t{tasks}\t{seconds:.1f}\t{status}")
+
+    def close_group() -> None:
+        """Emit the one row that stands in for a collapsed group."""
+        nonlocal open_group, group_done
+        if open_group is not None:
+            row(open_group, group_done, time.monotonic() - group_started)
+            open_group = None
+            group_done = 0
+
     while pending:
         if cancellation.is_set():
+            close_group()
             _print_cancelled_summary(len(executed), len(pending))
             return _ExecutionResult(1, timings, "aborted", len(entries), len(executed))
         entry = pending[0]
         group = entry.task.parallel_group
         if group and jobs > 1:
+            close_group()
             batch = [
                 candidate
                 for candidate in pending
@@ -499,20 +573,42 @@ def _execute(
             executed.update(batch_names)
             pending = [candidate for candidate in pending if candidate.task.name not in batch_names]
         else:
+            # A multi-member fan-out run serially collapses to one group line.
+            # A solo task keeps its own, because there its name IS the progress.
+            collapse = bool(group) and group_sizes.get(group or "", 0) > 1 and not verbose
+            if not collapse:
+                close_group()
+            elif open_group != group:
+                close_group()
+                open_group = group
+                group_started = time.monotonic()
+                group_done = 0
+            started = time.monotonic()
             rc, inline_timings = _run_one(entry.task)
+            elapsed = time.monotonic() - started
             timings.extend(inline_timings)
             if rc != 0:
+                close_group()
+                row(entry.task.name, 1, elapsed, "failed")
                 return _ExecutionResult(rc, timings, "failed", len(entries), len(executed))
+            if collapse:
+                group_done += 1
+            else:
+                row(entry.task.name, 1, elapsed)
             executed.add(entry.task.name)
             pending.pop(0)
+    close_group()
     return _ExecutionResult(0, timings, "completed", len(entries), len(executed))
 
 
 def _run_one(task: Task) -> _ExecutionResult:
-    """Run a single task in-process. Returns exit code."""
+    """Run a single task in-process. Returns exit code.
+
+    Progress reporting belongs to the caller, which knows whether this task is
+    a stage in its own right or one member of a fan-out. Failure is reported
+    here, because a diagnostic must never depend on how progress is grouped.
+    """
     logger.info("Running %s", task.name)
-    print(f"-> {task.name}")
-    start = time.monotonic()
     measured = measure(task.name, task.parallel_group, lambda: _execute_task(task))
     if measured.error is not None:
         exc = measured.error
@@ -521,8 +617,6 @@ def _run_one(task: Task) -> _ExecutionResult:
         return _ExecutionResult(
             1, [measured.timing] if measured.timing is not None else [], "failed"
         )
-    elapsed = time.monotonic() - start
-    print(f"   {task.name} done in {elapsed:.1f}s")
     return _ExecutionResult(0, [measured.timing] if measured.timing is not None else [])
 
 

@@ -182,11 +182,15 @@ def load_document(project_dir: Path, run_id: str | None = None) -> tuple[Path, d
 
 
 def format_summary(document: dict[str, Any]) -> str:
-    """Pretty-print a compact per-stage rollup table."""
-    lines = ["Pipeline timings", "Stage                         Wall       CPU  CPU/wall"]
+    """Per-stage rollup as tab-separated rows, so a run pastes into a spreadsheet.
+
+    Values are bare numbers and the units live in the header: ``7.20s`` and
+    ``0.75x`` read well in a terminal but are text to every tool that would
+    otherwise sum or sort the column.
+    """
+    lines = ["stage\twall_s\tcpu_s\tcpu_wall_ratio"]
     for item in document["stages"]:
         lines.append(
-            f"{item['stage']:<27} {item['wall']:>7.2f}s {item['cpu']:>8.2f}s"
-            f" {item['cpu_wall_ratio']:>8.2f}x"
+            f"{item['stage']}\t{item['wall']:.2f}\t{item['cpu']:.2f}\t{item['cpu_wall_ratio']:.2f}"
         )
     return "\n".join(lines)

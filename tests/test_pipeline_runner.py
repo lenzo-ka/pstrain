@@ -1390,5 +1390,191 @@ def test_rollup_schema_and_summary_are_value_tolerant() -> None:
     assert document["stages"] == [
         {"stage": "features", "wall": 2.0, "cpu": 1.5, "cpu_wall_ratio": 0.75}
     ]
-    assert "features" in pipeline_timings.format_summary(document)
-    assert "0.75x" in pipeline_timings.format_summary(document)
+    summary = pipeline_timings.format_summary(document)
+    rows = summary.splitlines()
+    assert rows[0] == "stage\twall_s\tcpu_s\tcpu_wall_ratio"
+    assert rows[1] == "features\t2.00\t1.50\t0.75"
+    # Every row has the same column count, so the block pastes as a TSV, and
+    # the values are bare numbers rather than "2.00s" / "0.75x".
+    assert {row.count("\t") for row in rows} == {3}
+
+
+def _fan_out_entries(tmp_path: Path, n: int) -> list[runner._PlanEntry]:
+    """One ungrouped task followed by an n-member fan-out, as features runs."""
+    entries = [
+        runner._PlanEntry(
+            Task(
+                "provenance:features",
+                functools.partial(_touch, tmp_path / "provenance", "p"),
+                outputs=(tmp_path / "provenance",),
+            ),
+            stale=True,
+            reason="test",
+        )
+    ]
+    for i in range(n):
+        output = tmp_path / f"feat-{i}"
+        entries.append(
+            runner._PlanEntry(
+                Task(
+                    f"extract:utt_{i}",
+                    functools.partial(_touch, output, str(i)),
+                    outputs=(output,),
+                    parallel_group="extract",
+                ),
+                stale=True,
+                reason="test",
+            )
+        )
+    return entries
+
+
+def test_serial_fan_out_reports_as_a_group_not_once_per_member(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Progress is one tab-separated row per stage, not two lines per utterance.
+
+    Feature extraction creates one task per utterance, and a notebook runs
+    ``jobs=1`` to avoid the spawn-pool hang, so the serial path is the one a
+    reader actually sees. Before this collapsed, 150 utterances printed 300
+    lines and buried every other message in the run.
+    """
+    result = runner._execute(_fan_out_entries(tmp_path, 12), jobs=1)
+    output = capsys.readouterr().out
+    lines = output.splitlines()
+
+    assert result.rc == 0
+    assert lines[0] == "stage\ttasks\twall\tstatus"
+    # The whole 13-task run is a header and two rows.
+    assert len(lines) == 3
+    assert any(line.startswith("extract\t12\t") for line in lines)
+    assert any(line.startswith("provenance:features\t1\t") for line in lines)
+    assert "extract:utt_0" not in output
+    assert "extract:utt_11" not in output
+    # Every row carries the same column count, so the block pastes as a TSV.
+    assert {line.count("\t") for line in lines} == {3}
+
+
+def test_verbose_restores_the_per_task_rows(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    result = runner._execute(_fan_out_entries(tmp_path, 3), jobs=1, verbose=True)
+    output = capsys.readouterr().out
+
+    assert result.rc == 0
+    for i in range(3):
+        assert f"extract:utt_{i}\t1\t" in output
+    assert "extract\t3\t" not in output
+
+
+def test_dry_run_plan_summarizes_a_fan_out_instead_of_listing_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A plan is meant to show the build's shape; a per-utterance listing hides it.
+
+    A real cd-1g plan for this corpus is 1,263 tasks, of which 1,132 are one
+    feature-extraction task per utterance. Listed one per line it runs past
+    1,200 lines and the dozen tasks that describe the actual training chain
+    are lost in it.
+    """
+    plan = _fan_out_entries(tmp_path, 40)
+    runner._print_plan(plan, target="cd-1g")
+    output = capsys.readouterr().out
+    lines = output.splitlines()
+
+    assert lines[2] == "index\tstage\ttasks\tstatus\tdescription"
+    assert "2-41\textract\t40\tstale\t" in output
+    assert "1\tprovenance:features\t1\ttest\t" in output
+    assert "extract:utt_0\t" not in output
+    # Two comment lines, a header, and one row per stage: no bullet markers
+    # and no continuation line, so every row carries the same column count.
+    assert len(lines) == 5
+    assert {line.count("\t") for line in lines[2:]} == {4}
+
+
+def test_dry_run_plan_lists_every_member_when_verbose(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _fan_out_entries(tmp_path, 40)
+    runner._print_plan(plan, target="cd-1g", verbose=True)
+    output = capsys.readouterr().out
+
+    for i in (0, 17, 39):
+        assert f"extract:utt_{i}\t1\ttest\t" in output
+    assert "\textract\t40\t" not in output
+
+
+def test_dry_run_plan_says_how_much_of_a_group_is_stale(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A partly-cached fan-out reports the fraction, not a bare 'stale'."""
+    plan = _fan_out_entries(tmp_path, 4)
+    plan[1].stale = False
+    plan[2].stale = False
+    runner._print_plan(plan, target="cd-1g")
+    output = capsys.readouterr().out
+
+    assert "2-5\textract\t4\t2 of 4 stale\t" in output
+
+
+def test_dry_run_plan_reports_a_fully_cached_group_as_up_to_date(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A group with nothing to do says so, rather than reporting '0 stale'."""
+    plan = _fan_out_entries(tmp_path, 4)
+    for entry in plan[1:]:
+        entry.stale = False
+    runner._print_plan(plan, target="cd-1g")
+    output = capsys.readouterr().out
+
+    assert "2-5\textract\t4\tup to date\t" in output
+    assert "0 of 4" not in output
+
+
+def test_dry_run_plan_keeps_a_description_on_one_row(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A tab or a newline inside a description must not invent a column."""
+    plan = _fan_out_entries(tmp_path, 2)
+    plan[0].task = Task(
+        "provenance:features",
+        plan[0].task.fn,
+        outputs=plan[0].task.outputs,
+        description="Record\teffective\nfeatures configuration",
+    )
+    runner._print_plan(plan, target="cd-1g")
+    lines = capsys.readouterr().out.splitlines()
+
+    assert "1\tprovenance:features\t1\ttest\tRecord effective features configuration" in lines
+    assert {line.count("\t") for line in lines[2:]} == {4}
+
+
+def test_a_failure_inside_a_collapsed_group_still_names_the_task(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Collapsing progress must never collapse a diagnostic."""
+
+    def boom() -> None:
+        raise RuntimeError("could not build a tree for OY")
+
+    entries = _fan_out_entries(tmp_path, 2)
+    entries.append(
+        runner._PlanEntry(
+            Task("extract:bad", boom, parallel_group="extract"),
+            stale=True,
+            reason="test",
+        )
+    )
+
+    result = runner._execute(entries, jobs=1)
+    output = capsys.readouterr().out
+
+    assert result.rc == 1
+    assert result.status == "failed"
+    # The diagnostic names the task, and is not squeezed into a TSV column.
+    assert "!! extract:bad failed: could not build a tree for OY" in output
+    # The failing task also gets its own row, marked as such.
+    assert any(
+        line.startswith("extract:bad\t1\t") and line.endswith("\tfailed")
+        for line in output.splitlines()
+    )
