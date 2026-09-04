@@ -10,8 +10,10 @@ from __future__ import annotations
 import contextlib
 import os
 import pickle
+import re
 import signal
 import socket
+import tempfile
 from collections.abc import Iterator
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -327,3 +329,57 @@ def test_shutdown_reaps_the_worker_and_its_diagnostic_file(tmp_path: Path) -> No
     native_worker._shutdown()
     assert worker.pid is None
     assert not Path(diagnostic_path).exists()
+
+
+def test_a_slow_start_is_not_reported_as_a_silent_crash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A worker that is merely slow must not be described as having failed.
+
+    A start that times out and one that dies before it can redirect its own
+    stderr both leave the diagnostic log empty, so the old message -- "failed
+    to start: no diagnostic" -- was identical for both and sent the reader
+    hunting for a crash that had not happened. Observed in the field on a
+    loaded machine.
+    """
+    monkeypatch.setattr(native_worker, "wait", lambda *_args, **_kwargs: [])
+
+    worker = native_worker._NativeWorker()
+    with pytest.raises(native_worker.PstrainWorkerError) as raised:
+        worker._start()
+
+    message = str(raised.value)
+    assert "did not become ready" in message
+    assert "still running" in message
+    assert "no diagnostic" not in message
+    worker._discard()
+
+
+def test_a_silent_startup_death_reports_its_exit_code_and_where_to_look(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A crash before the stderr redirect must report a real exit code and say
+    where to look.
+
+    This forces a genuine bootstrap death rather than mocking the readiness
+    wait: the helper is handed a diagnostic path in a directory that does not
+    exist, so its very first act -- opening that log to own its stderr --
+    raises before anything is redirected. The child dies for real, its
+    sentinel fires for real, and its exit status is a real number. Mocking the
+    wait while a healthy child ran on produced "exit code None" and a race
+    with that child, which a test that only looked for the words "exit code"
+    could not see.
+    """
+    real_fd, _ = tempfile.mkstemp(dir=tmp_path)
+    bogus = str(tmp_path / "no-such-dir" / "worker.log")
+    monkeypatch.setattr(native_worker.tempfile, "mkstemp", lambda **_kwargs: (real_fd, bogus))
+
+    worker = native_worker._NativeWorker()
+    with pytest.raises(native_worker.PstrainWorkerError) as raised:
+        worker._start()
+
+    message = str(raised.value)
+    assert "exited during startup" in message
+    assert re.search(r"exit code -?\d+", message), message
+    assert "exit code None" not in message
+    assert "this process's stderr" in message
