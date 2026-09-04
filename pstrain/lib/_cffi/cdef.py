@@ -335,7 +335,8 @@ int pstrain_bw_process_utt_text(pstrain_bw_context_t *ctx,
 int pstrain_bw_process_utt_mfcc(pstrain_bw_context_t *ctx,
                             const float *mfcc,
                             uint32 n_mfcc_frames,
-                            const char *transcript);
+                            const char *transcript,
+                            const char *utterance_id);
 int pstrain_bw_process_utt(pstrain_bw_context_t *ctx,
                        const float *features,
                        uint32 n_frames,

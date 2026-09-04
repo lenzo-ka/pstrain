@@ -139,6 +139,7 @@ int pstrain_bw_fallback_senone_active(pstrain_bw_context_t *ctx, uint32 senone);
  * @param features Feature vectors (n_frames * feat_dim, row-major)
  * @param n_frames Number of frames
  * @param transcript Word transcript (space-separated, uppercase)
+ * @param utterance_id Identifier printed in the native diagnostic row
  * @return 0 on success, -1 on error
  */
 int
@@ -163,7 +164,8 @@ int
 pstrain_bw_process_utt_mfcc(pstrain_bw_context_t *ctx,
                         const float *mfcc,
                         uint32 n_mfcc_frames,
-                        const char *transcript);
+                        const char *transcript,
+                        const char *utterance_id);
 
 /**
  * Process a single utterance (low-level, with phone IDs)

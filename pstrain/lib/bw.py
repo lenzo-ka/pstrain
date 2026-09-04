@@ -303,6 +303,7 @@ class BWTrainer:
         self,
         mfcc: npt.NDArray[np.float32],
         transcript: str,
+        utterance_id: str = "<unknown>",
     ) -> bool:
         """Process utterance from raw MFCC features (13-dim).
 
@@ -321,7 +322,9 @@ class BWTrainer:
         if not self._dict_set:
             raise RuntimeError("Dictionary not set. Call set_dict() first.")
         if hasattr(self, "_proxy"):
-            result = bool(self._proxy.call("process_utterance_mfcc", mfcc, transcript))
+            result = bool(
+                self._proxy.call("process_utterance_mfcc", mfcc, transcript, utterance_id)
+            )
             self._last_process_result = 0 if result else -1
             return result
 
@@ -339,6 +342,7 @@ class BWTrainer:
             self._ffi.cast("float *", mfcc.ctypes.data),
             n_frames,
             transcript.encode(),
+            utterance_id.encode(),
         )
         self._last_process_result = ret
         return bool(ret == 0)

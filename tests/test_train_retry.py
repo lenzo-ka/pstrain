@@ -1,6 +1,8 @@
 """Tests for retrying recoverable forward-beam update failures."""
 
 import logging
+import os
+import re
 from pathlib import Path
 
 import numpy as np
@@ -14,10 +16,27 @@ from pstrain.lib.steps.train import (
     TerminalAlignmentError,
     _accept_arctic_a0302_exception,
     _process_with_final_state_retry,
+    _redirect_stdout_fd,
 )
 from tests.clib import requires_c_library
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_arctic"
+
+
+def test_fd_stdout_redirect_restores_after_exception(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    diagnostic = tmp_path / "diagnostic.log"
+
+    with pytest.raises(RuntimeError, match="native failure"), _redirect_stdout_fd(diagnostic):
+        os.write(1, b"native bytes before failure\n")
+        raise RuntimeError("native failure")
+
+    os.write(1, b"stdout restored\n")
+    captured = capfd.readouterr()
+    assert "native bytes before failure" not in captured.out
+    assert "stdout restored\n" in captured.out
+    assert diagnostic.read_bytes() == b"native bytes before failure\n"
 
 
 class TightBeamTrainer:
@@ -201,6 +220,133 @@ def test_a0302_band_does_not_accept_another_utterance(tmp_path: Path) -> None:
         _accept_arctic_a0302_exception(fileid="arctic_a0587", model_dir=tmp_path, band=(4548, 4623))
         is None
     )
+
+
+@requires_c_library
+def test_real_bw_shard_writes_complete_diagnostics_to_log(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    from pstrain.lib.bw import BWConfig
+    from pstrain.lib.pipeline import PipelineContext
+    from pstrain.lib.pipeline.tasks import build_pipeline
+    from pstrain.lib.setup import setup_project
+    from pstrain.lib.steps.train import run_bw_training
+
+    project = tmp_path / "project"
+    setup_project(
+        project,
+        transcription_path=FIXTURE / "transcription.txt",
+        audio_path=FIXTURE / "wav",
+        dictionary_path=FIXTURE / "dictionary.dict",
+        phoneset_path=FIXTURE / "phoneset.txt",
+        filler_dict_path=FIXTURE / "filler.dict",
+    )
+    context = PipelineContext.from_config(project)
+    assert build_pipeline(context).run("flat", jobs=1) == 0
+
+    fileid = "arctic_a0001"
+    fileids = context.etc_dir / "diagnostic.fileids"
+    transcription = context.etc_dir / "diagnostic.transcription"
+    fileids.write_text(f"{fileid}\n")
+    transcription.write_text(f"{fileid} author of the danger trail philip steels etc\n")
+    capfd.readouterr()
+
+    result = run_bw_training(
+        model_dir=context.model_dir("flat"),
+        output_dir=tmp_path / "diagnostic-model",
+        features_dir=context.features_dir,
+        train_fileids=fileids,
+        transcription=transcription,
+        dictionary=context.shared_dir / "dictionary.dict",
+        filler_dict=context.filler_dict,
+        first_pass_2passvar=False,
+        n_iter=1,
+        config=BWConfig(
+            pass2var=False,
+            unobserved_gaussian_policy="zero",
+            multipron=False,
+        ),
+        multipron=False,
+        n_shards=1,
+        project_dir=project,
+        stage="diagnostic-stage",
+    )
+    assert result.final_utts == 1
+    print("stdout restored")
+
+    captured = capfd.readouterr()
+    assert "column defns" not in captured.out
+    assert "stdout restored" in captured.out
+    assert f"bw-logs\t{project / '.pstrain' / 'bw' / 'diagnostic-stage'}" in captured.out
+    diagnostic = project / ".pstrain" / "bw" / "diagnostic-stage" / "pass-01-shard-00.log"
+    content = diagnostic.read_text(encoding="utf-8")
+    assert content.startswith("column defns\n\t<seq>\n\t<id>\n")
+    assert "\t<avg_posterior_prune>\n" in content
+    assert "\t... timing info ... \n" in content
+    native_row = re.compile(r"(?m)^utt>\s+\d+\s+arctic_a0001\s+\d+.*[-+]?\d+\.\d+e[-+]\d+")
+    assert native_row.search(content)
+    assert not native_row.search(captured.out)
+
+
+@requires_c_library
+def test_real_multipron_bw_writes_native_diagnostics_to_log(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    from pstrain.lib.bw import BWConfig
+    from pstrain.lib.pipeline import PipelineContext
+    from pstrain.lib.pipeline.tasks import build_pipeline
+    from pstrain.lib.setup import setup_project
+    from pstrain.lib.steps.train import run_bw_training
+
+    project = tmp_path / "project"
+    setup_project(
+        project,
+        transcription_path=FIXTURE / "transcription.txt",
+        audio_path=FIXTURE / "wav",
+        dictionary_path=FIXTURE / "dictionary.dict",
+        phoneset_path=FIXTURE / "phoneset.txt",
+        filler_dict_path=FIXTURE / "filler.dict",
+    )
+    context = PipelineContext.from_config(project)
+    assert build_pipeline(context).run("flat", jobs=1) == 0
+
+    fileid = "arctic_a0001"
+    fileids = context.etc_dir / "multipron-diagnostic.fileids"
+    transcription = context.etc_dir / "multipron-diagnostic.transcription"
+    fileids.write_text(f"{fileid}\n")
+    transcription.write_text(f"{fileid} author of the danger trail philip steels etc\n")
+    capfd.readouterr()
+
+    result = run_bw_training(
+        model_dir=context.model_dir("flat"),
+        output_dir=tmp_path / "multipron-diagnostic-model",
+        features_dir=context.features_dir,
+        train_fileids=fileids,
+        transcription=transcription,
+        dictionary=context.shared_dir / "dictionary.dict",
+        filler_dict=context.filler_dict,
+        first_pass_2passvar=False,
+        n_iter=1,
+        config=BWConfig(
+            pass2var=False,
+            unobserved_gaussian_policy="zero",
+            multipron=True,
+        ),
+        multipron=True,
+        n_shards=1,
+        project_dir=project,
+        stage="multipron-diagnostic-stage",
+    )
+    assert result.final_utts == 1
+    print("stdout restored")
+
+    captured = capfd.readouterr()
+    diagnostic = project / ".pstrain" / "bw" / "multipron-diagnostic-stage" / "pass-01-shard-00.log"
+    content = diagnostic.read_text(encoding="utf-8")
+    native_row = re.compile(r"(?m)^utt>\s+\d+\s+arctic_a0001\s+\d+.*[-+]?\d+\.\d+e[-+]\d+")
+    assert native_row.search(content)
+    assert not native_row.search(captured.out)
+    assert "stdout restored" in captured.out
 
 
 @requires_c_library
