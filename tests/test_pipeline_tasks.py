@@ -1111,13 +1111,15 @@ def test_slt_profile_resolves_per_stage_schedule(empty_project: Path) -> None:
     untied, untied_first_2pass = _bw_policy_for_stage(ctx, "cd-untied")
     tied, tied_first_2pass = _bw_policy_for_stage(ctx, "cd-8g")
 
-    assert (ci.max_iterations, ci.min_iterations, ci.convergence_ratio) == (10, 1, 0.001)
+    # 0.1 is SphinxTrain's $CFG_CONVERGENCE_RATIO default, applied to every
+    # stage; a profile that claims to match SphinxTrain must carry it.
+    assert (ci.max_iterations, ci.min_iterations, ci.convergence_ratio) == (10, 1, 0.1)
     assert (untied.max_iterations, untied.min_iterations, untied.convergence_ratio) == (
         6,
         1,
-        0.001,
+        0.1,
     )
-    assert (tied.max_iterations, tied.min_iterations, tied.convergence_ratio) == (10, 1, 0.001)
+    assert (tied.max_iterations, tied.min_iterations, tied.convergence_ratio) == (10, 1, 0.1)
     assert (ci_first_2pass, untied_first_2pass, tied_first_2pass) == (False, True, False)
 
 

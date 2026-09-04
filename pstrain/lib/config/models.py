@@ -66,7 +66,19 @@ class TrainingScheduleConfig(StrictModel):
     max_iterations: Annotated[int, Field(ge=1, description="Maximum training passes")] = 10
     min_iterations: Annotated[int, Field(ge=1, description="Minimum training passes")] = 1
     convergence_ratio: Annotated[
-        float, Field(gt=0, description="Absolute likelihood-delta convergence threshold")
+        float,
+        Field(
+            gt=0,
+            description=(
+                "Stop a stage once the per-frame log-likelihood improves by no more than "
+                "this many nats between passes. Despite the name -- kept because SphinxTrain's "
+                "$CFG_CONVERGENCE_RATIO is the same signed per-frame delta -- this is an "
+                "absolute difference, not a ratio. At the default, corpora of Arctic's size "
+                "run every pass to max_iterations, which is the more accurate outcome as "
+                "measured; treat max_iterations as the operative control. The sphinxtrain "
+                "profile carries SphinxTrain's own 0.1"
+            ),
+        ),
     ] = 0.001
 
     @model_validator(mode="after")
