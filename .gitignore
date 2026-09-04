@@ -81,6 +81,7 @@ dist/
 *.wav
 /data/
 /notebooks/_work/
+/notebooks/arctic_tutorial_work/
 benchmarks/timit/data/
 benchmarks/timit/pilot/
 
