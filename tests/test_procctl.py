@@ -356,7 +356,13 @@ def test_process_details_keeps_a_command_containing_spaces_whole() -> None:
     with subprocess.Popen(command, stdout=subprocess.DEVNULL) as child:
         try:
             details = procctl._process_details(child.pid)
-            assert "time.sleep(60)" in details["command"]
+            deadline = time.monotonic() + STOP_TIMEOUT
+            # macOS reports a temporary `(name)` placeholder until arguments
+            # are readable.
+            while "time.sleep(60)" not in details["command"] and time.monotonic() < deadline:
+                time.sleep(0.05)
+                details = procctl._process_details(child.pid)
+            assert "time.sleep(60)" in details["command"], details["command"]
         finally:
             child.kill()
             child.wait(timeout=LIVENESS_TIMEOUT)

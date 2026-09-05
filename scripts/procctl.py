@@ -92,6 +92,7 @@ def _process_details(pid: int, deadline: float | None = None) -> dict[str, str]:
     parts = line.split(maxsplit=6)
     if len(parts) != 7:
         raise Refusal(f"could not inspect PID {pid} with ps")
+    # A macOS `(name)` placeholder changes when exec makes arguments readable.
     user, *started, command = parts
     return {"user": user, "start_time": " ".join(started), "command": command}
 
