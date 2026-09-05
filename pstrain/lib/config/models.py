@@ -106,8 +106,10 @@ class TrainingConfig(StrictModel):
         Field(
             description=(
                 "Action when an utterance fails to reach its final state: ``recover`` runs one "
-                "wider-beam retry and aborts if it also fails, ``abort`` fails immediately, and "
-                "``omit`` reports and excludes the failed update"
+                "wider-beam retry and, if that also fails, reports the utterance and continues "
+                "without it; ``abort`` fails the run on the first failure; and ``omit`` reports "
+                "and excludes it without retrying. Skips are counted either way, and "
+                "``max_skip_fraction`` still fails the run when they stop being incidental"
             )
         ),
     ] = "recover"

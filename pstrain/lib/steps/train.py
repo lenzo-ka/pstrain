@@ -318,10 +318,24 @@ def _process_with_final_state_retry(
         try:
             success = trainer.process_utterance_mfcc(mfcc, transcript)
             if not success:
-                raise TerminalAlignmentError(
-                    f"Final state not reached for {fileid} after retry: "
-                    f"expected a complete alignment at a_beam={retry_beam:.3g}"
+                # "recover" now recovers the pass, not only the utterance. One
+                # genuinely unalignable recording used to end a build that had
+                # already aligned everything else, leaving the operator to read
+                # the id out of the log, add it to an exclusion list, and start
+                # again -- a loop paid once per bad file.
+                #
+                # The drop is not silent, which is the part that matters: it is
+                # reported here, recorded as an "alignment_failure" skip, and
+                # max_skip_fraction still fails the run once skips stop being
+                # incidental. Use failed_alignment="abort" to fail on the first
+                # one instead.
+                logger.error(
+                    "Final state not reached for %s even at a_beam=%.3g; omitting it "
+                    "from this pass and continuing",
+                    fileid,
+                    retry_beam,
                 )
+                return False
             return True
         finally:
             trainer.set_a_beam(previous_beam)
@@ -488,6 +502,12 @@ def _run_bw_shard(
             else:
                 processed.append(fileid)
         except TerminalAlignmentError:
+            # Under the default "recover" policy a failed retry no longer raises;
+            # it returns False and is recorded above. This handler is reached
+            # only under "abort", or when retry_beam_factor <= 1.0 disables the
+            # retry. The two Arctic exceptions below are inert in the pinned
+            # profile (both knobs off) and are kept for its retired off-profile
+            # provenance.
             if fileid == "arctic_a0587" and iteration == accept_arctic_a0587_pass:
                 skipped.append((fileid, "alignment_failure"))
                 continue

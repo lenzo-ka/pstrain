@@ -74,14 +74,54 @@ def test_non_final_state_failure_is_not_retried() -> None:
     assert trainer.attempt_beams == [pytest.approx(1e-80)]
 
 
-def test_final_state_retry_exhaustion_fails_loudly() -> None:
+def test_final_state_retry_exhaustion_omits_the_utterance_and_says_so(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An utterance that cannot align must not end a build that aligned the rest.
+
+    ``recover`` used to raise here, so one genuinely unalignable recording
+    failed the whole run and left the operator to read its id out of the log,
+    add it to an exclusion list, and start over -- a loop paid once per bad
+    file. It now reports the utterance and continues without it. The caller
+    records that as an ``alignment_failure`` skip, and ``max_skip_fraction``
+    still fails the run once skips stop being incidental, so this tolerates a
+    bad recording without tolerating a broken corpus.
+    """
+    trainer = TightBeamTrainer()
+    # Fails at every beam, but records each attempt so the test can prove the
+    # widened retry actually ran rather than the call returning False at once.
+    trainer.process_utterance_mfcc = (  # type: ignore[method-assign]
+        lambda mfcc, transcript: trainer.attempt_beams.append(trainer.beam) or False
+    )
+    caplog.set_level(logging.ERROR, logger="pstrain.lib.steps.train")
+
+    assert not _process_with_final_state_retry(
+        trainer,  # type: ignore[arg-type]
+        np.zeros((4, 13), dtype=np.float32),
+        "<s> TEST </s>",
+        normal_beam=1e-90,
+        retry_beam_factor=1e10,
+        fileid="malformed",
+        failed_alignment="recover",
+    )
+
+    # Two attempts, the second at the widened beam: this is what distinguishes
+    # "recover" from "omit", which gives up after the first.
+    assert trainer.attempt_beams == [pytest.approx(1e-90), pytest.approx(1e-100)]
+    # The drop is reported, names the utterance, and names the beam it failed at.
+    assert "malformed" in caplog.text
+    assert "1e-100" in caplog.text
+    assert "omitting" in caplog.text
+    # The beam is restored for the next utterance.
+    assert trainer.beam == pytest.approx(1e-90)
+
+
+def test_abort_still_fails_the_run_for_callers_that_want_that() -> None:
+    """The strict behavior remains available; it is no longer the default."""
     trainer = TightBeamTrainer()
     trainer.process_utterance_mfcc = lambda mfcc, transcript: False  # type: ignore[method-assign]
 
-    with pytest.raises(
-        TerminalAlignmentError,
-        match=r"Final state not reached for malformed after retry: expected .*a_beam=1e-100",
-    ):
+    with pytest.raises(TerminalAlignmentError):
         _process_with_final_state_retry(
             trainer,  # type: ignore[arg-type]
             np.zeros((4, 13), dtype=np.float32),
@@ -89,9 +129,8 @@ def test_final_state_retry_exhaustion_fails_loudly() -> None:
             normal_beam=1e-90,
             retry_beam_factor=1e10,
             fileid="malformed",
-            failed_alignment="recover",
+            failed_alignment="abort",
         )
-    assert trainer.beam == pytest.approx(1e-90)
 
 
 def test_abort_position_does_not_retry_and_fails_loudly() -> None:
