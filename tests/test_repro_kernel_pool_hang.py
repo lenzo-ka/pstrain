@@ -49,6 +49,7 @@ from scripts.repro_kernel_pool_hang import (
     classify,
     connection_file,
     corpus_training_code,
+    decode_code,
     execute_in_kernel,
     group_kill_refusal,
     kernel_descendants,
@@ -573,6 +574,77 @@ def test_a_corpus_run_selects_in_vocabulary_utterances_and_drives_the_run() -> N
     assert "txt.done.data" in code
     assert "sorted(in_vocabulary.items())[:300]" in code
     assert "phoneset_path" not in code
+
+
+def test_a_decode_run_trains_serially_and_decodes_with_the_requested_jobs() -> None:
+    """The decode cell's subject is test_model's pool, so nothing else may fan out."""
+    code = decode_code(Path("/fixture"), jobs=4, utterances=10, test_utterances=8)
+    tree = ast.parse(code)
+    runs = [
+        call
+        for call in ast.walk(tree)
+        if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Attribute)
+        and call.func.attr == "run"
+    ]
+    assert len(runs) == 1
+    assert {keyword.arg: ast.literal_eval(keyword.value) for keyword in runs[0].keywords} == {
+        "jobs": 1
+    }
+    decodes = [
+        call
+        for call in ast.walk(tree)
+        if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Name)
+        and call.func.id == "test_model"
+    ]
+    assert len(decodes) == 1
+    assert {
+        keyword.arg: ast.literal_eval(keyword.value)
+        for keyword in decodes[0].keywords
+        if keyword.arg in {"jobs", "verbose"}
+    } == {"jobs": 4, "verbose": True}
+    # The holdout is what the decode pool's worker count is clamped to, so it
+    # has to reach the split rather than only the transcript that is read back.
+    assert '"split": {"test_count": 8}' in code
+    # The one run walks a fixed, literal sequence of stages, and it is that
+    # sequence -- not the presence or absence of some substring in the cell --
+    # that says the decode is reached without fanning anything out on the way.
+    literal_loops = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.For) and isinstance(node.iter, ast.Tuple)
+    ]
+    assert len(literal_loops) == 1
+    stages = literal_loops[0]
+    assert ast.literal_eval(stages.iter) == ("ci-1g", "lm")
+    assert isinstance(stages.target, ast.Name)
+    assert len(runs[0].args) == 1
+    assert isinstance(runs[0].args[0], ast.Name)
+    assert runs[0].args[0].id == stages.target.id
+
+
+def test_a_decode_run_is_the_only_one_that_may_ask_for_a_single_job() -> None:
+    args = parse_args(["--decode", "--jobs", "1", "--test-utterances", "3"])
+    assert (args.decode, args.jobs, args.test_utterances) == (True, 1, 3)
+    assert parse_args([]).decode is False
+    assert parse_args([]).test_utterances == 8
+    for bad in (
+        ["--jobs", "1"],
+        ["--decode", "--jobs", "0"],
+        ["--decode", "--test-utterances", "0"],
+        ["--decode", "--corpus", "/corpus", "--dictionary", "/lexicon.dict"],
+    ):
+        with pytest.raises(SystemExit):
+            parse_args(bad)
+
+
+def test_the_decode_flag_decides_which_code_an_attempt_runs() -> None:
+    training = attempt_code(parse_args([]), repository=REPOSITORY)
+    decode = attempt_code(parse_args(["--decode"]), repository=REPOSITORY)
+    assert "test_model" not in training
+    assert "test_model" in decode
+    assert str(REPOSITORY / "tests" / "fixtures" / "mini_arctic") in decode
 
 
 def test_the_corpus_options_decide_which_code_an_attempt_runs() -> None:

@@ -5,13 +5,18 @@ Run from the repository root after building the native library::
 
     PYTHONPATH=. nice -n 19 python scripts/repro_kernel_pool_hang.py \\
         --runs 20 --jobs 2 --timeout 120 [--server] [--reuse-kernel] \\
+        [--decode [--test-utterances N]] \\
         [--server-stdout {file,pipe}] [--no-capture-fd-output] \\
         [--corpus DIR --dictionary FILE] [--import-root DIR] [--hold-iopub S]
 
 Each attempt trains the mini-Arctic fixture to a target, driving the pipeline
 exactly the way the tutorial notebook does; ``--corpus`` trains a slice of a
 full Arctic corpus instead, which is how the volume of output is raised past
-what a pipe can absorb. This is a diagnostic stress harness, not a fix. An
+what a pipe can absorb. There are two pools a pstrain session creates, and by
+default this harness measures the pipeline's; ``--decode`` measures the other
+one, the process pool inside ``test_model``, by training the fixture serially
+and then decoding the split's holdout with ``--jobs`` workers, which is the
+tutorial's decode cell. This is a diagnostic stress harness, not a fix. An
 attempt that overruns its timeout is recorded as stalled, together with the
 process tree, a stack sample of every descendant and, where ``lsof`` is
 available, the descriptors each one holds, since a stall on fd 1 can only be
@@ -1470,6 +1475,81 @@ with TemporaryDirectory(prefix="pstrain-kernel-repro-") as temporary:
 {pipeline_run_code(target=target, jobs=jobs)}"""
 
 
+def decode_code(fixture: Path, *, jobs: int, utterances: int, test_utterances: int) -> str:
+    """Build kernel code for one mini-Arctic decode attempt.
+
+    The subject here is ``test_model``'s own process pool
+    (``pstrain/lib/testing/test.py``), not the pipeline's, so the training that
+    has to happen first is run serially: a stall then belongs to the decode
+    pool and to nothing else. The call is the tutorial's own decode cell --
+    ``pstrain.api.testing.test_model`` with an explicit ``jobs`` -- which is
+    where the defect was reported from.
+
+    ``test_utterances`` is the split's holdout, and it is what decides how many
+    pool workers the decode actually gets: ``_decode_files`` clamps its worker
+    count to the number of files, so a holdout smaller than ``jobs`` measures a
+    smaller pool than was asked for.
+    """
+    return f"""{KERNEL_IMPORTS}
+from pstrain.api import parse_transcription_file
+from pstrain.api.testing import test_model
+
+fixture = Path({str(fixture)!r})
+with TemporaryDirectory(prefix="pstrain-kernel-repro-") as temporary:
+    root = Path(temporary)
+    audio = root / "audio"
+    audio.mkdir()
+    lines = (fixture / "transcription.txt").read_text(encoding="utf-8").splitlines()
+    lines = [line for line in lines if line.strip()][:{utterances}]
+    if len(lines) <= {test_utterances}:
+        raise RuntimeError("no utterances left to train on")
+    for line in lines:
+        source = fixture / "wav" / (line.split()[0] + ".wav")
+        (audio / source.name).symlink_to(source)
+    transcription = root / "transcription.txt"
+    transcription.write_text("\\n".join(lines) + "\\n", encoding="utf-8")
+    project = root / "project"
+    setup_project(
+        project,
+        transcription_path=transcription,
+        audio_path=audio,
+        dictionary_path=fixture / "dictionary.dict",
+        phoneset_path=fixture / "phoneset.txt",
+        filler_dict_path=fixture / "filler.dict",
+    )
+    context = PipelineContext.from_config(
+        project,
+        experiment="default",
+        config_name="default",
+        cli_overrides={{
+            "runner": {{"jobs": 1}},
+            "split": {{"test_count": {test_utterances}}},
+        }},
+    )
+    pipeline = build_pipeline(context)
+    for stage in ("ci-1g", "lm"):
+        return_code = pipeline.run(stage, jobs=1)
+        if return_code:
+            raise RuntimeError(f"pipeline stage {{stage}} returned {{return_code}}")
+    etc = project / "experiments" / "default" / "etc"
+    transcripts = parse_transcription_file(etc / "test.transcription")
+    print("decoding", len(transcripts), "utterance(s) with jobs={jobs}")
+    decoded = test_model(
+        project / "shared" / "models" / "ci-1g" / "default",
+        project / "audio",
+        transcripts,
+        project / "shared" / "dictionary.dict",
+        project / "shared" / "filler.dict",
+        lm=project / "experiments" / "default" / "lm" / "train.arpa",
+        verbose=True,
+        jobs={jobs},
+    )
+    if decoded.n_decoded != len(transcripts):
+        raise RuntimeError(f"decoded {{decoded.n_decoded}} of {{len(transcripts)}}")
+print({COMPLETION_MARKER!r})
+"""
+
+
 def pipeline_run_call(code: str) -> ast.Call | None:
     """Return the ``.run(...)`` call in generated kernel code, if there is one."""
     for node in ast.walk(ast.parse(code)):
@@ -1496,6 +1576,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--target",
         default="ci-1g",
         help="pipeline target; 'cd-1g' also fans out the tree-building group",
+    )
+    parser.add_argument(
+        "--decode",
+        action="store_true",
+        help=(
+            "measure test_model's decode pool instead of the pipeline's: train the fixture "
+            "serially, then decode the split's holdout with --jobs workers"
+        ),
+    )
+    parser.add_argument(
+        "--test-utterances",
+        type=int,
+        default=8,
+        help="holdout the --decode run decodes, and so its worker ceiling (default 8)",
     )
     parser.add_argument(
         "--server",
@@ -1558,8 +1652,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     args = parser.parse_args(argv)
-    if args.runs < 1 or args.timeout <= 0 or args.jobs < 2 or args.utterances < 1:
-        parser.error("require runs >= 1, timeout > 0, jobs >= 2, and utterances >= 1")
+    # A serial pipeline run has no pool to stall, so the training modes need at
+    # least two jobs to measure anything. A decode run is different: jobs=1 is
+    # the documented workaround, and measuring it alongside jobs=4 is the point.
+    minimum_jobs = 1 if args.decode else 2
+    if args.runs < 1 or args.timeout <= 0 or args.jobs < minimum_jobs or args.utterances < 1:
+        parser.error(f"require runs >= 1, timeout > 0, jobs >= {minimum_jobs}, and utterances >= 1")
+    if args.test_utterances < 1:
+        parser.error("--test-utterances must be at least 1")
+    if args.decode and args.corpus is not None:
+        parser.error("--decode trains the bundled fixture, so it cannot take --corpus")
     if args.hold_iopub < 0:
         parser.error("--hold-iopub cannot be negative")
     if args.kernel_name != DEFAULT_KERNEL_NAME and not args.server:
@@ -1708,7 +1810,14 @@ def run_attempts(args: argparse.Namespace, code: str, *, repository: Path) -> Ta
 
 
 def attempt_code(args: argparse.Namespace, *, repository: Path) -> str:
-    """The kernel code one attempt runs, for whichever corpus was asked for."""
+    """The kernel code one attempt runs, for the pool and corpus asked for."""
+    if args.decode:
+        return decode_code(
+            repository / "tests" / "fixtures" / "mini_arctic",
+            jobs=args.jobs,
+            utterances=args.utterances,
+            test_utterances=args.test_utterances,
+        )
     if args.corpus is not None:
         return corpus_training_code(
             args.corpus.resolve(),
@@ -1734,8 +1843,13 @@ def main(argv: list[str] | None = None) -> int:
     # at the tree whose behavior is being measured, which may be another one.
     import_root = (args.import_root or repository).resolve()
     provisioning = "jupyter server" if args.server else "direct KernelManager"
+    subject = (
+        f"test_model decode pool, holdout={args.test_utterances}"
+        if args.decode
+        else f"pipeline pool, target={args.target}"
+    )
     print(
-        f"kernel pool stall repro: runs={args.runs} jobs={args.jobs} target={args.target} "
+        f"kernel pool stall repro: runs={args.runs} jobs={args.jobs} subject={subject} "
         f"utterances={args.utterances} timeout={args.timeout:.1f}s "
         f"provisioning={provisioning} "
         f"kernels={'one, reused' if args.reuse_kernel else 'one per run'} "

@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import os
+import signal
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from pstrain.lib import native_worker
 from pstrain.lib.pipeline import PipelineContext
 from pstrain.lib.pipeline.tasks import build_pipeline
 from pstrain.lib.setup import setup_project
@@ -62,6 +67,7 @@ def test_parallel_merge_is_canonical_and_uses_distinct_executor_path(
     traversal, other orderings, architecture, and arithmetic.
     """
     executor_calls: list[int] = []
+    initializers: list[Any] = []
 
     class ImmediateFuture:
         def __init__(self, value: Any) -> None:
@@ -71,8 +77,9 @@ def test_parallel_merge_is_canonical_and_uses_distinct_executor_path(
             return self.value
 
     class ImmediateExecutor:
-        def __init__(self, max_workers: int, mp_context: Any) -> None:
+        def __init__(self, max_workers: int, mp_context: Any, initializer: Any) -> None:
             executor_calls.append(max_workers)
+            initializers.append(initializer)
 
         def __enter__(self) -> ImmediateExecutor:
             return self
@@ -99,6 +106,9 @@ def test_parallel_merge_is_canonical_and_uses_distinct_executor_path(
     parallel = _decode_files(_config(), files, 2)
 
     assert executor_calls == [2]
+    # Cheap sibling of the live deadlock witness below: the workers must be
+    # told to close their native helper before multiprocessing joins them.
+    assert initializers == [native_worker.close_helper_before_children_are_joined]
     assert [utt_id for utt_id, _ in parallel] == ["a", "b", "c", "d", "e"]
     assert {utt_id: result.hypothesis for utt_id, result in parallel} == {
         utt_id: result.hypothesis for utt_id, result in serial
@@ -238,3 +248,88 @@ def test_mini_arctic_dithered_decode_smoke_across_selected_shard_arrangements(
             "output smoke test"
         )
     assert changed
+
+
+#: The wall a two-worker decode must finish inside, and the child that runs it.
+_POOL_SHUTDOWN_TIMEOUT_SECONDS = 120.0
+_PARALLEL_DECODE_CHILD = '''
+"""Decode the fixture with a real two-worker pool, then say how many landed."""
+import sys
+from pathlib import Path
+
+from pstrain.lib.testing.test import _DecodeConfig, _decode_files
+
+
+def main() -> None:
+    model, dictionary, filler, language_model, audio = (Path(a) for a in sys.argv[1:6])
+    files = sorted((path.stem, path) for path in audio.glob("*.wav"))
+    config = _DecodeConfig(model, dictionary, filler, language_model)
+    print("decoded", len(_decode_files(config, files, 2)))
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
+@requires_c_library
+def test_a_parallel_decode_shuts_its_pool_down_instead_of_deadlocking(tmp_path: Path) -> None:
+    """A multi-worker decode must return, not park in its own pool shutdown.
+
+    Every shard builds a ``Decoder``, whose density probe starts a native
+    helper inside the pool worker. ``multiprocessing`` joins a process's
+    non-daemon children before ordinary ``atexit`` handlers run, so a worker
+    that leaves its helper waiting on the request pipe never exits, and the
+    executor's shutdown waits on that worker forever. The whole session hangs
+    with every process at 0% CPU.
+
+    The decode runs in a child process under a wall clock because the defect is
+    a deadlock: in-process, a regression would hang this suite instead of
+    failing it. SILENT ON: hypotheses, worker counts above two, and the
+    pipeline's own pool, which installs the same finalizer in its initializer.
+    """
+    project = tmp_path / "project"
+    setup_project(
+        project,
+        transcription_path=FIXTURE / "transcription.txt",
+        audio_path=FIXTURE / "wav",
+        dictionary_path=FIXTURE / "dictionary.dict",
+        phoneset_path=FIXTURE / "phoneset.txt",
+        filler_dict_path=FIXTURE / "filler.dict",
+    )
+    context = PipelineContext.from_config(project)
+    assert build_pipeline(context).run("ci-1g", jobs=1) == 0
+
+    repository = Path(__file__).resolve().parents[1]
+    script = tmp_path / "parallel_decode_child.py"
+    script.write_text(_PARALLEL_DECODE_CHILD, encoding="utf-8")
+    child = subprocess.Popen(
+        [
+            sys.executable,
+            str(script),
+            str(context.model_dir("ci-1g")),
+            str(context.shared_dir / "dictionary.dict"),
+            str(context.filler_dict),
+            str(repository / "benchmarks" / "arctic" / "data" / "training-unigram.lm"),
+            str(FIXTURE / "wav"),
+        ],
+        cwd=repository,
+        env={**os.environ, "PYTHONPATH": str(repository)},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        # Its pool workers and their helpers are in this session, so a stalled
+        # child can be taken down whole rather than orphaned onto the machine.
+        start_new_session=True,
+    )
+    try:
+        output = child.communicate(timeout=_POOL_SHUTDOWN_TIMEOUT_SECONDS)[0]
+    except subprocess.TimeoutExpired:
+        os.killpg(child.pid, signal.SIGKILL)
+        child.communicate()
+        pytest.fail(
+            f"a two-worker decode did not finish within "
+            f"{_POOL_SHUTDOWN_TIMEOUT_SECONDS:.0f}s; the pool did not shut down"
+        )
+    assert child.returncode == 0, output
+    assert "decoded 10" in output, output

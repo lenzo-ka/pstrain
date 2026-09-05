@@ -29,7 +29,6 @@ from __future__ import annotations
 import hashlib
 import logging
 import multiprocessing
-import multiprocessing.util
 import os
 import signal
 import tempfile
@@ -697,10 +696,7 @@ def _initialize_pool_worker(nice: int, worker_registry: str) -> None:
                 logger.warning("Worker niceness could not be adjusted by %d", nice)
     Path(worker_registry, str(os.getpid())).touch()
     parent_pid = os.getppid()
-    # multiprocessing joins non-daemon children before ordinary atexit
-    # handlers. Close the helper first or a clean pool shutdown can deadlock
-    # waiting for a helper that is still waiting on its request pipe.
-    multiprocessing.util.Finalize(None, native_worker._shutdown, exitpriority=10)
+    native_worker.close_helper_before_children_are_joined()
 
     def watch_parent() -> None:
         while os.getppid() == parent_pid:
