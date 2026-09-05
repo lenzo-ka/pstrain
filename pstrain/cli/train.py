@@ -621,7 +621,7 @@ class TrainCommand(Command):
             "elapsed_seconds": round(time.monotonic() - started, 3),
             "reports": {"validation": str(validation_path), "oov": str(oov_path)},
             "resume_command": _resume_command(ctx, project_dir),
-            "test_command": f"pstrain test {ctx.args.target} --project-dir {project_dir} --no-lm",
+            "test_command": f"pstrain test {ctx.args.target} --project-dir {project_dir}",
             "config_command": f"pstrain config show --project-dir {project_dir} --profile {ctx.args.profile}",
         }
         self._emit(ctx, payload)

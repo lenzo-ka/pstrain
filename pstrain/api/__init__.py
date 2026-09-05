@@ -29,6 +29,7 @@ Example::
 
 from pstrain.api.config import resolve_config
 from pstrain.api.steps import (
+    run_build_lm,
     run_step_cd_hmm_untied,
     run_step_ci_hmm,
     run_step_features,
@@ -124,4 +125,5 @@ __all__: list[str] = [
     "run_step_features",
     "run_step_ci_hmm",
     "run_step_cd_hmm_untied",
+    "run_build_lm",
 ]

@@ -91,11 +91,15 @@ pstrain train /tmp/pstrain-demo \
 ```
 
 The command stores separate typed training and decoder transcripts. Decode the
-held-out set without a language model directly—no transcript conversion is needed:
+held-out set with a language model built automatically from the training transcript—no
+transcript conversion is needed:
 
 ```bash
-pstrain test cd-8g --project-dir /tmp/pstrain-demo --no-lm
+pstrain test cd-8g --project-dir /tmp/pstrain-demo
 ```
+
+The automatically built language model leaks training vocabulary into decoding, so
+this WER is optimistic and is not comparable to the pinned Arctic benchmark results.
 
 For a project of your own, `pstrain train --help` describes the accepted audio,
 prompt, dictionary, phoneset, and configuration inputs. The lower-level

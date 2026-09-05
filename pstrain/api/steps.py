@@ -22,6 +22,7 @@ from pstrain.lib.steps import (
     ci_hmm_step,
     features_step,
 )
+from pstrain.lib.steps.lm import run_build_lm
 
 # Re-export base classes
 __all__ = [
@@ -43,6 +44,7 @@ __all__ = [
     "run_step_ci_hmm",
     "step_cd_hmm_untied",
     "run_step_cd_hmm_untied",
+    "run_build_lm",
 ]
 
 

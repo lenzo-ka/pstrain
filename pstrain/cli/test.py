@@ -36,12 +36,16 @@ class TestCommand(Command):
             default="default",
             help="Config/experiment name (default: 'default')",
         )
-        parser.add_argument(
+        lm_group = parser.add_mutually_exclusive_group()
+        lm_group.add_argument(
             "--lm",
             type=str,
-            help="Language model file (ARPA format). If not specified, builds from training transcripts.",
+            help=(
+                "Language model file (ARPA format). By default, builds one from the "
+                "project's training transcript."
+            ),
         )
-        parser.add_argument(
+        lm_group.add_argument(
             "--no-lm",
             action="store_true",
             help="Don't use any language model (uniform probabilities)",
@@ -134,15 +138,25 @@ class TestCommand(Command):
         _filler = project_dir / "shared" / "filler.dict"
         filler_dict: Path | None = _filler if _filler.exists() else None
 
+        exp_dir = project_dir / "experiments" / config_name
+        train_transcript_file = exp_dir / "etc" / "train.transcription"
+
         # Resolve language model
         lm_path = None
+        auto_built_lm = False
         if ctx.args.lm:
             lm_path = Path(ctx.args.lm)
             if not lm_path.exists():
                 return CommandResult.fail(f"Language model not found: {lm_path}")
+        elif not ctx.args.no_lm:
+            if not train_transcript_file.exists():
+                return CommandResult.fail(
+                    f"Training transcripts not found: {train_transcript_file}"
+                )
+            lm_path = exp_dir / "lm" / "train.arpa"
+            auto_built_lm = True
 
         # Load test transcripts
-        exp_dir = project_dir / "experiments" / config_name
         test_transcript_file = exp_dir / "etc" / "test.decoder.transcription"
         if not test_transcript_file.exists():
             # Compatibility for projects created before typed split artifacts.
@@ -172,6 +186,8 @@ class TestCommand(Command):
         ctx.log(f"  Jobs: {ctx.args.jobs if ctx.args.jobs is not None else 'auto (max 12)'}")
         if lm_path:
             ctx.log(f"  Language model: {lm_path}")
+            if auto_built_lm:
+                ctx.log("  Language model source: project training transcripts")
         else:
             ctx.log("  Language model: None (using uniform)")
 
@@ -181,6 +197,15 @@ class TestCommand(Command):
 
         # Run test
         try:
+            if auto_built_lm:
+                from pstrain.api import run_build_lm
+
+                assert lm_path is not None
+                run_build_lm(
+                    train_transcripts=train_transcript_file,
+                    output_path=lm_path,
+                    max_order=ctx.args.lm_order,
+                )
             result = test_model(
                 model_dir=model_dir,
                 test_audio_dir=audio_dir,
@@ -205,6 +230,12 @@ class TestCommand(Command):
             corpus_name=project_dir.name,
             test_set_name="test",
         )
+        if auto_built_lm:
+            report.description = (
+                "CAUTION: This language model was built from the project's training "
+                "transcripts. Its training-vocabulary leakage makes this WER optimistic "
+                "and not comparable to the pinned Arctic benchmark results."
+            )
 
         # Output
         if ctx.args.output:
