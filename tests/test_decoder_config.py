@@ -3,16 +3,75 @@
 import shutil
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from pstrain.lib.config.models import FeatureConfig
+from pstrain.lib.native_worker import PstrainError
 from pstrain.lib.pipeline.context import FeatParams
 from pstrain.lib.pipeline.feat_params import write_feat_params
 from pstrain.lib.testing.decoder import Decoder
 from tests.conftest import requires_c_library
 
 pytestmark = requires_c_library
+
+
+def test_density_probe_failure_warns_and_uses_default_topn(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    fixture = Path(__file__).parent / "fixtures" / "multipron_final_state"
+    observed_topn: list[int] = []
+
+    from pstrain.lib._cffi.core import get_lib
+
+    lib = get_lib()
+
+    class RecordingLib:
+        def __getattr__(self, name: str) -> object:
+            return getattr(lib, name)
+
+        def pstrain_decoder_create(self, config: Any) -> object:
+            observed_topn.append(config.topn)
+            return lib.pstrain_decoder_create(config)
+
+    def fail_probe(path: str) -> object:
+        raise PstrainError("density probe broke")
+
+    monkeypatch.setattr("pstrain.lib._cffi.core.get_lib", lambda: RecordingLib())
+    monkeypatch.setattr("pstrain.lib.testing.decoder.read_gau", fail_probe)
+
+    with caplog.at_level("WARNING", logger="pstrain.lib.testing.decoder"):
+        decoder = Decoder(
+            fixture / "model",
+            fixture / "dictionary.dict",
+            fixture / "filler.dict",
+        )
+    try:
+        assert observed_topn == [0]
+        assert "density probe broke" in caplog.text
+        assert "PocketSphinx's default top-N" in caplog.text
+    finally:
+        decoder.close()
+
+
+def test_density_probe_programming_error_is_not_swallowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = Path(__file__).parent / "fixtures" / "multipron_final_state"
+
+    def fail_probe(path: str) -> object:
+        raise TypeError("density probe programming error")
+
+    monkeypatch.setattr("pstrain.lib.testing.decoder.read_gau", fail_probe)
+
+    with pytest.raises(RuntimeError, match="density probe programming error") as error:
+        Decoder(
+            fixture / "model",
+            fixture / "dictionary.dict",
+            fixture / "filler.dict",
+        )
+    assert isinstance(error.value.__cause__, TypeError)
 
 
 @pytest.mark.parametrize(
