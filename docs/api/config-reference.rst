@@ -214,7 +214,7 @@ training
 ``training.ci.convergence_ratio``
    :Type: ``float``
    :Default: ``0.001``
-   :Description: Absolute likelihood-delta convergence threshold
+   :Description: Stop a stage once the per-frame log-likelihood improves by no more than this many nats between passes. Despite the name -- kept because SphinxTrain's $CFG_CONVERGENCE_RATIO is the same signed per-frame delta -- this is an absolute difference, not a ratio. At the default, corpora of Arctic's size run every pass to max_iterations, which is the more accurate outcome as measured; treat max_iterations as the operative control. The sphinxtrain profile carries SphinxTrain's own 0.1
 
 ``training.ci.max_iterations``
    :Type: ``int``
@@ -284,7 +284,7 @@ training
 ``training.tied.convergence_ratio``
    :Type: ``float``
    :Default: ``0.001``
-   :Description: Absolute likelihood-delta convergence threshold
+   :Description: Stop a stage once the per-frame log-likelihood improves by no more than this many nats between passes. Despite the name -- kept because SphinxTrain's $CFG_CONVERGENCE_RATIO is the same signed per-frame delta -- this is an absolute difference, not a ratio. At the default, corpora of Arctic's size run every pass to max_iterations, which is the more accurate outcome as measured; treat max_iterations as the operative control. The sphinxtrain profile carries SphinxTrain's own 0.1
 
 ``training.tied.max_iterations``
    :Type: ``int``
@@ -344,7 +344,7 @@ training
 ``training.untied.convergence_ratio``
    :Type: ``float``
    :Default: ``0.001``
-   :Description: Absolute likelihood-delta convergence threshold
+   :Description: Stop a stage once the per-frame log-likelihood improves by no more than this many nats between passes. Despite the name -- kept because SphinxTrain's $CFG_CONVERGENCE_RATIO is the same signed per-frame delta -- this is an absolute difference, not a ratio. At the default, corpora of Arctic's size run every pass to max_iterations, which is the more accurate outcome as measured; treat max_iterations as the operative control. The sphinxtrain profile carries SphinxTrain's own 0.1
 
 ``training.untied.max_iterations``
    :Type: ``int``

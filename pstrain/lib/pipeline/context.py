@@ -366,7 +366,10 @@ DEFAULT_CONFIGS: dict[str, dict[str, Any]] = {
         },
     },
     "sphinxtrain": {
-        "description": "Matched to SphinxTrain defaults for comparison",
+        "description": (
+            "Matched to SphinxTrain defaults for comparison, including its convergence "
+            "threshold of 0.1 ($CFG_CONVERGENCE_RATIO)"
+        ),
         "features": {
             "samprate": 16000,
             "ncep": 13,
@@ -381,9 +384,14 @@ DEFAULT_CONFIGS: dict[str, dict[str, Any]] = {
         "training": {
             "n_state": 3,
             "n_senones": 200,
-            "ci": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.001},
-            "untied": {"max_iterations": 6, "min_iterations": 1, "convergence_ratio": 0.001},
-            "tied": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.001},
+            # SphinxTrain's $CFG_CONVERGENCE_RATIO defaults to 0.1
+            # (etc/sphinx_train.cfg), applied to every stage, and its semantics
+            # are the same signed per-frame log-likelihood delta this field
+            # carries. The 0.001 this profile used to declare was a hundredfold
+            # tighter than the thing it claimed to match.
+            "ci": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.1},
+            "untied": {"max_iterations": 6, "min_iterations": 1, "convergence_ratio": 0.1},
+            "tied": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.1},
         },
     },
 }

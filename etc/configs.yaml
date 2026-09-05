@@ -88,4 +88,13 @@ profiles:
       n_senones: 4000
   sphinxtrain:
     extends: default
-    description: Matched to SphinxTrain defaults for comparison
+    description: >-
+      Matched to SphinxTrain defaults for comparison, including its convergence
+      threshold of 0.1 ($CFG_CONVERGENCE_RATIO)
+    training:
+      # SphinxTrain's $CFG_CONVERGENCE_RATIO defaults to 0.1 (etc/sphinx_train.cfg)
+      # for every stage. Only the threshold is declared here: profiles deep-merge
+      # over their parent, so the iteration limits keep following `default`.
+      ci: {convergence_ratio: 0.1}
+      untied: {convergence_ratio: 0.1}
+      tied: {convergence_ratio: 0.1}
