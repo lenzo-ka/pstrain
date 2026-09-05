@@ -4,14 +4,19 @@
 Run from the repository root after building the native library::
 
     PYTHONPATH=. nice -n 19 python scripts/repro_kernel_pool_hang.py \\
-        --runs 20 --jobs 2 --timeout 120 [--server] [--reuse-kernel]
+        --runs 20 --jobs 2 --timeout 120 [--server] [--reuse-kernel] \\
+        [--server-stdout {file,pipe}] [--no-capture-fd-output] \\
+        [--corpus DIR --dictionary FILE] [--import-root DIR] [--hold-iopub S]
 
 Each attempt trains the mini-Arctic fixture to a target, driving the pipeline
-exactly the way the tutorial notebook does. This is a diagnostic stress
-harness, not a fix. An attempt that overruns its timeout is recorded as
-stalled, together with the process tree and a stack sample of every
-descendant; a kernel that dies is recorded as a failure rather than a stall.
-Any stall or failure makes the program exit nonzero.
+exactly the way the tutorial notebook does; ``--corpus`` trains a slice of a
+full Arctic corpus instead, which is how the volume of output is raised past
+what a pipe can absorb. This is a diagnostic stress harness, not a fix. An
+attempt that overruns its timeout is recorded as stalled, together with the
+process tree, a stack sample of every descendant and, where ``lsof`` is
+available, the descriptors each one holds, since a stall on fd 1 can only be
+read off the descriptors; a kernel that dies is recorded as a failure rather
+than a stall. Any stall or failure makes the program exit nonzero.
 
 There are two ways to get a kernel, and they differ in the plumbing under it,
 which is the axis this harness exists to vary:
@@ -29,6 +34,28 @@ which is the axis this harness exists to vary:
 run, which is the shape of a notebook session; the run stops at the first
 attempt that does not complete, since a kernel that stalled cannot serve the
 rest.
+
+Two hops carry a kernel's fd 1, and only the second of them can ever block.
+Inside a kernel fd 1 is not a terminal: with ``IPKernelApp.capture_fd_output``
+on, which is the default, it is a 64 KB pipe ipykernel made, and every pool
+worker and native helper the kernel spawns inherits it. A daemon thread in
+ipykernel drains that pipe and copies each read straight through to the
+kernel's *original* fd 1 with a blocking, unguarded ``os.write``; that
+descriptor is whatever the jupyter server's own stdout was, inherited
+unchanged. So if the far end stops draining, the copy blocks, the drain stops,
+the capture pipe fills, and every process writing to fd 1 parks in ``write(2)``
+-- which presents as a pool that has hung with every worker at 0% CPU.
+
+``--server-stdout`` is the knob that decides whether that far end can block,
+and it is the one that reproduces the stall. The default, ``file``, gives the
+server the harness's own launch log, which always drains, so no volume of
+output can stall anything and the whole class is invisible; ``pipe`` gives the
+server a pipe whose read end this harness holds open and never reads, which is
+the shape of a server launched by a supervisor, an editor or a tty under flow
+control. ``--no-capture-fd-output`` removes the first hop, so writers block on
+the server's descriptor directly. ``--hold-iopub`` is deliberately not a
+substitute for either: iopub is a ZMQ PUB socket, which drops at its high-water
+mark rather than pushing back on the kernel.
 
 Cleanup is a process group. The default mode kills the kernel's own group,
 which jupyter_client creates with ``start_new_session=True``, so spawned pool
@@ -65,6 +92,7 @@ from __future__ import annotations
 import argparse
 import ast
 import contextlib
+import dataclasses
 import json
 import os
 import secrets
@@ -74,6 +102,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -108,12 +137,20 @@ OUTCOME_STALLED = "stalled"
 #: The kernelspec ``--server`` asks the server for. ``python3`` is the spec the
 #: interpreter running this harness installs, so the kernel is the same Python.
 DEFAULT_KERNEL_NAME = "python3"
+#: The kernelspec ``--no-capture-fd-output`` writes and asks the server for. It
+#: is the same interpreter as `DEFAULT_KERNEL_NAME`, with ipykernel's fd 1/2
+#: capture turned off.
+NO_FD_CAPTURE_KERNEL_NAME = "python3-nofdcap"
 #: How long a ``jupyter server`` gets to answer its REST API, and how long it
 #: then gets to write the kernel's connection file.
 SERVER_STARTUP_TIMEOUT = 90.0
 #: A kernel's liveness under ``--server`` costs an HTTP round trip, so it is
 #: asked for at most this often rather than on every pass of the message loop.
 LIVENESS_INTERVAL = 5.0
+#: How long a held stdout pipe gets, after the group kill, to reach end of
+#: file. Every writer is meant to be dead by then, so this only has to cover
+#: the last of them being reaped, not any amount of buffered output.
+HELD_PIPE_TIMEOUT = 5.0
 
 
 @dataclass(frozen=True)
@@ -180,10 +217,16 @@ class TeardownReport:
     Refusing to signal is a distinct outcome from signalling and finding
     nothing left: a survivor count only means something if the kill actually
     happened, so a refusal makes the census untrusted rather than clean.
+
+    ``unresolved`` is the same kind of fact about the pipe held open as the
+    server's stdout: a drain that never reached end of file means something is
+    still holding a descriptor this teardown handed out, which no survivor
+    count taken by pid can be trusted over.
     """
 
     signalled: bool
     reason: str = ""
+    unresolved: str = ""
 
 
 @dataclass(frozen=True)
@@ -222,6 +265,55 @@ class KernelSession:
     root: str = "kernel"
 
 
+@dataclass
+class HeldPipe:
+    """The read end of a pipe, held open by this process and never read from.
+
+    Holding it open unread is the whole point: a full pipe blocks the processes
+    writing into it rather than killing them with ``SIGPIPE``, which is the
+    backpressure the harness exists to apply.
+
+    `release` ends that at teardown by handing the descriptor to a daemon
+    thread that reads and discards until the last writer has gone, and then
+    closes it. `resolve` waits for that within a bound and says whether it
+    happened, since a drain that never reaches end of file is not a tidy detail
+    to leak: it means a writer outlived the teardown. Both steps are
+    idempotent, and the descriptor is forgotten as it is closed, so a second
+    teardown cannot start a second reader or close a number the operating
+    system has since handed to something else.
+    """
+
+    read_end: int
+    reader: threading.Thread | None = None
+
+    def release(self) -> None:
+        """Start discarding whatever is in the pipe; close it at the far end's."""
+        if self.read_end < 0 or self.reader is not None:
+            return
+        self.reader = threading.Thread(target=self._drain, args=(self.read_end,), daemon=True)
+        self.reader.start()
+
+    def resolve(self, *, timeout: float) -> bool:
+        """Wait out the drain within ``timeout``; say whether it finished."""
+        if self.reader is not None:
+            self.reader.join(timeout)
+        return self.read_end < 0
+
+    def _drain(self, descriptor: int) -> None:
+        with contextlib.suppress(OSError):
+            while os.read(descriptor, 65536):
+                pass
+        self.close()
+
+    def close(self) -> None:
+        """Release the read end, if it has not already been released."""
+        if self.read_end < 0:
+            return
+        descriptor, self.read_end = self.read_end, -1
+        with contextlib.suppress(OSError):
+            os.close(descriptor)
+
+
 @dataclass(frozen=True)
 class JupyterServer:
     """A running ``jupyter server`` and what is needed to talk to it.
@@ -234,6 +326,10 @@ class JupyterServer:
     licenses the group kill later: a pid alone cannot say whether the process
     wearing it now is the server this harness started, nor whether that pid is
     still the leader of the group a kill would land on.
+
+    ``held_stdout`` is set only under ``--server-stdout pipe``: it is the read
+    end of the pipe the server's stdout is, kept open here so the pipe fills
+    and blocks instead of collapsing, and released once the group kill lands.
     """
 
     process: subprocess.Popen[bytes]
@@ -244,6 +340,7 @@ class JupyterServer:
     pid: int
     started: str | None
     pgid: int | None
+    held_stdout: HeldPipe | None = None
 
 
 def parse_process_snapshot(output: str, *, status: int = 0) -> ProcessSnapshot:
@@ -409,12 +506,15 @@ def report_teardown(
 ) -> SurvivorReport:
     """Fold a teardown and the two censuses into one survivor verdict.
 
-    Three ways of not knowing, each with its own reason: the kill was never
-    issued, the tree was never established, or the listing afterwards could not
-    be read. None of them is zero survivors.
+    Four ways of not knowing, each with its own reason: the kill was never
+    issued, a descriptor this teardown handed out is still held by somebody,
+    the tree was never established, or the listing afterwards could not be
+    read. None of them is zero survivors.
     """
     if not teardown.signalled:
         return SurvivorReport((), False, f"the process group was not signalled: {teardown.reason}")
+    if teardown.unresolved:
+        return SurvivorReport((), False, teardown.unresolved)
     if not census.trusted:
         return SurvivorReport((), False, f"before the kill, {census.reason}")
     return assess_survivors(captured_descendants(census, root_pid), after)
@@ -462,8 +562,31 @@ def stack_sample(pid: int, *, seconds: int = 3) -> str:
     return f"$ {' '.join(command)}\n{result.stdout}{result.stderr}".rstrip()
 
 
+def open_files(pid: int, *, seconds: int = 5) -> str:
+    """Dump the descriptors ``pid`` holds with ``lsof``.
+
+    A stack says a process is parked in ``write(2)``; only the descriptor table
+    says what it is writing to, which is what separates fd 1 backpressure from
+    every other reason a worker might be idle.
+
+    The timeout is short because this runs once per captured process, and a
+    stall report over a whole tree that waits a minute on each is a report
+    nobody sees until the run is over.
+    """
+    if not shutil.which("lsof"):
+        return f"pid {pid}: lsof is not available"
+    command = ["lsof", "-n", "-P", "-p", str(pid)]
+    try:
+        result = subprocess.run(
+            command, check=False, capture_output=True, text=True, timeout=seconds
+        )
+    except subprocess.TimeoutExpired:
+        return f"pid {pid}: lsof timed out"
+    return f"$ {' '.join(command)}\n{result.stdout}{result.stderr}".rstrip()
+
+
 def stall_report(session: KernelSession) -> str:
-    """Process tree plus a stack for the launched process and its descendants."""
+    """Process tree, a stack and a descriptor table for every captured process."""
     census = kernel_descendants(session)
     if not census.trusted:
         return f"no process tree for {session.root} pid {session.pid}: {census.reason}"
@@ -473,6 +596,7 @@ def stall_report(session: KernelSession) -> str:
         render_tree(census.descendants, pids),
     ]
     sections.extend(stack_sample(pid) for pid in pids)
+    sections.extend(open_files(pid) for pid in pids)
     return "\n".join(sections)
 
 
@@ -580,8 +704,17 @@ def execute_in_kernel(
         raise
 
 
-def run_in_session(session: KernelSession, code: str, *, timeout: float) -> KernelExecution:
+def run_in_session(
+    session: KernelSession, code: str, *, timeout: float, hold_iopub: float = 0.0
+) -> KernelExecution:
     """Execute ``code`` in an already connected session.
+
+    ``hold_iopub`` stops reading iopub for that many seconds after the execute
+    request goes out, the shape of a busy or throttled frontend. It is a
+    control, not a stall knob: iopub is a ZMQ PUB socket, which discards at its
+    high-water mark, so a client that stops reading it never pushes back on the
+    kernel. The hold is bounded by the run's own timeout, so a held run still
+    classifies rather than running past the clock.
 
     The elapsed time is the execution's alone. This is a deliberate change from
     the harness's first form, where the clock started before ``wait_for_ready``
@@ -608,6 +741,10 @@ def run_in_session(session: KernelSession, code: str, *, timeout: float) -> Kern
         )
 
     message_id = client.execute(code, stop_on_error=False)
+    if hold_iopub > 0:
+        held = min(hold_iopub, timeout)
+        print(f"  not reading iopub for {held:.0f}s", flush=True)
+        time.sleep(held)
     while True:
         if not session.is_alive():
             return outcome(reached_idle=False, kernel_alive=False)
@@ -761,6 +898,54 @@ def server_command(*, port: int, root_dir: Path) -> list[str]:
     ]
 
 
+def server_stdout(mode: str, log: TextIO | None) -> tuple[Any, HeldPipe | None]:
+    """What the server's stdout will be, and the read end held open for it.
+
+    The kernel inherits this descriptor and ipykernel's watcher thread copies
+    every captured byte to it, so whether it can block is the whole experiment.
+    ``file`` hands over the harness's launch log, or ``/dev/null`` when there
+    is none; both always drain. ``pipe`` makes a pipe and returns its write end
+    for the child together with the read end the caller must keep open, since a
+    pipe with no reader kills its writers instead of blocking them.
+    """
+    if mode != "pipe":
+        return (log if log is not None else subprocess.DEVNULL), None
+    read_end, write_end = os.pipe()
+    return write_end, HeldPipe(read_end)
+
+
+def write_no_capture_kernelspec(root: Path) -> str:
+    """Write a kernelspec with ipykernel's fd capture off; return its name.
+
+    The spec runs the same interpreter as the default one, so the only
+    difference between the two runs is the hop under test: with capture off the
+    kernel's fd 1 stays the descriptor the server gave it, and writers block on
+    that directly rather than on ipykernel's pipe. A server finds the spec
+    through ``JUPYTER_PATH``, which is why ``root`` is handed back to the
+    caller's environment rather than installed anywhere shared.
+    """
+    directory = root / "kernels" / NO_FD_CAPTURE_KERNEL_NAME
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "kernel.json").write_text(
+        json.dumps(
+            {
+                "argv": [
+                    sys.executable,
+                    "-m",
+                    "ipykernel_launcher",
+                    "-f",
+                    "{connection_file}",
+                    "--IPKernelApp.capture_fd_output=False",
+                ],
+                "display_name": "Python 3 (no fd capture)",
+                "language": "python",
+            }
+        ),
+        encoding="utf-8",
+    )
+    return NO_FD_CAPTURE_KERNEL_NAME
+
+
 def wait_for_server(server: JupyterServer, *, marker: str, deadline: float) -> None:
     """Block until the spawned server answers, or say why it never will.
 
@@ -798,7 +983,13 @@ def wait_for_server(server: JupyterServer, *, marker: str, deadline: float) -> N
 
 
 def start_jupyter_server(
-    *, cwd: Path, scratch: Path, log: TextIO | None = None, deadline: float
+    *,
+    cwd: Path,
+    scratch: Path,
+    log: TextIO | None = None,
+    deadline: float,
+    stdout_mode: str = "file",
+    capture_fd_output: bool = True,
 ) -> JupyterServer:
     """Start a headless ``jupyter server`` in its own process group.
 
@@ -807,6 +998,12 @@ def start_jupyter_server(
     checkout on ``PYTHONPATH``, which the kernels it starts inherit. A marker
     file goes into the root directory before launch, so readiness can prove the
     server answering is the one started here.
+
+    ``stdout_mode`` sets the descriptor the kernel will inherit as its original
+    fd 1, and ``capture_fd_output`` false points the server at a kernelspec,
+    written under ``scratch`` and found through ``JUPYTER_PATH``, that turns
+    ipykernel's own fd capture off. Both are scoped to this server: nothing
+    outside ``scratch`` is written and no ambient environment is mutated.
     """
     runtime_dir = scratch / "runtime"
     root_dir = scratch / "root"
@@ -816,10 +1013,19 @@ def start_jupyter_server(
     (root_dir / marker).write_text("pstrain kernel pool stall repro\n", encoding="utf-8")
     token = secrets.token_hex(24)
     port = free_port()
+    extra: dict[str, str] = {}
+    if not capture_fd_output:
+        specs = scratch / "kernelspecs"
+        write_no_capture_kernelspec(specs)
+        # First on the search path, not instead of it: a checkout or a virtual
+        # environment may already put kernelspecs on JUPYTER_PATH, and dropping
+        # those would change what else the server can start.
+        inherited = os.environ.get("JUPYTER_PATH", "")
+        extra["JUPYTER_PATH"] = f"{specs}{os.pathsep}{inherited}" if inherited else str(specs)
     environment = checkout_environment(
-        cwd, JUPYTER_TOKEN=token, JUPYTER_RUNTIME_DIR=str(runtime_dir)
+        cwd, JUPYTER_TOKEN=token, JUPYTER_RUNTIME_DIR=str(runtime_dir), **extra
     )
-    stream = log if log is not None else subprocess.DEVNULL
+    stream, held_stdout = server_stdout(stdout_mode, log)
     process = subprocess.Popen(
         server_command(port=port, root_dir=root_dir),
         cwd=str(cwd),
@@ -828,6 +1034,10 @@ def start_jupyter_server(
         stderr=subprocess.STDOUT,
         start_new_session=True,
     )
+    if held_stdout is not None:
+        # Only the server and the kernels under it hold the write end now, so
+        # filling the pipe blocks them and never this process.
+        os.close(stream)
     _, started = process_identity(process.pid)
     server = JupyterServer(
         process=process,
@@ -838,6 +1048,7 @@ def start_jupyter_server(
         pid=process.pid,
         started=started,
         pgid=current_group(process.pid),
+        held_stdout=held_stdout,
     )
     try:
         wait_for_server(server, marker=marker, deadline=deadline)
@@ -929,7 +1140,11 @@ def stop_server(server: JupyterServer) -> TeardownReport:
 
     A refusal is reported rather than worked around: leaving a server running
     is recoverable, and signalling a stranger's process group is not.
+
+    Any held stdout pipe is released first and waited out last; see
+    `release_held_stdout` and `unresolved_stdout`.
     """
+    release_held_stdout(server)
     pgid = current_group(server.pid)
     refusal = group_kill_refusal(
         process_snapshot(),
@@ -945,7 +1160,51 @@ def stop_server(server: JupyterServer) -> TeardownReport:
         return report
     with contextlib.suppress(subprocess.TimeoutExpired):
         server.process.wait(timeout=30)
-    return report
+    return dataclasses.replace(report, unresolved=unresolved_stdout(server))
+
+
+def release_held_stdout(server: JupyterServer) -> None:
+    """Drain and close the pipe this harness held open as the server's stdout.
+
+    This is the first act of teardown, before the kernel is even asked to shut
+    down, because everything downstream of it needs the pipe to move. A server
+    whose stdout has filled is itself blocked the moment it logs anything, so
+    it cannot serve the DELETE; and a kernel parked on that pipe cannot answer
+    a shutdown request. Leaving the descriptor open until after the kill spends
+    the DELETE's whole timeout and then reports the kernel and its children as
+    survivors, which they are.
+
+    Draining first and closing after is what makes the release clean: a reader
+    that simply closes turns the backpressure into ``SIGPIPE`` for everyone
+    parked on the pipe, so processes die where they stood instead of finishing
+    their writes and shutting down in order.
+
+    It is not gated the way the group kill is, and does not need to be. A group
+    kill is aimed at a number, and a number can come to be worn by a stranger;
+    this reaches exactly the processes holding the write end of a pipe this
+    harness created and handed to the server it launched, which can only ever
+    be that server and the kernels under it.
+    """
+    if server.held_stdout is not None:
+        server.held_stdout.release()
+
+
+def unresolved_stdout(server: JupyterServer, *, timeout: float = HELD_PIPE_TIMEOUT) -> str:
+    """Why the held stdout pipe is still open after the kill, or ``""``.
+
+    End of file arrives when the last write end closes, so once the group kill
+    has landed the drain should finish at once. If it has not within
+    ``timeout``, something is still holding a descriptor this teardown handed
+    out -- and the reader thread and its fd are still alive here to prove it.
+    That is a finding, not a leak to be swallowed: it is reported so a survivor
+    count taken by pid cannot claim a clean machine over the top of it.
+    """
+    if server.held_stdout is None or server.held_stdout.resolve(timeout=timeout):
+        return ""
+    return (
+        f"the pipe held open as the server's stdout had not reached end of file "
+        f"{timeout:.0f}s after the group kill, so something still holds the write end"
+    )
 
 
 def delete_kernel_and_stop(server: JupyterServer, kernel_id: str | None) -> TeardownReport:
@@ -953,8 +1212,10 @@ def delete_kernel_and_stop(server: JupyterServer, kernel_id: str | None) -> Tear
 
     The kernel has its own session, so the server's process group does not
     contain it; the server's own kernel manager is the only thing that reliably
-    ends it, and the group kill then finishes the server off.
+    ends it, and the group kill then finishes the server off. Any held stdout
+    pipe is released before the DELETE; see `release_held_stdout`.
     """
+    release_held_stdout(server)
     if kernel_id is not None:
         try:
             api_call(server, f"api/kernels/{kernel_id}", method="DELETE", timeout=60.0)
@@ -1002,6 +1263,8 @@ def start_server_session(
     cwd: Path,
     scratch: Path,
     kernel_name: str = DEFAULT_KERNEL_NAME,
+    stdout_mode: str = "file",
+    capture_fd_output: bool = True,
     log: TextIO | None = None,
     ready_timeout: float = 60.0,
 ) -> KernelSession:
@@ -1012,13 +1275,25 @@ def start_server_session(
     server's stdio and ZMQ plumbing rather than this harness's. The census is
     rooted at the server for that reason -- the kernel is one of its
     descendants.
+
+    ``stdout_mode`` and ``capture_fd_output`` set the two hops the kernel's
+    fd 1 travels; turning capture off replaces the kernelspec, since that is
+    the only place ipykernel's own option can be set.
     """
     deadline = time.monotonic() + SERVER_STARTUP_TIMEOUT
-    server = start_jupyter_server(cwd=cwd, scratch=scratch, log=log, deadline=deadline)
+    server = start_jupyter_server(
+        cwd=cwd,
+        scratch=scratch,
+        log=log,
+        deadline=deadline,
+        stdout_mode=stdout_mode,
+        capture_fd_output=capture_fd_output,
+    )
+    requested = kernel_name if capture_fd_output else NO_FD_CAPTURE_KERNEL_NAME
     kernel_id: str | None = None
     census = DescendantCensus({}, False, "the kernel was never created")
     try:
-        created = api_call(server, "api/kernels", method="POST", payload={"name": kernel_name})
+        created = api_call(server, "api/kernels", method="POST", payload={"name": requested})
         # Retain the id and the tree the moment the kernel exists. Everything
         # after this point can fail, and if it does the kernel still has to be
         # deleted and still has to be censused: the server's group kill cannot
@@ -1049,19 +1324,54 @@ def start_server_session(
     return session
 
 
-def training_code(fixture: Path, *, target: str, jobs: int, utterances: int) -> str:
-    """Build kernel code for one isolated mini-Arctic training attempt.
-
-    Imports go through ``pstrain.api``, the boundary the tutorial notebook
-    uses, so the harness exercises the same call path that stalls.
-    """
-    return f"""
+#: The imports every generated cell opens with. Shared because both corpora
+#: need exactly these and nothing else; anything a corpus needs on top of them
+#: it imports for itself.
+KERNEL_IMPORTS = """
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from pstrain.api import setup_project
 from pstrain.api.pipeline import PipelineContext, build_pipeline
+"""
 
+
+def pipeline_run_code(*, target: str, jobs: int) -> str:
+    """The tail of every generated cell: run the pipeline, then say so.
+
+    This much is identical whichever corpus was selected from, and it goes
+    through ``pstrain.api``, the boundary the tutorial notebook uses, so the
+    harness exercises the same call path that stalls. It is the only part the
+    two generators share below the imports: the selection and the project they
+    build differ, and were made to look alike once, at the cost of changing the
+    cell the default path had been measured with. They are kept apart now.
+    """
+    return f"""    context = PipelineContext.from_config(
+        project,
+        experiment="default",
+        config_name="default",
+        cli_overrides={{"runner": {{"jobs": {jobs}}}}},
+    )
+    return_code = build_pipeline(context).run({target!r}, jobs={jobs})
+    if return_code:
+        raise RuntimeError(f"pipeline returned {{return_code}}")
+print({COMPLETION_MARKER!r})
+"""
+
+
+def training_code(fixture: Path, *, target: str, jobs: int, utterances: int) -> str:
+    """Build kernel code for one isolated mini-Arctic training attempt.
+
+    Imports go through ``pstrain.api``, the boundary the tutorial notebook
+    uses, so the harness exercises the same call path that stalls.
+
+    This cell is byte-for-byte what every recorded measurement was taken with,
+    and `test_the_default_cell_is_the_one_every_measurement_was_taken_with`
+    pins it there. The fixture's transcription is written through unchanged
+    rather than reconstructed, because a default that quietly drifts makes the
+    hundreds of clean runs behind it unusable as a baseline.
+    """
+    return f"""{KERNEL_IMPORTS}
 fixture = Path({str(fixture)!r})
 with TemporaryDirectory(prefix="pstrain-kernel-repro-") as temporary:
     root = Path(temporary)
@@ -1085,17 +1395,79 @@ with TemporaryDirectory(prefix="pstrain-kernel-repro-") as temporary:
         phoneset_path=fixture / "phoneset.txt",
         filler_dict_path=fixture / "filler.dict",
     )
-    context = PipelineContext.from_config(
-        project,
-        experiment="default",
-        config_name="default",
-        cli_overrides={{"runner": {{"jobs": {jobs}}}}},
+{pipeline_run_code(target=target, jobs=jobs)}"""
+
+
+def corpus_training_code(
+    corpus: Path, dictionary: Path, *, target: str, jobs: int, utterances: int
+) -> str:
+    """Build kernel code for one training attempt over a full Arctic corpus.
+
+    The bundled fixture is ten utterances, whose per-utterance output is far
+    too small to fill a 64 KB pipe, so the volume needed to see fd 1
+    backpressure has to come from a real corpus. Selection is the tutorial
+    notebook's own: parse ``etc/txt.done.data``, normalize each prompt, reject
+    any carrying a word the dictionary does not have, and take the first N by
+    utterance id so a rerun selects the same utterances.
+
+    The cell also reports which ``pstrain`` it imported, since ``--import-root``
+    exists to point it somewhere other than this checkout and a run against the
+    wrong tree measures nothing. That reporting lives here and not on the
+    default path, which stays as it was measured.
+    """
+    return f"""{KERNEL_IMPORTS}
+import re
+
+import pstrain
+
+corpus = Path({str(corpus)!r})
+dictionary = Path({str(dictionary)!r})
+lexicon = set()
+for line in dictionary.read_text(encoding="utf-8").splitlines():
+    if line.strip() and not line.startswith("#"):
+        lexicon.add(line.split()[0])
+prompt = re.compile(r'\\(\\s*(\\S+)\\s+"(.*)"\\s*\\)')
+wav_dir = corpus / "wav"
+in_vocabulary = {{}}
+for line in (corpus / "etc" / "txt.done.data").read_text(encoding="utf-8").splitlines():
+    match = prompt.match(line.strip())
+    if match is None:
+        continue
+    utterance, text = match.group(1), match.group(2)
+    words = [
+        word.strip("'")
+        for word in re.sub(r"[^\\w\\s']", " ", text.lower()).split()
+        if word.strip("'")
+    ]
+    if not words or not all(word in lexicon for word in words):
+        continue
+    if not (wav_dir / (utterance + ".wav")).exists():
+        continue
+    in_vocabulary[utterance] = " ".join(words)
+selected = dict(sorted(in_vocabulary.items())[:{utterances}])
+if len(selected) < {utterances}:
+    raise RuntimeError(f"only {{len(selected)}} in-vocabulary utterance(s) available")
+print("pstrain imported from", pstrain.__file__)
+print("selected", len(selected), "utterance(s) from", corpus)
+with TemporaryDirectory(prefix="pstrain-kernel-repro-") as temporary:
+    root = Path(temporary)
+    audio = root / "audio"
+    audio.mkdir()
+    for utterance in selected:
+        (audio / (utterance + ".wav")).symlink_to(wav_dir / (utterance + ".wav"))
+    transcription = root / "transcription.txt"
+    transcription.write_text(
+        "".join(f"{{utterance}} {{text}}\\n" for utterance, text in selected.items()),
+        encoding="utf-8",
     )
-    return_code = build_pipeline(context).run({target!r}, jobs={jobs})
-    if return_code:
-        raise RuntimeError(f"pipeline returned {{return_code}}")
-print({COMPLETION_MARKER!r})
-"""
+    project = root / "project"
+    setup_project(
+        project,
+        transcription_path=transcription,
+        audio_path=audio,
+        dictionary_path=dictionary,
+    )
+{pipeline_run_code(target=target, jobs=jobs)}"""
 
 
 def pipeline_run_call(code: str) -> ast.Call | None:
@@ -1140,11 +1512,71 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="run every attempt in one long-lived kernel, the shape of a notebook session",
     )
+    parser.add_argument(
+        "--server-stdout",
+        choices=("file", "pipe"),
+        default="file",
+        help=(
+            "what the jupyter server's own stdout is, and so what the kernel inherits as its "
+            "original fd 1: 'file', the harness's launch log, which always drains, or 'pipe', "
+            "a pipe nobody reads, which fills and blocks its writers (--server only)"
+        ),
+    )
+    parser.add_argument(
+        "--no-capture-fd-output",
+        action="store_true",
+        help=(
+            "start the kernel with IPKernelApp.capture_fd_output=False, so fd 1 is the "
+            "server's descriptor directly rather than ipykernel's capture pipe (--server only)"
+        ),
+    )
+    parser.add_argument(
+        "--corpus",
+        type=Path,
+        default=None,
+        help="train in-vocabulary utterances from this Arctic corpus instead of the fixture",
+    )
+    parser.add_argument(
+        "--dictionary",
+        type=Path,
+        default=None,
+        help="lexicon the --corpus prompts are filtered against and trained with",
+    )
+    parser.add_argument(
+        "--import-root",
+        type=Path,
+        default=None,
+        help="checkout the kernel imports pstrain from (default: this harness's own)",
+    )
+    parser.add_argument(
+        "--hold-iopub",
+        type=float,
+        default=0.0,
+        help=(
+            "stop reading iopub for this many seconds after each execute request; a control, "
+            "not a stall knob, since ZMQ PUB drops at its high-water mark and never blocks"
+        ),
+    )
     args = parser.parse_args(argv)
     if args.runs < 1 or args.timeout <= 0 or args.jobs < 2 or args.utterances < 1:
         parser.error("require runs >= 1, timeout > 0, jobs >= 2, and utterances >= 1")
+    if args.hold_iopub < 0:
+        parser.error("--hold-iopub cannot be negative")
     if args.kernel_name != DEFAULT_KERNEL_NAME and not args.server:
         parser.error("--kernel-name names the kernelspec a server starts, so it needs --server")
+    if args.server_stdout != "file" and not args.server:
+        parser.error("--server-stdout is the stdout of a server, so it needs --server")
+    if args.no_capture_fd_output and not args.server:
+        parser.error(
+            "--no-capture-fd-output configures a kernelspec a server starts, so it needs --server"
+        )
+    if args.no_capture_fd_output and args.kernel_name != DEFAULT_KERNEL_NAME:
+        parser.error(
+            "--no-capture-fd-output writes and requests its own kernelspec, so the one named "
+            "by --kernel-name would be ignored"
+        )
+    if (args.corpus is None) != (args.dictionary is None):
+        parser.error("--corpus and --dictionary are only meaningful together")
     return args
 
 
@@ -1233,6 +1665,8 @@ def start_session(
             cwd=cwd,
             scratch=scratch,
             kernel_name=args.kernel_name,
+            stdout_mode=args.server_stdout,
+            capture_fd_output=not args.no_capture_fd_output,
             log=log,
             ready_timeout=ready_timeout,
         )
@@ -1255,7 +1689,9 @@ def run_attempts(args: argparse.Namespace, code: str, *, repository: Path) -> Ta
                 for number in group:
                     label = f"run {number}/{args.runs}"
                     tally.attempted += 1
-                    execution = run_in_session(session, code, timeout=args.timeout)
+                    execution = run_in_session(
+                        session, code, timeout=args.timeout, hold_iopub=args.hold_iopub
+                    )
                     launch_log.seek(consumed)
                     result = report_attempt(label, execution, session, launch_log.read())
                     consumed = launch_log.tell()
@@ -1271,20 +1707,45 @@ def run_attempts(args: argparse.Namespace, code: str, *, repository: Path) -> Ta
     return tally
 
 
+def attempt_code(args: argparse.Namespace, *, repository: Path) -> str:
+    """The kernel code one attempt runs, for whichever corpus was asked for."""
+    if args.corpus is not None:
+        return corpus_training_code(
+            args.corpus.resolve(),
+            args.dictionary.resolve(),
+            target=args.target,
+            jobs=args.jobs,
+            utterances=args.utterances,
+        )
+    return training_code(
+        repository / "tests" / "fixtures" / "mini_arctic",
+        target=args.target,
+        jobs=args.jobs,
+        utterances=args.utterances,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     repository = Path(__file__).resolve().parents[1]
-    fixture = repository / "tests" / "fixtures" / "mini_arctic"
-    code = training_code(fixture, target=args.target, jobs=args.jobs, utterances=args.utterances)
+    code = attempt_code(args, repository=repository)
+    # The fixture and the kernel's import path are separate choices: the
+    # fixture belongs to this checkout, while --import-root points the kernel
+    # at the tree whose behavior is being measured, which may be another one.
+    import_root = (args.import_root or repository).resolve()
     provisioning = "jupyter server" if args.server else "direct KernelManager"
     print(
         f"kernel pool stall repro: runs={args.runs} jobs={args.jobs} target={args.target} "
         f"utterances={args.utterances} timeout={args.timeout:.1f}s "
         f"provisioning={provisioning} "
-        f"kernels={'one, reused' if args.reuse_kernel else 'one per run'}",
+        f"kernels={'one, reused' if args.reuse_kernel else 'one per run'} "
+        f"corpus={args.corpus or 'mini fixture'} import_root={import_root} "
+        f"server_stdout={args.server_stdout} "
+        f"capture_fd_output={not args.no_capture_fd_output} "
+        f"hold_iopub={args.hold_iopub:.0f}s",
         flush=True,
     )
-    tally = run_attempts(args, code, repository=repository)
+    tally = run_attempts(args, code, repository=import_root)
     print(
         f"summary: {tally.stalls}/{tally.attempted} stalled, "
         f"{tally.failures}/{tally.attempted} failed, "

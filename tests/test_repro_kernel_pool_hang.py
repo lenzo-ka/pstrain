@@ -5,12 +5,20 @@ pytest options deselect, so CI never starts a kernel or a server. Everything
 else is a pure check over the harness's classification, process-identity and
 server-provisioning helpers, so the teardown rules can be tested without a
 kernel and without a real ``ps``.
+
+One of the marked checks reproduces the fd 1 write backpressure the harness
+exists to catch, with a synthetic writer and no pstrain in it at all, so the
+instrument can be shown to see that class of stall rather than only asserted to.
 """
 
 import ast
 import dataclasses
+import json
 import os
+import shutil
 import signal
+import stat
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,20 +30,25 @@ from scripts import repro_kernel_pool_hang as harness
 from scripts.repro_kernel_pool_hang import (
     COMPLETION_MARKER,
     DEFAULT_KERNEL_NAME,
+    NO_FD_CAPTURE_KERNEL_NAME,
     OUTCOME_COMPLETED,
     OUTCOME_FAILED,
     OUTCOME_STALLED,
+    HeldPipe,
     KernelExecution,
+    ProcessInfo,
     TeardownReport,
     api_call,
     api_url,
     assess_census,
     assess_survivors,
+    attempt_code,
     attempt_groups,
     auth_headers,
     captured_descendants,
     classify,
     connection_file,
+    corpus_training_code,
     execute_in_kernel,
     group_kill_refusal,
     kernel_descendants,
@@ -43,14 +56,18 @@ from scripts.repro_kernel_pool_hang import (
     parse_process_snapshot,
     pipeline_run_call,
     read_connection_file,
+    release_held_stdout,
     run_in_session,
     select_descendants,
     server_command,
+    server_stdout,
     shutdown_kernel,
+    stall_report,
     start_server_session,
     surviving_pids,
     throttle,
     training_code,
+    write_no_capture_kernelspec,
 )
 
 REPOSITORY = Path(__file__).resolve().parents[1]
@@ -133,6 +150,176 @@ def test_a_server_provisioned_kernel_runs_and_shuts_down_clean(tmp_path: Path) -
         report = shutdown_kernel(session)
         assert report.trusted, report.reason
         assert report.survivors == ()
+
+
+# The writer lives in its own module file rather than in the executed cell,
+# because a spawn child re-imports its target by name and a function defined in
+# a kernel's __main__ is not importable anywhere.
+FD1_WRITER_MODULE = '''"""A child that fills fd 1, the way a pool worker's native printf does."""
+
+import os
+
+
+def write_to_fd1(payload_size: int, writes: int) -> None:
+    for _ in range(writes):
+        os.write(1, b"x" * payload_size)
+'''
+
+#: Enough to overrun both hops -- ipykernel's 64 KB capture pipe and the 64 KB
+#: pipe the server's stdout is -- so no buffer along the way can absorb it.
+FD1_FLOOD_BYTES = 300 * 1024
+#: Long enough for a kernel to start a child and for the child to fill both
+#: pipes, which takes a fraction of a second, and short enough that a stalled
+#: attempt plus its stack sampling stays well inside a minute.
+FD1_FLOOD_TIMEOUT = 12.0
+
+
+def fd1_flood_code(directory: Path) -> str:
+    """Kernel code whose spawned child writes `FD1_FLOOD_BYTES` to fd 1.
+
+    The writer is a spawn child and not the kernel's own thread because that is
+    the shape of the thing that stalls: a process that inherited the kernel's
+    fd 1 and knows nothing about ipykernel. There is no pstrain here -- the
+    mechanism is the plumbing, and this reproduces it on its own.
+    """
+    return f"""
+import multiprocessing
+import sys
+from pathlib import Path
+
+directory = Path({str(directory)!r})
+directory.mkdir(parents=True, exist_ok=True)
+(directory / "fd1_writer.py").write_text({FD1_WRITER_MODULE!r}, encoding="utf-8")
+if str(directory) not in sys.path:
+    sys.path.insert(0, str(directory))
+import fd1_writer
+
+child = multiprocessing.get_context("spawn").Process(
+    target=fd1_writer.write_to_fd1, args=(4096, {FD1_FLOOD_BYTES // 4096})
+)
+child.start()
+child.join()
+print({COMPLETION_MARKER!r})
+"""
+
+
+def flood_a_servers_stdout(
+    scratch: Path, *, stdout_mode: str
+) -> tuple[str, str, dict[int, ProcessInfo], Any]:
+    """Run the fd 1 flood under a server with the given stdout, and tear down.
+
+    Returns the outcome, the stall report and process tree when there is one,
+    and the teardown report, so every assertion can be made after the server is
+    gone rather than while it is holding a pipe open.
+    """
+    scratch.mkdir(parents=True)
+    outcome, report = OUTCOME_FAILED, ""
+    descendants: dict[int, ProcessInfo] = {}
+    with (scratch / "launch.log").open("w+", encoding="utf-8") as log:
+        session = start_server_session(
+            cwd=REPOSITORY,
+            scratch=scratch,
+            stdout_mode=stdout_mode,
+            log=log,
+            ready_timeout=60.0,
+        )
+        try:
+            execution = run_in_session(
+                session, fd1_flood_code(scratch / "writer"), timeout=FD1_FLOOD_TIMEOUT
+            )
+            outcome = classify(execution, marker=COMPLETION_MARKER)
+            if outcome != OUTCOME_COMPLETED:
+                census = kernel_descendants(session)
+                assert census.trusted, census.reason
+                descendants = dict(census.descendants)
+                report = stall_report(session)
+        finally:
+            teardown = shutdown_kernel(session)
+    return outcome, report, descendants, teardown
+
+
+def report_section(report: str, command: str) -> str:
+    """The block of a stall report produced by one ``$ command`` line."""
+    for block in report.split("\n$ "):
+        if block.startswith(command):
+            return block
+    return ""
+
+
+@pytest.mark.kernel
+@pytest.mark.skipif(
+    os.name != "posix", reason="the harness identifies kernel descendants through POSIX ps"
+)
+def test_a_server_stdout_nobody_reads_stalls_a_child_writing_to_fd_1(tmp_path: Path) -> None:
+    """The stall this harness hunts, reproduced on demand without pstrain.
+
+    A child of the kernel writes more to fd 1 than the two pipes between it and
+    the server's stdout can hold. With nothing draining the far end the copy
+    ipykernel's watcher thread makes blocks, the capture pipe fills behind it,
+    and the child parks in ``write(2)`` -- so the run must classify as stalled,
+    and the stall report must show the child in that syscall holding a pipe on
+    fd 1. Anything less and the instrument cannot see this class of defect.
+    """
+    pytest.importorskip("jupyter_server")
+    pytest.importorskip("jupyter_server.__main__")
+    outcome, report, descendants, teardown = flood_a_servers_stdout(
+        tmp_path / "unread-pipe", stdout_mode="pipe"
+    )
+    assert teardown.trusted, teardown.reason
+    assert teardown.survivors == ()
+    assert outcome == OUTCOME_STALLED
+
+    writers = [pid for pid, info in descendants.items() if "spawn_main" in info.command]
+    assert len(writers) == 1, report
+    writer = writers[0]
+
+    if shutil.which("py-spy"):
+        stack = report_section(report, f"py-spy dump --pid {writer}")
+        assert stack, report
+        # py-spy walks Python frames, so the flooding function is what names it.
+        assert "write_to_fd1" in stack, stack
+    elif shutil.which("sample"):
+        stack = report_section(report, f"sample {writer} ")
+        assert stack, report
+        # macOS `sample` walks native frames, so the syscall itself is visible.
+        assert "os_write" in stack, stack
+        assert "write  (in libsystem_kernel" in stack or "write_nocancel" in stack, stack
+    else:
+        # Neither sampler is installed, so the harness took no stack and there
+        # is none to read. Everything else about the stall still holds and is
+        # still asserted; only the syscall goes unwitnessed.
+        assert f"pid {writer}: neither py-spy nor sample is available" in report, report
+
+    if shutil.which("lsof"):
+        files = report_section(report, f"lsof -n -P -p {writer}")
+        assert files, report
+        rows = [line.split() for line in files.splitlines()]
+        on_fd1 = [row for row in rows if len(row) > 4 and row[3].rstrip("rwu") == "1"]
+        assert on_fd1, files
+        # A pipe on fd 1, not a terminal and not a file: what the child is
+        # parked on is the thing that cannot take another byte.
+        assert all(row[4] in {"PIPE", "FIFO"} for row in on_fd1), files
+
+
+@pytest.mark.kernel
+@pytest.mark.skipif(
+    os.name != "posix", reason="the harness identifies kernel descendants through POSIX ps"
+)
+def test_the_same_flood_completes_when_the_servers_stdout_drains(tmp_path: Path) -> None:
+    """The control: identical code, a stdout that drains, and no stall.
+
+    This is what makes the stalled run mean something. The only difference is
+    the descriptor the server was given, so a completion here says the volume
+    of output is not itself the cause -- the far end not draining is.
+    """
+    pytest.importorskip("jupyter_server")
+    pytest.importorskip("jupyter_server.__main__")
+    outcome, report, _, teardown = flood_a_servers_stdout(
+        tmp_path / "launch-log", stdout_mode="file"
+    )
+    assert teardown.trusted, teardown.reason
+    assert teardown.survivors == ()
+    assert outcome == OUTCOME_COMPLETED, report
 
 
 def test_an_error_reply_is_a_failure_not_a_completion() -> None:
@@ -259,6 +446,63 @@ def test_generated_kernel_code_parses_and_drives_the_requested_run() -> None:
     assert keywords == {"jobs": 3}
 
 
+# The mini-fixture cell exactly as every recorded run of this harness executed
+# it. Hundreds of clean attempts are only a baseline for the next measurement
+# if the next measurement runs the same code, so this is spelled out in full
+# rather than described: a change here has to be made deliberately, and any
+# result taken before it has to be re-read in the light of it.
+DEFAULT_CELL = """
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from pstrain.api import setup_project
+from pstrain.api.pipeline import PipelineContext, build_pipeline
+
+fixture = Path('/fixture')
+with TemporaryDirectory(prefix="pstrain-kernel-repro-") as temporary:
+    root = Path(temporary)
+    audio = root / "audio"
+    audio.mkdir()
+    lines = (fixture / "transcription.txt").read_text(encoding="utf-8").splitlines()
+    lines = [line for line in lines if line.strip()][:10]
+    if not lines:
+        raise RuntimeError("no utterances selected")
+    for line in lines:
+        source = fixture / "wav" / (line.split()[0] + ".wav")
+        (audio / source.name).symlink_to(source)
+    transcription = root / "transcription.txt"
+    transcription.write_text("\\n".join(lines) + "\\n", encoding="utf-8")
+    project = root / "project"
+    setup_project(
+        project,
+        transcription_path=transcription,
+        audio_path=audio,
+        dictionary_path=fixture / "dictionary.dict",
+        phoneset_path=fixture / "phoneset.txt",
+        filler_dict_path=fixture / "filler.dict",
+    )
+    context = PipelineContext.from_config(
+        project,
+        experiment="default",
+        config_name="default",
+        cli_overrides={"runner": {"jobs": 2}},
+    )
+    return_code = build_pipeline(context).run('ci-1g', jobs=2)
+    if return_code:
+        raise RuntimeError(f"pipeline returned {return_code}")
+print('pstrain-kernel-repro: completed')
+"""
+
+
+def test_the_default_cell_is_the_one_every_measurement_was_taken_with() -> None:
+    assert training_code(Path("/fixture"), target="ci-1g", jobs=2, utterances=10) == DEFAULT_CELL
+    # The additions made for the corpus path are on the corpus path only. None
+    # of them may reach the default cell, which is the measured baseline.
+    default = training_code(Path("/fixture"), target="ci-1g", jobs=4, utterances=500)
+    for addition in ("import pstrain", "pstrain imported from", 'print("selected"', "wav_dir"):
+        assert addition not in default, addition
+
+
 def test_parse_args_rejects_serial_and_empty_configurations() -> None:
     args = parse_args(["--runs", "5", "--jobs", "4", "--target", "cd-1g"])
     assert (args.runs, args.jobs, args.target) == (5, 4, "cd-1g")
@@ -280,6 +524,145 @@ def test_parse_args_takes_the_server_mode_and_guards_its_options() -> None:
     # would silently do nothing.
     with pytest.raises(SystemExit):
         parse_args(["--kernel-name", "python3-alt"])
+
+
+def test_parse_args_takes_the_backpressure_options_and_guards_them() -> None:
+    args = parse_args(
+        ["--server", "--server-stdout", "pipe", "--no-capture-fd-output", "--hold-iopub", "5"]
+    )
+    assert (args.server_stdout, args.no_capture_fd_output, args.hold_iopub) == ("pipe", True, 5.0)
+    default = parse_args([])
+    # The defaults are the ones every measurement so far was taken under: a
+    # stdout that drains, ipykernel's capture on, iopub read as it arrives.
+    assert (default.server_stdout, default.no_capture_fd_output) == ("file", False)
+    assert (default.hold_iopub, default.corpus, default.dictionary, default.import_root) == (
+        0.0,
+        None,
+        None,
+        None,
+    )
+    for bad in (
+        # Both options configure a server, or the kernelspec one starts.
+        ["--server-stdout", "pipe"],
+        ["--no-capture-fd-output"],
+        # The no-capture spec is the one requested, so a named one is ignored.
+        ["--server", "--no-capture-fd-output", "--kernel-name", "python3-alt"],
+        # A corpus is selected against a dictionary; neither alone says which
+        # utterances to train.
+        ["--corpus", "/corpus"],
+        ["--dictionary", "/lexicon.dict"],
+        ["--hold-iopub", "-1"],
+    ):
+        with pytest.raises(SystemExit):
+            parse_args(bad)
+
+
+def test_a_corpus_run_selects_in_vocabulary_utterances_and_drives_the_run() -> None:
+    code = corpus_training_code(
+        Path("/corpus"), Path("/lexicon.dict"), target="cd-1g", jobs=4, utterances=300
+    )
+    call = pipeline_run_call(code)
+    assert call is not None
+    assert ast.literal_eval(call.args[0]) == "cd-1g"
+    assert {keyword.arg: ast.literal_eval(keyword.value) for keyword in call.keywords} == {
+        "jobs": 4
+    }
+    # Prompts come from where a full Arctic corpus keeps them, the selection is
+    # bounded and ordered so a rerun trains the same utterances, and the
+    # fixture's phoneset and filler dictionary play no part in a real corpus.
+    assert "txt.done.data" in code
+    assert "sorted(in_vocabulary.items())[:300]" in code
+    assert "phoneset_path" not in code
+
+
+def test_the_corpus_options_decide_which_code_an_attempt_runs() -> None:
+    fixture = str(REPOSITORY / "tests" / "fixtures" / "mini_arctic")
+    assert fixture in attempt_code(parse_args([]), repository=REPOSITORY)
+    corpus = attempt_code(
+        parse_args(["--corpus", "/corpus", "--dictionary", "/lexicon.dict"]),
+        repository=REPOSITORY,
+    )
+    assert "/corpus" in corpus
+    assert fixture not in corpus
+
+
+def test_a_file_stdout_hands_over_a_descriptor_that_cannot_block(tmp_path: Path) -> None:
+    with (tmp_path / "launch.log").open("w+", encoding="utf-8") as log:
+        stream, held = server_stdout("file", log)
+        assert stream is log
+        assert held is None
+    # Without a launch log there is still nothing that can fill up.
+    stream, held = server_stdout("file", None)
+    assert stream is subprocess.DEVNULL
+    assert held is None
+
+
+def test_a_pipe_stdout_is_never_read_and_teardown_closes_it() -> None:
+    write_end, held = server_stdout("pipe", None)
+    assert held is not None
+    try:
+        assert stat.S_ISFIFO(os.fstat(write_end).st_mode)
+        # Nothing drains the read end, so a writer fills the pipe and then has
+        # nowhere to put the next byte. On a blocking descriptor, which is what
+        # a server and its kernels inherit, that is the stall being reproduced.
+        os.set_blocking(write_end, False)
+        written = 0
+        with pytest.raises(BlockingIOError):
+            for _ in range(1024):
+                written += os.write(write_end, b"x" * 4096)
+        assert written > 0
+        # Releasing while a writer is still there cannot finish, and says so
+        # rather than blocking teardown or reporting a pipe that is gone.
+        held.release()
+        assert held.resolve(timeout=0.5) is False
+        assert held.read_end >= 0
+    finally:
+        os.close(write_end)
+    # With the last writer gone the drain reaches end of file and closes.
+    assert held.resolve(timeout=30.0) is True
+    assert held.read_end == -1
+    # And a second teardown is a no-op rather than a close of whatever
+    # descriptor number has since been handed out.
+    held.release()
+    held.close()
+    assert held.read_end == -1
+
+
+def test_teardown_reports_a_held_stdout_that_still_has_a_writer() -> None:
+    read_end, write_end = os.pipe()
+    server = SimpleNamespace(held_stdout=HeldPipe(read_end))
+    release_held_stdout(server)
+    # A writer that outlived the group kill still holds the write end, so the
+    # drain never reaches end of file. That is a survivor by another name and
+    # has to be said out loud, not swallowed with the thread.
+    unresolved = harness.unresolved_stdout(server, timeout=0.5)
+    assert "still holds the write end" in unresolved
+    survivors = harness.report_teardown(
+        TeardownReport(True, unresolved=unresolved),
+        harness.DescendantCensus({}, True),
+        300,
+        parse_process_snapshot(SERVER_PS_OUTPUT),
+    )
+    assert survivors.trusted is False
+    assert survivors.reason == unresolved
+
+    os.close(write_end)
+    assert harness.unresolved_stdout(server, timeout=30.0) == ""
+    # A server whose stdout was a file holds no pipe, and teardown says so by
+    # doing nothing rather than by failing.
+    release_held_stdout(SimpleNamespace(held_stdout=None))
+    assert harness.unresolved_stdout(SimpleNamespace(held_stdout=None), timeout=0.0) == ""
+
+
+def test_the_no_capture_kernelspec_turns_ipykernels_fd_capture_off(tmp_path: Path) -> None:
+    name = write_no_capture_kernelspec(tmp_path)
+    assert name == NO_FD_CAPTURE_KERNEL_NAME
+    spec = json.loads((tmp_path / "kernels" / name / "kernel.json").read_text(encoding="utf-8"))
+    # The same interpreter as the default spec, so the capture setting is the
+    # only thing that differs between a run with it and a run without.
+    assert spec["argv"][0] == sys.executable
+    assert "{connection_file}" in spec["argv"]
+    assert "--IPKernelApp.capture_fd_output=False" in spec["argv"]
 
 
 def test_attempts_get_a_fresh_kernel_each_unless_one_is_reused() -> None:
@@ -447,6 +830,7 @@ def test_provisioning_that_fails_after_the_post_still_deletes_and_censuses(
         runtime_dir=tmp_path,
         base_url="http://127.0.0.1:8888",
         token="s3cret",
+        held_stdout=None,
     )
     calls: list[tuple[str, str]] = []
 
