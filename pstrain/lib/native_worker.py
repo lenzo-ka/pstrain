@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import atexit
 import contextlib
+import ctypes
 import multiprocessing
 import os
 import select
@@ -56,6 +57,8 @@ GUARDED_OPERATIONS = frozenset(
         "object_create",
         "object_call",
         "object_close",
+        "stdout_redirect",
+        "stdout_restore",
     }
 )
 
@@ -253,6 +256,7 @@ def _worker_main(connection: Connection, state: _WorkerState) -> None:
     diagnostic_fd = os.open(state.diagnostic_path, os.O_WRONLY | os.O_APPEND)
     os.dup2(diagnostic_fd, 2)
     os.close(diagnostic_fd)
+    original_stdout_fd = os.dup(1)
 
     # Importing CFFI and dlopening libpstrainc is deliberately child-only for
     # guarded operations, and happens before "ready" so that a load failure is
@@ -269,12 +273,27 @@ def _worker_main(connection: Connection, state: _WorkerState) -> None:
         try:
             request = connection.recv()
         except EOFError:
-            return
+            break
         if request is None:
-            return
+            break
         request_id, operation, arguments = request
         try:
-            result = _dispatch(lib, ffi, operation, arguments, objects)
+            if operation == "stdout_redirect":
+                # fflush(NULL) intentionally flushes every C stream before fd 1 moves.
+                ctypes.CDLL(None).fflush(None)
+                stdout_fd = os.open(arguments[0], os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o666)
+                try:
+                    os.dup2(stdout_fd, 1)
+                finally:
+                    os.close(stdout_fd)
+                result = None
+            elif operation == "stdout_restore":
+                # fflush(NULL) intentionally flushes every C stream before fd 1 moves.
+                ctypes.CDLL(None).fflush(None)
+                os.dup2(original_stdout_fd, 1)
+                result = None
+            else:
+                result = _dispatch(lib, ffi, operation, arguments, objects)
             # Stateful BW/alignment/logmath objects span multiple RPCs. Their
             # native contexts may retain cmd_ln-backed configuration, so reset
             # at the coarse operation boundary (when the final object closes),
@@ -293,6 +312,11 @@ def _worker_main(connection: Connection, state: _WorkerState) -> None:
                     connection.send(("validation_error", request_id, exc))
                 else:
                     connection.send(("error", request_id, repr(exc)))
+    # Restore before closing the saved duplicate so shutdown output cannot leak
+    # into the most recently selected training log.
+    ctypes.CDLL(None).fflush(None)
+    os.dup2(original_stdout_fd, 1)
+    os.close(original_stdout_fd)
 
 
 class _NativeWorker:

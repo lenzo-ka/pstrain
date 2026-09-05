@@ -648,7 +648,8 @@ int
 pstrain_bw_process_utt_mfcc(pstrain_bw_context_t *ctx,
                         const float *mfcc,
                         uint32 n_mfcc_frames,
-                        const char *transcript)
+                        const char *transcript,
+                        const char *utterance_id)
 {
     mfcc_t **mfcc_buf = NULL;
     mfcc_t ***feat_buf = NULL;
@@ -662,7 +663,7 @@ pstrain_bw_process_utt_mfcc(pstrain_bw_context_t *ctx,
     char *trans_copy;
     int32 ceplen = 13;
 
-    if (!ctx || !mfcc || n_mfcc_frames == 0 || !transcript) {
+    if (!ctx || !mfcc || n_mfcc_frames == 0 || !transcript || !utterance_id) {
         E_ERROR("Invalid arguments to pstrain_bw_process_utt_mfcc\n");
         return -1;
     }
@@ -719,6 +720,8 @@ pstrain_bw_process_utt_mfcc(pstrain_bw_context_t *ctx,
             feat_array_free(feat_buf);
             return -1;
         }
+        printf("utt> %5u %25s %4u", ctx->total_utts + 1, utterance_id,
+               n_mfcc_frames);
         ret = baum_welch_update(&log_forw_prob,
                                 feat_buf,
                                 n_feat_frames,
@@ -738,6 +741,10 @@ pstrain_bw_process_utt_mfcc(pstrain_bw_context_t *ctx,
                                 NULL,  /* pdumpfh */
                                 NULL,  /* latfh */
                                 ctx->feat);
+        if (ret == S3_SUCCESS)
+            printf(" %e\n", log_forw_prob);
+        else
+            printf(" failed\n");
 
         if (ret == S3_SUCCESS && ctx->multipron)
             mark_fallback_senones(ctx, state_seq, n_state);

@@ -5,6 +5,7 @@ Orchestrates Baum-Welch training using the CFFI-wrapped BWTrainer.
 
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import json
 import logging
@@ -12,11 +13,12 @@ import multiprocessing
 import os
 import resource
 import shutil
+import sys
 import time
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from concurrent.futures import ProcessPoolExecutor
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -25,6 +27,7 @@ if TYPE_CHECKING:
     import numpy as np
     import numpy.typing as npt
 
+from pstrain.lib import native_worker
 from pstrain.lib.bw import HMM, BWConfig, BWResult, BWTrainer
 from pstrain.lib.features import read_sphinx_mfc
 from pstrain.lib.model import MODEL_FILES_REQUIRED
@@ -46,6 +49,76 @@ _CHECKPOINT_FILES = (
 _TELEMETRY_FILENAME = "bw_telemetry.json"
 _ACCUMULATOR_FILES = ("gauden_counts", "mixw_counts", "tmat_counts")
 _COPIED_TRAINING_OUTPUTS = ("mdef",)
+
+
+def _flush_stdout() -> None:
+    """Flush Python and C stdio before changing the process stdout fd."""
+    sys.stdout.flush()
+    # fflush(NULL) intentionally flushes every C stream in this process.
+    ctypes.CDLL(None).fflush(None)
+
+
+@contextmanager
+def _redirect_stdout_fd(destination: Path) -> Iterator[None]:
+    """Temporarily send fd 1, including native ``printf`` output, to a file."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    saved_stdout = os.dup(1)
+    redirected = False
+    restored = False
+    try:
+        with destination.open("ab", buffering=0) as stream:
+            _flush_stdout()
+            os.dup2(stream.fileno(), 1)
+            redirected = True
+            try:
+                yield
+            finally:
+                with suppress(Exception):
+                    _flush_stdout()
+                try:
+                    os.dup2(saved_stdout, 1)
+                except OSError:
+                    logger.warning(
+                        "Could not restore stdout fd; retaining saved fd %d", saved_stdout
+                    )
+                    raise
+                else:
+                    restored = True
+    finally:
+        if not redirected or restored:
+            os.close(saved_stdout)
+
+
+@contextmanager
+def _redirect_bw_stdout(destination: Path) -> Iterator[None]:
+    """Redirect native BW output in whichever process owns the trainer."""
+    if native_worker.in_worker():
+        with _redirect_stdout_fd(destination):
+            yield
+        return
+    native_worker.call("stdout_redirect", (str(destination),), (destination,))
+    try:
+        yield
+    finally:
+        native_worker.call("stdout_restore", (), ())
+
+
+_BW_COLUMN_HEADER = (
+    b"""column defns
+\t<seq>
+\t<id>
+\t<n_frame_in>
+\t<n_frame_del>
+\t<n_state_shmm>
+\t<avg_states_alpha>
+\t<avg_states_beta>
+\t<avg_states_reest>
+\t<avg_posterior_prune>
+\t<frame_log_lik>
+\t<utt_log_lik>
+"""
+    + b"\t... timing info ... \n"
+)
 
 
 class TerminalAlignmentError(RuntimeError):
@@ -285,8 +358,14 @@ def _process_with_final_state_retry(
     assert not trainer._retry_transaction_active, "BWTrainer cannot be shared across threads"
     trainer._last_process_retried = False
     trainer._retry_transaction_active = True
+
+    def process() -> bool:
+        if isinstance(trainer, BWTrainer):
+            return trainer.process_utterance_mfcc(mfcc, transcript, fileid)
+        return trainer.process_utterance_mfcc(mfcc, transcript)
+
     try:
-        success = trainer.process_utterance_mfcc(mfcc, transcript)
+        success = process()
         if success:
             return success
 
@@ -316,7 +395,7 @@ def _process_with_final_state_retry(
         )
         previous_beam = trainer.set_a_beam(retry_beam)
         try:
-            success = trainer.process_utterance_mfcc(mfcc, transcript)
+            success = process()
             if not success:
                 # "recover" now recovers the pass, not only the utterance. One
                 # genuinely unalignable recording used to end a build that had
@@ -455,6 +534,7 @@ def _run_bw_shard(
     iteration: int,
     arctic_a0302_zero_codebook_band: tuple[int, int] | None,
     accept_arctic_a0587_pass: int | None,
+    diagnostic_log: Path,
 ) -> _ShardResult:
     user_cpu_start = resource.getrusage(resource.RUSAGE_SELF).ru_utime
     trainer = BWTrainer(
@@ -470,6 +550,8 @@ def _run_bw_shard(
     retried: list[str] = []
     skipped: list[tuple[str, str]] = []
     accepted_exceptions: list[tuple[str, int, int, int]] = []
+    diagnostic_log.parent.mkdir(parents=True, exist_ok=True)
+    diagnostic_log.write_bytes(_BW_COLUMN_HEADER)
     for fileid in assigned_ids:
         if fileid in excluded_fileids:
             skipped.append((fileid, "excluded_by_schedule"))
@@ -486,15 +568,16 @@ def _run_bw_shard(
             if mfcc.shape[1] != 13:
                 skipped.append((fileid, "feature_dimension"))
                 continue
-            success = _process_with_final_state_retry(
-                trainer,
-                mfcc,
-                f"<s> {transcripts[fileid]} </s>",
-                iter_config.a_beam,
-                retry_beam_factor,
-                fileid,
-                failed_alignment,
-            )
+            with _redirect_bw_stdout(diagnostic_log):
+                success = _process_with_final_state_retry(
+                    trainer,
+                    mfcc,
+                    f"<s> {transcripts[fileid]} </s>",
+                    iter_config.a_beam,
+                    retry_beam_factor,
+                    fileid,
+                    failed_alignment,
+                )
             if not success:
                 skipped.append((fileid, "alignment_failure"))
             elif trainer._last_process_retried:
@@ -564,6 +647,8 @@ def run_bw_training(
     accept_arctic_a0587_pass: int | None = None,
     n_shards: int = 1,
     partition_position: Literal["remainder-first", "remainder-last"] = "remainder-first",
+    project_dir: Path | None = None,
+    stage: str | None = None,
     _in_process_reference: bool = False,
 ) -> TrainingResult:
     """Run Baum-Welch training iterations.
@@ -611,6 +696,10 @@ def run_bw_training(
     model_dir = Path(model_dir)
     output_dir = Path(output_dir)
     features_dir = Path(features_dir)
+    project_dir = Path(project_dir) if project_dir is not None else output_dir.parent
+    stage = stage or output_dir.name
+    diagnostic_dir = project_dir / ".pstrain" / "bw" / stage
+    print(f"bw-logs\t{diagnostic_dir}")
 
     # Validate inputs
     validate_files_exist(
@@ -700,6 +789,10 @@ def run_bw_training(
         merged_stats: BWResult | None = None
         shard_metadata: list[dict[str, object]] = []
         iteration_fileids = fileids
+        serial_diagnostic_log = diagnostic_dir / f"pass-{iteration:02d}-shard-00.log"
+        if iteration_fileids:
+            serial_diagnostic_log.parent.mkdir(parents=True, exist_ok=True)
+            serial_diagnostic_log.write_bytes(_BW_COLUMN_HEADER)
         if not multipron and not _in_process_reference:
             iteration_fileids = []
             pass_root = output_dir / ".bw-accum" / f"pass-{iteration:02d}"
@@ -724,6 +817,7 @@ def run_bw_training(
                     iteration,
                     arctic_a0302_zero_codebook_band,
                     accept_arctic_a0587_pass,
+                    diagnostic_dir / f"pass-{iteration:02d}-shard-{index:02d}.log",
                 )
                 for index, assigned in enumerate(partitions)
             ]
@@ -834,15 +928,16 @@ def run_bw_training(
                 transcript = f"<s> {text} </s>"
 
                 # Use process_utterance_mfcc - C handles CMN+deltas
-                success = _process_with_final_state_retry(
-                    trainer,
-                    mfcc,
-                    transcript,
-                    iter_config.a_beam,
-                    retry_beam_factor,
-                    fileid,
-                    failed_alignment,
-                )
+                with _redirect_bw_stdout(serial_diagnostic_log):
+                    success = _process_with_final_state_retry(
+                        trainer,
+                        mfcc,
+                        transcript,
+                        iter_config.a_beam,
+                        retry_beam_factor,
+                        fileid,
+                        failed_alignment,
+                    )
                 if success:
                     if trainer._last_process_retried:
                         retried += 1

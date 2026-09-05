@@ -114,6 +114,8 @@ def test_guarded_set_includes_the_full_surface_routes() -> None:
         "object_create",
         "object_call",
         "object_close",
+        "stdout_redirect",
+        "stdout_restore",
     }
 
 

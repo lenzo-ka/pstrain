@@ -391,6 +391,8 @@ def _make_bw_train_task(
             ),
             n_shards=ctx.runner.jobs or 1,
             partition_position=ctx.sharding.partition_position,
+            project_dir=ctx.project_dir,
+            stage=out_model,
         )
         if copy_mdef_from_src:
             shutil.copy(src_dir / "mdef", out_dir / "mdef")
@@ -468,6 +470,8 @@ def _make_split_and_train_task(
             n_shards=ctx.runner.jobs or 1,
             partition_position=ctx.sharding.partition_position,
             exclusion_schedule=ctx.train.exclusion_schedule.get(out_model),
+            project_dir=ctx.project_dir,
+            stage=out_model,
             accept_arctic_a0587_pass=(
                 1 if ctx.train.accept_arctic_a0587_known_skip and out_model == "cd-2g" else None
             ),
