@@ -919,7 +919,7 @@ init_uniform_mixw(float32 ***dest_mixw,
     }
 }
 
-static void
+static int
 init_model_params(float32 ***dest_mixw,
                   vector_t ***dest_mean,
                   vector_t ***dest_var,
@@ -937,7 +937,11 @@ init_model_params(float32 ***dest_mixw,
                   uint32 n_feat,
                   uint32 n_gau,
                   uint32 n_state_pm,
-                  const uint32 *veclen)
+                  const uint32 *veclen,
+                  uint32 n_tmat_src,
+                  uint32 n_tmat_dest,
+                  const char *src_model_name,
+                  const char *dest_model_name)
 {
     unsigned int s, j, k, l;
     unsigned int s_m, s_mg;
@@ -946,6 +950,19 @@ init_model_params(float32 ***dest_mixw,
 
     s_tmat = src->tmat;
     d_tmat = dest->tmat;
+
+    if (s_tmat >= n_tmat_src) {
+        E_ERROR("Source model %s refers to transition matrix %u, but the source "
+                "transition-matrix file contains %u matrices\n",
+                src_model_name, s_tmat, n_tmat_src);
+        return -1;
+    }
+    if (d_tmat >= n_tmat_dest) {
+        E_ERROR("Destination model %s refers to transition matrix %u, but the "
+                "destination model definition declares %u matrices\n",
+                dest_model_name, d_tmat, n_tmat_dest);
+        return -1;
+    }
 
     if (!was_added(&init_tmat_dest_list[d_tmat], s_tmat)) {
         for (j = 0; j < n_state_pm-1; j++) {
@@ -986,6 +1003,8 @@ init_model_params(float32 ***dest_mixw,
             }
         }
     }
+
+    return 0;
 }
 
 int
@@ -1161,19 +1180,29 @@ pstrain_init_mixw(const char *src_mdef_path,
                 init_uniform_mixw(dest_mixw, &dest_mdef->defn[dest_m], n_feat, n_gau);
             } else {
                 /* Use base phone */
-                init_model_params(dest_mixw, dest_mean, dest_var, dest_tmat,
-                                  &dest_mdef->defn[dest_m], dest_mdef->cb, dest_mdef->acmod_set,
-                                  src_mixw, src_mean, src_var, src_tmat,
-                                  &src_mdef->defn[src_m_base], src_mdef->cb, src_mdef->acmod_set,
-                                  n_feat, n_gau, n_state_pm, veclen);
+                if (init_model_params(dest_mixw, dest_mean, dest_var, dest_tmat,
+                                      &dest_mdef->defn[dest_m], dest_mdef->cb,
+                                      dest_mdef->acmod_set, src_mixw, src_mean, src_var,
+                                      src_tmat, &src_mdef->defn[src_m_base], src_mdef->cb,
+                                      src_mdef->acmod_set, n_feat, n_gau, n_state_pm, veclen,
+                                      n_tmat_src, n_tmat_dest, dest_m_base_name,
+                                      dest_m_name) != 0) {
+                    ret = -1;
+                    goto cleanup;
+                }
             }
         } else {
             /* Exact match found */
-            init_model_params(dest_mixw, dest_mean, dest_var, dest_tmat,
-                              &dest_mdef->defn[dest_m], dest_mdef->cb, dest_mdef->acmod_set,
-                              src_mixw, src_mean, src_var, src_tmat,
-                              &src_mdef->defn[src_m], src_mdef->cb, src_mdef->acmod_set,
-                              n_feat, n_gau, n_state_pm, veclen);
+            if (init_model_params(dest_mixw, dest_mean, dest_var, dest_tmat,
+                                  &dest_mdef->defn[dest_m], dest_mdef->cb,
+                                  dest_mdef->acmod_set, src_mixw, src_mean, src_var,
+                                  src_tmat, &src_mdef->defn[src_m], src_mdef->cb,
+                                  src_mdef->acmod_set, n_feat, n_gau, n_state_pm, veclen,
+                                  n_tmat_src, n_tmat_dest, dest_m_name,
+                                  dest_m_name) != 0) {
+                ret = -1;
+                goto cleanup;
+            }
         }
     }
 
