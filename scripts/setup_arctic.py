@@ -27,7 +27,7 @@ def parse_arctic_transcripts(txt_done_data: Path) -> dict[str, str]:
     Format: ( utterance_id "transcription text" )
     """
     transcripts = {}
-    with open(txt_done_data, encoding="utf-8") as f:
+    with txt_done_data.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             match = re.match(r'\(\s*(\S+)\s+"(.*)"\s*\)', line)
@@ -58,9 +58,8 @@ def normalize_text(text: str) -> str:
     text = re.sub(r"'$", "", text)
 
     # Collapse whitespace
-    text = " ".join(text.split())
+    return " ".join(text.split())
 
-    return text
 
 
 def load_cmudict(dict_path: Path) -> dict[str, list[list[str]]]:
@@ -69,7 +68,7 @@ def load_cmudict(dict_path: Path) -> dict[str, list[list[str]]]:
     Returns dict mapping base_word -> list of pronunciations (each is list of phones)
     """
     entries: dict[str, list[list[str]]] = {}
-    with open(dict_path, encoding="utf-8") as f:
+    with dict_path.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith(";;;"):
@@ -117,7 +116,7 @@ def create_dictionary(
     found = set()
     missing = set()
 
-    with open(output_path, "w", encoding="utf-8") as f:
+    with output_path.open("w", encoding="utf-8") as f:
         for word in sorted(all_words):
             if word in cmudict:
                 pronunciations = cmudict[word]
@@ -133,6 +132,28 @@ def create_dictionary(
     return found, missing
 
 
+def write_missing_vocabulary(
+    transcripts: dict[str, str], missing: set[str], output_path: Path
+) -> int:
+    """Write every missing word and the utterances containing it.
+
+    Returns the number of affected utterances. Those utterances remain in the
+    generated train/test data; this manifest makes that existing behavior
+    visible to the person running setup.
+    """
+    utterances_by_word = {word: [] for word in missing}
+    for utt_id, text in transcripts.items():
+        for word in set(normalize_text(text).split()) & missing:
+            utterances_by_word[word].append(utt_id)
+
+    with output_path.open("w", encoding="utf-8") as f:
+        for word in sorted(utterances_by_word):
+            utterance_ids = sorted(utterances_by_word[word])
+            f.write("\t".join((word, *utterance_ids)) + "\n")
+
+    return len({utt_id for ids in utterances_by_word.values() for utt_id in ids})
+
+
 def create_filler_dict(output_path: Path) -> None:
     """Create filler dictionary.
 
@@ -140,7 +161,7 @@ def create_filler_dict(output_path: Path) -> None:
     - <s> and </s> are sentence markers
     - <sil> is optional silence
     """
-    with open(output_path, "w", encoding="utf-8") as f:
+    with output_path.open("w", encoding="utf-8") as f:
         f.write("<sil> SIL\n")
         f.write("<s> SIL\n")
         f.write("</s> SIL\n")
@@ -149,7 +170,7 @@ def create_filler_dict(output_path: Path) -> None:
 def create_phoneset(dictionary_path: Path, output_path: Path) -> set[str]:
     """Extract unique phones from dictionary and create phoneset file."""
     phones = set()
-    with open(dictionary_path, encoding="utf-8") as f:
+    with dictionary_path.open(encoding="utf-8") as f:
         for line in f:
             parts = line.strip().split()
             if len(parts) >= 2:
@@ -159,7 +180,7 @@ def create_phoneset(dictionary_path: Path, output_path: Path) -> set[str]:
     phones.add("SIL")
 
     sorted_phones = sorted(phones)
-    with open(output_path, "w", encoding="utf-8") as f:
+    with output_path.open("w", encoding="utf-8") as f:
         for phone in sorted_phones:
             f.write(f"{phone}\n")
 
@@ -211,12 +232,12 @@ def main() -> None:
     dict_path = SHARED_DIR / "dictionary.dict"
     found, missing = create_dictionary(transcripts, cmudict, dict_path)
     print(f"  Words found: {len(found)}")
-    if missing:
-        print(f"  Words missing: {len(missing)}")
-        for word in sorted(missing)[:10]:
-            print(f"    - {word}")
-        if len(missing) > 10:
-            print(f"    ... and {len(missing) - 10} more")
+    missing_path = EXPERIMENT_DIR / "etc" / "missing_vocabulary.txt"
+    affected_utterances = write_missing_vocabulary(transcripts, missing, missing_path)
+    print(
+        f"missing_vocabulary\twords={len(missing)}\t"
+        f"utterances_kept={affected_utterances}\tpath={missing_path}"
+    )
 
     # 4. Create filler dictionary
     print("Creating filler dictionary...")
@@ -238,21 +259,21 @@ def main() -> None:
     print(f"  Train: {len(train_ids)}, Test: {len(test_ids)}")
 
     # Write fileids
-    with open(EXPERIMENT_DIR / "etc" / "train.fileids", "w") as f:
+    with (EXPERIMENT_DIR / "etc" / "train.fileids").open("w") as f:
         for uid in train_ids:
             f.write(f"{uid}\n")
 
-    with open(EXPERIMENT_DIR / "etc" / "test.fileids", "w") as f:
+    with (EXPERIMENT_DIR / "etc" / "test.fileids").open("w") as f:
         for uid in sorted(test_ids):
             f.write(f"{uid}\n")
 
     # Write transcriptions in Sphinx format
-    with open(EXPERIMENT_DIR / "etc" / "train.transcription", "w") as f:
+    with (EXPERIMENT_DIR / "etc" / "train.transcription").open("w") as f:
         for uid in train_ids:
             text = normalize_text(transcripts[uid])
             f.write(f"<s> {text} </s> ({uid})\n")
 
-    with open(EXPERIMENT_DIR / "etc" / "test.transcription", "w") as f:
+    with (EXPERIMENT_DIR / "etc" / "test.transcription").open("w") as f:
         for uid in sorted(test_ids):
             text = normalize_text(transcripts[uid])
             f.write(f"<s> {text} </s> ({uid})\n")
