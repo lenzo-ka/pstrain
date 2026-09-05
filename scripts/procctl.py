@@ -30,7 +30,22 @@ FIELDS = (
 )
 FINGERPRINT_SETTLE_INTERVAL = 0.1
 FINGERPRINT_SETTLE_DURATION = 1.0
-FINGERPRINT_SETTLE_TIMEOUT = 2.0
+FINGERPRINT_SETTLE_CHANGES = 3
+FINGERPRINT_READER_TIMEOUT = 2.0
+# The outer bound on identity settling, which a caller can rely on: settling
+# produces an identity or refuses within this many seconds, plus the cost of
+# reaping the last reader subprocess. Readers are clamped to the time left
+# inside it and none is started once it has passed. A refused launch also pays
+# for cleanup below, so it is not the bound on launch as a whole.
+LAUNCH_SETTLE_DEADLINE = 60.0
+# A hang cap for one reader, not a latency threshold. Measured worst case for
+# `lsof` on a loaded twelve-core machine at nice 19 is under seven seconds, so
+# this fires only on a reader that has genuinely stopped, never on a slow one.
+READER_SUBPROCESS_TIMEOUT = 30.0
+# Each of the four waits a failed launch makes while disposing of its child:
+# for the leader and then its group after SIGTERM, and both again after
+# SIGKILL. A refused launch therefore returns within the settling bound plus
+# four of these.
 LAUNCH_CLEANUP_TIMEOUT = 2.0
 
 
@@ -38,15 +53,38 @@ class Refusal(Exception):
     """The fingerprint does not identify the current process."""
 
 
-def _process_details(pid: int) -> dict[str, str]:
+def _reader_timeout(pid: int, deadline: float | None) -> float:
+    """Bound one reader by its hang cap and by the time left before `deadline`.
+
+    A reader is never started once the deadline has passed, because a reader
+    granted even a token timeout could return a sample the launcher has no
+    budget left to trust.
+    """
+    if deadline is None:
+        return READER_SUBPROCESS_TIMEOUT
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise Refusal(f"no time left to inspect PID {pid} before the launch deadline")
+    return min(READER_SUBPROCESS_TIMEOUT, remaining)
+
+
+def _process_details(pid: int, deadline: float | None = None) -> dict[str, str]:
     try:
         result = subprocess.run(
-            ["ps", "-p", str(pid), "-o", "user=", "-o", "lstart=", "-o", "command="],
+            # -ww lifts the width limit both BSD and procps ps otherwise impose,
+            # which truncates the command to the terminal width and, with no
+            # terminal, to eighty columns less the fields printed before it. The
+            # loss is not cosmetic: settling compares whole identities, so a
+            # wrapper and the target it execs can share a surviving prefix and
+            # compare equal, which would settle an identity that never stopped
+            # changing. The command stays last so no fixed-width column cuts it.
+            ["ps", "-ww", "-p", str(pid), "-o", "user=", "-o", "lstart=", "-o", "command="],
             check=False,
             capture_output=True,
             text=True,
+            timeout=_reader_timeout(pid, deadline),
         )
-    except OSError as error:
+    except (OSError, subprocess.TimeoutExpired) as error:
         raise Refusal(f"could not run ps to inspect PID {pid}: {error}") from error
     line = result.stdout.strip()
     if result.returncode != 0 or not line:
@@ -102,7 +140,7 @@ def _process_start_time(pid: int, ps_start_time: str) -> str:
     return f"ps-lstart:{ps_start_time}"
 
 
-def _process_cwd(pid: int) -> str:
+def _process_cwd(pid: int, deadline: float | None = None) -> str:
     proc_cwd = Path(f"/proc/{pid}/cwd")
     if proc_cwd.exists():
         return str(proc_cwd.resolve(strict=True))
@@ -112,8 +150,9 @@ def _process_cwd(pid: int) -> str:
             check=False,
             capture_output=True,
             text=True,
+            timeout=_reader_timeout(pid, deadline),
         )
-    except OSError as error:
+    except (OSError, subprocess.TimeoutExpired) as error:
         raise Refusal(f"could not inspect working directory for PID {pid}: {error}") from error
     paths = [line[1:] for line in result.stdout.splitlines() if line.startswith("n")]
     if result.returncode != 0 or len(paths) != 1:
@@ -121,44 +160,104 @@ def _process_cwd(pid: int) -> str:
     return str(Path(paths[0]).resolve(strict=True))
 
 
-def _live_fingerprint(pid: int) -> dict[str, Any]:
-    details = _process_details(pid)
+def _live_fingerprint(pid: int, deadline: float | None = None) -> dict[str, Any]:
+    details = _process_details(pid, deadline)
     return {
         "host": socket.gethostname(),
         "user": details["user"],
         "pid": pid,
         "start_time": _process_start_time(pid, details["start_time"]),
         "command": details["command"],
-        "attempt_path": _process_cwd(pid),
+        "attempt_path": _process_cwd(pid, deadline),
     }
 
 
 def _settled_live_fingerprint(pid: int) -> dict[str, Any]:
-    """Read an identity unchanged for a full second within the launch budget."""
+    """Read an identity unchanged for a full second, confirming it by observation.
+
+    Two rules apply. The inner rule counts confirmation windows rather than
+    wall-clock seconds: a sample that differs from the one before it opens a
+    new window, which is what a wrapper that execs its target needs, and
+    `FINGERPRINT_SETTLE_CHANGES` such changes are tolerated. A reader failure
+    interrupts the window and the settle wait restarts, but it is not a change,
+    because failing to read an identity is not evidence that it differs. So a
+    machine slow enough to make `ps` and the working-directory reader take
+    longer than a window settles later instead of refusing.
+
+    The outer rule is `LAUNCH_SETTLE_DEADLINE`, the bound a caller can rely on
+    for settling: this returns an identity or refuses within that many seconds
+    plus the cost of reaping the last reader subprocess. No reader is started
+    once the deadline has passed, each is capped by `READER_SUBPROCESS_TIMEOUT`
+    and clamped again to the time left, and a reading that still finishes late
+    is refused rather than accepted, so no identity is ever confirmed on
+    evidence gathered after the deadline. A refusal reports the last identity
+    read, the last reader error, and counts of the distinct identities,
+    interrupted windows, and reader failures behind them.
+
+    That bound covers settling only. A caller whose launch is refused waits for
+    it and then for `_terminate_failed_launch`, which spends up to four
+    `LAUNCH_CLEANUP_TIMEOUT` periods disposing of the detached child, so a
+    refused launch returns in about sixty-eight seconds rather than sixty.
+    """
     started = time.monotonic()
-    deadline = started + FINGERPRINT_SETTLE_TIMEOUT
+    outer_deadline = started + LAUNCH_SETTLE_DEADLINE
     previous: dict[str, Any] | None = None
-    stable_since = started
+    stable_since: float | None = None
+    changes = 0
+    interruptions = 0
+    failures = 0
+    last_error: str | None = None
+    reader_deadline = started + FINGERPRINT_READER_TIMEOUT
     while True:
-        now = time.monotonic()
-        if now > deadline:
-            break
         try:
-            current = _live_fingerprint(pid)
-        except Refusal:
-            previous = None
-            stable_since = now
-        else:
-            if current != previous:
-                previous = current
-                stable_since = now
-            elif now - stable_since >= FINGERPRINT_SETTLE_DURATION:
-                return current
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
+            current = _live_fingerprint(pid, outer_deadline)
+        except Refusal as error:
+            last_error = str(error)
+            failures += 1
+            if stable_since is not None:
+                # The window is interrupted, not invalidated: the identity is
+                # unconfirmed, but nothing says it changed.
+                interruptions += 1
+                stable_since = None
+            now = time.monotonic()
+            # Two attempts before giving up, so one slow failing read cannot
+            # decide the launch on its own.
+            if now >= outer_deadline or (failures >= 2 and now >= reader_deadline):
+                break
+            time.sleep(min(FINGERPRINT_SETTLE_INTERVAL, outer_deadline - now))
+            continue
+        observed_at = time.monotonic()
+        if observed_at >= outer_deadline:
+            # The read overran the budget it was clamped to. Accepting it would
+            # confirm an identity on evidence gathered after the deadline.
+            last_error = "the last reading finished after the launch deadline"
             break
-        time.sleep(min(FINGERPRINT_SETTLE_INTERVAL, remaining))
-    raise Refusal(f"process identity for PID {pid} did not settle after launch")
+        failures = 0
+        reader_deadline = observed_at + FINGERPRINT_READER_TIMEOUT
+        if current == previous:
+            if stable_since is None:
+                stable_since = observed_at
+            elif observed_at - stable_since >= FINGERPRINT_SETTLE_DURATION:
+                return current
+        else:
+            changes += 1
+            if changes > FINGERPRINT_SETTLE_CHANGES:
+                break
+            previous = current
+            stable_since = observed_at
+        now = time.monotonic()
+        if now >= outer_deadline:
+            break
+        delay = min(stable_since + FINGERPRINT_SETTLE_DURATION - now, outer_deadline - now)
+        if delay > 0:
+            time.sleep(delay)
+    raise Refusal(
+        f"process identity for PID {pid} did not settle after launch "
+        f"({time.monotonic() - started:.1f}s of {LAUNCH_SETTLE_DEADLINE:.0f}s; "
+        f"distinct identities: {changes}, windows interrupted by reader failures: "
+        f"{interruptions}, consecutive reader failures: {failures}, "
+        f"last identity: {previous!r}, last reader error: {last_error!r})"
+    )
 
 
 def _process_group_exists(pgid: int) -> bool:
