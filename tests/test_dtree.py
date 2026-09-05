@@ -336,6 +336,135 @@ BB - - - n/a 1 1 N
 
 
 @pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
+def test_init_mixw_rejects_source_tmat_count_mismatch(tmp_path: Path) -> None:
+    """A source mdef cannot index beyond its transition-matrix file."""
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "mdef").write_text(
+        """0.3
+2 n_base
+0 n_tri
+4 n_state_map
+2 n_tied_state
+2 n_tied_ci_state
+2 n_tied_tmat
+AA - - - n/a 0 0 N
+BB - - - n/a 1 1 N
+"""
+    )
+    assert (
+        _pstrainc.write_mixw(str(source / "mixture_weights"), np.ones((2, 1, 2), dtype=np.float32))
+        == 0
+    )
+    assert _pstrainc.write_gau(str(source / "means"), np.zeros((2, 1, 2, 3), dtype=np.float32)) == 0
+    assert (
+        _pstrainc.write_gau(str(source / "variances"), np.ones((2, 1, 2, 3), dtype=np.float32)) == 0
+    )
+    assert (
+        _pstrainc.write_tmat(
+            str(source / "transition_matrices"),
+            np.array([[[0.5, 0.5], [0.0, 1.0]]] * 2, dtype=np.float32),
+        )
+        == 0
+    )
+    transition_matrices = _pstrainc.read_tmat_counts(str(source / "transition_matrices"))[0]
+    assert transition_matrices.shape[0] == 2
+    truncated = np.pad(transition_matrices[:1], ((0, 0), (0, 1), (0, 0)))
+    assert _pstrainc.write_tmat(str(source / "transition_matrices"), truncated) == 0
+
+    output = tmp_path / "output"
+    output.mkdir()
+    with pytest.raises(
+        native_worker.PstrainNativeError,
+        match=r"Source model BB refers to transition matrix 1, but the source "
+        r"transition-matrix file contains 1 matrices",
+    ):
+        dtree.init_mixw(
+            source / "mdef",
+            source / "mixture_weights",
+            source / "means",
+            source / "variances",
+            source / "transition_matrices",
+            source / "mdef",
+            output / "mixture_weights",
+            output / "means",
+            output / "variances",
+            output / "transition_matrices",
+        )
+
+    assert not any(output.iterdir())
+
+
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
+def test_init_mixw_rejects_destination_tmat_count_mismatch(tmp_path: Path) -> None:
+    """A destination mdef cannot index beyond its declared matrix count."""
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "mdef").write_text(
+        """0.3
+2 n_base
+0 n_tri
+4 n_state_map
+2 n_tied_state
+2 n_tied_ci_state
+2 n_tied_tmat
+AA - - - n/a 0 0 N
+BB - - - n/a 1 1 N
+"""
+    )
+    assert (
+        _pstrainc.write_mixw(str(source / "mixture_weights"), np.ones((2, 1, 2), dtype=np.float32))
+        == 0
+    )
+    assert _pstrainc.write_gau(str(source / "means"), np.zeros((2, 1, 2, 3), dtype=np.float32)) == 0
+    assert (
+        _pstrainc.write_gau(str(source / "variances"), np.ones((2, 1, 2, 3), dtype=np.float32)) == 0
+    )
+    assert (
+        _pstrainc.write_tmat(
+            str(source / "transition_matrices"),
+            np.array([[[0.5, 0.5], [0.0, 1.0]]] * 2, dtype=np.float32),
+        )
+        == 0
+    )
+
+    destination_mdef = tmp_path / "destination.mdef"
+    destination_mdef.write_text(
+        """0.3
+2 n_base
+0 n_tri
+4 n_state_map
+2 n_tied_state
+2 n_tied_ci_state
+1 n_tied_tmat
+AA - - - n/a 0 0 N
+BB - - - n/a 1 1 N
+"""
+    )
+    output = tmp_path / "output"
+    output.mkdir()
+    with pytest.raises(
+        native_worker.PstrainNativeError,
+        match=r"Destination model BB refers to transition matrix 1, but the "
+        r"destination model definition declares 1 matrices",
+    ):
+        dtree.init_mixw(
+            source / "mdef",
+            source / "mixture_weights",
+            source / "means",
+            source / "variances",
+            source / "transition_matrices",
+            destination_mdef,
+            output / "mixture_weights",
+            output / "means",
+            output / "variances",
+            output / "transition_matrices",
+        )
+
+    assert not any(output.iterdir())
+
+
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
 class TestBuildTree:
     """Tests for decision tree building."""
 

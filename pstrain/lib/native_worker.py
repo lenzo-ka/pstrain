@@ -480,7 +480,11 @@ class _NativeWorker:
                 self._discard()
                 raise PstrainWorkerProtocolError(label, inputs, diagnostic)
             if kind == "error":
-                raise PstrainNativeError(label, inputs, str(payload))
+                detail = str(payload)
+                errors = [line for line in self._tail().splitlines() if line.startswith("ERROR:")]
+                if errors:
+                    detail = f"{detail}\n" + "\n".join(errors)
+                raise PstrainNativeError(label, inputs, detail)
             if kind == "validation_error":
                 raise payload
             if operation in _STATUS_OPERATIONS and payload != 0:
