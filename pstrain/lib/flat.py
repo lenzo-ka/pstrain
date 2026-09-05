@@ -6,6 +6,7 @@ Wraps mk_flat (tmat/mixw) and init_gau (means/variances).
 
 from __future__ import annotations
 
+import logging
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,8 @@ from typing import Any
 from pstrain.lib import _pstrainc
 from pstrain.lib.mdef import generate_ci_mdef
 from pstrain.lib.native_worker import contained
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "create_mdef",
@@ -177,6 +180,44 @@ def normalize_gaussians(
 
 
 @contained
+def _init_gaussians_native(
+    ctl_path: Path,
+    cep_dir: Path,
+    accum_dir: Path,
+    mdef_path: Path | None = None,
+    dict_path: Path | None = None,
+    filler_dict_path: Path | None = None,
+    feat_type: str = "1s_c_d_dd",
+    ceplen: int = 13,
+    cep_ext: str = ".mfc",
+    lsn_path: Path | None = None,
+    seg_dir: Path | None = None,
+    seg_ext: str | None = None,
+    mean_path: Path | None = None,
+) -> int:
+    lib = _pstrainc.get_lib()
+    ffi = _pstrainc.get_ffi()
+    # C code adds the dot, so strip it if present
+    ext = cep_ext.lstrip(".")
+    return int(
+        lib.pstrain_init_gau(
+            _pstrainc.path_or_null(mdef_path),
+            _pstrainc.path_or_null(dict_path),
+            _pstrainc.path_or_null(filler_dict_path),
+            feat_type.encode(),
+            ceplen,
+            str(ctl_path).encode(),
+            str(cep_dir).encode(),
+            ext.encode(),
+            _pstrainc.path_or_null(lsn_path),
+            _pstrainc.path_or_null(seg_dir),
+            seg_ext.encode() if seg_ext else ffi.NULL,
+            str(accum_dir).encode(),
+            _pstrainc.path_or_null(mean_path),
+        )
+    )
+
+
 def init_gaussians(
     ctl_path: Path,
     cep_dir: Path,
@@ -191,51 +232,47 @@ def init_gaussians(
     seg_dir: Path | None = None,
     seg_ext: str | None = None,
     mean_path: Path | None = None,
-) -> None:
-    """Initialize Gaussian parameters from feature data via CFFI.
-
-    First call (mean_path=None): computes means
-    Second call (mean_path=computed_means): computes variances
-
-    Args:
-        ctl_path: Path to control file (list of utterances)
-        cep_dir: Directory containing feature files
-        accum_dir: Directory to write accumulator files
-        mdef_path: Path to model definition (None for global mode)
-        dict_path: Path to dictionary
-        filler_dict_path: Path to filler dictionary
-        feat_type: Feature type string
-        ceplen: Cepstral dimension
-        cep_ext: Feature file extension
-        lsn_path: Path to transcription file
-        seg_dir: Directory containing segmentation files
-        seg_ext: Segmentation file extension
-        mean_path: Path to means (for variance computation)
-    """
+    max_skip_fraction: float = 0.05,
+) -> int:
+    """Accumulate Gaussian parameters and enforce the training skip limit."""
     accum_dir = Path(accum_dir)
     accum_dir.mkdir(parents=True, exist_ok=True)
-
-    lib = _pstrainc.get_lib()
-    ffi = _pstrainc.get_ffi()
-    # C code adds the dot, so strip it if present
-    ext = cep_ext.lstrip(".")
-    ret = lib.pstrain_init_gau(
-        _pstrainc.path_or_null(mdef_path),
-        _pstrainc.path_or_null(dict_path),
-        _pstrainc.path_or_null(filler_dict_path),
-        feat_type.encode(),
+    ret = _init_gaussians_native(
+        ctl_path,
+        cep_dir,
+        accum_dir,
+        mdef_path,
+        dict_path,
+        filler_dict_path,
+        feat_type,
         ceplen,
-        str(ctl_path).encode(),
-        str(cep_dir).encode(),
-        ext.encode(),
-        _pstrainc.path_or_null(lsn_path),
-        _pstrainc.path_or_null(seg_dir),
-        seg_ext.encode() if seg_ext else ffi.NULL,
-        str(accum_dir).encode(),
-        _pstrainc.path_or_null(mean_path),
+        cep_ext,
+        lsn_path,
+        seg_dir,
+        seg_ext,
+        mean_path,
     )
-    if ret != 0:
+    if ret < 0:
         raise RuntimeError(f"pstrain_init_gau failed with code {ret}")
+    total = sum(
+        1
+        for line in ctl_path.read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    )
+    if ret:
+        logger.warning(
+            "Flat initialization skipped %d/%d utterances (%.2f%%)",
+            ret,
+            total,
+            100.0 * ret / total if total else 100.0,
+        )
+    skip_fraction = ret / total if total else (1.0 if ret else 0.0)
+    if skip_fraction > max_skip_fraction:
+        raise RuntimeError(
+            f"Flat initialization skipped {ret}/{total} utterances "
+            f"({skip_fraction:.2%}), above configured limit {max_skip_fraction:.2%}"
+        )
+    return ret
 
 
 def init_flat_model(
@@ -248,6 +285,7 @@ def init_flat_model(
     cep_ext: str = ".mfc",
     feat_type: str = "1s_c_d_dd",
     ceplen: int = 13,
+    max_skip_fraction: float = 0.05,
 ) -> dict[str, Path]:
     """Initialize a complete flat model.
 
@@ -310,6 +348,7 @@ def init_flat_model(
             feat_type=feat_type,
             ceplen=ceplen,
             cep_ext=cep_ext,
+            max_skip_fraction=max_skip_fraction,
         )
 
         # Normalize to get global mean
@@ -325,6 +364,7 @@ def init_flat_model(
             ceplen=ceplen,
             cep_ext=cep_ext,
             mean_path=global_mean_path,
+            max_skip_fraction=max_skip_fraction,
         )
 
         # Normalize to get global variance

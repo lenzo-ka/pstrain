@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+import os
+import struct
 import tempfile
 from pathlib import Path
 
@@ -14,11 +17,19 @@ from pstrain.lib.flat import (
     create_topology_file,
     create_transition_matrices,
     init_flat_model,
+    init_gaussians,
 )
 from tests.conftest import requires_c_library
 
 # Skip all tests if C library not available
 pytestmark = requires_c_library
+
+
+def _write_feature_file(path: Path, n_frame: int = 10, ceplen: int = 13) -> None:
+    """Write a well formed, all-zero Sphinx feature file."""
+    with path.open("wb") as f:
+        f.write(struct.pack("<i", n_frame * ceplen))
+        f.write(b"\0" * (n_frame * ceplen * 4))
 
 
 class TestCreateMdef:
@@ -170,6 +181,81 @@ class TestInitFlatModel:
     def phones(self) -> list[str]:
         """Sample phone set."""
         return ["SIL", "AA", "AE", "AH", "AO", "AW", "AY"]
+
+    def test_init_gaussians_logs_and_counts_missing_features(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A feature file that is not there is counted as a skip, not a success."""
+        cep_dir = tmp_path / "cep"
+        cep_dir.mkdir()
+        ctl = tmp_path / "train.ctl"
+        ctl.write_text("present\nmissing\n")
+        _write_feature_file(cep_dir / "present.mfc")
+
+        with caplog.at_level(logging.WARNING):
+            skipped = init_gaussians(
+                ctl,
+                cep_dir,
+                tmp_path / "accum",
+                max_skip_fraction=0.5,
+            )
+
+        assert skipped == 1
+        assert "Flat initialization skipped 1/2 utterances (50.00%)" in caplog.text
+
+    @pytest.mark.skipif(
+        os.name == "nt", reason="POSIX permission bits do not gate reads on Windows"
+    )
+    @pytest.mark.skipif(
+        hasattr(os, "geteuid") and os.geteuid() == 0,
+        reason="root reads files regardless of permission bits",
+    )
+    def test_init_gaussians_logs_and_counts_unreadable_features(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A feature file that exists but cannot be opened is also a skip.
+
+        Distinct from the missing-file case above: this file is present and
+        well formed, and only its permission bits keep it out.
+        """
+        cep_dir = tmp_path / "cep"
+        cep_dir.mkdir()
+        ctl = tmp_path / "train.ctl"
+        ctl.write_text("readable\nunreadable\n")
+        _write_feature_file(cep_dir / "readable.mfc")
+        unreadable = cep_dir / "unreadable.mfc"
+        _write_feature_file(unreadable)
+        unreadable.chmod(0o000)
+
+        try:
+            with caplog.at_level(logging.WARNING):
+                skipped = init_gaussians(
+                    ctl,
+                    cep_dir,
+                    tmp_path / "accum",
+                    max_skip_fraction=0.5,
+                )
+        finally:
+            unreadable.chmod(0o644)
+
+        assert unreadable.exists()
+        assert skipped == 1
+        assert "Flat initialization skipped 1/2 utterances (50.00%)" in caplog.text
+
+    def test_init_gaussians_applies_training_skip_limit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ctl = tmp_path / "train.ctl"
+        ctl.write_text("present\nmissing\n")
+        monkeypatch.setattr("pstrain.lib.flat._init_gaussians_native", lambda *args: 1)
+
+        with pytest.raises(RuntimeError, match=r"skipped 1/2.*above configured limit 49.00%"):
+            init_gaussians(
+                ctl,
+                tmp_path,
+                tmp_path / "accum",
+                max_skip_fraction=0.49,
+            )
 
     def test_init_flat_model_creates_files(self, phones: list[str]) -> None:
         """Test that init_flat_model creates all required files."""

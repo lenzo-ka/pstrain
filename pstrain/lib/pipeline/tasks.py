@@ -267,6 +267,7 @@ def _make_flat_task(ctx: PipelineContext) -> Task:
             cep_ext=".mfc",
             feat_type=ctx.feat.feat_type,
             ceplen=ctx.feat.ncep,
+            max_skip_fraction=ctx.train.max_skip_fraction,
         )
         write_feat_params(out_dir / "feat.params", ctx.feat)
         _record_model_provenance(ctx, out_dir)
