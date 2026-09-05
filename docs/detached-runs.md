@@ -21,10 +21,38 @@ directory). On Linux the start time is `/proc/<pid>/stat` field 22, expressed in
 ticks since boot. On macOS it is `kinfo_proc.p_starttime`, obtained with
 `KERN_PROC_PID` and expressed as seconds plus microseconds. The process-group ID equals
 the PID because the launcher creates a fresh session led by the launched process. The
-launcher samples the live identity for up to two seconds and records an observed
-identity only after consecutive equal samples span at least one second. Temporary `ps`
-or working-directory-reader failures are retried within that budget. Keep the
-fingerprint beside the attempt outputs and copy it along with them.
+launcher records an observed identity only after consecutive equal samples span at least
+one second. A sample that differs from the one before it opens a new confirmation
+window, which is what a wrapper that replaces itself with `exec` needs; three such
+changes are tolerated. Counting windows rather than wall-clock seconds is what lets a
+machine loaded enough to make `ps` or the working-directory reader take longer than a
+window settle later instead of refusing. A reader failure interrupts the window and the
+wait restarts, but it is not counted as a change, because failing to read an identity is
+not evidence that it differs; those failures are retried for up to two seconds after the
+last reading that succeeded, except that a second attempt is always made, so one slow
+failing reader cannot decide a launch by itself. Because a first attempt may consume up
+to the reader cap, that exception can carry the retry past the two seconds.
+
+Identity settling is bounded: it produces a settled identity or refuses within sixty
+seconds, plus whatever it costs to reap the last reader subprocess. No reader is started
+once that deadline has passed, each is capped at thirty seconds and clamped again to the
+time left, and a reading that finishes late is refused rather than accepted, so no
+identity is confirmed on evidence gathered after the deadline. The cap is a hang
+detector, not a latency threshold: `lsof` was measured taking almost seven seconds on a
+loaded twelve-core machine at `nice` 19, and a cap near that figure would refuse healthy
+launches. Earlier releases documented a two-second bound the launcher could not honor,
+because the reads it was waiting on were themselves spending the budget; sixty seconds
+is the bound settling now enforces. A refusal reports the last identity read, the last
+reader error, how long settling took, and how many distinct identities, interrupted
+windows, and reader failures lay behind them.
+
+Settling is not the whole of a failed launch. When it refuses, the launcher still has a
+detached child to dispose of, and the group-wide `SIGTERM` to `SIGKILL` escalation waits
+up to two seconds at each of four points: for the leader after `SIGTERM`, for the rest
+of its group, then for both again after `SIGKILL`. That is at most eight seconds of
+cleanup on top of the settling bound, so a refused launch returns within about
+sixty-eight seconds. A launch that succeeds pays none of it. Keep the fingerprint beside
+the attempt outputs and copy it along with them.
 
 To stop the run, execute the helper on the same remote host:
 
