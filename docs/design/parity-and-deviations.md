@@ -22,6 +22,7 @@ contracts behind each classified difference.
 | Baum-Welch checkpoint representation | Aligned | Raw mixture-weight and transition-matrix accumulators are serialized; checkpoints copy those files unchanged | Raw-count checkpoints; loaders normalize them | Common pre-reload inputs, checkpoint bytes, loader path, and post-reload arrays |
 | Shard partition position | Shipped default plus upstream-compatible alternative | Shipped default `remainder-first` distributes extra utterances across leading shards; opt-in `remainder-last` matches stock | Floor-sized leading shards and the entire remainder in the last shard | `sharding.partition_position`, manifest order, shard count, and produced partition manifest |
 | Shard reduction order | Aligned | Ascending shard-index reduction, independent of worker completion order | Ascending partition-index reduction | Accumulator inputs and reduction order |
+| Vendored byte swapping | Aligned safety fix | Exact-width unsigned intermediates avoid undefined signed shifts while preserving output bits | Signed shift expressions rely on implementation behavior | Serialized model and feature bytes |
 
 ## Inventory under multiple pronunciations
 

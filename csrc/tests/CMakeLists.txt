@@ -164,3 +164,14 @@ add_test(
     ${BW_FIXTURE}/model/transition_matrices
     ${INIT_MIXW_OUTPUT_DIR}
 )
+
+add_executable(test_byteorder test_byteorder.c)
+target_link_libraries(test_byteorder pstrainc)
+target_include_directories(test_byteorder
+  PRIVATE ${CMAKE_BINARY_DIR}
+)
+
+add_test(
+  NAME byteorder
+  COMMAND test_byteorder ${CMAKE_CURRENT_BINARY_DIR}
+)

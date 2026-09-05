@@ -47,6 +47,9 @@
  *
  * HISTORY
  *
+ * 2026-09-05: Use unsigned byte-swap intermediates after UBSan reported a
+ * signed shift at s3io.c:701 while reading a big-endian v8_seg header.
+ *
  * $Log: byteorder.h,v $
  * Revision 1.8  2005/09/01 21:09:54  dhdfu
  * Really, actually, truly consolidate byteswapping operations into
@@ -61,20 +64,22 @@
 #ifndef __S2_BYTEORDER_H__
 #define __S2_BYTEORDER_H__	1
 
+/* Unsigned intermediates keep shifts defined for every input bit pattern. */
 /* Macro to byteswap an int16 variable.  x = ptr to variable */
-#define SWAP_INT16(x)	*(x) = ((0x00ff & (*(x))>>8) | (0xff00 & (*(x))<<8))
+#define SWAP_INT16(x)	*(x) = (uint16)((((uint32)*(x) & 0x00ffU) << 8) | \
+					 (((uint32)*(x) & 0xff00U) >> 8))
 
 /* Macro to byteswap an int32 variable.  x = ptr to variable */
-#define SWAP_INT32(x)	*(x) = ((0x000000ff & (*(x))>>24) | \
-				(0x0000ff00 & (*(x))>>8) | \
-				(0x00ff0000 & (*(x))<<8) | \
-				(0xff000000 & (*(x))<<24))
+#define SWAP_INT32(x)	*(x) = (uint32)((((uint32)*(x) & 0x000000ffU) << 24) | \
+					 (((uint32)*(x) & 0x0000ff00U) << 8) | \
+					 (((uint32)*(x) & 0x00ff0000U) >> 8) | \
+					 (((uint32)*(x) & 0xff000000U) >> 24))
 
 /* Macro to byteswap a float32 variable.  x = ptr to variable */
 #define SWAP_FLOAT32(x)	SWAP_INT32((int32 *) x)
 
 /* Macro to byteswap a float64 variable.  x = ptr to variable */
-#define SWAP_FLOAT64(x)	{ int *low = (int *) (x), *high = (int *) (x) + 1,\
+#define SWAP_FLOAT64(x)	{ uint32 *low = (uint32 *) (x), *high = (uint32 *) (x) + 1,\
 			      temp;\
 			  SWAP_INT32(low);  SWAP_INT32(high);\
 			  temp = *low; *low = *high; *high = temp;}
