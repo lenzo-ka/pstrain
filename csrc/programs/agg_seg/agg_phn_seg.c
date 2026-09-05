@@ -45,6 +45,7 @@
 
 #include "agg_phn_seg.h"
 #include "mk_seg.h"
+#include "omission.h"
 
 #include <s3/segdmp.h>
 #include <s3/corpus.h>
@@ -57,6 +58,7 @@
 
 #include <stdio.h>
 #include <assert.h>
+#include <sys_compat/file.h>
 
 
 int
@@ -92,16 +94,32 @@ agg_phn_seg(lexicon_t *lex,
     veclen = feat_stream_lengths(fcb);
 
     while (corpus_next_utt()) {
+	/* Everything the iteration allocates is released at next_utt, so
+	 * every skip below leaves through that one path. */
+	trans = NULL;
+	seg = NULL;
+	word = NULL;
+	phone = NULL;
+	btw_mark = NULL;
+	start = NULL;
+	len = NULL;
+	mfcc = NULL;
+	feat = NULL;
+
 	if ((++tick_cnt % 500) == 0) {
 	    E_INFOCONT("[%u] ", tick_cnt);
 	}
 
 	if (corpus_get_sent(&trans) != S3_SUCCESS) {
-	    E_FATAL("Unable to read word transcript for %s\n", corpus_utt_brief_name());
+	    E_WARN("Unable to read word transcript for %s; skipping\n", corpus_utt_brief_name());
+	    agg_omission_record(AGG_OMIT_TRANSCRIPT_READ);
+	    goto next_utt;
 	}
 
 	if (corpus_get_seg(&seg, &n_frame) != S3_SUCCESS) {
-	    E_FATAL("Unable to read Viterbi state segmentation for %s\n", corpus_utt_brief_name());
+	    E_WARN("Unable to read Viterbi state segmentation for %s; skipping\n", corpus_utt_brief_name());
+	    agg_omission_record(AGG_OMIT_SEGMENTATION_READ);
+	    goto next_utt;
 	}
 
 	n_word = str2words(trans, NULL, 0);
@@ -115,28 +133,18 @@ agg_phn_seg(lexicon_t *lex,
 	/* check to see whether the word transcript and dictionary entries
 	   agree with the state segmentation */
 	if (ck_seg(acmod_set, phone, n_phone, seg, n_frame, corpus_utt()) != S3_SUCCESS) {
-	    free(trans);	/* alloc'ed using strdup, not ckd_*() */
-	    free(seg);	/* alloc'ed using malloc in areadshort(), not ckd_*() */
-	    ckd_free(word);
-	    ckd_free(phone);
-
 	    E_ERROR("ck_seg failed");
+	    agg_omission_record(AGG_OMIT_SEGMENTATION_MISMATCH);
 
-	    continue;
+	    goto next_utt;
 	}
 
 	if (cvt2triphone(acmod_set, phone, btw_mark, n_phone) != S3_SUCCESS) {
-	    free(trans);	/* alloc'ed using strdup, not ckd_*() */
-	    free(seg);		/* alloc'ed using malloc in areadshort(), not ckd_*() */
-	    ckd_free(word);
-	    ckd_free(phone);
-
 	    E_ERROR("cvt2triphone failed");
+	    agg_omission_record(AGG_OMIT_TRIPHONE_CONVERSION);
 
-	    continue;
+	    goto next_utt;
 	}
-
-	ckd_free(btw_mark);
 
 	if (mk_seg(acmod_set,
 		   seg,
@@ -145,53 +153,63 @@ agg_phn_seg(lexicon_t *lex,
 		   start,
 		   len,
 		   n_phone) != S3_SUCCESS) {
-	    free(trans);
-	    free(seg);
-	    ckd_free(word);
-	    ckd_free(phone);
-
 	    E_ERROR("mk_seg failed");
-	    continue;
+	    agg_omission_record(AGG_OMIT_SEGMENT_GENERATION);
+	    goto next_utt;
 	}
 
-	if (corpus_provides_mfcc()) {
-    	        if (corpus_get_generic_featurevec(&mfcc, &n_frame, mfc_veclen) < 0) {
-		      E_FATAL("Can't read input features from %s\n", corpus_utt());
-		}
-
-		if (n_frame < 9) {
-		  E_WARN("utt %s too short\n", corpus_utt());
-		  if (mfcc) {
-		    ckd_free(mfcc[0]);
-		    ckd_free(mfcc);
-		    mfcc = NULL;
-		  }
-		  continue;
-		}
-
-		feat = feat_array_alloc(fcb, n_frame + feat_window_size(fcb));
-	        feat_s2mfc2feat_live(fcb, mfcc, &n_frame, TRUE, TRUE, feat);
-
-		for (s = 0; s < n_phone; s++) {
-		    segdmp_add_feat(phone[s],
-				    &feat[start[s]],
-				    len[s]);
-		}
-
-		feat_array_free(feat);
-		free(&mfcc[0][0]);
-		ckd_free(mfcc);
-	}
-	else {
+	if (!corpus_provides_mfcc()) {
 	    E_FATAL("No data type specified\n");
 	}
 
-	free(trans);	/* alloc'ed using strdup, not ckd_*() */
-	free(seg);	/* alloc'ed using malloc in areadshort(), not ckd_*() */
-	ckd_free(word);
-	ckd_free(phone);
-	ckd_free(start);
-	ckd_free(len);
+	if (sys_compat_access(corpus_mfcc_filename(), R_OK) != 0) {
+	    E_WARN("Can't read input features from %s; skipping\n", corpus_utt());
+	    agg_omission_record(AGG_OMIT_FEATURE_READ);
+	    goto next_utt;
+	}
+
+	if (corpus_get_generic_featurevec(&mfcc, &n_frame, mfc_veclen) < 0) {
+	    E_FATAL("Can't read input features from %s\n", corpus_utt());
+	}
+
+	if (n_frame < 9) {
+	    E_WARN("utt %s too short\n", corpus_utt());
+	    agg_omission_record(AGG_OMIT_TOO_SHORT);
+	    goto next_utt;
+	}
+
+	feat = feat_array_alloc(fcb, n_frame + feat_window_size(fcb));
+	feat_s2mfc2feat_live(fcb, mfcc, &n_frame, TRUE, TRUE, feat);
+
+	for (s = 0; s < n_phone; s++) {
+	    segdmp_add_feat(phone[s],
+			    &feat[start[s]],
+			    len[s]);
+	}
+
+	agg_omission_processed();
+
+    next_utt:
+	if (feat)
+	    feat_array_free(feat);
+	if (mfcc) {
+	    free(mfcc[0]);	/* alloc'ed using malloc in areadfloat() */
+	    ckd_free(mfcc);
+	}
+	if (trans)
+	    free(trans);	/* alloc'ed using strdup, not ckd_*() */
+	if (seg)
+	    free(seg);		/* alloc'ed using malloc in areadshort(), not ckd_*() */
+	if (word)
+	    ckd_free(word);
+	if (phone)
+	    ckd_free(phone);
+	if (btw_mark)
+	    ckd_free(btw_mark);
+	if (start)
+	    ckd_free(start);
+	if (len)
+	    ckd_free(len);
     }
 
     return 0;

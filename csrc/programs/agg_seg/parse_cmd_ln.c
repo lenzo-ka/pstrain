@@ -178,6 +178,10 @@ ctl -cepdir cepdir -cepext mfc -ceplen 13 -stride 10 ";
 	  ARG_INT32,
 	  "1",
 	  "Take every -stride'th frame when producing dmp" },
+	{ "-allowomit",
+	  ARG_BOOLEAN,
+	  "no",
+	  "Exit successfully when utterances are omitted" },
 
 	{ "-part",
 	  ARG_INT32,

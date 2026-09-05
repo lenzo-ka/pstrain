@@ -44,6 +44,7 @@
  *********************************************************************/
 
 #include "cnt_st_seg.h"
+#include "omission.h"
 
 #include <s3/lexicon.h>
 #include <s3/corpus.h>
@@ -66,14 +67,33 @@ get_next_sseq(model_def_t *mdef,
     uint32 n_phone;
     uint32 *sseq;
 
-    corpus_get_sent(&trans);
-    corpus_get_seg(&seg, &n_frame);
+    if (corpus_get_sent(&trans) != S3_SUCCESS) {
+        agg_omission_record(AGG_OMIT_TRANSCRIPT_READ);
+        return NULL;
+    }
+    if (corpus_get_seg(&seg, &n_frame) != S3_SUCCESS) {
+        ckd_free(trans);
+        agg_omission_record(AGG_OMIT_SEGMENTATION_READ);
+        return NULL;
+    }
 
     mk_phone_seq(&phone, &n_phone, trans, mdef->acmod_set, lex);
 
-    ck_seg(mdef->acmod_set, phone, n_phone, seg, n_frame, corpus_utt());
+    /* A transcript that disagrees with the segmentation cannot produce a
+     * usable senone sequence; count it rather than passing it on. */
+    if (ck_seg(mdef->acmod_set, phone, n_phone, seg, n_frame,
+               corpus_utt()) != S3_SUCCESS) {
+        ckd_free(phone);
+        ckd_free(seg);
+        ckd_free(trans);
+        agg_omission_record(AGG_OMIT_SEGMENTATION_MISMATCH);
+        return NULL;
+    }
 
     sseq = mk_sseq(seg, n_frame, phone, n_phone, mdef);
+
+    if (sseq == NULL)
+        agg_omission_record(AGG_OMIT_SENONE_SEQUENCE);
 
     ckd_free(phone);
     ckd_free(seg);
@@ -109,7 +129,6 @@ cnt_st_seg(model_def_t *mdef,
 
 	if (sseq == NULL) {
 	    E_WARN("senone sequence not produced; skipping.\n");
-
 	    continue;
 	}
 
@@ -118,6 +137,7 @@ cnt_st_seg(model_def_t *mdef,
 	}
 
 	ckd_free(sseq);
+	agg_omission_processed();
     }
 
     for (i = 0; i < mdef->n_tied_state; i++) {

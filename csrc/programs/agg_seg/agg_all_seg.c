@@ -44,6 +44,7 @@
  *********************************************************************/
 
 #include "agg_all_seg.h"
+#include "omission.h"
 
 #include <s3/corpus.h>
 #include <s3/s3io.h>
@@ -59,6 +60,7 @@
 #include <sys_compat/misc.h>
 
 #include <stdio.h>
+#include <sys_compat/file.h>
 
 static FILE *
 open_dmp(const char *fn)
@@ -120,6 +122,11 @@ agg_all_seg(feat_t *fcb,
 		mfcc = NULL;
 	    }
 
+	    if (sys_compat_access(corpus_mfcc_filename(), R_OK) != 0) {
+	      E_WARN("Can't read input features from %s; skipping\n", corpus_utt());
+	      agg_omission_record(AGG_OMIT_FEATURE_READ);
+	      continue;
+	    }
 	    /* get the MFCC data for the utterance */
 	    if (corpus_get_generic_featurevec(&mfcc, &n_frame, mfc_veclen) < 0) {
 	      E_FATAL("Can't read input features from %s\n", corpus_utt());
@@ -136,6 +143,7 @@ agg_all_seg(feat_t *fcb,
 
 	    if (n_frame < 9) {
 	      E_WARN("utt %s too short\n", corpus_utt());
+	      agg_omission_record(AGG_OMIT_TOO_SHORT);
 	      if (mfcc) {
 		ckd_free(mfcc[0]);
 		ckd_free(mfcc);
@@ -169,6 +177,7 @@ agg_all_seg(feat_t *fcb,
 		    ++n_out_frame;
 		}
 	    }
+	    agg_omission_processed();
     }
 
     if (fseek(fp, start, SEEK_SET) < 0) {

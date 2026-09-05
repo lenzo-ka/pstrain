@@ -56,6 +56,7 @@
 #include "agg_st_seg.h"
 #include "agg_phn_seg.h"
 #include "agg_all_seg.h"
+#include "omission.h"
 
 #include <s3/segdmp.h>
 
@@ -73,6 +74,43 @@
 #include <sphinxbase/cmd_ln.h>
 #include <sphinxbase/ckd_alloc.h>
 #include <sphinxbase/feat.h>
+
+static uint32 agg_processed;
+static uint32 agg_omitted[AGG_OMIT_REASON_COUNT];
+static const char *agg_omit_names[AGG_OMIT_REASON_COUNT] = {
+    "feature read", "too short", "transcript read", "segmentation read",
+    "segmentation mismatch", "triphone conversion", "segment generation",
+    "senone sequence"
+};
+
+void agg_omission_reset(void)
+{
+    agg_processed = 0;
+    memset(agg_omitted, 0, sizeof(agg_omitted));
+}
+
+void agg_omission_processed(void) { ++agg_processed; }
+
+void agg_omission_record(agg_omit_reason_t reason) { ++agg_omitted[reason]; }
+
+uint32 agg_omission_count(void)
+{
+    uint32 i, total = 0;
+    for (i = 0; i < AGG_OMIT_REASON_COUNT; ++i)
+        total += agg_omitted[i];
+    return total;
+}
+
+void agg_omission_report(void)
+{
+    uint32 i, reported = 0, total = agg_omission_count();
+    E_INFOCONT("agg_seg: processed %u, omitted %u (", agg_processed, total);
+    for (i = 0; i < AGG_OMIT_REASON_COUNT; ++i) {
+        if (agg_omitted[i])
+            E_INFOCONT("%s%s: %u", reported++ ? ", " : "", agg_omit_names[i], agg_omitted[i]);
+    }
+    E_INFOCONT(")\n");
+}
 
 
 int
@@ -285,17 +323,29 @@ initialize(lexicon_t **out_lex,
 	return S3_ERROR;
     }
 
+    /* The aggregation loops hand segdmp_add_feat() whole feature vectors,
+     * and kmeans_init rejects any dump that is not a feature dump.  Without
+     * this the caller's dmp_type stayed uninitialized: segdmp_open_write()
+     * then matched none of its type arms, left the static frame_sz at 0 and
+     * divided by it. */
+    *out_dmp_type = SEGDMP_TYPE_FEAT;
+
     E_INFO("Will produce feature dump\n");
 
     return S3_SUCCESS;
 }
 
+/* Counts tied state occurrences, writing the count file when it is absent.
+ * Sets *out_created when this call produced the count file, so that the
+ * caller can report the counting pass rather than leaving the process. */
 static uint32 *
-cnt_st(model_def_t *mdef, lexicon_t *lex)
+cnt_st(model_def_t *mdef, lexicon_t *lex, int *out_created)
 {
     uint32 i;
     uint32 *cnt;
     FILE *cnt_fp;
+
+    *out_created = 0;
 
     cnt_fp = fopen(cmd_ln_str("-cntfn"), "r");
     if (cnt_fp == NULL) {
@@ -310,9 +360,8 @@ cnt_st(model_def_t *mdef, lexicon_t *lex)
 	    fprintf(cnt_fp, "%u\n", cnt[i]);
 	}
 	fclose(cnt_fp);
-#ifndef PSTRAIN_LIBRARY_BUILD
-	exit(0);
-#endif
+
+	*out_created = 1;
     }
     else {
 	E_INFO("Reading %s\n",
@@ -334,16 +383,22 @@ cnt_st(model_def_t *mdef, lexicon_t *lex)
     return cnt;
 }
 
+/* Counts phone segments, writing the count file when it is absent.  Sets
+ * *out_created when this call produced the count file, so that the caller
+ * can report the counting pass rather than leaving the process. */
 static int
 cnt_phn(model_def_t *mdef, lexicon_t *lex,
 	uint32 **out_n_seg,
-	uint32 ***out_n_frame)
+	uint32 ***out_n_frame,
+	int *out_created)
 {
     uint32 i, j;
     uint32 *n_seg;
     uint32 **n_frame;
     FILE *cnt_fp;
     uint32 n_acmod;
+
+    *out_created = 0;
 
     cnt_fp = fopen(cmd_ln_str("-cntfn"), "r");
     if (cnt_fp == NULL) {
@@ -362,9 +417,8 @@ cnt_phn(model_def_t *mdef, lexicon_t *lex,
 	    fprintf(cnt_fp, "\n");
 	}
 	fclose(cnt_fp);
-#ifndef PSTRAIN_LIBRARY_BUILD
-	exit(0);
-#endif
+
+	*out_created = 1;
     }
     else {
 	E_INFO("Reading %s\n",
@@ -413,15 +467,19 @@ int agg_seg_run(void)
     model_def_t *mdef;
     feat_t *feat;
     const char *segtype;
-    segdmp_type_t dmp_type;
+    segdmp_type_t dmp_type = SEGDMP_TYPE_FEAT;
     uint32 *n_seg;
+    uint32 *st_cnt;
     uint32 **n_frame;
     uint32 *ts2cb;
     int32 *cb2mllr;
+    int cnt_created = 0;
+    int status = -1;
 
+    agg_omission_reset();
     if (initialize(&lex, &mdef, &feat, &ts2cb, &cb2mllr, &dmp_type) != S3_SUCCESS) {
 	E_ERROR("agg_seg initialization failed\n");
-	return -1;
+	goto done;
     }
 
     segtype = cmd_ln_str("-segtype");
@@ -433,28 +491,38 @@ int agg_seg_run(void)
 			dmp_type,
 			cmd_ln_str("-segdmpfn"),
 			cmd_ln_int32("-stride")) != S3_SUCCESS) {
-	    return -1;
+	    goto done;
 	}
     }
     else if (strcmp(segtype, "st") == 0) {
 	segdmp_set_bufsz(cmd_ln_int32("-cachesz"));
+	st_cnt = cnt_st(mdef, lex, &cnt_created);
+#ifndef PSTRAIN_LIBRARY_BUILD
+	if (cnt_created) {
+	    /* The count file has just been written.  Report the counting
+	     * pass, whose omissions are baked into that file, and stop. */
+	    status = 0;
+	    goto done;
+	}
+#endif
+	agg_omission_reset();
 
 	if (segdmp_open_write(cmd_ln_str_list("-segdmpdirs"),
 			      cmd_ln_str("-segdmpfn"),
 			      cmd_ln_str("-segidxfn"),
 			      mdef->n_tied_state,
-			      cnt_st(mdef, lex),
+			      st_cnt,
 			      NULL,
 			      dmp_type,
 			      feat_dimension1(feat),
 			      feat_stream_lengths(feat),
 			      feat_dimension(feat)) != S3_SUCCESS) {
 	    E_ERROR("Unable to initialize segment dump\n");
-	    return -1;
+	    goto done;
 	}
 
 	if (agg_st_seg(mdef, lex, feat, ts2cb, cb2mllr, dmp_type) != S3_SUCCESS) {
-	    return -1;
+	    goto done;
 	}
 
 	segdmp_close();
@@ -462,7 +530,16 @@ int agg_seg_run(void)
     else if (strcmp(segtype, "phn") == 0) {
 	segdmp_set_bufsz(cmd_ln_int32("-cachesz"));
 
-	cnt_phn(mdef, lex, &n_seg, &n_frame);
+	cnt_phn(mdef, lex, &n_seg, &n_frame, &cnt_created);
+#ifndef PSTRAIN_LIBRARY_BUILD
+	if (cnt_created) {
+	    /* The count file has just been written.  Report the counting
+	     * pass, whose omissions are baked into that file, and stop. */
+	    status = 0;
+	    goto done;
+	}
+#endif
+	agg_omission_reset();
 
 	if (segdmp_open_write(cmd_ln_str_list("-segdmpdirs"),
 			      cmd_ln_str("-segdmpfn"),
@@ -475,29 +552,38 @@ int agg_seg_run(void)
 			      feat_stream_lengths(feat),
 			      feat_dimension(feat)) != S3_SUCCESS) {
 	    E_ERROR("Unable to initialize segment dump\n");
-	    return -1;
+	    goto done;
 	}
 
 	if (agg_phn_seg(lex, mdef->acmod_set, feat, dmp_type) != S3_SUCCESS) {
-	    return -1;
+	    goto done;
 	}
 
 	segdmp_close();
     }
     else if (strcmp(segtype, "wrd") == 0) {
 	E_ERROR("Unimplemented -segtype wrd\n");
-	return -1;
+	goto done;
     }
     else if (strcmp(segtype, "utt") == 0) {
 	E_ERROR("Unimplemented -segtype utt\n");
-	return -1;
+	goto done;
     }
     else {
 	E_ERROR("Unhandled -segtype %s\n", segtype);
-	return -1;
+	goto done;
     }
 
-    return 0;
+    status = 0;
+
+done:
+    /* Every return from this function passes through here, so the counters
+     * are always reported and the omission status rule always applied. */
+    agg_omission_report();
+    if (agg_omission_count() && !cmd_ln_boolean("-allowomit"))
+	status = -1;
+
+    return status;
 }
 
 #ifndef PSTRAIN_LIBRARY_BUILD

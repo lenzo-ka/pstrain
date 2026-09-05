@@ -44,6 +44,7 @@
  *********************************************************************/
 
 #include "agg_st_seg.h"
+#include "omission.h"
 
 #include <s3/lexicon.h>
 #include <s3/corpus.h>
@@ -56,6 +57,7 @@
 #include <sphinxbase/matrix.h>
 #include <sphinxbase/ckd_alloc.h>
 #include <sphinxbase/feat.h>
+#include <sys_compat/file.h>
 
 static void
 xfrm_feat(float32 ***a,
@@ -101,8 +103,24 @@ get_sseq(model_def_t *mdef,
     uint32 n_phone;
     uint32 *sseq;
 
-    corpus_get_sent(&trans);
-    corpus_get_seg(&seg, &n_frame);
+    /* Records its own omission reason for every failure below, so that the
+     * caller can distinguish an unreadable transcript from an unreadable
+     * segmentation, a disagreeing segmentation, and an unbuildable senone
+     * sequence. */
+    if (corpus_get_sent(&trans) != S3_SUCCESS) {
+	E_WARN("Unable to read word transcript for %s; skipping\n", corpus_utt());
+	agg_omission_record(AGG_OMIT_TRANSCRIPT_READ);
+
+	return NULL;
+    }
+
+    if (corpus_get_seg(&seg, &n_frame) != S3_SUCCESS) {
+	E_WARN("Unable to read state segmentation for %s; skipping\n", corpus_utt());
+	ckd_free(trans);
+	agg_omission_record(AGG_OMIT_SEGMENTATION_READ);
+
+	return NULL;
+    }
 
     if (n_frame_in != n_frame) {
 	E_WARN("# frames in feature stream, %u != # frames in seg file %u; skipping\n",
@@ -110,15 +128,29 @@ get_sseq(model_def_t *mdef,
 
 	ckd_free(seg);
 	ckd_free(trans);
+	agg_omission_record(AGG_OMIT_SEGMENTATION_MISMATCH);
 
 	return NULL;
     }
 
     mk_phone_seq(&phone, &n_phone, trans, mdef->acmod_set, lex);
 
-    /*    ck_seg(mdef->acmod_set, phone, n_phone, seg, n_frame, corpus_utt()); */
+    /* A transcript that disagrees with the segmentation cannot produce a
+     * usable senone sequence; count it rather than passing it on. */
+    if (ck_seg(mdef->acmod_set, phone, n_phone, seg, n_frame,
+	       corpus_utt()) != S3_SUCCESS) {
+	ckd_free(phone);
+	ckd_free(seg);
+	ckd_free(trans);
+	agg_omission_record(AGG_OMIT_SEGMENTATION_MISMATCH);
+
+	return NULL;
+    }
 
     sseq = mk_sseq(seg, n_frame, phone, n_phone, mdef);
+
+    if (sseq == NULL)
+	agg_omission_record(AGG_OMIT_SENONE_SEQUENCE);
 
     ckd_free(phone);
     ckd_free(seg);
@@ -169,6 +201,11 @@ agg_st_seg(model_def_t *mdef,
 		mfcc = NULL;
 	    }
 
+	    if (sys_compat_access(corpus_mfcc_filename(), R_OK) != 0) {
+	      E_WARN("Can't read input features from %s; skipping\n", corpus_utt());
+	      agg_omission_record(AGG_OMIT_FEATURE_READ);
+	      continue;
+	    }
 	    if (corpus_get_generic_featurevec(&mfcc, &n_frame, mfc_veclen) < 0) {
 	      E_FATAL("Can't read input features from %s\n", corpus_utt());
 	    }
@@ -182,11 +219,19 @@ agg_st_seg(model_def_t *mdef,
 	/* read transcript and convert it into a senone sequence */
 	sseq = get_sseq(mdef, lex, n_frame);
 	if (sseq == NULL) {
+	    /* get_sseq() has already recorded the specific reason. */
 	    E_WARN("senone sequence not produced; skipping.\n");
 
+	    /* Clear both pointers: the next iteration, and the exit code
+	     * below, free whatever they still hold. */
 	    free(mfcc[0]);
 	    ckd_free((void *)mfcc);
-	    feat_array_free(feat);
+	    mfcc = NULL;
+
+	    if (feat) {
+		feat_array_free(feat);
+		feat = NULL;
+	    }
 
 	    continue;
 	}
@@ -203,6 +248,7 @@ agg_st_seg(model_def_t *mdef,
 		ckd_free(mfcc);
 		mfcc = NULL;
 	      }
+	      agg_omission_record(AGG_OMIT_TOO_SHORT);
 	      continue;
 	    }
 
@@ -253,6 +299,7 @@ agg_st_seg(model_def_t *mdef,
 		}
 		segdmp_add_feat(sseq[t], &feat[t], 1);
 	    }
+	    agg_omission_processed();
     }
 
     if (mfcc) {
