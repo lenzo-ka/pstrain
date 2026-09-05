@@ -398,7 +398,8 @@ def test_features_extracted_for_every_utterance(
     mfcs = list(ctx.features_dir.glob("*.mfc"))
     assert len(mfcs) == n_wav, f"expected {n_wav} .mfc files, got {len(mfcs)}"
     assert list((project_dir / ".pstrain" / "timings").glob("*.json"))
-    assert "Pipeline timings" in capsys.readouterr().out
+    # The timing rollup is emitted as a TSV block, headed by its column names.
+    assert "stage\twall_s\tcpu_s\tcpu_wall_ratio" in capsys.readouterr().out
 
 
 @requires_c_library
