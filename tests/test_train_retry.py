@@ -135,6 +135,150 @@ def test_final_state_retry_exhaustion_omits_the_utterance_and_says_so(
     assert trainer.beam == pytest.approx(1e-90)
 
 
+def test_repeated_omission_output_collapses_to_stage_summary(
+    caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from pstrain.lib.steps.train import _record_omission, _report_skip_summary
+
+    trainer = TightBeamTrainer()
+    trainer.process_utterance_mfcc = (  # type: ignore[method-assign]
+        lambda mfcc, transcript: trainer.attempt_beams.append(trainer.beam) or False
+    )
+    caplog.set_level(logging.WARNING, logger="pstrain.lib.steps.train")
+    for report_retry in (True, False, False, False):
+        assert not _process_with_final_state_retry(
+            trainer,  # type: ignore[arg-type]
+            np.zeros((4, 13), dtype=np.float32),
+            "<s> TEST </s>",
+            normal_beam=1e-90,
+            retry_beam_factor=1e10,
+            fileid="arctic_a0135",
+            failed_alignment="recover",
+            report_retry=report_retry,
+        )
+
+    omissions: dict[tuple[str, str], list[int]] = {}
+    reason = "final state not reached even at a_beam=1e-100"
+    for iteration in range(3, 7):
+        _record_omission(omissions, "arctic_a0135", reason, iteration)
+    _report_skip_summary(omissions)
+    output = capsys.readouterr().out
+    assert output == (
+        "omitted\tarctic_a0135\tfinal state not reached even at a_beam=1e-100\tpasses 3-6\n"
+    )
+    assert caplog.text.count("retrying once") == 1
+    assert caplog.text.count("omitting it from this pass") == 1
+    assert "iteration 3 skipped" not in caplog.text
+    assert "Failed to process" not in caplog.text
+
+
+def test_skip_limit_failure_reports_changes_and_omissions_first(
+    caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from pstrain.lib.steps.train import _account_and_enforce_skips, _record_omission
+
+    omissions: dict[tuple[str, str], list[int]] = {}
+    skipped_by_pass: list[tuple[int, int]] = []
+    reason = "final state not reached even at a_beam=1e-100"
+    caplog.set_level(logging.WARNING, logger="pstrain.lib.steps.train")
+    for iteration, skipped in ((1, 0), (2, 0), (3, 1)):
+        if skipped:
+            _record_omission(omissions, "arctic_a0135", reason, iteration)
+        _account_and_enforce_skips(
+            iteration=iteration,
+            skipped=skipped,
+            input_utts=10,
+            max_skip_fraction=0.15,
+            skipped_by_pass=skipped_by_pass,
+            omitted_passes=omissions,
+        )
+    _record_omission(omissions, "arctic_a0135", reason, 4)
+    with pytest.raises(RuntimeError, match="Iteration 4: skipped 2/10"):
+        _account_and_enforce_skips(
+            iteration=4,
+            skipped=2,
+            input_utts=10,
+            max_skip_fraction=0.15,
+            skipped_by_pass=skipped_by_pass,
+            omitted_passes=omissions,
+        )
+
+    assert "iteration 3 skipped 1/10" in caplog.text
+    assert "iteration 4 skipped 2/10" in caplog.text
+    assert capsys.readouterr().out == f"omitted\tarctic_a0135\t{reason}\tpasses 3-4\n"
+
+
+@pytest.mark.parametrize(
+    ("counts", "reported"),
+    [
+        ((1, 1), ((1, 1),)),
+        ((1, 0), ((1, 1), (2, 0))),
+        ((0, 0, 1), ((3, 1),)),
+        ((2, 2, 3), ((1, 2), (3, 3))),
+    ],
+)
+def test_skip_reporting_prints_first_nonzero_and_each_change(
+    caplog: pytest.LogCaptureFixture,
+    counts: tuple[int, ...],
+    reported: tuple[tuple[int, int], ...],
+) -> None:
+    from pstrain.lib.steps.train import _report_changed_skip
+
+    history: list[tuple[int, int]] = []
+    caplog.set_level(logging.WARNING, logger="pstrain.lib.steps.train")
+    for iteration, skipped in enumerate(counts, start=1):
+        history.append((iteration, skipped))
+        _report_changed_skip(history, input_utts=10)
+
+    messages = [record.message for record in caplog.records]
+    assert len(messages) == len(reported)
+    for message, (iteration, skipped) in zip(messages, reported, strict=True):
+        assert f"iteration {iteration} skipped {skipped}/10" in message
+
+
+def test_one_utterance_with_two_omission_reasons_gets_two_summaries(
+    caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from pstrain.lib.steps.train import _record_omission, _report_skip_summary
+
+    omissions: dict[tuple[str, str], list[int]] = {}
+    first = "final state not reached even at a_beam=1e-100"
+    second = "final state not reached even at a_beam=1e-110"
+    caplog.set_level(logging.WARNING, logger="pstrain.lib.steps.train")
+
+    class AlwaysFinalStateFailure(TightBeamTrainer):
+        @property
+        def final_state_not_reached(self) -> bool:
+            return True
+
+    for iteration, beam, reason in (
+        (3, 1e-90, first),
+        (4, 1e-90, first),
+        (5, 1e-100, second),
+    ):
+        trainer = AlwaysFinalStateFailure()
+        trainer.beam = beam
+        trainer.process_utterance_mfcc = lambda mfcc, transcript: False  # type: ignore[method-assign]
+        assert not _process_with_final_state_retry(
+            trainer,  # type: ignore[arg-type]
+            np.zeros((4, 13), dtype=np.float32),
+            "<s> TEST </s>",
+            normal_beam=beam,
+            retry_beam_factor=1e10,
+            fileid="arctic_a0135",
+            report_retry=("arctic_a0135", reason) not in omissions,
+        )
+        _record_omission(omissions, "arctic_a0135", reason, iteration)
+    _report_skip_summary(omissions)
+
+    assert capsys.readouterr().out.splitlines() == [
+        f"omitted\tarctic_a0135\t{first}\tpasses 3-4",
+        f"omitted\tarctic_a0135\t{second}\tpasses 5",
+    ]
+    assert caplog.text.count("retrying once") == 2
+    assert caplog.text.count("omitting it from this pass") == 2
+
+
 def test_abort_still_fails_the_run_for_callers_that_want_that() -> None:
     """The strict behavior remains available; it is no longer the default."""
     trainer = TightBeamTrainer()

@@ -16,7 +16,7 @@ import shutil
 import sys
 import time
 import uuid
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import contextmanager, suppress
 from dataclasses import asdict, dataclass
@@ -161,6 +161,7 @@ class _ShardResult:
     accum_dir: Path
     accepted_exceptions: tuple[tuple[str, int, int, int], ...] = ()
     user_cpu_seconds: float = 0.0
+    final_state_omissions: tuple[tuple[str, str], ...] = ()
 
 
 def _write_shard_metadata(
@@ -348,6 +349,7 @@ def _process_with_final_state_retry(
     retry_beam_factor: float,
     fileid: str,
     failed_alignment: Literal["recover", "abort", "omit"] = "recover",
+    report_retry: bool = True,
 ) -> bool:
     """Process an update, retrying only a forward-final-state pruning failure.
 
@@ -388,11 +390,12 @@ def _process_with_final_state_retry(
 
         retry_beam = normal_beam / retry_beam_factor
         trainer._last_process_retried = True
-        logger.warning(
-            "Final state not reached for %s; retrying once with a_beam=%.3g",
-            fileid,
-            retry_beam,
-        )
+        if report_retry:
+            logger.warning(
+                "Final state not reached for %s; retrying once with a_beam=%.3g",
+                fileid,
+                retry_beam,
+            )
         previous_beam = trainer.set_a_beam(retry_beam)
         try:
             success = process()
@@ -408,12 +411,13 @@ def _process_with_final_state_retry(
                 # max_skip_fraction still fails the run once skips stop being
                 # incidental. Use failed_alignment="abort" to fail on the first
                 # one instead.
-                logger.error(
-                    "Final state not reached for %s even at a_beam=%.3g; omitting it "
-                    "from this pass and continuing",
-                    fileid,
-                    retry_beam,
-                )
+                if report_retry:
+                    logger.error(
+                        "Final state not reached for %s even at a_beam=%.3g; omitting it "
+                        "from this pass and continuing",
+                        fileid,
+                        retry_beam,
+                    )
                 return False
             return True
         finally:
@@ -499,16 +503,92 @@ def _ordered_shard_results(futures: Iterable[object]) -> list[_ShardResult]:
 
 
 def _effective_bw_shard_count(n_shards: int, *, multipron: bool) -> int:
-    """Resolve the loud multipron fallback before a training pass starts."""
+    """Resolve the multipron fallback before a training pass starts."""
     if n_shards < 1:
         raise ValueError("n_shards must be at least 1")
     if n_shards > 1 and multipron:
-        logger.warning(
-            "BW sharding disabled because multipron_training=true: fallback_senone "
-            "is pass-wide state; running serially"
-        )
+        # fallback_senone is pass-wide mutable state, so multipron BW cannot
+        # safely shard utterances across independent trainers.
         return 1
     return n_shards
+
+
+def _pass_ranges(passes: list[int]) -> str:
+    """Render ordered pass numbers compactly for the TSV omission summary."""
+    ranges: list[str] = []
+    start = previous = passes[0]
+    for current in passes[1:]:
+        if current == previous + 1:
+            previous = current
+            continue
+        ranges.append(str(start) if start == previous else f"{start}-{previous}")
+        start = previous = current
+    ranges.append(str(start) if start == previous else f"{start}-{previous}")
+    return ",".join(ranges)
+
+
+def _report_skip_summary(
+    omitted_passes: dict[tuple[str, str], list[int]],
+) -> None:
+    """Report each distinct stage-level omission and its affected passes."""
+    for (fileid, reason), passes in omitted_passes.items():
+        print(f"omitted\t{fileid}\t{reason}\tpasses {_pass_ranges(passes)}")
+
+
+def _report_changed_skip(
+    skipped_by_pass: list[tuple[int, int]],
+    input_utts: int,
+) -> None:
+    """Print the first nonzero count and every change; unchanged repeats are silent."""
+    iteration, skipped = skipped_by_pass[-1]
+    if len(skipped_by_pass) == 1:
+        if not skipped:
+            return
+    elif skipped == skipped_by_pass[-2][1]:
+        return
+    logger.warning(
+        "WARNING: iteration %d skipped %d/%d utterance updates (%.2f%%)",
+        iteration,
+        skipped,
+        input_utts,
+        100.0 * skipped / input_utts,
+    )
+
+
+def _record_omission(
+    omitted_passes: dict[tuple[str, str], list[int]],
+    fileid: str,
+    reason: str,
+    iteration: int,
+) -> bool:
+    """Record one omission, returning whether its utterance/reason pair is new."""
+    key = (fileid, reason)
+    is_new = key not in omitted_passes
+    omitted_passes.setdefault(key, []).append(iteration)
+    return is_new
+
+
+def _account_and_enforce_skips(
+    *,
+    iteration: int,
+    skipped: int,
+    input_utts: int,
+    max_skip_fraction: float,
+    skipped_by_pass: list[tuple[int, int]],
+    omitted_passes: dict[tuple[str, str], list[int]],
+) -> float:
+    """Report changing skip rates and enforce the configured stage limit."""
+    skipped_by_pass.append((iteration, skipped))
+    _report_changed_skip(skipped_by_pass, input_utts)
+    skip_fraction = skipped / input_utts if input_utts else 1.0
+    if skip_fraction > max_skip_fraction:
+        _report_skip_summary(omitted_passes)
+        raise RuntimeError(
+            f"Iteration {iteration}: skipped {skipped}/{input_utts} utterance "
+            f"updates ({skip_fraction:.2%}), above configured limit "
+            f"{max_skip_fraction:.2%}"
+        )
+    return skip_fraction
 
 
 def _initialize_bw_pool_worker() -> None:
@@ -535,6 +615,7 @@ def _run_bw_shard(
     arctic_a0302_zero_codebook_band: tuple[int, int] | None,
     accept_arctic_a0587_pass: int | None,
     diagnostic_log: Path,
+    reported_omissions: set[tuple[str, str]],
 ) -> _ShardResult:
     user_cpu_start = resource.getrusage(resource.RUSAGE_SELF).ru_utime
     trainer = BWTrainer(
@@ -550,6 +631,7 @@ def _run_bw_shard(
     retried: list[str] = []
     skipped: list[tuple[str, str]] = []
     accepted_exceptions: list[tuple[str, int, int, int]] = []
+    final_state_omissions: list[tuple[str, str]] = []
     diagnostic_log.parent.mkdir(parents=True, exist_ok=True)
     diagnostic_log.write_bytes(_BW_COLUMN_HEADER)
     for fileid in assigned_ids:
@@ -569,6 +651,8 @@ def _run_bw_shard(
                 skipped.append((fileid, "feature_dimension"))
                 continue
             with _redirect_bw_stdout(diagnostic_log):
+                retry_beam = iter_config.a_beam / retry_beam_factor
+                omission_reason = f"final state not reached even at a_beam={retry_beam:.3g}"
                 success = _process_with_final_state_retry(
                     trainer,
                     mfcc,
@@ -577,9 +661,12 @@ def _run_bw_shard(
                     retry_beam_factor,
                     fileid,
                     failed_alignment,
+                    report_retry=(fileid, omission_reason) not in reported_omissions,
                 )
             if not success:
                 skipped.append((fileid, "alignment_failure"))
+                if trainer._last_process_retried:
+                    final_state_omissions.append((fileid, omission_reason))
             elif trainer._last_process_retried:
                 retried.append(fileid)
             else:
@@ -621,6 +708,7 @@ def _run_bw_shard(
         accum_dir=accum_dir,
         accepted_exceptions=tuple(accepted_exceptions),
         user_cpu_seconds=resource.getrusage(resource.RUSAGE_SELF).ru_utime - user_cpu_start,
+        final_state_omissions=tuple(final_state_omissions),
     )
 
 
@@ -650,6 +738,7 @@ def run_bw_training(
     project_dir: Path | None = None,
     stage: str | None = None,
     _in_process_reference: bool = False,
+    _output_note: Callable[[str], None] | None = None,
 ) -> TrainingResult:
     """Run Baum-Welch training iterations.
 
@@ -692,7 +781,10 @@ def run_bw_training(
         FileNotFoundError: If required files are missing
         RuntimeError: If training fails
     """
+    requested_shards = n_shards
     n_shards = _effective_bw_shard_count(n_shards, multipron=multipron)
+    if requested_shards > 1 and multipron:
+        (_output_note or print)("bw-parallelism\tserial (multipron_training is on)")
     model_dir = Path(model_dir)
     output_dir = Path(output_dir)
     features_dir = Path(features_dir)
@@ -733,6 +825,8 @@ def run_bw_training(
     total_skipped = 0
     trajectory: list[TrainingIteration] = []
     telemetry_rows: list[dict[str, object]] = []
+    omitted_passes: dict[tuple[str, str], list[int]] = {}
+    skipped_by_pass: list[tuple[int, int]] = []
     exclusion_schedule = exclusion_schedule or {}
 
     for iteration in range(1, n_iter + 1):
@@ -818,6 +912,7 @@ def run_bw_training(
                     arctic_a0302_zero_codebook_band,
                     accept_arctic_a0587_pass,
                     diagnostic_dir / f"pass-{iteration:02d}-shard-{index:02d}.log",
+                    set(omitted_passes),
                 )
                 for index, assigned in enumerate(partitions)
             ]
@@ -883,6 +978,8 @@ def run_bw_training(
                             "band": [lower, upper],
                         }
                     )
+                for omission in result.final_state_omissions:
+                    _record_omission(omitted_passes, *omission, iteration)
             total_log_lik = sum(result.total_log_lik for result in shard_results)
             total_frames = sum(result.total_frames for result in shard_results)
             merged_stats = BWResult(
@@ -929,6 +1026,8 @@ def run_bw_training(
 
                 # Use process_utterance_mfcc - C handles CMN+deltas
                 with _redirect_bw_stdout(serial_diagnostic_log):
+                    retry_beam = iter_config.a_beam / retry_beam_factor
+                    omission_reason = f"final state not reached even at a_beam={retry_beam:.3g}"
                     success = _process_with_final_state_retry(
                         trainer,
                         mfcc,
@@ -937,6 +1036,7 @@ def run_bw_training(
                         retry_beam_factor,
                         fileid,
                         failed_alignment,
+                        report_retry=(fileid, omission_reason) not in omitted_passes,
                     )
                 if success:
                     if trainer._last_process_retried:
@@ -944,10 +1044,11 @@ def run_bw_training(
                     else:
                         processed += 1
                 else:
-                    logger.warning("Failed to process: %s", fileid)
                     skipped += 1
                     skip_reasons["alignment_failure"] += 1
                     terminal_skips.append({"utterance": fileid, "reason": "alignment_failure"})
+                    if trainer._last_process_retried:
+                        _record_omission(omitted_passes, fileid, omission_reason, iteration)
             except TerminalAlignmentError:
                 if fileid == "arctic_a0587" and iteration == accept_arctic_a0587_pass:
                     logger.warning(
@@ -985,29 +1086,23 @@ def run_bw_training(
                 terminal_skips.append({"utterance": fileid, "reason": "exception"})
 
         total_skipped += skipped
-        if skipped:
-            logger.warning(
-                "WARNING: iteration %d skipped %d/%d utterance updates (%.2f%%)",
-                iteration,
-                skipped,
-                len(fileids),
-                100.0 * skipped / len(fileids),
-            )
-        else:
+        _account_and_enforce_skips(
+            iteration=iteration,
+            skipped=skipped,
+            input_utts=len(fileids),
+            max_skip_fraction=max_skip_fraction,
+            skipped_by_pass=skipped_by_pass,
+            omitted_passes=omitted_passes,
+        )
+        if not skipped:
             logger.info(
                 "Iteration %d processed %d utterances with zero skips",
                 iteration,
                 processed + retried,
             )
 
-        skip_fraction = skipped / len(fileids) if fileids else 1.0
-        if skip_fraction > max_skip_fraction:
-            raise RuntimeError(
-                f"Iteration {iteration}: skipped {skipped}/{len(fileids)} utterances "
-                f"({skip_fraction:.2%}), above configured limit {max_skip_fraction:.2%}"
-            )
-
         if processed + retried == 0:
+            _report_skip_summary(omitted_passes)
             raise RuntimeError("No utterances processed successfully")
 
         # Get statistics BEFORE normalization (normalize resets stats)
@@ -1146,6 +1241,7 @@ def run_bw_training(
                 min_iterations,
             ):
                 if total_skipped:
+                    _report_skip_summary(omitted_passes)
                     logger.warning(
                         "WARNING: BW training skipped %d utterance updates in total",
                         total_skipped,
@@ -1170,6 +1266,7 @@ def run_bw_training(
         del trainer
 
     if total_skipped:
+        _report_skip_summary(omitted_passes)
         logger.warning("WARNING: BW training skipped %d utterance updates in total", total_skipped)
     logger.info(
         "Completed %d iterations (did not converge); total skipped=%d", n_iter, total_skipped

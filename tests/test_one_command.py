@@ -23,6 +23,7 @@ from pstrain.lib.one_command import (
     write_validation_reports,
 )
 from pstrain.lib.testing import check_pocketsphinx
+from tests.clib import requires_c_library
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_arctic"
 
@@ -331,6 +332,32 @@ def test_resume_command_preserves_explicit_intermediate_target(
     assert "--phoneset" in resume_arguments
     assert "--filler-dict" in resume_arguments
     assert resume_arguments[-1] == "--resume"
+
+
+@requires_c_library
+def test_json_training_stdout_is_one_document(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = tmp_path / "project"
+    assert (
+        _invoke(
+            monkeypatch,
+            *_base_arguments(project),
+            "--target",
+            "ci-1g",
+            "--json",
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["status"] == "trained"
+    assert payload["target"] == "ci-1g"
+    assert "bw-logs\t" in captured.err
+    assert "bw-passes\tci-1g\t" in captured.err
 
 
 @pytest.mark.parametrize("complete_staging", [False, True])

@@ -75,7 +75,7 @@ def test_model_comparison_surfaces_effective_bw_shard_count(tmp_path: Path) -> N
     reason=("fallback_senone",),
 )
 def test_multipron_multiple_shards_falls_back_loudly(
-    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Gate multipron shard selection against pstrain's serial fallback.
 
@@ -84,10 +84,26 @@ def test_multipron_multiple_shards_falls_back_loudly(
     at four requested shards. SILENT ON: multipron model correctness, execution
     after selection, architecture, arithmetic, and defects shared with serial.
     """
-    with caplog.at_level("WARNING"):
-        assert _effective_bw_shard_count(4, multipron=True) == 1
-    assert "fallback_senone" in caplog.text
+    from pstrain.lib.bw import BWConfig
+    from pstrain.lib.steps.train import run_bw_training
+
+    assert _effective_bw_shard_count(4, multipron=True) == 1
     assert _effective_bw_shard_count(4, multipron=False) == 4
+    with pytest.raises(FileNotFoundError):
+        run_bw_training(
+            model_dir=tmp_path / "model",
+            output_dir=tmp_path / "output",
+            features_dir=tmp_path / "features",
+            train_fileids=tmp_path / "fileids",
+            transcription=tmp_path / "transcription",
+            dictionary=tmp_path / "dictionary",
+            first_pass_2passvar=False,
+            config=BWConfig(pass2var=False, unobserved_gaussian_policy="zero"),
+            n_shards=4,
+        )
+    assert capsys.readouterr().out.splitlines()[0] == (
+        "bw-parallelism\tserial (multipron_training is on)"
+    )
 
 
 def test_partition_manifest_varies_boundaries_and_keeps_empty_shards() -> None:

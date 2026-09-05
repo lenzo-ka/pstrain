@@ -34,7 +34,7 @@ import functools
 import json
 import os
 import shutil
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -320,6 +320,7 @@ def _make_bw_train_task(
     description: str,
     extra_inputs: Iterable[Path] = (),
     copy_mdef_from_src: bool = False,
+    output_note: Callable[[str], None] | None = None,
 ) -> Task:
     """Build a Baum-Welch training task.
 
@@ -394,12 +395,13 @@ def _make_bw_train_task(
             partition_position=ctx.sharding.partition_position,
             project_dir=ctx.project_dir,
             stage=out_model,
+            _output_note=output_note,
         )
         if copy_mdef_from_src:
             shutil.copy(src_dir / "mdef", out_dir / "mdef")
         write_feat_params(out_dir / "feat.params", ctx.feat)
         _record_model_provenance(ctx, out_dir)
-        print(f"   {name}: {result.iterations} iter(s), converged={result.converged}")
+        print(f"bw-passes\t{name}\t{result.iterations}\tconverged={result.converged}")
 
     return Task(
         name=name,
@@ -417,6 +419,7 @@ def _make_split_and_train_task(
     src_model: str,
     out_model: str,
     description: str,
+    output_note: Callable[[str], None] | None = None,
 ) -> Task:
     """Build a 'split Gaussians then train' task (e.g. ci-1g -> ci-2g)."""
     train_fileids = ctx.etc_dir / "train.fileids"
@@ -476,10 +479,11 @@ def _make_split_and_train_task(
             accept_arctic_a0587_pass=(
                 1 if ctx.train.accept_arctic_a0587_known_skip and out_model == "cd-2g" else None
             ),
+            _output_note=output_note,
         )
         write_feat_params(out_dir / "feat.params", ctx.feat)
         _record_model_provenance(ctx, out_dir)
-        print(f"   {name}: split + {result.iterations} iter(s), converged={result.converged}")
+        print(f"bw-passes\t{name}\tsplit + {result.iterations}\tconverged={result.converged}")
 
     return Task(
         name=name,
@@ -544,7 +548,9 @@ def _make_cd_untied_init_task(ctx: PipelineContext) -> Task:
     )
 
 
-def _make_cd_untied_task(ctx: PipelineContext) -> Task:
+def _make_cd_untied_task(
+    ctx: PipelineContext, output_note: Callable[[str], None] | None = None
+) -> Task:
     return _make_bw_train_task(
         ctx,
         name="cd-untied",
@@ -552,6 +558,7 @@ def _make_cd_untied_task(ctx: PipelineContext) -> Task:
         out_model="cd-untied",
         description="Train CD untied (per-triphone) model",
         copy_mdef_from_src=True,
+        output_note=output_note,
     )
 
 
@@ -748,7 +755,9 @@ def _make_cd_1g_init_task(ctx: PipelineContext) -> Task:
     )
 
 
-def _make_cd_1g_train_task(ctx: PipelineContext) -> Task:
+def _make_cd_1g_train_task(
+    ctx: PipelineContext, output_note: Callable[[str], None] | None = None
+) -> Task:
     return _make_bw_train_task(
         ctx,
         name="cd-1g",
@@ -756,6 +765,7 @@ def _make_cd_1g_train_task(ctx: PipelineContext) -> Task:
         out_model="cd-1g",
         description="Train tied CD-1g model",
         copy_mdef_from_src=True,
+        output_note=output_note,
     )
 
 
@@ -944,6 +954,7 @@ def build_pipeline(ctx: PipelineContext) -> Pipeline:
             src_model="flat",
             out_model="ci-1g",
             description="Train CI-1g (1 Gaussian per state)",
+            output_note=pl.report_once,
         )
     )
     for src, dst in [("ci-1g", "ci-2g"), ("ci-2g", "ci-4g"), ("ci-4g", "ci-8g")]:
@@ -953,18 +964,19 @@ def build_pipeline(ctx: PipelineContext) -> Pipeline:
                 name=dst,
                 src_model=src,
                 out_model=dst,
+                output_note=pl.report_once,
                 description=f"Split + train {dst}",
             )
         )
 
     pl.add(_make_cd_untied_init_task(ctx))
-    pl.add(_make_cd_untied_task(ctx))
+    pl.add(_make_cd_untied_task(ctx, pl.report_once))
     pl.add(_make_questions_task(ctx))
     pl.add_all(_make_tree_tasks(ctx))
     pl.add(_make_prune_trees_task(ctx))
     pl.add(_make_alltriphones_mdef_task(ctx))
     pl.add(_make_cd_1g_init_task(ctx))
-    pl.add(_make_cd_1g_train_task(ctx))
+    pl.add(_make_cd_1g_train_task(ctx, pl.report_once))
 
     for src, dst in [
         ("cd-1g", "cd-2g"),
@@ -980,6 +992,7 @@ def build_pipeline(ctx: PipelineContext) -> Pipeline:
                 src_model=src,
                 out_model=dst,
                 description=f"Split + train {dst}",
+                output_note=pl.report_once,
             )
         )
 
