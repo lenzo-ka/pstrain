@@ -48,6 +48,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys_compat/file.h>
 
 #include <sphinxbase/ckd_alloc.h>
 #include <sphinxbase/cmd_ln.h>
@@ -302,7 +303,14 @@ pstrain_init_gau_core(lexicon_t *lex, model_def_t *mdef, feat_t *feat,
     uint32 *sseq = NULL;
     uint32 *ci_sseq = NULL;
 
-    uint32 tick_cnt = 0;
+    uint32 attempted_cnt = 0;
+    uint32 processed_cnt = 0;
+    uint32 skip_transcript = 0;
+    uint32 skip_segmentation = 0;
+    uint32 skip_feature = 0;
+    uint32 skip_frame_mismatch = 0;
+    uint32 skip_too_short = 0;
+    uint32 skip_feature_frames = 0;
 
     char **word = NULL;
     uint32 n_word;
@@ -411,8 +419,8 @@ pstrain_init_gau_core(lexicon_t *lex, model_def_t *mdef, feat_t *feat,
             f = NULL;
         }
 
-        if ((++tick_cnt % 100) == 0) {
-            E_INFO("[%u] utterances processed\n", tick_cnt);
+        if ((++attempted_cnt % 100) == 0) {
+            E_INFO("[%u] utterances attempted\n", attempted_cnt);
         }
 
         /* For global mode (mdef=NULL), we don't need transcripts/segmentation */
@@ -420,19 +428,23 @@ pstrain_init_gau_core(lexicon_t *lex, model_def_t *mdef, feat_t *feat,
             if (corpus_get_sent(&trans) != S3_SUCCESS) {
                 E_WARN("Unable to read transcript for %s, skipping\n",
                        corpus_utt_brief_name());
+                ++skip_transcript;
                 continue;
             }
 
             if (corpus_get_seg(&seg, &n_frame) != S3_SUCCESS) {
                 E_WARN("Unable to read segmentation for %s, skipping\n",
                        corpus_utt_brief_name());
+                ++skip_segmentation;
                 continue;
             }
         }
 
-        if (corpus_get_generic_featurevec(&mfcc, &tmp, ceplen) < 0) {
+        if (sys_compat_access(corpus_mfcc_filename(), R_OK) != 0 ||
+            corpus_get_generic_featurevec(&mfcc, &tmp, ceplen) < 0) {
             E_WARN("Can't read features for %s, skipping\n",
                    corpus_utt_brief_name());
+            ++skip_feature;
             continue;
         }
 
@@ -441,6 +453,7 @@ pstrain_init_gau_core(lexicon_t *lex, model_def_t *mdef, feat_t *feat,
         if (mdef && tmp != n_frame) {
             E_WARN("Frame count mismatch for %s, skipping\n",
                    corpus_utt_brief_name());
+            ++skip_frame_mismatch;
             continue;
         }
 
@@ -449,6 +462,7 @@ pstrain_init_gau_core(lexicon_t *lex, model_def_t *mdef, feat_t *feat,
         if (n_frame < 9) {
             E_WARN("Utterance %s too short (%d frames), skipping\n",
                    corpus_utt_brief_name(), n_frame);
+            ++skip_too_short;
             continue;
         }
 
@@ -460,6 +474,7 @@ pstrain_init_gau_core(lexicon_t *lex, model_def_t *mdef, feat_t *feat,
                    corpus_utt_brief_name());
             feat_array_free(f);
             f = NULL;
+            ++skip_feature_frames;
             continue;
         }
 
@@ -492,9 +507,15 @@ pstrain_init_gau_core(lexicon_t *lex, model_def_t *mdef, feat_t *feat,
                 }
             }
         }
+        ++processed_cnt;
     }
 
-    E_INFO("Processed %u utterances\n", tick_cnt);
+    E_INFO("flat_init: processed %u, skipped %u (transcript read: %u, "
+           "segmentation read: %u, feature read: %u, frame mismatch: %u, "
+           "too short: %u, feature frame change: %u)\n",
+           processed_cnt, attempted_cnt - processed_cnt, skip_transcript,
+           skip_segmentation, skip_feature, skip_frame_mismatch, skip_too_short,
+           skip_feature_frames);
 
     /* Write accumulator counts */
     fn = ckd_calloc(strlen(accumdir) + strlen("/gauden_counts") + 1, 1);
@@ -529,7 +550,7 @@ pstrain_init_gau_core(lexicon_t *lex, model_def_t *mdef, feat_t *feat,
     if (mean) gauden_free_param(mean);
     ckd_free_3d((void ***)dnom);
 
-    return 0;
+    return attempted_cnt - processed_cnt;
 }
 
 /**

@@ -200,7 +200,9 @@ corpus_get_mfcc(vector_t **mfc,
 int
 corpus_get_generic_featurevec(vector_t **mfc,
                               int32 *n_frame,
-                              uint32 veclen);
+			      uint32 veclen);
+
+const char *corpus_mfcc_filename(void);
 
 int
 corpus_get_sildel(uint32 **sf,

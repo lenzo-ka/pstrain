@@ -131,6 +131,7 @@ pstrain_agg_seg(const char *mdef_path,
         { "-ceplen", ARG_INT32, "13", "Cepstrum length" },
         { "-stride", ARG_INT32, "1", "Frame stride" },
         { "-cachesz", ARG_INT32, "200", "Cache size in MB" },
+        { "-allowomit", ARG_BOOLEAN, "yes", "Allow omitted utterances" },
         /* Keep agg_seg's inherited live default: cmn_live subtracts the
          * running mean that existed before the current frames, then updates
          * its accumulated/windowed mean.  The shipped CFFI aggregation API

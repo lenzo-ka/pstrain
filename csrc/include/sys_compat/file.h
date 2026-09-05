@@ -55,7 +55,9 @@
 #include <sys/stat.h>
 
 #define MAXPATHLEN FILENAME_MAX
+/* <io.h> declares _access() but not the POSIX mode names it accepts. */
 #define F_OK 0
+#define R_OK 4
 #define sys_compat_access _access
 #if defined(_WIN32_WCE) || defined(_WIN32_WP)
 #define sys_compat_unlink unlink

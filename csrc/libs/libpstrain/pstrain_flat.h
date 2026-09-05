@@ -60,7 +60,8 @@ pstrain_flat_mixw(uint32 n_tied_state,
  * @param seg_ext Segmentation file extension (may be NULL)
  * @param accum_dir Directory to write accumulator files
  * @param mean_path Path to means file for variance pass (NULL for mean pass)
- * @return 0 on success, -1 on error
+ * @return the number of utterances skipped (0 when all were used), or -1 on
+ *         error
  */
 int
 pstrain_init_gau(const char *mdef_path,

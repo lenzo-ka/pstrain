@@ -1271,6 +1271,12 @@ open_file_for_reading(uint32 type)
     return out;
 }
 
+const char *
+corpus_mfcc_filename(void)
+{
+    return mk_filename(DATA_TYPE_MFCC, cur_ctl_path);
+}
+
 static int
 corpus_read_next_sent_file(char **trans)
 {

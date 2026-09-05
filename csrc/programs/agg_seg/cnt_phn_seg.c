@@ -45,6 +45,7 @@
 
 #include "cnt_phn_seg.h"
 #include "mk_seg.h"
+#include "omission.h"
 
 #include <s3/lexicon.h>
 #include <s3/corpus.h>
@@ -63,7 +64,10 @@ get_next_phnseq(model_def_t *mdef,
     acmod_id_t *phone;
     uint32 n_phone;
 
-    corpus_get_sent(&trans);
+    if (corpus_get_sent(&trans) != S3_SUCCESS) {
+	agg_omission_record(AGG_OMIT_TRANSCRIPT_READ);
+	return NULL;
+    }
 
     mk_phone_seq(&phone, &n_phone, trans, mdef->acmod_set, lex);
 
@@ -117,20 +121,42 @@ cnt_phn_seg(model_def_t *mdef,
 	    E_INFOCONT(" cnt[%u]", seq_no);
 	}
 
-	corpus_get_seg(&seg, &n_frame);
+	if (corpus_get_seg(&seg, &n_frame) != S3_SUCCESS) {
+	    agg_omission_record(AGG_OMIT_SEGMENTATION_READ);
+	    continue;
+	}
 
 	phone = get_next_phnseq(mdef, lex, &n_phone);
 
-	ck_seg(mdef->acmod_set, phone, n_phone, seg, n_frame, corpus_utt());
+	if (phone == NULL) {
+	    /* get_next_phnseq() has already recorded the reason. */
+	    ckd_free(seg);
+	    continue;
+	}
+
+	if (ck_seg(mdef->acmod_set, phone, n_phone, seg, n_frame,
+	           corpus_utt()) != S3_SUCCESS) {
+	    ckd_free(seg);
+	    ckd_free(phone);
+	    agg_omission_record(AGG_OMIT_SEGMENTATION_MISMATCH);
+	    continue;
+	}
 
 	start = ckd_calloc(n_phone, sizeof(uint32));
 	len = ckd_calloc(n_phone, sizeof(uint32));
 
-	mk_seg(mdef->acmod_set, seg, n_frame, phone, start, len, n_phone);
+	if (mk_seg(mdef->acmod_set, seg, n_frame, phone, start, len,
+	           n_phone) != S3_SUCCESS) {
+	    ckd_free(start);
+	    ckd_free(len);
+	    ckd_free(seg);
+	    ckd_free(phone);
+	    agg_omission_record(AGG_OMIT_SEGMENT_GENERATION);
+	    continue;
+	}
 
 	ckd_free(start);
 	ckd_free(seg);
-	ckd_free(phone);
 
 	for (i = 0; i < n_phone; i++) {
 	    /* insert the len for list phone[i] */
@@ -150,7 +176,9 @@ cnt_phn_seg(model_def_t *mdef,
 		tl[phone[i]] = cur;
 	    }
 	}
+	ckd_free(phone);
 	ckd_free(len);
+	agg_omission_processed();
     }
 
     n_frame_per = (uint32 **)ckd_calloc(n_acmod, sizeof(uint32 *));
