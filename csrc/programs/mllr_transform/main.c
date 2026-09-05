@@ -50,7 +50,25 @@ initialize(int argc,
 	   char *argv[])
 {
     /* define, parse and (partially) validate the command line */
-    parse_cmd_ln(argc, argv);
+    if (parse_cmd_ln(argc, argv) != S3_SUCCESS)
+	return S3_ERROR;
+
+    if (cmd_ln_str("-mllrmat") == NULL) {
+	E_ERROR("You must specify -mllrmat.\n");
+	return S3_ERROR;
+    }
+    if (cmd_ln_str("-outmeanfn") != NULL && cmd_ln_str("-inmeanfn") == NULL) {
+	E_ERROR("You must specify -inmeanfn with -outmeanfn.\n");
+	return S3_ERROR;
+    }
+    if (cmd_ln_str("-outgaucntfn") != NULL && cmd_ln_str("-ingaucntfn") == NULL) {
+	E_ERROR("You must specify -ingaucntfn with -outgaucntfn.\n");
+	return S3_ERROR;
+    }
+    if (cmd_ln_str("-outmeanfn") == NULL && cmd_ln_str("-outgaucntfn") == NULL) {
+	E_ERROR("No -outmeanfn or -outgaucntfn given, nothing done.\n");
+	return S3_ERROR;
+    }
 
     return S3_SUCCESS;
 }
@@ -335,7 +353,7 @@ main(int argc, char *argv[])
 
     if (initialize(argc, argv) != S3_SUCCESS) {
 	E_ERROR("Errors initializing.\n");
-	return 0;
+	return 1;
     }
 
     outmeanfn = cmd_ln_str("-outmeanfn");
@@ -348,9 +366,6 @@ main(int argc, char *argv[])
     cdonly    = cmd_ln_int32("-cdonly");
     inverse   = cmd_ln_int32("-inverse");
 
-    if (! (mllrmatfn && cb2mllrfn)) {
-	E_FATAL("You must specify all mllr files\n");
-    }
     if (outmeanfn) {
 	if (mllr_adapt_mean(outmeanfn,
 			    inmeanfn,
@@ -384,7 +399,7 @@ main(int argc, char *argv[])
 	}
     }
     else {
-	E_FATAL("No -outmeanfn or -outgaucntfn given, nothing done.\n");
+	E_ERROR("No -outmeanfn or -outgaucntfn given, nothing done.\n");
+	return 1;
     }
-    return 0 ;
 }
