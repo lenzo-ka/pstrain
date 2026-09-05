@@ -57,5 +57,5 @@ parse_cmd_ln(int argc, char *argv[])
       exit(0);
     }
 
-    return 0;
+    return S3_SUCCESS;
 }

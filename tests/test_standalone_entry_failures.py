@@ -6,8 +6,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 
+from pstrain.lib import _pstrainc
 from pstrain.lib.commands import resolve_binary
 
 
@@ -44,6 +46,50 @@ def _param_cnt_args(tmp_path: Path, param_type: str) -> list[str]:
         "-paramtype",
         param_type,
     ]
+
+
+def _write_identity_mllr(path: Path, veclen: int) -> None:
+    rows = []
+    for row in range(veclen):
+        rows.append(" ".join("1" if row == column else "0" for column in range(veclen)))
+    path.write_text(
+        "\n".join(
+            ["1", "1", str(veclen), *rows, " ".join(["0"] * veclen), " ".join(["1"] * veclen)]
+        )
+        + "\n"
+    )
+
+
+@pytest.mark.skipif(resolve_binary("mllr_transform") is None, reason="mllr_transform not found")
+def test_mllr_transform_missing_arguments_is_unsuccessful() -> None:
+    result = _run("mllr_transform", "-mllrmat", "unused.mllr")
+
+    assert result.returncode == 1, result.stderr
+    assert "Errors initializing." in result.stderr
+
+
+@pytest.mark.skipif(resolve_binary("mllr_transform") is None, reason="mllr_transform not found")
+def test_mllr_transform_valid_identity_transform_succeeds(tmp_path: Path) -> None:
+    fixture = Path(__file__).parent / "fixtures" / "multipron_final_state" / "model"
+    matrix = tmp_path / "identity.mllr"
+    output = tmp_path / "means"
+    _write_identity_mllr(matrix, 39)
+
+    result = _run(
+        "mllr_transform",
+        "-inmeanfn",
+        str(fixture / "means"),
+        "-outmeanfn",
+        str(output),
+        "-mllrmat",
+        str(matrix),
+    )
+
+    assert result.returncode == 0, result.stderr
+    input_means = _pstrainc.read_gau(str(fixture / "means"))
+    output_means = _pstrainc.read_gau(str(output))
+    assert input_means[1:] == output_means[1:]
+    np.testing.assert_array_equal(input_means[0], output_means[0])
 
 
 def test_param_cnt_output_open_failure_is_unsuccessful(tmp_path: Path) -> None:
