@@ -171,6 +171,22 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         run: pip install -e ".[dev,test]"
 
+      - name: Install tutorial notebook dependencies
+        if: needs.changes.outputs.code == 'true' && matrix.python == '3.13' && matrix.os == 'ubuntu-latest'
+        run: pip install nbclient nbconvert ipykernel jiwer matplotlib
+
+      - name: Execute tutorial notebook offline
+        if: needs.changes.outputs.code == 'true' && matrix.python == '3.13' && matrix.os == 'ubuntu-latest'
+        timeout-minutes: 20
+        env:
+          PIP_DISABLE_PIP_VERSION_CHECK: "1"
+          PIP_NO_INDEX: "1"
+          PSTRAIN_TUTORIAL_OFFLINE: "1"
+        run: >-
+          python -m jupyter nbconvert --to notebook --execute
+          --ExecutePreprocessor.timeout=900 --output /tmp/executed.ipynb
+          notebooks/arctic_hmm_gmm_tutorial.ipynb
+
       - name: Run tests
         if: needs.changes.outputs.code == 'true'
         # PSTRAIN_REQUIRE_CLIB=1 turns "C library not loadable" from a silent
