@@ -258,7 +258,7 @@ def _mdef_senone_assignments(path: Path) -> tuple[list[int], list[int]]:
 
 @requires_c_library
 def test_build_ci_1g_produces_finite_model(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """features → flat → ci-1g yields a finite, converged CI model."""
     from pstrain.lib.pipeline import PipelineContext
@@ -278,11 +278,13 @@ def test_build_ci_1g_produces_finite_model(
 
     ctx = PipelineContext.from_config(project_dir)
     ctx = replace(ctx, runner=replace(ctx.runner, jobs=2))
-    with caplog.at_level("WARNING"):
-        rc = build_pipeline(ctx).run("ci-1g", jobs=2)
-    assert rc == 0, "pipeline run of ci-1g failed"
-    assert "multipron_training=true" in caplog.text
-    assert "fallback_senone" in caplog.text
+    rc = build_pipeline(ctx).run("cd-untied", jobs=2)
+    assert rc == 0, "pipeline run through cd-untied failed"
+    output = capsys.readouterr().out
+    assert output.count("bw-parallelism\tserial (multipron_training is on)") == 1
+    assert "bw-passes\tci-1g\t" in output
+    assert "bw-passes\tcd-untied\t" in output
+    assert not any(line.startswith(" ") and "converged=" in line for line in output.splitlines())
     execution = ctx.provenance_document("training")["execution"]
     assert execution["requested_jobs"] == 2
     assert execution["bw_shard_count"] == 1

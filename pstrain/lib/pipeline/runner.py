@@ -172,6 +172,13 @@ class Pipeline:
         self._worker_nice = worker_nice
         self._run_lock = threading.Lock()
         self._active_cancellation: threading.Event | None = None
+        self._reported_notes: set[str] = set()
+
+    def report_once(self, line: str) -> None:
+        """Print a key line at most once in the current pipeline run."""
+        if line not in self._reported_notes:
+            print(line)
+            self._reported_notes.add(line)
 
     def cancel(self) -> None:
         """Request cancellation.
@@ -310,6 +317,7 @@ class Pipeline:
                     print(f"Up to date: {target}")
                     return 0
 
+                self._reported_notes.clear()
                 run_id = new_run_id()
                 started = datetime.now(UTC).isoformat()
                 wall_start = time.monotonic()

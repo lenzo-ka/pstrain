@@ -9,8 +9,10 @@ import re
 import shlex
 import shutil
 import stat
+import sys
 import tempfile
 import time
+from contextlib import nullcontext, redirect_stdout
 from pathlib import Path
 
 from pstrain.api import setup_project, validate_project
@@ -595,12 +597,14 @@ class TrainCommand(Command):
             )
         try:
             pipeline = build_pipeline(pipeline_ctx)
-            rc = pipeline.run(
-                ctx.args.target,
-                force=ctx.args.force,
-                jobs=ctx.args.jobs,
-                verbose=ctx.verbose,
-            )
+            output_context = redirect_stdout(sys.stderr) if ctx.json_output else nullcontext()
+            with output_context:
+                rc = pipeline.run(
+                    ctx.args.target,
+                    force=ctx.args.force,
+                    jobs=ctx.args.jobs,
+                    verbose=ctx.verbose,
+                )
         except UnknownTargetError as exc:
             return self._failure(ctx, "unknown_target", str(exc))
         except Exception as exc:

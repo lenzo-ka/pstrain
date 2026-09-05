@@ -1175,7 +1175,9 @@ def test_bw_config_requires_explicit_normalization_policies() -> None:
 
 
 def test_configured_bw_parameters_reach_training_call(
-    empty_project: Path, monkeypatch: pytest.MonkeyPatch
+    empty_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The public training profile must drive the actual BW call."""
     from pstrain.lib.steps.train import TrainingResult
@@ -1253,6 +1255,7 @@ def test_configured_bw_parameters_reach_training_call(
     tasks = build_pipeline(ctx).tasks()
     tasks["provenance:training"].fn()
     tasks["ci-1g"].fn()
+    assert "bw-passes\tci-1g\t1\tconverged=False" in capsys.readouterr().out
 
     config: Any = captured["config"]
     assert config.a_beam == 1e-123
