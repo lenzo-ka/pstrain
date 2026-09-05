@@ -22,6 +22,7 @@ import atexit
 import contextlib
 import ctypes
 import multiprocessing
+import multiprocessing.util
 import os
 import select
 import struct
@@ -678,3 +679,33 @@ def _shutdown() -> None:
 
 
 atexit.register(_shutdown)
+
+
+_finalizer_owner_pid: int | None = None
+
+
+def close_helper_before_children_are_joined() -> None:
+    """Arrange for this process's helper to be closed early enough at exit.
+
+    Call in any process that multiprocessing itself started -- a pool worker,
+    or any other ``BaseProcess`` -- before it can spawn a helper. Calling it
+    more than once in the same process does nothing further.
+
+    ``BaseProcess._bootstrap`` runs ``multiprocessing.util._exit_function``
+    when the process body returns, and that joins every non-daemon child with
+    no timeout. The helper is such a child, and it waits on its request pipe
+    until it is told to exit, so a process that leaves one running parks in
+    ``waitpid`` forever, and whatever is waiting on that process parks with it.
+    Registering ``_shutdown`` with :func:`atexit` is too late: ordinary
+    ``atexit`` handlers do not run until ``sys.exit`` afterwards. A
+    ``multiprocessing.util.Finalize`` runs inside ``_exit_function`` itself,
+    ahead of the joins, which is early enough.
+    """
+    global _finalizer_owner_pid
+    # Keyed on the pid, not a plain flag: multiprocessing clears its finalizer
+    # registry after a fork, so an inherited "already done" would be wrong.
+    pid = os.getpid()
+    if _finalizer_owner_pid == pid:
+        return
+    _finalizer_owner_pid = pid
+    multiprocessing.util.Finalize(None, _shutdown, exitpriority=10)

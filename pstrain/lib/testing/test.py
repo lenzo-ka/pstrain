@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from pstrain.lib import native_worker
 from pstrain.lib.model import MODEL_FILES_REQUIRED, require_complete_model
 from pstrain.lib.native_worker import PstrainError
 from pstrain.lib.testing.decoder import Decoder, DecodingResult, check_pocketsphinx
@@ -69,7 +70,14 @@ def _decode_files(
         # PocketSphinx owns native process-global state. A fresh interpreter keeps
         # workers independent of any decoder previously used by the parent.
         context = multiprocessing.get_context("spawn")
-        with ProcessPoolExecutor(max_workers=worker_count, mp_context=context) as executor:
+        # Every shard builds a Decoder, whose density probe starts a native
+        # helper in the worker. Without the initializer the worker's exit joins
+        # that helper forever and the pool never shuts down.
+        with ProcessPoolExecutor(
+            max_workers=worker_count,
+            mp_context=context,
+            initializer=native_worker.close_helper_before_children_are_joined,
+        ) as executor:
             futures = [executor.submit(_decode_shard, config, shard) for shard in shards]
             decoded = [item for future in futures for item in future.result()]
     decoded.sort(key=lambda item: item[0])

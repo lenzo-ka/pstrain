@@ -385,3 +385,32 @@ def test_a_silent_startup_death_reports_its_exit_code_and_where_to_look(
     assert re.search(r"exit code -?\d+", message), message
     assert "exit code None" not in message
     assert "this process's stderr" in message
+
+
+def test_the_exit_finalizer_is_registered_once_per_process(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repeated calls must not stack finalizers, but a forked child needs its own.
+
+    ``multiprocessing`` clears its finalizer registry after a fork, so a plain
+    "already done" flag inherited across one would leave the child with no
+    finalizer at all -- the exact deadlock this exists to prevent.
+    """
+    registered: list[int] = []
+
+    def record(obj: object, callback: object, exitpriority: int = 0) -> None:
+        registered.append(exitpriority)
+
+    monkeypatch.setattr("multiprocessing.util.Finalize", record)
+    monkeypatch.setattr(native_worker, "_finalizer_owner_pid", None)
+
+    native_worker.close_helper_before_children_are_joined()
+    native_worker.close_helper_before_children_are_joined()
+    assert registered == [10]
+
+    # What a fork looks like from inside the child: a different pid, and a
+    # registry multiprocessing has already emptied.
+    forked = os.getpid() + 1
+    monkeypatch.setattr(native_worker.os, "getpid", lambda: forked)
+    native_worker.close_helper_before_children_are_joined()
+    assert registered == [10, 10]
