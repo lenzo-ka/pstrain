@@ -899,10 +899,31 @@ pstrain_dtree_session_reset(void)
 }
 
 static void
+free_was_added(pair_t **list, uint32 n_dest)
+{
+    uint32 i;
+
+    if (list == NULL)
+        return;
+    for (i = 0; i < n_dest; ++i) {
+        pair_t *pair = list[i];
+        while (pair != NULL) {
+            pair_t *next = pair->next;
+            ckd_free(pair);
+            pair = next;
+        }
+    }
+    ckd_free(list);
+}
+
+static int
 init_uniform_mixw(float32 ***dest_mixw,
                   model_def_entry_t *dest,
                   uint32 n_feat,
-                  uint32 n_gau)
+                  uint32 n_gau,
+                  uint32 n_mixw_dest,
+                  uint32 n_state_map_dest,
+                  const char *dest_model_name)
 {
     float32 uniform = 1.0f / (float32)n_gau;
     unsigned int s, i, j;
@@ -910,6 +931,18 @@ init_uniform_mixw(float32 ***dest_mixw,
 
     for (s = 0; s < dest->n_state; s++) {
         d_m = dest->state[s];
+        if (d_m != TYING_NON_EMITTING && d_m >= n_mixw_dest) {
+            E_ERROR("Destination model %s refers to tied state %u, but the "
+                    "destination model definition declares %u tied states\n",
+                    dest_model_name, d_m, n_mixw_dest);
+            return -1;
+        }
+        if (d_m != TYING_NON_EMITTING && d_m >= n_state_map_dest) {
+            E_ERROR("Destination model %s refers to tied state %u, but the "
+                    "destination state mapping contains %u tied states\n",
+                    dest_model_name, d_m, n_state_map_dest);
+            return -1;
+        }
         for (i = 0; i < n_feat; i++) {
             for (j = 0; j < n_gau; j++) {
                 if (d_m != TYING_NON_EMITTING)
@@ -917,6 +950,7 @@ init_uniform_mixw(float32 ***dest_mixw,
             }
         }
     }
+    return 0;
 }
 
 static int
@@ -938,6 +972,12 @@ init_model_params(float32 ***dest_mixw,
                   uint32 n_gau,
                   uint32 n_state_pm,
                   const uint32 *veclen,
+                  uint32 n_mixw_src,
+                  uint32 n_mixw_dest,
+                  uint32 n_state_map_src,
+                  uint32 n_state_map_dest,
+                  uint32 n_cb_src,
+                  uint32 n_cb_dest,
                   uint32 n_tmat_src,
                   uint32 n_tmat_dest,
                   const char *src_model_name,
@@ -951,6 +991,11 @@ init_model_params(float32 ***dest_mixw,
     s_tmat = src->tmat;
     d_tmat = dest->tmat;
 
+    if (src->n_state != dest->n_state) {
+        E_ERROR("Source model %s has %u states, but destination model %s has %u states\n",
+                src_model_name, src->n_state, dest_model_name, dest->n_state);
+        return -1;
+    }
     if (s_tmat >= n_tmat_src) {
         E_ERROR("Source model %s refers to transition matrix %u, but the source "
                 "transition-matrix file contains %u matrices\n",
@@ -980,6 +1025,30 @@ init_model_params(float32 ***dest_mixw,
             continue;
 
         if ((s_m != TYING_NON_EMITTING) && (d_m != TYING_NON_EMITTING)) {
+            if (s_m >= n_state_map_src) {
+                E_ERROR("Source model %s refers to tied state %u, but the source "
+                        "state mapping contains %u tied states\n",
+                        src_model_name, s_m, n_state_map_src);
+                return -1;
+            }
+            if (s_m >= n_mixw_src) {
+                E_ERROR("Source model %s refers to tied state %u, but the source "
+                        "mixture-weight file contains %u tied states\n",
+                        src_model_name, s_m, n_mixw_src);
+                return -1;
+            }
+            if (d_m >= n_mixw_dest) {
+                E_ERROR("Destination model %s refers to tied state %u, but the "
+                        "destination model definition declares %u tied states\n",
+                        dest_model_name, d_m, n_mixw_dest);
+                return -1;
+            }
+            if (d_m >= n_state_map_dest) {
+                E_ERROR("Destination model %s refers to tied state %u, but the "
+                        "destination state mapping contains %u tied states\n",
+                        dest_model_name, d_m, n_state_map_dest);
+                return -1;
+            }
             if (!was_added(&init_mixw_dest_list[d_m], s_m)) {
                 for (j = 0; j < n_feat; j++) {
                     for (k = 0; k < n_gau; k++) {
@@ -990,6 +1059,18 @@ init_model_params(float32 ***dest_mixw,
 
             s_mg = src_cb_map[s_m];
             d_mg = dest_cb_map[d_m];
+            if (s_mg >= n_cb_src) {
+                E_ERROR("Source model %s refers to codebook %u, but the source "
+                        "Gaussian file contains %u codebooks\n",
+                        src_model_name, s_mg, n_cb_src);
+                return -1;
+            }
+            if (d_mg >= n_cb_dest) {
+                E_ERROR("Destination model %s refers to codebook %u, but the "
+                        "destination model definition declares %u codebooks\n",
+                        dest_model_name, d_mg, n_cb_dest);
+                return -1;
+            }
             if (!was_added(&init_cb_dest_list[d_mg], s_mg)) {
                 for (j = 0; j < n_feat; j++) {
                     for (k = 0; k < n_gau; k++) {
@@ -1032,12 +1113,12 @@ pstrain_init_mixw(const char *src_mdef_path,
     vector_t ***dest_var = NULL;
     float32 ***dest_tmat = NULL;
 
-    uint32 n_mixw_src, n_mixw_dest;
+    uint32 n_mixw_src = 0, n_mixw_dest = 0;
     uint32 n_feat, tmp_n_feat;
     uint32 n_gau, tmp_n_gau;
-    uint32 n_cb_src, n_cb_dest;
+    uint32 n_cb_src = 0, n_cb_dest = 0;
     uint32 n_state_pm;
-    uint32 n_tmat_src, n_tmat_dest;
+    uint32 n_tmat_src = 0, n_tmat_dest = 0;
     uint32 *veclen = NULL, *tmp_veclen = NULL;
     uint32 n_ts, n_cb;
 
@@ -1177,7 +1258,12 @@ pstrain_init_mixw(const char *src_mdef_path,
 
             if (src_m_base == NO_ACMOD) {
                 /* No match at all - use uniform */
-                init_uniform_mixw(dest_mixw, &dest_mdef->defn[dest_m], n_feat, n_gau);
+                if (init_uniform_mixw(dest_mixw, &dest_mdef->defn[dest_m], n_feat, n_gau,
+                                     n_mixw_dest, dest_mdef->n_tied_state,
+                                     dest_m_name) != 0) {
+                    ret = -1;
+                    goto cleanup;
+                }
             } else {
                 /* Use base phone */
                 if (init_model_params(dest_mixw, dest_mean, dest_var, dest_tmat,
@@ -1185,6 +1271,8 @@ pstrain_init_mixw(const char *src_mdef_path,
                                       dest_mdef->acmod_set, src_mixw, src_mean, src_var,
                                       src_tmat, &src_mdef->defn[src_m_base], src_mdef->cb,
                                       src_mdef->acmod_set, n_feat, n_gau, n_state_pm, veclen,
+                                      n_mixw_src, n_mixw_dest, src_mdef->n_tied_state,
+                                      dest_mdef->n_tied_state, n_cb_src, n_cb_dest,
                                       n_tmat_src, n_tmat_dest, dest_m_base_name,
                                       dest_m_name) != 0) {
                     ret = -1;
@@ -1198,6 +1286,8 @@ pstrain_init_mixw(const char *src_mdef_path,
                                   dest_mdef->acmod_set, src_mixw, src_mean, src_var,
                                   src_tmat, &src_mdef->defn[src_m], src_mdef->cb,
                                   src_mdef->acmod_set, n_feat, n_gau, n_state_pm, veclen,
+                                  n_mixw_src, n_mixw_dest, src_mdef->n_tied_state,
+                                  dest_mdef->n_tied_state, n_cb_src, n_cb_dest,
                                   n_tmat_src, n_tmat_dest, dest_m_name,
                                   dest_m_name) != 0) {
                 ret = -1;
@@ -1277,8 +1367,12 @@ cleanup:
     if (src_tmat) ckd_free_3d(src_tmat);
     if (dest_tmat) ckd_free_3d(dest_tmat);
 
-    /* Note: init_*_dest_list arrays are leaked here. For a proper implementation,
-     * we'd need to track and free them. */
+    free_was_added(init_mixw_dest_list, n_mixw_dest);
+    free_was_added(init_cb_dest_list, n_cb_dest);
+    free_was_added(init_tmat_dest_list, n_tmat_dest);
+    init_mixw_dest_list = NULL;
+    init_cb_dest_list = NULL;
+    init_tmat_dest_list = NULL;
 
     return ret;
 }

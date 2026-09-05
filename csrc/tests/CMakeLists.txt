@@ -148,3 +148,19 @@ add_test(
     ${BW_FIXTURE}/dictionary.dict
     ${BW_FIXTURE}/filler.dict
 )
+
+add_executable(test_init_mixw_cleanup test_init_mixw_cleanup.c)
+target_link_libraries(test_init_mixw_cleanup pstrainc)
+
+set(INIT_MIXW_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/init_mixw_cleanup)
+file(MAKE_DIRECTORY ${INIT_MIXW_OUTPUT_DIR})
+add_test(
+  NAME init_mixw_cleanup
+  COMMAND test_init_mixw_cleanup
+    ${BW_FIXTURE}/model/mdef
+    ${BW_FIXTURE}/model/mixture_weights
+    ${BW_FIXTURE}/model/means
+    ${BW_FIXTURE}/model/variances
+    ${BW_FIXTURE}/model/transition_matrices
+    ${INIT_MIXW_OUTPUT_DIR}
+)
