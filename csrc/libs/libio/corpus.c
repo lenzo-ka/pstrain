@@ -1285,6 +1285,10 @@ corpus_read_next_sent_file(char **trans)
 
     /* open the current file */
     fp = open_file_for_reading(DATA_TYPE_SENT);
+    if (fp == NULL) {
+	E_ERROR("Unable to open the lexical transcript for this utterance; configure -lsnfn, or -sentdir/-sentext, and check the file exists\n");
+	return S3_ERROR;
+    }
 
     li = lineiter_start_clean(fp);
     if (li == NULL) {
