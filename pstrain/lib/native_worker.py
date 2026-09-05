@@ -366,9 +366,33 @@ class _NativeWorker:
                 message = parent.recv()
             if message and message[0] == "ready":
                 return
+        # Three different failures reach this point and they call for different
+        # responses, so say which one happened. A silent death and a slow start
+        # are indistinguishable from the diagnostic log alone -- it is empty in
+        # both cases -- and reporting "no diagnostic" for a worker that was
+        # merely still starting sends the reader hunting for a crash.
         diagnostic = self._tail().strip()
+        # Discard first: it joins the child, so the exit status is reaped before
+        # it is read. The pipe can close a moment before the process finishes
+        # exiting, and reading exitcode in that gap yields None for a child that
+        # did in fact die.
         self._discard()
-        raise PstrainWorkerError(f"native worker failed to start: {diagnostic or 'no diagnostic'}")
+        exit_code = process.exitcode
+        if not ready:
+            raise PstrainWorkerError(
+                f"native worker did not become ready within {_START_TIMEOUT:.0f}s. "
+                "It was still running when the timeout expired, not failed; a heavily "
+                "loaded machine is one common cause."
+            )
+        if diagnostic:
+            raise PstrainWorkerError(f"native worker failed to start: {diagnostic}")
+        raise PstrainWorkerError(
+            f"native worker exited during startup (exit code {exit_code}) without "
+            "writing a diagnostic. It died before it could redirect its own stderr, "
+            "so any traceback went to this process's stderr -- under a notebook "
+            "server that is the server's log or launching console, not the cell "
+            "output."
+        )
 
     def call(
         self,
