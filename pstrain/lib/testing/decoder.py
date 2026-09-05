@@ -12,6 +12,7 @@ from typing import cast
 from pstrain.lib._cffi import read_gau
 from pstrain.lib.config.models import FeatureConfig
 from pstrain.lib.model import require_complete_model
+from pstrain.lib.native_worker import PstrainError
 
 logger = logging.getLogger(__name__)
 
@@ -169,8 +170,12 @@ class Decoder:
                 try:
                     _, _, _, n_density, _ = read_gau(str(means))
                     config.topn = topn if topn is not None else min(4, n_density)
-                except Exception:
-                    pass
+                except (PstrainError, OSError, ValueError) as e:
+                    logger.warning(
+                        "Could not read the model density count: %s; "
+                        "decoding will proceed with PocketSphinx's default top-N",
+                        e,
+                    )
             self._decoder = self._lib.pstrain_decoder_create(config)
             if self._decoder == self._ffi.NULL:
                 raise RuntimeError("PocketSphinx decoder initialization failed")
