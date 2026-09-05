@@ -16,6 +16,8 @@ from pstrain.lib.agg_seg import SegType
 # detection); see tests/clib.py.
 from tests.clib import C_LIBRARY_AVAILABLE as _lib_exists
 
+_AGG_SEG_BINARY = Path(__file__).parent.parent / "build" / "bin" / "agg_seg"
+
 
 def _write_feature_file(path: Path, n_frame: int = 10, ceplen: int = 13) -> None:
     """Write a well formed, all-zero Sphinx feature file."""
@@ -144,6 +146,35 @@ def _agg_seg_command(
     if segtype == "st":
         command += ["-ts2cbfn", ".semi."]
     return command
+
+
+@pytest.mark.skipif(not _AGG_SEG_BINARY.exists(), reason="agg_seg executable not built")
+def test_agg_seg_requires_a_transcript_source(tmp_path: Path, project_root: Path) -> None:
+    """The real executable reports missing transcript configuration."""
+
+    def prepared_command(base: Path) -> list[Path | str]:
+        base.mkdir()
+        command = _agg_seg_command(project_root, base, "st", ("present",))
+        _write_feature_file(base / "cep" / "present.mfc", len(VALID_SEG_FRAMES))
+        _write_seg_file(base / "seg" / "present.v8_seg", VALID_SEG_FRAMES)
+        return command
+
+    command = prepared_command(tmp_path / "missing")
+    lsn_option = command.index("-lsnfn")
+    del command[lsn_option : lsn_option + 2]
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+
+    assert result.returncode != 0
+    assert (
+        "Unable to open the lexical transcript for this utterance; configure -lsnfn, or "
+        "-sentdir/-sentext, and check the file exists" in result.stderr
+    )
+    assert "agg_seg: processed 0, omitted 1 (transcript read: 1)" in result.stderr
+
+    control = subprocess.run(
+        prepared_command(tmp_path / "configured"), capture_output=True, text=True, check=False
+    )
+    assert control.returncode == 0, control.stderr[-2000:]
 
 
 @pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
