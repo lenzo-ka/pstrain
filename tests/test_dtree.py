@@ -22,6 +22,41 @@ from tests.clib import C_LIBRARY_AVAILABLE as _lib_exists
 
 
 @pytest.fixture
+def small_init_model(tmp_path: Path) -> Path:
+    """Write a small, internally consistent continuous acoustic model."""
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "mdef").write_text(
+        """0.3
+2 n_base
+0 n_tri
+4 n_state_map
+2 n_tied_state
+2 n_tied_ci_state
+2 n_tied_tmat
+AA - - - n/a 0 0 N
+BB - - - n/a 1 1 N
+"""
+    )
+    assert (
+        _pstrainc.write_mixw(str(source / "mixture_weights"), np.ones((2, 1, 2), dtype=np.float32))
+        == 0
+    )
+    assert _pstrainc.write_gau(str(source / "means"), np.zeros((2, 1, 2, 3), dtype=np.float32)) == 0
+    assert (
+        _pstrainc.write_gau(str(source / "variances"), np.ones((2, 1, 2, 3), dtype=np.float32)) == 0
+    )
+    assert (
+        _pstrainc.write_tmat(
+            str(source / "transition_matrices"),
+            np.array([[[0.5, 0.5], [0.0, 1.0]]] * 2, dtype=np.float32),
+        )
+        == 0
+    )
+    return source
+
+
+@pytest.fixture
 def ci_mdef_file(tmp_path: Path) -> Path:
     """Create a minimal CI mdef file."""
     mdef = tmp_path / "ci.mdef"
@@ -454,6 +489,258 @@ BB - - - n/a 1 1 N
             source / "means",
             source / "variances",
             source / "transition_matrices",
+            destination_mdef,
+            output / "mixture_weights",
+            output / "means",
+            output / "variances",
+            output / "transition_matrices",
+        )
+
+    assert not any(output.iterdir())
+
+
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
+def test_init_mixw_rejects_source_state_count_mismatch(
+    small_init_model: Path, tmp_path: Path
+) -> None:
+    """A source mdef cannot index beyond its mixture-weight file."""
+    mixw_path = small_init_model / "mixture_weights"
+    mixw = _pstrainc.read_mixw_counts(str(mixw_path))[0]
+    assert mixw.shape[0] == 2
+    assert _pstrainc.write_mixw(str(mixw_path), mixw[:1]) == 0
+
+    output = tmp_path / "output"
+    output.mkdir()
+    with pytest.raises(
+        native_worker.PstrainNativeError,
+        match=r"Source model BB refers to tied state 1, but the source "
+        r"mixture-weight file contains 1 tied states",
+    ):
+        dtree.init_mixw(
+            small_init_model / "mdef",
+            mixw_path,
+            small_init_model / "means",
+            small_init_model / "variances",
+            small_init_model / "transition_matrices",
+            small_init_model / "mdef",
+            output / "mixture_weights",
+            output / "means",
+            output / "variances",
+            output / "transition_matrices",
+        )
+
+    assert not any(output.iterdir())
+
+
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
+def test_init_mixw_rejects_destination_state_count_mismatch(
+    small_init_model: Path, tmp_path: Path
+) -> None:
+    """A destination mdef cannot index beyond its declared tied states."""
+    destination_mdef = tmp_path / "destination.mdef"
+    destination_mdef.write_text(
+        (small_init_model / "mdef")
+        .read_text()
+        .replace("2 n_tied_state", "1 n_tied_state")
+        .replace("2 n_tied_ci_state", "1 n_tied_ci_state")
+    )
+    output = tmp_path / "output"
+    output.mkdir()
+    with pytest.raises(
+        native_worker.PstrainNativeError,
+        match=r"Destination model BB refers to tied state 1, but the destination "
+        r"model definition declares 1 tied states",
+    ):
+        dtree.init_mixw(
+            small_init_model / "mdef",
+            small_init_model / "mixture_weights",
+            small_init_model / "means",
+            small_init_model / "variances",
+            small_init_model / "transition_matrices",
+            destination_mdef,
+            output / "mixture_weights",
+            output / "means",
+            output / "variances",
+            output / "transition_matrices",
+        )
+
+    assert not any(output.iterdir())
+
+
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
+def test_init_mixw_repeated_calls_share_one_worker(small_init_model: Path, tmp_path: Path) -> None:
+    """Repeated initialization succeeds in the same native worker process."""
+    for iteration in range(5):
+        output = tmp_path / f"output-{iteration}"
+        output.mkdir()
+        dtree.init_mixw(
+            small_init_model / "mdef",
+            small_init_model / "mixture_weights",
+            small_init_model / "means",
+            small_init_model / "variances",
+            small_init_model / "transition_matrices",
+            small_init_model / "mdef",
+            output / "mixture_weights",
+            output / "means",
+            output / "variances",
+            output / "transition_matrices",
+        )
+        assert len(list(output.iterdir())) == 4
+
+
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
+def test_init_mixw_rejects_source_state_mapping_mismatch(
+    small_init_model: Path, tmp_path: Path
+) -> None:
+    """A source state must fit both the mixw file and state mapping."""
+    source_mdef = small_init_model / "mdef"
+    source_mdef.write_text(
+        source_mdef.read_text()
+        .replace("2 n_tied_state", "1 n_tied_state")
+        .replace("2 n_tied_ci_state", "1 n_tied_ci_state")
+    )
+    assert (
+        _pstrainc.write_gau(
+            str(small_init_model / "means"), np.zeros((1, 1, 2, 3), dtype=np.float32)
+        )
+        == 0
+    )
+    assert (
+        _pstrainc.write_gau(
+            str(small_init_model / "variances"), np.ones((1, 1, 2, 3), dtype=np.float32)
+        )
+        == 0
+    )
+    destination_mdef = tmp_path / "destination.mdef"
+    destination_mdef.write_text(source_mdef.read_text().replace("1 n_tied_state", "2 n_tied_state"))
+
+    output = tmp_path / "output"
+    output.mkdir()
+    with pytest.raises(
+        native_worker.PstrainNativeError,
+        match=r"Source model BB refers to tied state 1, but the source "
+        r"state mapping contains 1 tied states",
+    ):
+        dtree.init_mixw(
+            source_mdef,
+            small_init_model / "mixture_weights",
+            small_init_model / "means",
+            small_init_model / "variances",
+            small_init_model / "transition_matrices",
+            destination_mdef,
+            output / "mixture_weights",
+            output / "means",
+            output / "variances",
+            output / "transition_matrices",
+        )
+
+    assert not any(output.iterdir())
+
+
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
+def test_init_mixw_rejects_unmatched_destination_state_mismatch(
+    small_init_model: Path, tmp_path: Path
+) -> None:
+    """Uniform initialization validates an unmatched destination state."""
+    source_mdef = small_init_model / "mdef"
+    source_mdef.write_text(
+        """0.3
+1 n_base
+0 n_tri
+2 n_state_map
+1 n_tied_state
+1 n_tied_ci_state
+1 n_tied_tmat
+AA - - - n/a 0 0 N
+"""
+    )
+    assert (
+        _pstrainc.write_mixw(
+            str(small_init_model / "mixture_weights"), np.ones((1, 1, 2), dtype=np.float32)
+        )
+        == 0
+    )
+    assert (
+        _pstrainc.write_gau(
+            str(small_init_model / "means"), np.zeros((1, 1, 2, 3), dtype=np.float32)
+        )
+        == 0
+    )
+    assert (
+        _pstrainc.write_gau(
+            str(small_init_model / "variances"), np.ones((1, 1, 2, 3), dtype=np.float32)
+        )
+        == 0
+    )
+    assert (
+        _pstrainc.write_tmat(
+            str(small_init_model / "transition_matrices"),
+            np.array([[[0.5, 0.5], [0.0, 1.0]]], dtype=np.float32),
+        )
+        == 0
+    )
+    destination_mdef = tmp_path / "destination.mdef"
+    destination_mdef.write_text(
+        """0.3
+2 n_base
+0 n_tri
+4 n_state_map
+1 n_tied_state
+1 n_tied_ci_state
+2 n_tied_tmat
+AA - - - n/a 0 0 N
+BB - - - n/a 1 1 N
+"""
+    )
+
+    output = tmp_path / "output"
+    output.mkdir()
+    with pytest.raises(
+        native_worker.PstrainNativeError,
+        match=r"Destination model BB refers to tied state 1, but the destination "
+        r"model definition declares 1 tied states",
+    ):
+        dtree.init_mixw(
+            source_mdef,
+            small_init_model / "mixture_weights",
+            small_init_model / "means",
+            small_init_model / "variances",
+            small_init_model / "transition_matrices",
+            destination_mdef,
+            output / "mixture_weights",
+            output / "means",
+            output / "variances",
+            output / "transition_matrices",
+        )
+
+    assert not any(output.iterdir())
+
+
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
+def test_init_mixw_rejects_model_state_count_mismatch(
+    small_init_model: Path, tmp_path: Path
+) -> None:
+    """Matched models must have the same number of states."""
+    destination_mdef = tmp_path / "destination.mdef"
+    destination_mdef.write_text(
+        (small_init_model / "mdef")
+        .read_text()
+        .replace("4 n_state_map", "5 n_state_map")
+        .replace("AA - - - n/a 0 0 N", "AA - - - n/a 0 0 1 N")
+    )
+
+    output = tmp_path / "output"
+    output.mkdir()
+    with pytest.raises(
+        native_worker.PstrainNativeError,
+        match=r"Source model AA has 2 states, but destination model AA has 3 states",
+    ):
+        dtree.init_mixw(
+            small_init_model / "mdef",
+            small_init_model / "mixture_weights",
+            small_init_model / "means",
+            small_init_model / "variances",
+            small_init_model / "transition_matrices",
             destination_mdef,
             output / "mixture_weights",
             output / "means",
