@@ -395,7 +395,7 @@
       "models",
       "results"
     ],
-    "sha256": "b2df48419ec08e17d629f3d2d76d09e492441b46bca5a4fed3f186618d1cb18a"
+    "sha256": "e65001c16e47926fad1e9e2ba41bd9e470f462e11bb4eab79c436c095cb27b23"
   },
   "resources": {
     "archives": {
@@ -473,6 +473,20 @@
           77.26864474026235
         ],
         "cer": null,
+        "comparability": {
+          "implementation_attribution": {
+            "basis": "model-producing identities are missing or incomplete",
+            "status": "NOT COMPARABLE"
+          },
+          "live_pin": {
+            "basis": "historical decode engine, path, and resources differ from the live pin",
+            "status": "NOT COMPARABLE"
+          },
+          "paired_decode": {
+            "basis": "both fixed model artifacts use identical utterances and references through one recorded historical engine, dictionary, language model, decode path, and scoring path",
+            "status": "COMPARABLE"
+          }
+        },
         "configuration_provenance": {
           "diff_from_shipped_defaults": [
             {
@@ -17572,6 +17586,20 @@
           33.68426628010703
         ],
         "cer": null,
+        "comparability": {
+          "implementation_attribution": {
+            "basis": "model-producing identities are missing or incomplete",
+            "status": "NOT COMPARABLE"
+          },
+          "live_pin": {
+            "basis": "historical decode engine, path, and resources differ from the live pin",
+            "status": "NOT COMPARABLE"
+          },
+          "paired_decode": {
+            "basis": "both fixed model artifacts use identical utterances and references through one recorded historical engine, dictionary, language model, decode path, and scoring path",
+            "status": "COMPARABLE"
+          }
+        },
         "configuration_provenance": {
           "diff_from_shipped_defaults": [
             {
@@ -17973,6 +18001,20 @@
           75.85454337826275
         ],
         "cer": null,
+        "comparability": {
+          "implementation_attribution": {
+            "basis": "oracle model producing host, architecture, source revision, build, training configuration, inputs, and full lineage are unknown",
+            "status": "NOT COMPARABLE"
+          },
+          "live_pin": {
+            "basis": "cell is measured on the live pin path",
+            "status": "COMPARABLE"
+          },
+          "paired_decode": {
+            "basis": "both fixed model artifacts use identical utterances and references through one current engine, dictionary, language model, decoder configuration, and scoring path",
+            "status": "COMPARABLE"
+          }
+        },
         "configuration_provenance": {
           "diff_from_shipped_defaults": [
             {
@@ -34991,6 +35033,20 @@
           32.47232472324723
         ],
         "cer": null,
+        "comparability": {
+          "implementation_attribution": {
+            "basis": "oracle model producing host, architecture, source revision, build, training configuration, inputs, and full lineage are unknown",
+            "status": "NOT COMPARABLE"
+          },
+          "live_pin": {
+            "basis": "cell is measured on the live pin path",
+            "status": "COMPARABLE"
+          },
+          "paired_decode": {
+            "basis": "both fixed model artifacts use identical utterances and references through one current engine, dictionary, language model, decoder configuration, and scoring path",
+            "status": "COMPARABLE"
+          }
+        },
         "configuration_provenance": {
           "diff_from_shipped_defaults": [
             {
@@ -35304,5 +35360,5 @@
       }
     }
   },
-  "schema_version": 8
+  "schema_version": 9
 }

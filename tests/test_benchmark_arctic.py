@@ -34,6 +34,7 @@ from pstrain.benchmarks.arctic import (
     bind_record,
     bootstrap_ci,
     compare_results,
+    comparison_comparability,
     configuration_provenance,
     engine_identity,
     extract_archive,
@@ -734,6 +735,7 @@ def _comparison_documents() -> tuple[dict[str, object], dict[str, object]]:
     for mode, cells in record["results"].items():
         for cell in cells.values():
             cell["status"] = "live" if mode == "on" else "retired/historical"
+            cell["comparability"] = comparison_comparability(mode)
     bind_record(record)
     return actual, record
 
@@ -873,6 +875,19 @@ def test_record_schema_and_bootstrap_smoke() -> None:
     assert delta_low == delta_high == 0
     with pytest.raises(RuntimeError, match="missing required field: basis"):
         validate_record({"schema_version": RECORD_SCHEMA_VERSION})
+
+
+def test_record_cells_bind_schema_owned_comparability() -> None:
+    record = json.loads(Path("evidence/arctic-pin/record.json").read_text())
+
+    validate_record(record)
+    for mode in ("off", "on"):
+        for cell in record["results"][mode].values():
+            assert cell["comparability"] == comparison_comparability(mode)
+
+    record["results"]["on"]["slt55"]["comparability"]["paired_decode"]["status"] = "NOT COMPARABLE"
+    with pytest.raises(RuntimeError, match="comparability"):
+        validate_record(record)
 
 
 def test_headline_reports_decode_shortfall_denominator() -> None:

@@ -17581,6 +17581,20 @@
   },
   "pstrain_vs_oracle": [
     {
+      "comparability": {
+        "implementation_attribution": {
+          "basis": "model-producing identities are missing or incomplete",
+          "status": "NOT COMPARABLE"
+        },
+        "live_pin": {
+          "basis": "historical decode engine, path, and resources differ from the live pin",
+          "status": "NOT COMPARABLE"
+        },
+        "paired_decode": {
+          "basis": "both fixed model artifacts use identical utterances and references through one recorded historical engine, dictionary, language model, decode path, and scoring path",
+          "status": "COMPARABLE"
+        }
+      },
       "dataset": "slt55",
       "mode": "off",
       "oracle_wer": 28.84990253411306,
@@ -17594,6 +17608,20 @@
       "upper_bound_bar_pp": 0.0
     },
     {
+      "comparability": {
+        "implementation_attribution": {
+          "basis": "model-producing identities are missing or incomplete",
+          "status": "NOT COMPARABLE"
+        },
+        "live_pin": {
+          "basis": "historical decode engine, path, and resources differ from the live pin",
+          "status": "NOT COMPARABLE"
+        },
+        "paired_decode": {
+          "basis": "both fixed model artifacts use identical utterances and references through one recorded historical engine, dictionary, language model, decode path, and scoring path",
+          "status": "COMPARABLE"
+        }
+      },
       "dataset": "big",
       "mode": "off",
       "oracle_wer": 74.79154159162164,
@@ -17607,6 +17635,20 @@
       "upper_bound_bar_pp": 1.0
     },
     {
+      "comparability": {
+        "implementation_attribution": {
+          "basis": "oracle model producing host, architecture, source revision, build, training configuration, inputs, and full lineage are unknown",
+          "status": "NOT COMPARABLE"
+        },
+        "live_pin": {
+          "basis": "cell is measured on the live pin path",
+          "status": "COMPARABLE"
+        },
+        "paired_decode": {
+          "basis": "both fixed model artifacts use identical utterances and references through one current engine, dictionary, language model, decoder configuration, and scoring path",
+          "status": "COMPARABLE"
+        }
+      },
       "dataset": "slt55",
       "mode": "on",
       "oracle_wer": 28.07017543859649,
@@ -17620,6 +17662,20 @@
       "upper_bound_bar_pp": 0.0
     },
     {
+      "comparability": {
+        "implementation_attribution": {
+          "basis": "oracle model producing host, architecture, source revision, build, training configuration, inputs, and full lineage are unknown",
+          "status": "NOT COMPARABLE"
+        },
+        "live_pin": {
+          "basis": "cell is measured on the live pin path",
+          "status": "COMPARABLE"
+        },
+        "paired_decode": {
+          "basis": "both fixed model artifacts use identical utterances and references through one current engine, dictionary, language model, decoder configuration, and scoring path",
+          "status": "COMPARABLE"
+        }
+      },
       "dataset": "big",
       "mode": "on",
       "oracle_wer": 75.50530318190914,
@@ -52232,5 +52288,5 @@
       }
     }
   },
-  "schema_version": 2
+  "schema_version": 3
 }

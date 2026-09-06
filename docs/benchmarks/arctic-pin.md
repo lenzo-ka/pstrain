@@ -111,6 +111,19 @@ model-file identities, and resource metadata. Its internal digest does not
 replace the retained producing-run evidence or establish who produced its
 measurement rows.
 
+## Comparability
+
+The live `on/slt55` and `on/big` arms are comparable as paired decode
+measurements: both models use the same current engine, dictionary, language
+model, decoder settings, and scoring path. They are **NOT COMPARABLE** for
+implementation attribution because the oracle model's producing host,
+architecture, source revision, build, training configuration, inputs, and full
+lineage are unknown. The retired `off/slt55` and `off/big` arms are comparable
+as paired historical decode measurements on their own recorded path, **NOT
+COMPARABLE** to the live pin because that path and its resources differ, and
+**NOT COMPARABLE** for implementation attribution because their model-producing
+identities are missing or incomplete.
+
 ## Baseline
 
 Delta is pstrain minus the preserved upstream oracle in WER percentage points.
@@ -119,12 +132,12 @@ utterances are clustered by speaker rather than exchangeable independent
 observations. The big cells therefore resample within speaker strata.
 
 <!-- BEGIN GENERATED BASELINE -->
-| Mode | Cell | pstrain WER | Oracle WER | Delta pp | Paired 95% CI | Interpretation |
-|---|---|---:|---:|---:|---:|---|
-| off (retired) | SLT-55 | 28.8499 | 28.8499 | +0.0000 | [-4.7059, +4.7619] | historical only |
-| on | SLT-55 | 27.6803 | 28.0702 | -0.3899 | [-3.0075, +1.9763] | no statistically significant difference |
-| off (retired) | big | 76.6393 | 74.7915 | +1.8478 | [+1.3257, +2.3646] | historical only |
-| on | big | 75.2585 | 75.5053 | -0.2468 | [-0.6983, +0.1980] | no statistically significant difference |
+| Mode | Cell | pstrain WER | Oracle WER | Delta pp | Paired 95% CI | Paired decode | Implementation attribution | Interpretation |
+|---|---|---:|---:|---:|---:|---|---|---|
+| off (retired) | SLT-55 | 28.8499 | 28.8499 | +0.0000 | [-4.7059, +4.7619] | COMPARABLE | NOT COMPARABLE | historical only |
+| on | SLT-55 | 27.6803 | 28.0702 | -0.3899 | [-3.0075, +1.9763] | COMPARABLE | NOT COMPARABLE | no statistically significant difference |
+| off (retired) | big | 76.6393 | 74.7915 | +1.8478 | [+1.3257, +2.3646] | COMPARABLE | NOT COMPARABLE | historical only |
+| on | big | 75.2585 | 75.5053 | -0.2468 | [-0.6983, +0.1980] | COMPARABLE | NOT COMPARABLE | no statistically significant difference |
 
 The live rows come from the record and the resource-matched oracle sidecar through
 `scripts/regenerate_arctic_paired_analysis.py`; the retired rows come from the

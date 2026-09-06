@@ -20,6 +20,8 @@ defaults except for `split.test_count=0` (including multiple-pronunciation
 training) shows no statistically significant regression on either cell versus
 the preserved upstream oracle, historically attributed to stock SphinxTrain;
 see its [provenance limits](https://github.com/lenzo-ka/pstrain/blob/main/docs/benchmarks/oracle-provenance.md).
+The arms share one matched decode path but are **NOT COMPARABLE** for
+implementation attribution because the oracle's producing lineage is unknown.
 On SLT-55, pstrain's favorable point estimate is 142 errors (27.6803% WER)
 versus 144 (28.0702%) for that oracle, with 20 of 55
 per-utterance error rows differing; the 95% paired confidence interval spans

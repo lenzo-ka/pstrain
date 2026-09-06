@@ -47,7 +47,7 @@ def resolve_data_dir(*, package_root: Path | None = None, repo_root: Path | None
 
 
 DATA_DIR = resolve_data_dir()
-RECORD_SCHEMA_VERSION = 8
+RECORD_SCHEMA_VERSION = 9
 RECORD_BINDING_ALGORITHM = "sha256-canonical-json-v1"
 RECORD_BINDING_FIELDS = (
     "schema_version",
@@ -64,6 +64,54 @@ BENCHMARK_BASIS = {
     "live_cells": ["on/slt55", "on/big"],
     "retired_cells": ["off/slt55", "off/big"],
 }
+
+
+def comparison_comparability(mode: str) -> dict[str, dict[str, str]]:
+    """Return the schema-owned comparability classification for an Arctic cell."""
+    if mode == "on":
+        return {
+            "implementation_attribution": {
+                "basis": (
+                    "oracle model producing host, architecture, source revision, build, "
+                    "training configuration, inputs, and full lineage are unknown"
+                ),
+                "status": "NOT COMPARABLE",
+            },
+            "live_pin": {
+                "basis": "cell is measured on the live pin path",
+                "status": "COMPARABLE",
+            },
+            "paired_decode": {
+                "basis": (
+                    "both fixed model artifacts use identical utterances and references through "
+                    "one current engine, dictionary, language model, decoder configuration, and "
+                    "scoring path"
+                ),
+                "status": "COMPARABLE",
+            },
+        }
+    if mode == "off":
+        return {
+            "implementation_attribution": {
+                "basis": "model-producing identities are missing or incomplete",
+                "status": "NOT COMPARABLE",
+            },
+            "live_pin": {
+                "basis": "historical decode engine, path, and resources differ from the live pin",
+                "status": "NOT COMPARABLE",
+            },
+            "paired_decode": {
+                "basis": (
+                    "both fixed model artifacts use identical utterances and references through "
+                    "one recorded historical engine, dictionary, language model, decode path, "
+                    "and scoring path"
+                ),
+                "status": "COMPARABLE",
+            },
+        }
+    raise ValueError(f"unsupported Arctic comparison mode: {mode!r}")
+
+
 # The retired off-mode cells were measured once, by the run recorded below, and
 # have been copied forward byte-for-byte ever since. A record's top-level
 # engine, resources, and models describe the run that produced its live cells
@@ -1241,7 +1289,7 @@ def bind_record(record: dict[str, Any]) -> None:
     }
 
 
-def _validate_cell(cell: Any, label: str, *, recorded: bool) -> None:
+def _validate_cell(cell: Any, label: str, *, recorded: bool, mode: str | None = None) -> None:
     required = {
         "wer",
         "errors",
@@ -1254,10 +1302,16 @@ def _validate_cell(cell: Any, label: str, *, recorded: bool) -> None:
         "configuration_provenance",
     }
     if recorded:
-        required.add("utterance_rows")
+        required.update(("comparability", "utterance_rows"))
     if not isinstance(cell, dict) or not required <= set(cell):
         missing = sorted(required - set(cell) if isinstance(cell, dict) else required)
         raise RuntimeError(f"benchmark record has invalid result cell {label}: missing {missing}")
+    if recorded:
+        if mode is None:
+            raise RuntimeError(f"benchmark record has no comparison mode for result cell {label}")
+        _require_equal(
+            f"{label} comparability", cell["comparability"], comparison_comparability(mode)
+        )
     provenance = cell["configuration_provenance"]
     if (
         not isinstance(provenance, dict)
@@ -1426,7 +1480,7 @@ def validate_record(record: dict[str, Any]) -> None:
             cell = record["results"][mode][dataset]
             expected_status = "live" if mode == "on" else "retired/historical"
             _require_equal(f"{mode}/{dataset} status", cell.get("status"), expected_status)
-            _validate_cell(cell, f"{mode}/{dataset}", recorded=True)
+            _validate_cell(cell, f"{mode}/{dataset}", recorded=True, mode=mode)
             if has_resolved_conditions:
                 expected_provenance = resolved_configuration_provenance(
                     {
@@ -1449,7 +1503,7 @@ def validate_record(record: dict[str, Any]) -> None:
         _require_equal(
             f"off/{dataset} status", off_cells[dataset].get("status"), "retired/historical"
         )
-        _validate_cell(off_cells[dataset], f"off/{dataset}", recorded=True)
+        _validate_cell(off_cells[dataset], f"off/{dataset}", recorded=True, mode="off")
     _validate_historical_provenance(record)
     binding = record.get("record_binding")
     expected_binding = {
@@ -1625,6 +1679,7 @@ def make_record(
         mode: {
             dataset: {
                 **{key: value for key, value in cell.items() if key != "matched_pairs"},
+                "comparability": comparison_comparability(mode),
                 "status": "live",
                 "known_skips": _canonical_known_skips(cell["known_skips"]),
                 "wer": float(cell["wer"]) * 100,
@@ -1645,6 +1700,7 @@ def make_record(
         raise RuntimeError("record emission requires historical off-mode cells")
     record_results["off"] = json.loads(json.dumps(historical_cells))
     for cell in record_results["off"].values():
+        cell["comparability"] = comparison_comparability("off")
         cell["status"] = "retired/historical"
         cell.setdefault("decode_denominator", cell["utterances"])
         if "matched_pairs" in cell:

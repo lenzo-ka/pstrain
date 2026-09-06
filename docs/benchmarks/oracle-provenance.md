@@ -102,10 +102,19 @@ historical rows and their producing identity in the sidecar's
 `historical_provenance`; they are reported on their own resources and are never
 presented as resource-matched to the live pin.
 
-Under the resource-matched comparison the live cells sit below the oracle on
-the point estimate, by 0.3899 pp on SLT-55 and 0.2468 pp on big. Both paired
-95% intervals include zero, so that is a favorable point estimate and not a
-statistically significant improvement.
+The retired arms are comparable as paired historical decode measurements on
+their own recorded path, **NOT COMPARABLE** to the live pin, and **NOT
+COMPARABLE** for implementation attribution because their model-producing
+identities are missing or incomplete.
+
+The live arms are comparable as paired decode measurements because they share
+the current decode and scoring path, but they are **NOT COMPARABLE** for
+implementation attribution because the oracle model's producing host,
+architecture, build, training configuration, inputs, and full lineage are
+unknown. Under that resource-matched comparison the live cells sit below the
+oracle on the point estimate, by 0.3899 pp on SLT-55 and 0.2468 pp on big. Both
+paired 95% intervals include zero, so that is a favorable point estimate and
+not a statistically significant improvement.
 
 ## Procedure for an independently derived stock arm
 
