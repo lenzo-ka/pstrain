@@ -19,6 +19,7 @@ from pstrain.benchmarks.arctic import (  # noqa: E402
     bind_record,
     comparison_comparability,
     record_binding_sha256,
+    require_committed_baseline,
     resolved_configuration_provenance,
     validate_record,
 )
@@ -45,8 +46,12 @@ def main() -> int:
         metavar="CANDIDATE",
         help="adopt a freshly emitted record while preserving retired historical measurements",
     )
+    parser.add_argument("--allow-uncommitted-baseline", action="store_true")
     args = parser.parse_args()
-    record = json.loads(args.record.read_text(encoding="utf-8"))
+    record_bytes = require_committed_baseline(
+        args.record, allow_uncommitted=args.allow_uncommitted_baseline
+    )
+    record = json.loads(record_bytes)
     if args.adopt_comparability:
         if record.get("schema_version") != 8:
             raise RuntimeError("comparability adoption requires a schema-8 record")

@@ -47,6 +47,7 @@ from pstrain.benchmarks.arctic import (  # noqa: E402
     load_transcripts,
     model_directory_identity,
     paired_delta_ci,
+    require_committed_baseline,
     score_model,
     sha256,
 )
@@ -521,10 +522,17 @@ def regenerate(
     work_dir: Path,
     cache: Path,
     given_historical_dictionary: Path | None = None,
+    allow_uncommitted_baseline: bool = False,
 ) -> str:
     started = time.time()
-    record = json.loads(record_path.read_text(encoding="utf-8"))
-    previous = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    record_bytes = require_committed_baseline(
+        record_path, allow_uncommitted=allow_uncommitted_baseline
+    )
+    sidecar_bytes = require_committed_baseline(
+        sidecar_path, allow_uncommitted=allow_uncommitted_baseline
+    )
+    record = json.loads(record_bytes)
+    previous = json.loads(sidecar_bytes)
     retained = historical_provenance(previous)
     dictionary, lm = band_resources("pin")
     preserved = {
@@ -711,10 +719,17 @@ def main() -> None:
         action="store_true",
         help="authenticate the checked-in sidecar's resource axis and controls without decoding",
     )
+    parser.add_argument("--allow-uncommitted-baseline", action="store_true")
     args = parser.parse_args()
     if args.adopt_comparability:
-        sidecar = json.loads(args.sidecar.read_text(encoding="utf-8"))
-        record = json.loads(args.record.read_text(encoding="utf-8"))
+        sidecar_bytes = require_committed_baseline(
+            args.sidecar, allow_uncommitted=args.allow_uncommitted_baseline
+        )
+        record_bytes = require_committed_baseline(
+            args.record, allow_uncommitted=args.allow_uncommitted_baseline
+        )
+        sidecar = json.loads(sidecar_bytes)
+        record = json.loads(record_bytes)
         if sidecar.get("schema_version") != 2:
             raise SystemExit("comparability adoption requires a schema-2 oracle sidecar")
         verify_sidecar(sidecar, record, allow_schema_2=True)
@@ -728,9 +743,15 @@ def main() -> None:
         print(f"adopted schema-owned comparability in {args.output}")
         return
     if args.check:
+        sidecar_bytes = require_committed_baseline(
+            args.sidecar, allow_uncommitted=args.allow_uncommitted_baseline
+        )
+        record_bytes = require_committed_baseline(
+            args.record, allow_uncommitted=args.allow_uncommitted_baseline
+        )
         verify_sidecar(
-            json.loads(args.sidecar.read_text(encoding="utf-8")),
-            json.loads(args.record.read_text(encoding="utf-8")),
+            json.loads(sidecar_bytes),
+            json.loads(record_bytes),
         )
         print("oracle sidecar is resource-matched to the record and its controls recompute")
         return
@@ -742,6 +763,7 @@ def main() -> None:
             args.work_dir,
             args.cache,
             args.historical_dictionary,
+            args.allow_uncommitted_baseline,
         ),
         encoding="utf-8",
     )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -273,7 +274,9 @@ def test_paired_analysis_refuses_arms_on_different_resources(tmp_path: Path, fie
 
     with pytest.raises(SystemExit, match=f"arms disagree on {field}"):
         _script("regenerate_arctic_paired_analysis").regenerate(
-            EVIDENCE / "record.json", oracle_path
+            EVIDENCE / "record.json",
+            oracle_path,
+            allow_uncommitted_baseline=True,
         )
 
 
@@ -292,3 +295,29 @@ def test_paired_analysis_rejects_a_false_comparability_classification() -> None:
 
     with pytest.raises(SystemExit, match="invalid comparability"):
         _script("regenerate_arctic_paired_analysis").validate_analysis(analysis)
+
+
+def test_paired_analysis_hashes_the_verified_buffers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    module = _script("regenerate_arctic_paired_analysis")
+    record_bytes = (EVIDENCE / "record.json").read_bytes()
+    oracle_bytes = (EVIDENCE / "oracle-sidecar.json").read_bytes()
+    record_path = tmp_path / "record.json"
+    oracle_path = tmp_path / "oracle-sidecar.json"
+    record_path.write_bytes(b"changed after verification")
+    oracle_path.write_bytes(b"changed after verification")
+    verified = {record_path: record_bytes, oracle_path: oracle_bytes}
+    monkeypatch.setattr(
+        module, "require_committed_baseline", lambda path, **_kwargs: verified[path]
+    )
+
+    generated = json.loads(module.regenerate(record_path, oracle_path))
+
+    assert (
+        generated["generated_from"]["record"]["sha256"] == hashlib.sha256(record_bytes).hexdigest()
+    )
+    assert (
+        generated["generated_from"]["oracle_sidecar"]["sha256"]
+        == hashlib.sha256(oracle_bytes).hexdigest()
+    )
