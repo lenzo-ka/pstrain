@@ -16,8 +16,10 @@ import json
 import os
 import platform
 import sys
+from contextlib import redirect_stdout
 from copy import deepcopy
 from dataclasses import replace
+from io import StringIO
 from pathlib import Path
 
 import numpy as np
@@ -171,7 +173,9 @@ def test_reference_tuple_intrinsic_measurement_gate_rejects_regression(
 
 
 @requires_c_library
-def test_ci_1g_decode_matches_real_measurement_golden(tmp_path: Path) -> None:
+def test_ci_1g_decode_matches_real_measurement_golden(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Train, decode, score, and compare the real mini-Arctic corpus."""
     from pstrain.lib.lm import build_lm
     from pstrain.lib.pipeline import PipelineContext
@@ -190,7 +194,18 @@ def test_ci_1g_decode_matches_real_measurement_golden(tmp_path: Path) -> None:
     )
     ctx = PipelineContext.from_config(project_dir)
     pipeline = build_pipeline(ctx)
-    assert pipeline.run("ci-1g", jobs=1) == 0
+    capfd.readouterr()
+    # Required Python CI jobs build libpstrainc and set PSTRAIN_REQUIRE_CLIB, so
+    # this native smoke gate cannot silently skip there.
+    with redirect_stdout(StringIO()):
+        assert pipeline.run("ci-1g", jobs=1) == 0
+    # Native training must not reach fd 1: under Jupyter that capture pipe can
+    # fill and leave every worker blocked in write(2).
+    captured_stdout = capfd.readouterr().out
+    assert captured_stdout == "", (
+        "training wrote directly to fd 1; route any legitimate new output explicitly "
+        "instead of weakening this empty-stream invariant"
+    )
     transcripts = {
         fields[0]: " ".join(fields[1:])
         for line in (FIXTURE / "transcription.txt").read_text(encoding="utf-8").splitlines()

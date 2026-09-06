@@ -8,13 +8,117 @@ This module centralizes test configuration, including:
 
 from __future__ import annotations
 
+import concurrent.futures
+import functools
+import inspect
+import multiprocessing.pool
+import sys
+from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 import pstrain
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_PRODUCTION_ROOT = _PROJECT_ROOT / "pstrain"
+# Authoritative pool invariant: every process pool constructed by production
+# code must close native helpers before CPython joins child processes at exit.
+# Observing constructors here covers aliases, subclasses, and dynamic factories.
+# The static inventory is only a non-exhaustive early check. This runtime guard
+# is authoritative for constructions the suite executes, but cannot observe a
+# pool built in a spawned child/native helper, a subprocess, or during the
+# pstrain import above before pytest_configure installs these wrappers.
+_POOL_INITIALIZERS: set[object] = set()
+_ORIGINAL_POOL_CONSTRUCTORS: list[tuple[type[Any], Callable[..., Any]]] = []
+_OBSERVED_PRODUCTION_POOLS: Counter[str] = Counter()
+
+
+def _production_caller() -> tuple[Path, int] | None:
+    frame = sys._getframe(1)
+    while frame is not None:
+        path = Path(frame.f_code.co_filename).resolve()
+        try:
+            path.relative_to(_PRODUCTION_ROOT)
+        except ValueError:
+            frame = frame.f_back
+            continue
+        return path, frame.f_lineno
+    return None
+
+
+def _guard_pool_constructor(constructor: Callable[..., Any]) -> Callable[..., Any]:
+    signature = inspect.signature(constructor)
+
+    @functools.wraps(constructor)
+    def guarded(self: object, *args: object, **kwargs: object) -> Any:
+        if isinstance(self, multiprocessing.pool.ThreadPool):
+            return constructor(self, *args, **kwargs)
+        caller = _production_caller()
+        if caller is not None:
+            path, line = caller
+            relative = path.relative_to(_PROJECT_ROOT)
+            if path.exists():
+                _OBSERVED_PRODUCTION_POOLS[f"{relative}:{line}"] += 1
+            arguments = signature.bind_partial(self, *args, **kwargs).arguments
+            initializer = _normalized_initializer(arguments.get("initializer"))
+            try:
+                approved = initializer in _POOL_INITIALIZERS
+            except TypeError:
+                approved = False
+            if not approved:
+                if isinstance(self, multiprocessing.pool.Pool):
+                    self._state = multiprocessing.pool.INIT
+                raise AssertionError(
+                    "production process pool initializer must install the native-helper shutdown "
+                    f"finalizer; constructed at {relative}:{line}"
+                )
+        return constructor(self, *args, **kwargs)
+
+    return guarded
+
+
+def _normalized_initializer(initializer: object) -> object:
+    seen: set[int] = set()
+    while id(initializer) not in seen:
+        seen.add(id(initializer))
+        if isinstance(initializer, functools.partial):
+            initializer = initializer.func
+            continue
+        wrapped = getattr(initializer, "__wrapped__", None)
+        if wrapped is not None:
+            initializer = wrapped
+            continue
+        break
+    return initializer
+
+
+def _install_pool_constructor_guards() -> None:
+    from pstrain.lib.native_worker import close_helper_before_children_are_joined
+    from pstrain.lib.pipeline.runner import _initialize_pool_worker
+    from pstrain.lib.steps.train import _initialize_bw_pool_worker
+
+    _OBSERVED_PRODUCTION_POOLS.clear()
+    _POOL_INITIALIZERS.update(
+        {
+            close_helper_before_children_are_joined,
+            _initialize_pool_worker,
+            _initialize_bw_pool_worker,
+        }
+    )
+    for pool_class in (concurrent.futures.ProcessPoolExecutor, multiprocessing.pool.Pool):
+        constructor = pool_class.__init__
+        _ORIGINAL_POOL_CONSTRUCTORS.append((pool_class, constructor))
+        pool_class.__init__ = _guard_pool_constructor(constructor)  # type: ignore[method-assign]
+
+
+def _restore_pool_constructor_guards() -> None:
+    while _ORIGINAL_POOL_CONSTRUCTORS:
+        pool_class, constructor = _ORIGINAL_POOL_CONSTRUCTORS.pop()
+        pool_class.__init__ = constructor  # type: ignore[method-assign]
+    _POOL_INITIALIZERS.clear()
 
 
 def _assert_path_in_checkout(*, subject: str, actual: Path) -> None:
@@ -97,6 +201,17 @@ def pytest_configure(config: pytest.Config) -> None:
             "PSTRAIN_REQUIRE_CLIB is set but libpstrainc could not be loaded. "
             "Build it first (e.g. 'make build-c') or unset PSTRAIN_REQUIRE_CLIB."
         )
+    _install_pool_constructor_guards()
+
+
+def pytest_unconfigure(config: pytest.Config) -> None:
+    _restore_pool_constructor_guards()
+
+
+def pytest_terminal_summary(terminalreporter: Any) -> None:
+    terminalreporter.write_sep("=", "observed production process pools")
+    for location, count in sorted(_OBSERVED_PRODUCTION_POOLS.items()):
+        terminalreporter.write_line(f"{location}: {count}")
 
 
 # =============================================================================

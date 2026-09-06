@@ -175,6 +175,12 @@ def test_mini_arctic_dithered_decode_smoke_across_selected_shard_arrangements(
     files = sorted((FIXTURE / "wav").glob("*.wav"))
     indexed = [(position, path.stem, path) for position, path in enumerate(files)]
 
+    # Exercise the real multi-worker decode pool under the session-wide runtime
+    # finalizer guard; this is the production path whose shutdown once hung.
+    parallel = _decode_files(config, [(path.stem, path) for path in files[:2]], 2)
+    assert [utterance_id for utterance_id, _ in parallel] == [path.stem for path in files[:2]]
+    assert all(result.success for _, result in parallel)
+
     real_decoder = Decoder
     constructed: list[Decoder] = []
     decoded_paths: dict[int, list[Path]] = {}
