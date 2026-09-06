@@ -38,6 +38,12 @@ from pstrain.api.steps import (
     step_ci_hmm,
     step_features,
 )
+from pstrain.api.tutorial import (
+    TUTORIAL_FILENAME,
+    TutorialExistsError,
+    TutorialResult,
+    copy_tutorial,
+)
 
 # Re-export lib API
 from pstrain.lib import (
@@ -91,6 +97,11 @@ __all__: list[str] = [
     "resolve_config",
     # Packaging
     "package_model",
+    # Tutorial
+    "TUTORIAL_FILENAME",
+    "TutorialExistsError",
+    "TutorialResult",
+    "copy_tutorial",
     # Data structures
     "Dictionary",
     "CMUDict",

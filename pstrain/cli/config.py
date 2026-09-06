@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -19,6 +20,7 @@ from pstrain.api.config import (
     migrate_project,
     resolve_config,
 )
+from pstrain.cli.base import ensure_global_option_defaults
 
 
 def _selectors(parser: Any, *, key: bool = False) -> None:
@@ -28,10 +30,11 @@ def _selectors(parser: Any, *, key: bool = False) -> None:
     parser.add_argument("--experiment", default="default")
     parser.add_argument("-c", "--config", dest="profile_name", default="default")
     parser.add_argument("-j", "--jobs", type=int, default=None)
-    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
 
 
 def register_config_command(subparsers: Any) -> None:
+    ensure_global_option_defaults(subparsers)
     parser = subparsers.add_parser("config", help="Resolve and inspect configuration")
     commands = parser.add_subparsers(dest="config_command")
 
@@ -41,7 +44,7 @@ def register_config_command(subparsers: Any) -> None:
 
     profiles = commands.add_parser("profiles", help="List available named profiles")
     profiles.add_argument("--project-dir", default=".")
-    profiles.add_argument("--json", action="store_true")
+    profiles.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     profiles.set_defaults(func=cmd_config_profiles)
 
     show = commands.add_parser("show", help="Show a resolved profile")
@@ -61,7 +64,7 @@ def register_config_command(subparsers: Any) -> None:
 
     listing = commands.add_parser("list", help="List canonical semantic fields")
     listing.add_argument("--section")
-    listing.add_argument("--json", action="store_true")
+    listing.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     listing.set_defaults(func=cmd_config_list)
 
     migrate = commands.add_parser("migrate", help="Migrate legacy files to version 1")

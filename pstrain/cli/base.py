@@ -19,34 +19,49 @@ def format_json(data: Any, indent: int = 2, sort_keys: bool = False) -> str:
     return json.dumps(data, indent=indent, ensure_ascii=False, sort_keys=sort_keys)
 
 
-def add_dry_run_argument(parser: argparse.ArgumentParser) -> None:
+def add_dry_run_argument(
+    parser: argparse.ArgumentParser, *, suppress_default: bool = False
+) -> None:
     """Add --dry-run argument to a parser."""
     parser.add_argument(
         "-n",
         "--dry-run",
         action="store_true",
+        default=argparse.SUPPRESS if suppress_default else False,
         help="Show what would be done without making changes",
     )
 
 
-def add_json_argument(parser: argparse.ArgumentParser) -> None:
+def add_json_argument(parser: argparse.ArgumentParser, *, suppress_defaults: bool = False) -> None:
     """Add --json argument and formatting options to a parser."""
     parser.add_argument(
         "--json",
         action="store_true",
+        default=argparse.SUPPRESS if suppress_defaults else False,
         help="Output as JSON",
     )
     parser.add_argument(
         "--json-indent",
         type=int,
-        default=2,
+        default=argparse.SUPPRESS if suppress_defaults else 2,
         metavar="N",
         help="JSON indentation level (default: 2, use 0 for compact)",
     )
     parser.add_argument(
         "--json-ascii",
         action="store_true",
+        default=argparse.SUPPRESS if suppress_defaults else False,
         help="Escape non-ASCII characters in JSON output",
+    )
+
+
+def ensure_global_option_defaults(subparsers: Any) -> None:
+    """Seed global option attributes without letting subparsers overwrite their values."""
+    subparsers.container.set_defaults(
+        dry_run=False,
+        json=False,
+        json_indent=2,
+        json_ascii=False,
     )
 
 
@@ -860,6 +875,7 @@ class Command(ABC):
 
     def register(self, subparsers: Any) -> argparse.ArgumentParser:
         """Register command with argument parser."""
+        ensure_global_option_defaults(subparsers)
         parser: argparse.ArgumentParser = subparsers.add_parser(
             self.name,
             help=self.help,
@@ -890,10 +906,10 @@ class Command(ABC):
             )
 
         if self.supports_dry_run:
-            add_dry_run_argument(parser)
+            add_dry_run_argument(parser, suppress_default=True)
 
         if self.supports_json_output:
-            add_json_argument(parser)
+            add_json_argument(parser, suppress_defaults=True)
 
         self.add_arguments(parser)
         parser.set_defaults(command_instance=self)
