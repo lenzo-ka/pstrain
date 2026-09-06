@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import shlex
 import shutil
@@ -52,14 +53,50 @@ def _validate_wav_inputs(tmp_path: Path, rates: list[int], *, channels: int = 1)
     ("content", "expected"),
     [
         ("utt1 HELLO WORLD\n", "leading-id"),
+        ("<s> HELLO WORLD </s> (utt1)\n", "sphinx"),
         ("utt1\tHELLO WORLD\n", "tsv"),
         ('"utt1","HELLO, WORLD"\n', "csv"),
+        ('( utt1 "HELLO WORLD" )\n', "festival"),
     ],
 )
 def test_unambiguous_prompt_format_detection(tmp_path: Path, content: str, expected: str) -> None:
     prompts = tmp_path / "prompts.txt"
     prompts.write_text(content)
     assert detect_prompt_format(prompts) == expected
+
+
+@pytest.mark.parametrize(
+    ("content", "expected_format", "expected_prompt"),
+    [
+        ("(utt1)\t(HELLO)\n", "tsv", ("(utt1)", "(HELLO)")),
+        ("( field)\tordinary TSV\n", "tsv", ("( field)", "ordinary TSV")),
+        ("(utt1) HELLO)\n", "leading-id", ("(utt1)", "HELLO)")),
+        ("(this is a comment)\n", "leading-id", ("(this", "is a comment)")),
+    ],
+)
+def test_parenthesized_existing_formats_are_not_festival(
+    tmp_path: Path,
+    content: str,
+    expected_format: str,
+    expected_prompt: tuple[str, str],
+) -> None:
+    prompts = tmp_path / "prompts.txt"
+    prompts.write_text(content)
+
+    selected, parsed = parse_prompts(prompts)
+
+    assert selected == expected_format
+    assert (parsed[0].fileid, parsed[0].text) == expected_prompt
+
+
+def test_tabbed_whitespace_free_festival_collision_remains_tsv(tmp_path: Path) -> None:
+    prompts = tmp_path / "prompts.txt"
+    prompts.write_text('(id\t"text")\n')
+
+    selected, parsed = parse_prompts(prompts)
+
+    assert selected == "tsv"
+    assert (parsed[0].fileid, parsed[0].text) == ("(id", '"text")')
 
 
 def test_audio_accepts_nondefault_consistent_sample_rate(tmp_path: Path) -> None:
@@ -104,11 +141,102 @@ def test_sphinx_tokens_require_explicit_format(
 ) -> None:
     prompts = tmp_path / "prompts.txt"
     prompts.write_text(content)
-    with pytest.raises(PromptFormatError, match="Ambiguous"):
-        detect_prompt_format(prompts)
+    if explicit == "sphinx":
+        assert detect_prompt_format(prompts) == "sphinx"
+    else:
+        with pytest.raises(PromptFormatError, match="Ambiguous"):
+            detect_prompt_format(prompts)
     selected, parsed = parse_prompts(prompts, explicit)
     assert selected == explicit
     assert (parsed[0].fileid, parsed[0].text) == expected
+
+
+def test_festival_prompts_handle_whitespace_escapes_and_empty_text(tmp_path: Path) -> None:
+    prompts = tmp_path / "prompts.txt"
+    prompts.write_text('  ( arctic_a0001 "He said \\"go.\\"" )  \n( arctic_a0002 "" )\n')
+
+    selected, parsed = parse_prompts(prompts)
+
+    assert selected == "festival"
+    assert [(row.fileid, row.text) for row in parsed] == [
+        ("arctic_a0001", 'He said "go."'),
+        ("arctic_a0002", ""),
+    ]
+
+
+@pytest.mark.parametrize("token", ["<s>", "</s>"])
+def test_festival_text_may_contain_sphinx_tokens(tmp_path: Path, token: str) -> None:
+    prompts = tmp_path / "prompts.txt"
+    prompts.write_text(f'( utt1 "literal {token} token" )\n')
+
+    selected, parsed = parse_prompts(prompts)
+
+    assert selected == "festival"
+    assert (parsed[0].fileid, parsed[0].text) == ("utt1", f"literal {token} token")
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        '( arctic_a0001 "missing close"\n',
+        '( arctic_a0001 "missing closing quote )\n',
+        "( arctic_a0001 missing opening quote )\n",
+        '( arctic_a0001 "extra field" nope )\n',
+        "( )\n",
+        "   ( arctic_a0001 missing opening quote )\n",
+        '(arctic_a0001 "missing closing quote )\n',
+        '(arctic_a0001 "text"\n',
+    ],
+)
+def test_malformed_festival_prompt_reports_its_line(tmp_path: Path, content: str) -> None:
+    prompts = tmp_path / "prompts.txt"
+    prompts.write_text(content)
+
+    with pytest.raises(PromptFormatError, match="Line 1: expected"):
+        parse_prompts(prompts)
+
+
+@pytest.mark.parametrize("content", ["(\ttext)\n", "(\tarctic_a0001 missing quote )\n"])
+def test_immediate_tab_is_ambiguous_between_festival_and_tsv(tmp_path: Path, content: str) -> None:
+    prompts = tmp_path / "prompts.txt"
+    prompts.write_text(content)
+
+    with pytest.raises(
+        PromptFormatError,
+        match=(
+            "Ambiguous prompt could be Festival or TSV format; "
+            "pass --prompt-format festival or tsv explicitly"
+        ),
+    ):
+        parse_prompts(prompts)
+
+    with pytest.raises(PromptFormatError, match="Line 1: expected"):
+        parse_prompts(prompts, "festival")
+
+
+def test_whitespace_free_missing_opening_quote_is_ambiguous(tmp_path: Path) -> None:
+    prompts = tmp_path / "prompts.txt"
+    prompts.write_text("(arctic_a0001 missing opening quote )\n")
+
+    with pytest.raises(
+        PromptFormatError,
+        match=(
+            "Ambiguous parenthesized prompt could be Festival or leading-id format; "
+            "pass --prompt-format festival or leading-id explicitly"
+        ),
+    ):
+        parse_prompts(prompts)
+
+
+def test_festival_is_a_train_cli_prompt_format_choice() -> None:
+    from pstrain.cli.train import TrainCommand
+
+    parser = argparse.ArgumentParser()
+    TrainCommand().add_arguments(parser)
+    action = next(action for action in parser._actions if action.dest == "prompt_format")
+
+    assert action.choices is not None
+    assert "festival" in action.choices
 
 
 def test_prompt_bom_is_rejected_explicitly(tmp_path: Path) -> None:

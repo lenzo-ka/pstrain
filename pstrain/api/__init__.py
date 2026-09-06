@@ -74,6 +74,7 @@ from pstrain.lib import (
     validate_file_type,
     validate_project,
 )
+from pstrain.lib.dictionary import CMUDict, strip_dictionary_stress, strip_stress
 from pstrain.lib.features import extract_features
 from pstrain.lib.flat import init_flat_model
 from pstrain.lib.validate import ValidationReport
@@ -92,6 +93,9 @@ __all__: list[str] = [
     "package_model",
     # Data structures
     "Dictionary",
+    "CMUDict",
+    "strip_stress",
+    "strip_dictionary_stress",
     "Phoneset",
     "get_fileids",
     "parse_transcription_file",

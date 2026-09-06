@@ -3,11 +3,14 @@
 from pstrain.lib._cffi.core import _find_library
 from pstrain.lib.commands import PSTRAIN_BINARIES, resolve_binary
 from pstrain.lib.runtime import fp_contract_policy
+from pstrain.lib.telemetry import learning_curves, load_bw_telemetry
 
 __all__ = [
     "PSTRAIN_BINARIES",
     "fp_contract_policy",
     "native_library_available",
+    "learning_curves",
+    "load_bw_telemetry",
     "resolve_binary",
 ]
 

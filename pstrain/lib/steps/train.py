@@ -11,7 +11,6 @@ import json
 import logging
 import multiprocessing
 import os
-import resource
 import shutil
 import sys
 import time
@@ -22,6 +21,13 @@ from contextlib import contextmanager, suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
+
+try:
+    # resource is Unix-only. Without it, training still works but CPU-time
+    # accounting is reported as unavailable; wall-clock timing remains intact.
+    import resource
+except ImportError:  # pragma: no cover - exercised by Windows CI
+    resource = None  # type: ignore[assignment]
 
 if TYPE_CHECKING:
     import numpy as np
@@ -49,6 +55,20 @@ _CHECKPOINT_FILES = (
 _TELEMETRY_FILENAME = "bw_telemetry.json"
 _ACCUMULATOR_FILES = ("gauden_counts", "mixw_counts", "tmat_counts")
 _COPIED_TRAINING_OUTPUTS = ("mdef",)
+
+
+def _user_cpu_seconds(*, children: bool = False) -> float | None:
+    """Return current user CPU time, or ``None`` when unsupported."""
+    if resource is None:
+        return None
+    usage = resource.RUSAGE_CHILDREN if children else resource.RUSAGE_SELF
+    return resource.getrusage(usage).ru_utime
+
+
+def _cpu_delta(start: float | None, end: float | None) -> float | None:
+    if start is None or end is None:
+        return None
+    return end - start
 
 
 def _flush_stdout() -> None:
@@ -160,7 +180,7 @@ class _ShardResult:
     total_frames: int
     accum_dir: Path
     accepted_exceptions: tuple[tuple[str, int, int, int], ...] = ()
-    user_cpu_seconds: float = 0.0
+    user_cpu_seconds: float | None = 0.0
     final_state_omissions: tuple[tuple[str, str], ...] = ()
 
 
@@ -617,7 +637,7 @@ def _run_bw_shard(
     diagnostic_log: Path,
     reported_omissions: set[tuple[str, str]],
 ) -> _ShardResult:
-    user_cpu_start = resource.getrusage(resource.RUSAGE_SELF).ru_utime
+    user_cpu_start = _user_cpu_seconds()
     trainer = BWTrainer(
         mdef_path=current_model / "mdef",
         means_path=current_model / "means",
@@ -707,7 +727,7 @@ def _run_bw_shard(
         total_frames=stats.total_frames,
         accum_dir=accum_dir,
         accepted_exceptions=tuple(accepted_exceptions),
-        user_cpu_seconds=resource.getrusage(resource.RUSAGE_SELF).ru_utime - user_cpu_start,
+        user_cpu_seconds=_cpu_delta(user_cpu_start, _user_cpu_seconds()),
         final_state_omissions=tuple(final_state_omissions),
     )
 
@@ -832,8 +852,8 @@ def run_bw_training(
     for iteration in range(1, n_iter + 1):
         logger.info("Starting iteration %d/%d...", iteration, n_iter)
         pass_wall_start = time.perf_counter()
-        pass_self_start = resource.getrusage(resource.RUSAGE_SELF).ru_utime
-        pass_children_start = resource.getrusage(resource.RUSAGE_CHILDREN).ru_utime
+        pass_self_start = _user_cpu_seconds()
+        pass_children_start = _user_cpu_seconds(children=True)
 
         # SphinxTrain's policy is stage-specific: CI and tied stages begin with
         # one-pass variance, while stage 30 CD-untied uses -2passvar yes from
@@ -1157,18 +1177,26 @@ def run_bw_training(
             "stop_decision": stop_decision,
         }
         pass_wall = time.perf_counter() - pass_wall_start
+        pass_self_end = _user_cpu_seconds()
+        pass_children_end = _user_cpu_seconds(children=True)
+        self_cpu = _cpu_delta(pass_self_start, pass_self_end)
+        children_cpu = _cpu_delta(pass_children_start, pass_children_end)
         pass_user_cpu = (
-            resource.getrusage(resource.RUSAGE_SELF).ru_utime
-            - pass_self_start
-            + resource.getrusage(resource.RUSAGE_CHILDREN).ru_utime
-            - pass_children_start
+            self_cpu + children_cpu if self_cpu is not None and children_cpu is not None else None
         )
         if not multipron and not _in_process_reference:
-            pass_user_cpu = sum(result.user_cpu_seconds for result in shard_results)
+            shard_cpu = [result.user_cpu_seconds for result in shard_results]
+            pass_user_cpu = (
+                sum(cpu for cpu in shard_cpu if cpu is not None)
+                if all(cpu is not None for cpu in shard_cpu)
+                else None
+            )
         telemetry_row["performance"] = {
             "wall_seconds": pass_wall,
             "user_cpu_seconds": pass_user_cpu,
-            "parallelism_user_cpu_per_wall": pass_user_cpu / pass_wall if pass_wall else 0.0,
+            "parallelism_user_cpu_per_wall": (
+                pass_user_cpu / pass_wall if pass_user_cpu is not None and pass_wall else None
+            ),
             "workers": n_shards if not multipron and not _in_process_reference else 1,
         }
         telemetry_row["accounting"] = {

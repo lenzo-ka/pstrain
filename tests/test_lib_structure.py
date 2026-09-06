@@ -1,5 +1,7 @@
 """Test library structure and imports."""
 
+import subprocess
+import sys
 from pathlib import Path
 from tomllib import load
 
@@ -31,6 +33,76 @@ def test_lib_public_api() -> None:
     assert callable(resolve_config)
     assert callable(setup_project)
     assert callable(validate_project)
+
+
+def test_cmudict_stress_helpers_are_in_public_api() -> None:
+    import pstrain.api
+
+    assert pstrain.api.__all__ == [
+        "setup_project",
+        "validate_project",
+        "ValidationReport",
+        "Profile",
+        "FeatureConfig",
+        "TrainingConfig",
+        "resolve_config",
+        "package_model",
+        "Dictionary",
+        "CMUDict",
+        "strip_stress",
+        "strip_dictionary_stress",
+        "Phoneset",
+        "get_fileids",
+        "parse_transcription_file",
+        "Model",
+        "CIModel",
+        "CDModel",
+        "create_model",
+        "get_model_class",
+        "init_flat_model",
+        "extract_features",
+        "PstrainPaths",
+        "get_paths",
+        "FileType",
+        "describe_file",
+        "detect_file_type",
+        "validate_file_type",
+        "ModelCompareResult",
+        "compare_auto",
+        "compare_features",
+        "compare_gaussians",
+        "compare_mixw",
+        "compare_models",
+        "compare_tmat",
+        "print_stats",
+        "step_features",
+        "step_ci_hmm",
+        "step_cd_hmm_untied",
+        "run_step_features",
+        "run_step_ci_hmm",
+        "run_step_cd_hmm_untied",
+        "run_build_lm",
+    ]
+
+
+def test_public_api_imports_without_unix_only_modules() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; "
+                "sys.modules['resource'] = None; "
+                "sys.modules['fcntl'] = None; "
+                "import pstrain.api"
+            ),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_pstrainc_dunder_probe_does_not_load_library(monkeypatch: pytest.MonkeyPatch) -> None:
