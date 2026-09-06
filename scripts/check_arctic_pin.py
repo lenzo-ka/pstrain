@@ -54,6 +54,11 @@ def main() -> int:
                     f"retired off/{dataset} full-cell historical drift: "
                     "every serialized field must remain exactly equal"
                 )
+        if candidate["historical_provenance"] != record["historical_provenance"]:
+            raise RuntimeError(
+                "retired historical provenance drift: the engine, resource, and model "
+                "identity recorded for the retired cells must remain exactly equal"
+            )
         temporary = args.record.with_suffix(args.record.suffix + ".tmp")
         temporary.write_text(
             json.dumps(candidate, indent=2, sort_keys=True) + "\n", encoding="utf-8"

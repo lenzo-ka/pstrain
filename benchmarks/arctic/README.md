@@ -85,7 +85,7 @@ These normalized files are committed because each voice archive contains only
 Scheme-formatted, unnormalized `etc/txt.done.data`.
 
 `data/cmu_arctic_slt.dict` is the ratified CMUdict-derived Arctic dictionary
-(SHA-256 `24ff2852a707b63f499fd968294d5e4c02d44e0eb1ec511e40be1f380d785846`).
+(SHA-256 `204f36aa9d0ecad1a567f561a85705ecb4289376a7cdd4538c9abba60fd2969c`).
 Its CMU license is included at `csrc/LICENSE.sphinx`. `data/training-unigram.lm`
 is the canonical measured-band LM (SHA-256
 `2cf11ab0474a0bdd165cbee59db674b05764fdb00bf6f9824c0dccce571637b5`).

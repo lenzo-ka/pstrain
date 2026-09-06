@@ -3,49 +3,67 @@
     "big_speaker_stratified": true,
     "bootstrap_resamples": 100000,
     "bootstrap_seed": 7,
-    "paired_delta_path": "pstrain.benchmarks.arctic.paired_delta_ci"
+    "engines": {
+      "oracle": {
+        "git_describe": "c80480e",
+        "native_library_sha256": "a2063f71aa11a60620c8736ccc9f9b0cda628455b60b6800f3891382e776b6a1",
+        "pocketsphinx_version": "5.1.1+511126b492dcb267cf30d49d631946d7b61a9530",
+        "version": "0.3.0"
+      },
+      "pstrain": {
+        "git_describe": "9e1769d",
+        "native_library_sha256": "a2063f71aa11a60620c8736ccc9f9b0cda628455b60b6800f3891382e776b6a1",
+        "pocketsphinx_version": "5.1.1+511126b492dcb267cf30d49d631946d7b61a9530",
+        "version": "0.3.0"
+      }
+    },
+    "paired_delta_path": "pstrain.benchmarks.arctic.paired_delta_ci",
+    "resource_axis": {
+      "dictionary_sha256": "204f36aa9d0ecad1a567f561a85705ecb4289376a7cdd4538c9abba60fd2969c",
+      "lm_sha256": "2cf11ab0474a0bdd165cbee59db674b05764fdb00bf6f9824c0dccce571637b5"
+    }
   },
   "generated_from": {
     "oracle_sidecar": {
       "path": "oracle-sidecar.json",
-      "sha256": "1921f43bff555ebbff5399009a8f7e00af410ceaa7a70c264ef4d3e60577fd1b"
+      "sha256": "af749db8748e01bbfbd71b29e6906641e08f634887d064229dbaf5e28f759c37"
     },
     "record": {
       "path": "record.json",
-      "sha256": "af3dc5e4259d42a0e5fb0087683b1df60c164729e476de8f30bd29563f3508e7"
+      "sha256": "20959d8b32c53f38c8fc8215a21d2146c2ed95248d5199ba0967b936eb0dacf4"
     }
   },
   "pstrain_vs_oracle": [
     {
       "dataset": "slt55",
       "mode": "on",
-      "oracle_errors": 138,
-      "oracle_wer": 26.900584795321638,
+      "oracle_errors": 144,
+      "oracle_wer": 28.07017543859649,
       "paired_ci_95_pp": [
-        -2.5830625105455822,
-        2.5
+        -3.007518796992481,
+        1.976284584980237
       ],
-      "per_utterance_error_rows_differ": 26,
-      "pstrain_errors": 138,
-      "pstrain_minus_oracle_pp": 0.0,
-      "pstrain_wer": 26.900584795321635,
+      "per_utterance_error_rows_differ": 20,
+      "pstrain_errors": 142,
+      "pstrain_minus_oracle_pp": -0.3898635477582846,
+      "pstrain_wer": 27.680311890838205,
       "ref_words": 513
     },
     {
       "dataset": "big",
       "mode": "on",
-      "oracle_errors": 22487,
-      "oracle_wer": 75.00166766726703,
+      "oracle_errors": 22638,
+      "oracle_wer": 75.50530318190914,
       "paired_ci_95_pp": [
-        -0.19910419703885776,
-        0.730867535363815
+        -0.6982780430167788,
+        0.19796116800226038
       ],
-      "per_utterance_error_rows_differ": 1903,
-      "pstrain_errors": 22567,
-      "pstrain_minus_oracle_pp": 0.2668267627243012,
-      "pstrain_wer": 75.26849442999134,
+      "per_utterance_error_rows_differ": 1825,
+      "pstrain_errors": 22564,
+      "pstrain_minus_oracle_pp": -0.24681475551997864,
+      "pstrain_wer": 75.25848842638916,
       "ref_words": 29982
     }
   ],
-  "schema_version": 1
+  "schema_version": 2
 }

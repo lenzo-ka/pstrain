@@ -1,15 +1,17 @@
 """Checks for contract documentation generated from gate declarations."""
 
 import difflib
+import json
 from pathlib import Path
 
 import pytest
 
 from pstrain.lib.contract_docs import (
+    _check_pinned_resource_rows,
     _declarations,
     contract_check_fields,
     contract_check_files,
-    generate_arctic_coverage,
+    generate_arctic_pin_document,
     generate_bw_sharding_contract,
 )
 
@@ -30,10 +32,19 @@ def test_bw_sharding_contract_matches_gate_declarations() -> None:
         pytest.fail(f"contract document differs from generated gate scope:\n{diff}", pytrace=False)
 
 
-def test_arctic_coverage_matches_pin_record() -> None:
+def test_arctic_pin_document_matches_its_evidence() -> None:
     root = Path(__file__).parents[1]
     expected = (root / "docs/benchmarks/arctic-pin.md").read_text()
-    assert generate_arctic_coverage(root) == expected
+    assert generate_arctic_pin_document(root) == expected
+
+
+def test_arctic_pin_document_refuses_an_unstated_resource_digest() -> None:
+    root = Path(__file__).parents[1]
+    record = json.loads((root / "evidence/arctic-pin/record.json").read_text())
+    record["resources"]["dictionary_sha256"] = "0" * 64
+
+    with pytest.raises(ValueError, match="decode dictionary digest"):
+        _check_pinned_resource_rows((root / "docs/benchmarks/arctic-pin.md").read_text(), record)
 
 
 def test_checked_file_helper_negative_control(tmp_path: Path) -> None:

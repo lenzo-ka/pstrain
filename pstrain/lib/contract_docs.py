@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import json
+import textwrap
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import suppress
 from pathlib import Path
@@ -14,6 +15,11 @@ _START = "<!-- BEGIN GENERATED GATE SCOPE -->"
 _END = "<!-- END GENERATED GATE SCOPE -->"
 _COVERAGE_START = "<!-- BEGIN GENERATED COVERAGE -->"
 _COVERAGE_END = "<!-- END GENERATED COVERAGE -->"
+_IDENTITY_START = "<!-- BEGIN GENERATED MEASUREMENT IDENTITY -->"
+_IDENTITY_END = "<!-- END GENERATED MEASUREMENT IDENTITY -->"
+_BASELINE_START = "<!-- BEGIN GENERATED BASELINE -->"
+_BASELINE_END = "<!-- END GENERATED BASELINE -->"
+_CELL_NAMES = {"slt55": "SLT-55", "big": "big"}
 
 
 def contract_scope(**_scope: object) -> Callable[[_F], _F]:
@@ -250,12 +256,20 @@ def write_bw_sharding_contract(root: Path | None = None) -> None:
     path.write_text(generate_bw_sharding_contract(root))
 
 
-def generate_arctic_coverage(root: Path | None = None) -> str:
-    """Generate the Arctic pin's coverage statement from its record."""
-    root = root or Path.cwd()
-    document = root / "docs/benchmarks/arctic-pin.md"
-    record = json.loads((root / "evidence/arctic-pin/record.json").read_text())
+def _replace_block(text: str, start: str, end: str, generated: Sequence[str], label: str) -> str:
+    before, separator, remainder = text.partition(start)
+    if not separator:
+        raise ValueError(f"missing generated {label} start marker")
+    _, separator, after = remainder.partition(end)
+    if not separator:
+        raise ValueError(f"missing generated {label} end marker")
+    return before + "\n".join([start, *generated, end]) + after
+
+
+def _coverage_block(record: Mapping[str, object]) -> list[str]:
     results = record["results"]
+    if not isinstance(results, Mapping):
+        raise ValueError("Arctic record results must be an object")
     cells_by_status: dict[str, list[str]] = {}
     for mode, datasets in results.items():
         for dataset, cell in datasets.items():
@@ -265,32 +279,185 @@ def generate_arctic_coverage(root: Path | None = None) -> str:
     retired = sorted(cells_by_status.pop("retired/historical", ()))
     if cells_by_status or not live or not retired:
         raise ValueError(f"unexpected Arctic coverage statuses: {cells_by_status}")
-    declared_retired = sorted(record["basis"]["retired_cells"])
+    basis = record["basis"]
+    if not isinstance(basis, Mapping):
+        raise ValueError("Arctic record basis must be an object")
+    declared_retired = sorted(basis["retired_cells"])
     if retired != declared_retired:
         raise ValueError(
             f"retired result cells {retired!r} disagree with basis {declared_retired!r}"
         )
     if any(not cell.startswith("off/") for cell in retired):
         raise ValueError(f"retired Arctic cells are not all off-mode: {retired!r}")
-
-    generated = [
-        _COVERAGE_START,
+    return [
         f"The live cells are {_names(live)}. The {_names(retired)} cells are retained as",
         "`retired/historical`; the off-mode cells are neither trained nor decoded by the",
         "current benchmark run.",
-        _COVERAGE_END,
     ]
+
+
+def _wrap(paragraph: str) -> list[str]:
+    """Wrap generated prose without breaking a backticked digest across lines."""
+    return textwrap.wrap(paragraph, width=88, break_long_words=False, break_on_hyphens=False)
+
+
+def _identity_block(record: Mapping[str, object]) -> list[str]:
+    """State the live decode identity from the record rather than from memory."""
+    engine = record["engine"]
+    if not isinstance(engine, Mapping):
+        raise ValueError("Arctic record engine must be an object")
+    retained = record["historical_provenance"]
+    if not isinstance(retained, Mapping):
+        raise ValueError("Arctic record historical provenance must be an object")
+    historical_engine = retained["engine"]
+    python_version = str(engine["python_version"]).split()[0]
+    pocketsphinx = str(engine["pocketsphinx_version"]).split("+")[0]
+    historical_python = str(historical_engine["python_version"]).split()[0]
+    return [
+        *_wrap(
+            "The decode path is a defining condition of this measurement. The live cells are "
+            f"decoded from WAV through pinned PocketSphinx {pocketsphinx} using Python "
+            f"{python_version}, native library SHA-256 "
+            f"`{engine['native_library_sha256']}`, and decode dictionary SHA-256 "
+            f"`{engine['decode_dictionary_sha256']}`. The engine is pstrain "
+            f"{engine['version']} at `{engine['git_describe']}`. A result obtained through "
+            "another decode path is not the same measurement even when the acoustic-model "
+            "bytes are identical."
+        ),
+        "",
+        *_wrap(
+            "The retired off-mode cells were not measured on that path. They were decoded by "
+            f"pstrain {historical_engine['version']} at `{historical_engine['git_describe']}` "
+            f"using Python {historical_python}, native library SHA-256 "
+            f"`{historical_engine['native_library_sha256']}`, and decode dictionary SHA-256 "
+            f"`{historical_engine['decode_dictionary_sha256']}`. That identity travels with "
+            "them in the record's `historical_provenance` and is never inherited from a "
+            "later run."
+        ),
+    ]
+
+
+def _row(mode: str, dataset: str, pstrain: float, oracle: float, interval: Sequence[float]) -> str:
+    delta = pstrain - oracle
+    if mode == "off":
+        interpretation = "historical only"
+    elif interval[0] > 0:
+        interpretation = "statistically significant regression"
+    elif interval[1] < 0:
+        interpretation = "statistically significant improvement"
+    else:
+        # A favorable point estimate whose interval spans zero is not an
+        # improvement. The column must not let a negative delta read as one.
+        interpretation = "no statistically significant difference"
+    label = "off (retired)" if mode == "off" else mode
+    return (
+        f"| {label} | {_CELL_NAMES[dataset]} | {pstrain:.4f} | {oracle:.4f} | {delta:+.4f} "
+        f"| [{interval[0]:+.4f}, {interval[1]:+.4f}] | {interpretation} |"
+    )
+
+
+def _baseline_block(
+    record: Mapping[str, object],
+    oracle: Mapping[str, object],
+    analysis: Mapping[str, object],
+) -> list[str]:
+    """Render the baseline table from the measured artifacts, never by hand."""
+    results = record["results"]
+    oracle_results = oracle["results"]
+    oracle_verdicts = oracle["pstrain_vs_oracle"]
+    if not isinstance(results, Mapping) or not isinstance(oracle_results, Mapping):
+        raise ValueError("Arctic results must be objects")
+    if not isinstance(oracle_verdicts, Sequence) or not isinstance(
+        analysis["pstrain_vs_oracle"], Sequence
+    ):
+        raise ValueError("Arctic comparisons must be sequences")
+    live = {
+        (row["mode"], row["dataset"]): row
+        for row in analysis["pstrain_vs_oracle"]
+        if isinstance(row, Mapping)
+    }
+    retired = {
+        (row["mode"], row["dataset"]): row
+        for row in oracle_verdicts
+        if isinstance(row, Mapping) and row["mode"] == "off"
+    }
+    rows = []
+    for dataset in ("slt55", "big"):
+        verdict = retired[("off", dataset)]
+        rows.append(
+            _row(
+                "off",
+                dataset,
+                float(results["off"][dataset]["wer"]),
+                float(oracle_results["off"][dataset]["wer"]),
+                verdict["paired_ci_95_pp"],
+            )
+        )
+        comparison = live[("on", dataset)]
+        rows.append(
+            _row(
+                "on",
+                dataset,
+                float(comparison["pstrain_wer"]),
+                float(comparison["oracle_wer"]),
+                comparison["paired_ci_95_pp"],
+            )
+        )
+    return [
+        "| Mode | Cell | pstrain WER | Oracle WER | Delta pp | Paired 95% CI | Interpretation |",
+        "|---|---|---:|---:|---:|---:|---|",
+        *rows,
+        "",
+        "The live rows come from the record and the resource-matched oracle sidecar through",
+        "`scripts/regenerate_arctic_paired_analysis.py`; the retired rows come from the",
+        "sidecar's preserved historical comparison. Both are regenerated from the checked-in",
+        "artifacts, so an amended measurement cannot leave this table stale.",
+    ]
+
+
+def _check_pinned_resource_rows(text: str, record: Mapping[str, object]) -> None:
+    """Refuse a pin document whose hand-written resource digests left the record."""
+    resources = record["resources"]
+    if not isinstance(resources, Mapping):
+        raise ValueError("Arctic record resources must be an object")
+    expected = {
+        "Language model": resources["lm_sha256"],
+        "Decode dictionary": resources["dictionary_sha256"],
+        "Filler dictionary": resources["filler_dictionary_sha256"],
+    }
+    for label, digest in expected.items():
+        row = f"| {label} | SHA-256 `{digest}` |"
+        if row not in text:
+            raise ValueError(
+                f"pin document does not state the recorded {label.lower()} digest: expected row "
+                f"{row!r}"
+            )
+
+
+def generate_arctic_pin_document(root: Path | None = None) -> str:
+    """Generate the Arctic pin's coverage, decode identity, and baseline table."""
+    root = root or Path.cwd()
+    document = root / "docs/benchmarks/arctic-pin.md"
+    evidence = root / "evidence/arctic-pin"
+    record = json.loads((evidence / "record.json").read_text())
+    oracle = json.loads((evidence / "oracle-sidecar.json").read_text())
+    analysis = json.loads((evidence / "paired-analysis.json").read_text())
     text = document.read_text()
-    before, separator, remainder = text.partition(_COVERAGE_START)
-    if not separator:
-        raise ValueError(f"missing generated coverage start marker in {document}")
-    _, separator, after = remainder.partition(_COVERAGE_END)
-    if not separator:
-        raise ValueError(f"missing generated coverage end marker in {document}")
-    return before + "\n".join(generated) + after
+    _check_pinned_resource_rows(text, record)
+    text = _replace_block(text, _COVERAGE_START, _COVERAGE_END, _coverage_block(record), "coverage")
+    text = _replace_block(
+        text, _IDENTITY_START, _IDENTITY_END, _identity_block(record), "measurement identity"
+    )
+    return _replace_block(
+        text,
+        _BASELINE_START,
+        _BASELINE_END,
+        _baseline_block(record, oracle, analysis),
+        "baseline",
+    )
 
 
-def write_arctic_coverage(root: Path | None = None) -> None:
+def write_arctic_pin_document(root: Path | None = None) -> None:
     root = root or Path.cwd()
     path = root / "docs/benchmarks/arctic-pin.md"
-    path.write_text(generate_arctic_coverage(root))
+    path.write_text(generate_arctic_pin_document(root))
