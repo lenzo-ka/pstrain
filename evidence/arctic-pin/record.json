@@ -71,6 +71,7 @@
       ],
       "training": [
         "n_state",
+        "skip_state",
         "n_senones",
         "a_beam",
         "b_beam",
@@ -154,6 +155,7 @@
         "training.question_npermute": "project-profile",
         "training.question_quests_per_state": "project-profile",
         "training.retry_beam_factor": "project-profile",
+        "training.skip_state": "project-profile",
         "training.tied.convergence_ratio": "project-profile",
         "training.tied.max_iterations": "project-profile",
         "training.tied.min_iterations": "project-profile",
@@ -237,6 +239,7 @@
           "question_npermute": 12,
           "question_quests_per_state": 20,
           "retry_beam_factor": 10000000000.0,
+          "skip_state": false,
           "tied": {
             "convergence_ratio": 0.001,
             "max_iterations": 10,
@@ -351,7 +354,7 @@
       "models",
       "results"
     ],
-    "sha256": "cdfe45839f673c9e335864da184ed472bd8650b9fc0aebd60eb83d89d54fd733"
+    "sha256": "580d6f3d1eb6c0d96702f7a6d76ea79167b9be4e12649c2996925d367c03cc02"
   },
   "resources": {
     "archives": {

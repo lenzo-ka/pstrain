@@ -343,6 +343,14 @@ def test_stage_fingerprints_cover_only_effective_relevant_values(empty_project: 
     assert document["fingerprint"] in base.provenance_path("training").name
 
 
+def test_skip_state_change_invalidates_training_fingerprint(empty_project: Path) -> None:
+    base = PipelineContext.from_config(empty_project)
+    skip_enabled = replace(base, train=replace(base.train, skip_state=True))
+
+    assert skip_enabled.fingerprint_payload("training") != base.fingerprint_payload("training")
+    assert skip_enabled.provenance_path("training") != base.provenance_path("training")
+
+
 def test_project_sharding_policy_changes_training_provenance(empty_project: Path) -> None:
     config = empty_project / "etc" / "config.yaml"
     config.write_text("config_version: 1\nsharding:\n  partition_position: remainder-first\n")
@@ -506,6 +514,7 @@ def test_training_fingerprint_payload_composition_is_pinned(empty_project: Path)
             "training.question_npermute",
             "training.question_quests_per_state",
             "training.retry_beam_factor",
+            "training.skip_state",
             "training.tied.convergence_ratio",
             "training.tied.max_iterations",
             "training.tied.min_iterations",

@@ -195,6 +195,7 @@ PIN_CONFIGS: dict[str, dict[str, Any]] = {
         },
         "training": {
             "n_state": 3,
+            "skip_state": False,
             "n_senones": 200,
             "a_beam": 1e-90,
             "b_beam": 1e-10,
@@ -253,6 +254,7 @@ PIN_CONFIGS: dict[str, dict[str, Any]] = {
         },
         "training": {
             "n_state": 3,
+            "skip_state": False,
             "n_senones": 200,
             "a_beam": 1e-90,
             "b_beam": 1e-10,

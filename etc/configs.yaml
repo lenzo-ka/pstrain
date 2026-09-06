@@ -26,6 +26,7 @@ profiles:
       varnorm: "no"
     training:
       n_state: 3
+      skip_state: false
       n_senones: 200
       a_beam: 1.0e-90
       b_beam: 1.0e-10
@@ -90,8 +91,10 @@ profiles:
     extends: default
     description: >-
       Matched to SphinxTrain defaults for comparison, including its convergence
-      threshold of 0.1 ($CFG_CONVERGENCE_RATIO)
+      threshold of 0.1 ($CFG_CONVERGENCE_RATIO) and no skip-state arcs
+      ($CFG_SKIPSTATE = 'no')
     training:
+      skip_state: false
       # SphinxTrain's $CFG_CONVERGENCE_RATIO defaults to 0.1 (etc/sphinx_train.cfg)
       # for every stage. Only the threshold is declared here: profiles deep-merge
       # over their parent, so the iteration limits keep following `default`.

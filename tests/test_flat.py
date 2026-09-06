@@ -86,6 +86,39 @@ class TestCreateTopologyFile:
         assert lines[1] == "4"  # n_state + 1 (emitting + exit)
         assert len(lines) == 5  # version + n_state + 3 transition rows
 
+    @pytest.mark.parametrize(
+        ("skip_state", "expected_rows"),
+        [
+            (
+                False,
+                [
+                    [0.75, 0.25, 0.0, 0.0],
+                    [0.0, 0.75, 0.25, 0.0],
+                    [0.0, 0.0, 0.75, 0.25],
+                ],
+            ),
+            (
+                True,
+                [
+                    [0.6, 0.2, 0.2, 0.0],
+                    [0.0, 0.6, 0.2, 0.2],
+                    [0.0, 0.0, 0.75, 0.25],
+                ],
+            ),
+        ],
+    )
+    def test_create_topology_matches_sphinxtrain_weights(
+        self, skip_state: bool, expected_rows: list[list[float]]
+    ) -> None:
+        """Normalize maketopology.pl:80-87 raw 3/1[/1] row weights."""
+        lines = create_topology_file(n_state=3, skip_state=skip_state).splitlines()
+
+        # maketopology.pl:63-68 writes version 0.1 and nstates + 1; it writes
+        # three emitting rows but no outgoing row for the non-emitting state.
+        assert lines[:2] == ["0.1", "4"]
+        assert [[float(value) for value in line.split()] for line in lines[2:]] == expected_rows
+        assert len(lines) == 5
+
     def test_create_topology_writes_file(self) -> None:
         """Test that topology file is written."""
         with tempfile.TemporaryDirectory() as tmpdir:

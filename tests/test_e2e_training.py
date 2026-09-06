@@ -228,6 +228,60 @@ def test_ci_1g_decode_matches_real_measurement_golden(tmp_path: Path) -> None:
     _assert_measurement_gate(measured, golden, transcripts)
 
 
+@requires_c_library
+def test_skip_state_ci_1g_trains_and_decodes(tmp_path: Path) -> None:
+    """Baum-Welch and decoding accept SphinxTrain's skip-state topology."""
+    from pstrain.lib import _pstrainc
+    from pstrain.lib.lm import build_lm
+    from pstrain.lib.pipeline import PipelineContext
+    from pstrain.lib.pipeline.tasks import build_pipeline
+    from pstrain.lib.setup import setup_project
+    from pstrain.lib.testing import test_model
+
+    project_dir = tmp_path / "proj"
+    setup_project(
+        project_dir,
+        transcription_path=FIXTURE / "transcription.txt",
+        audio_path=FIXTURE / "wav",
+        dictionary_path=FIXTURE / "dictionary.dict",
+        phoneset_path=FIXTURE / "phoneset.txt",
+        filler_dict_path=FIXTURE / "filler.dict",
+    )
+    (project_dir / "etc" / "config.yaml").write_text(
+        "config_version: 1\ntraining:\n  skip_state: true\n"
+    )
+    ctx = PipelineContext.from_config(project_dir)
+    assert ctx.train.skip_state is True
+    assert build_pipeline(ctx).run("ci-1g", jobs=1) == 0
+    assert "0.6 0.2 0.2 0.0" in (ctx.model_dir("flat") / "topo").read_text()
+    transition_matrices, _, n_state = _pstrainc.read_tmat_counts(
+        str(ctx.model_dir("ci-1g") / "transition_matrices")
+    )
+    eligible_states = np.arange(n_state - 2)
+    assert np.any(transition_matrices[:, eligible_states, eligible_states + 2] > 0), (
+        "Baum-Welch normalization removed every configured skip-state arc"
+    )
+
+    transcripts = {
+        fields[0]: " ".join(fields[1:])
+        for line in (FIXTURE / "transcription.txt").read_text().splitlines()
+        if (fields := line.split())
+    }
+    lm_path = build_lm(transcripts, ctx.lm_dir / "train.arpa")
+    result = test_model(
+        model_dir=ctx.model_dir("ci-1g"),
+        test_audio_dir=FIXTURE / "wav",
+        test_transcripts=transcripts,
+        dict_file=ctx.shared_dir / "dictionary.dict",
+        filler_dict=ctx.filler_dict,
+        lm=lm_path,
+        verbose=True,
+        jobs=1,
+    )
+    assert result.n_decoded == len(transcripts)
+    assert result.per_utterance is not None
+
+
 def _mdef_counts(path: Path) -> dict[str, int]:
     """Read the integer count fields from a text mdef header."""
     counts: dict[str, int] = {}

@@ -68,7 +68,7 @@ class FlatCommand(ModelCommand):
         from pstrain.api import init_flat_model
 
         model = self.get_model(ctx)
-        self.get_config(ctx)  # Validate the selected canonical profile.
+        config = self.get_config(ctx)
 
         # Resolve paths
         project_dir = ctx.project_dir
@@ -139,6 +139,7 @@ class FlatCommand(ModelCommand):
             cep_ext=".mfc",
             feat_type="1s_c_d_dd",
             ceplen=13,
+            skip_state=config.training.skip_state,
         )
 
         # Copy feat.params
