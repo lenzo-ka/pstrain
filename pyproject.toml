@@ -83,7 +83,11 @@ build.verbose = true
 logging.level = "INFO"
 editable.mode = "redirect"
 editable.rebuild = false
-sdist.include = ["benchmarks/arctic/data/**", "benchmarks/corpora/**"]
+sdist.include = [
+    "benchmarks/arctic/data/**",
+    "benchmarks/corpora/**",
+    "notebooks/arctic_hmm_gmm_tutorial.ipynb",
+]
 # Package files are mapped explicitly below. This keeps redirect-mode editable
 # installs from adding their package search directory (the repository root) to
 # sys.path; ``benchmarks`` remains data-only rather than an import package.
@@ -97,6 +101,7 @@ cmake.version = ">=3.25"
 "pstrain" = "pstrain"
 "benchmarks/arctic/data" = "benchmarks/arctic/data"
 "benchmarks/corpora" = "benchmarks/corpora"
+"notebooks/arctic_hmm_gmm_tutorial.ipynb" = "pstrain/data/notebooks/arctic_hmm_gmm_tutorial.ipynb"
 
 [tool.scikit-build.cmake.define]
 BUILD_SHARED_LIBS = "ON"

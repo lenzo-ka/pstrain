@@ -42,6 +42,7 @@ def main() -> int:
     from pstrain.cli.test import test_command
     from pstrain.cli.timings import timings_command
     from pstrain.cli.train import train_command
+    from pstrain.cli.tutorial import tutorial_command
     from pstrain.cli.validate import validate_command
 
     # Register Command-based commands
@@ -60,6 +61,7 @@ def main() -> int:
         compare_command,
         timings_command,
         train_command,
+        tutorial_command,
     ]
     for cmd in commands:
         cmd.register(subparsers)

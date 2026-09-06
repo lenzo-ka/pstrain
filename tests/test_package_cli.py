@@ -6,12 +6,18 @@ import argparse
 import json
 import shutil
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from pstrain.cli.base import add_dry_run_argument, add_json_argument
 from pstrain.cli.cli import main
+from pstrain.cli.config import register_config_command
 from pstrain.cli.package import package_command
+from pstrain.cli.test import test_command
+from pstrain.cli.validate import validate_command
 
 FIXTURE = Path(__file__).parent / "fixtures" / "multipron_final_state"
 ARTIFACT_KEYS = {
@@ -87,6 +93,9 @@ def test_package_argument_defaults_and_overrides() -> None:
     assert defaults.command_instance is package_command
     assert defaults.project_dir is None
     assert defaults.dry_run is False
+    assert defaults.json is False
+    assert defaults.json_indent == 2
+    assert defaults.json_ascii is False
     assert defaults.target == "ci-1g"
     assert defaults.config is None
     assert defaults.out is None
@@ -102,6 +111,34 @@ def test_package_argument_defaults_and_overrides() -> None:
     assert overrides.filler_dict == Path("fillers.dict")
     assert overrides.no_dict is True
     assert overrides.overwrite is True
+
+
+@pytest.mark.parametrize(
+    ("register", "command"),
+    [
+        (package_command.register, ["package", "ci-1g"]),
+        (test_command.register, ["test", "model"]),
+        (validate_command.register, ["validate-project"]),
+        (register_config_command, ["config", "profiles"]),
+    ],
+)
+def test_global_option_values_survive_every_command_parser(
+    register: Callable[[Any], Any], command: list[str]
+) -> None:
+    parser = argparse.ArgumentParser()
+    add_json_argument(parser)
+    add_dry_run_argument(parser)
+    subparsers = parser.add_subparsers(dest="command")
+    register(subparsers)
+
+    args = parser.parse_args(
+        ["--json", "--json-indent", "0", "--json-ascii", "--dry-run", *command]
+    )
+
+    assert args.json is True
+    assert args.json_indent == 0
+    assert args.json_ascii is True
+    assert args.dry_run is True
 
 
 def test_package_help_is_registered(monkeypatch: pytest.MonkeyPatch, capsys) -> None:

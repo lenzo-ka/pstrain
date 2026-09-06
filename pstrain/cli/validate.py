@@ -28,6 +28,7 @@ class ValidateCommand(Command):
         parser.add_argument(
             "--json",
             action="store_true",
+            default=argparse.SUPPRESS,
             help="Output JSON to stdout instead of summary",
         )
         parser.add_argument(
