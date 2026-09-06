@@ -73,7 +73,8 @@ Prompt lists are assumed to be pre-normalized to match the lexicon.
 
 ### From a checkout
 
-Clone the repository and install it in editable mode with the decoding extra:
+Clone the repository and install it in editable mode with the evaluation-metrics
+extra:
 
 ```bash
 git clone https://github.com/lenzo-ka/pstrain.git
