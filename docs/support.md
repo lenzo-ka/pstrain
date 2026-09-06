@@ -2,10 +2,12 @@
 
 ## Platforms
 
-pstrain supports macOS and Linux. CI builds wheels and runs the C and Python
-test suites on both platforms. Native Windows/MSVC support is future work: the
-vendored CMU Sphinx C currently relies on POSIX APIs and does not build cleanly
-with MSVC. WSL is the current Windows-hosted route to a supported Linux build.
+pstrain supports macOS, Linux, and Windows. CI builds wheels on all three
+platforms, and release builds publish those wheels to PyPI. On Windows, CI
+builds the native library and command-line programs with both MSVC and clang-cl,
+then runs a Windows-compatible subset of the Python tests against an MSVC build
+on Python 3.13. The full Python test suite is run on macOS and Linux; Windows CI
+does not currently claim that broader coverage.
 
 ## Dependencies
 
