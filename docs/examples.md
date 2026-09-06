@@ -57,7 +57,7 @@ print(f"HMM directory: {hmm_dir}")
 
 # Get default training parameters
 params = model.get_default_training_params()
-print(f"Default max_iterations: {params['max_iterations']}")
+print(f"Save alignments: {params['save_alignments']}")
 ```
 
 ## Data Structures
