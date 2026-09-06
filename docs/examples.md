@@ -30,12 +30,10 @@ from pstrain.api import validate_project
 from pathlib import Path
 
 # Validate a project
-errors = validate_project(Path("my_project"))
+report = validate_project(Path("my_project"))
 
-if errors:
-    print("Validation errors:")
-    for error in errors:
-        print(f"  - {error}")
+if not report.is_valid:
+    print(report.summary())
 else:
     print("Project is valid!")
 ```

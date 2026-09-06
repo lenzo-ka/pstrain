@@ -90,9 +90,9 @@ result = setup_project(
 )
 
 # Validate the project
-errors = validate_project(Path("my_project"))
-if errors:
-    print(f"Validation errors: {errors}")
+report = validate_project(Path("my_project"))
+if not report.is_valid:
+    print(report.summary())
 
 # Create a model
 model = create_model("ci", config="baseline")
