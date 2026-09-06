@@ -10,6 +10,8 @@ from contextlib import suppress
 from pathlib import Path
 from typing import TypeVar
 
+from pstrain.benchmarks.arctic import require_committed_baseline
+
 _F = TypeVar("_F", bound=Callable[..., object])
 _START = "<!-- BEGIN GENERATED GATE SCOPE -->"
 _END = "<!-- END GENERATED GATE SCOPE -->"
@@ -456,14 +458,28 @@ def _check_pinned_resource_rows(text: str, record: Mapping[str, object]) -> None
             )
 
 
-def generate_arctic_pin_document(root: Path | None = None) -> str:
+def generate_arctic_pin_document(
+    root: Path | None = None, *, allow_uncommitted_baseline: bool = False
+) -> str:
     """Generate the Arctic pin's coverage, decode identity, and baseline table."""
     root = root or Path.cwd()
     document = root / "docs/benchmarks/arctic-pin.md"
     evidence = root / "evidence/arctic-pin"
-    record = json.loads((evidence / "record.json").read_text())
-    oracle = json.loads((evidence / "oracle-sidecar.json").read_text())
-    analysis = json.loads((evidence / "paired-analysis.json").read_text())
+    record = json.loads(
+        require_committed_baseline(
+            evidence / "record.json", allow_uncommitted=allow_uncommitted_baseline
+        )
+    )
+    oracle = json.loads(
+        require_committed_baseline(
+            evidence / "oracle-sidecar.json", allow_uncommitted=allow_uncommitted_baseline
+        )
+    )
+    analysis = json.loads(
+        require_committed_baseline(
+            evidence / "paired-analysis.json", allow_uncommitted=allow_uncommitted_baseline
+        )
+    )
     text = document.read_text()
     _check_pinned_resource_rows(text, record)
     text = _replace_block(text, _COVERAGE_START, _COVERAGE_END, _coverage_block(record), "coverage")
@@ -479,7 +495,11 @@ def generate_arctic_pin_document(root: Path | None = None) -> str:
     )
 
 
-def write_arctic_pin_document(root: Path | None = None) -> None:
+def write_arctic_pin_document(
+    root: Path | None = None, *, allow_uncommitted_baseline: bool = False
+) -> None:
     root = root or Path.cwd()
     path = root / "docs/benchmarks/arctic-pin.md"
-    path.write_text(generate_arctic_pin_document(root))
+    path.write_text(
+        generate_arctic_pin_document(root, allow_uncommitted_baseline=allow_uncommitted_baseline)
+    )

@@ -449,6 +449,51 @@ def _tracked_modifications_hash() -> str:
     return digest.hexdigest()
 
 
+def require_committed_baseline(path: Path, *, allow_uncommitted: bool = False) -> bytes:
+    """Read a baseline once and refuse unless those exact bytes are in HEAD."""
+    try:
+        contents = path.read_bytes()
+    except OSError as exc:
+        raise RuntimeError(
+            f"cannot read baseline {path}; commit it, stash it, or pass "
+            "--allow-uncommitted-baseline"
+        ) from exc
+    if allow_uncommitted:
+        print(
+            f"WARNING: --allow-uncommitted-baseline used for {path}; "
+            "the comparison is not against a verified committed baseline",
+            file=sys.stderr,
+        )
+        return contents
+    resolved = path.resolve()
+    try:
+        repository = Path(
+            subprocess.run(
+                ["git", "-C", str(resolved.parent), "rev-parse", "--show-toplevel"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+        ).resolve()
+        relative = resolved.relative_to(repository)
+        committed = subprocess.run(
+            ["git", "-C", str(repository), "show", f"HEAD:{relative.as_posix()}"],
+            check=True,
+            capture_output=True,
+        ).stdout
+    except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError(
+            f"cannot verify baseline {path} against HEAD: the git probe could not answer; "
+            "commit it, stash it, or pass --allow-uncommitted-baseline"
+        ) from exc
+    if contents != committed:
+        raise RuntimeError(
+            f"baseline {path} has uncommitted modifications, so it is not the recorded thing; "
+            "commit it, stash it, or pass --allow-uncommitted-baseline"
+        )
+    return contents
+
+
 def reproducible_binary_sha256(path: Path) -> str:
     """Hash a native binary after removing Mach-O's randomized build UUID."""
     data = bytearray(path.read_bytes())
@@ -1736,8 +1781,19 @@ def run(
     deep_verify: bool = False,
     band: str = "pin",
     historical_record_path: Path | None = None,
+    allow_uncommitted_baseline: bool = False,
 ) -> dict[str, Any]:
     """Run BM1 from downloads through comparison."""
+    record_bytes = None
+    historical_record_bytes = None
+    if record_path is not None:
+        record_bytes = require_committed_baseline(
+            record_path, allow_uncommitted=allow_uncommitted_baseline
+        )
+    if emit_record is not None and historical_record_path is not None:
+        historical_record_bytes = require_committed_baseline(
+            historical_record_path, allow_uncommitted=allow_uncommitted_baseline
+        )
     cache = Path(
         os.environ.get("PSTRAIN_BENCH_CACHE", Path.home() / ".cache" / "pstrain" / "benchmarks")
     )
@@ -1830,7 +1886,8 @@ def run(
     if emit_record is not None:
         if historical_record_path is None:
             raise RuntimeError("emitting a multipron-only record requires --historical-record")
-        historical_record = json.loads(historical_record_path.read_text(encoding="utf-8"))
+        assert historical_record_bytes is not None
+        historical_record = json.loads(historical_record_bytes)
         benchmark_record = make_record(output, historical_record)
         emit_record.parent.mkdir(parents=True, exist_ok=True)
         emit_record.write_text(
@@ -1838,7 +1895,8 @@ def run(
         )
         output["emitted_record"] = str(emit_record)
     if record_path is not None:
-        record = json.loads(record_path.read_text(encoding="utf-8"))
+        assert record_bytes is not None
+        record = json.loads(record_bytes)
         output["comparison"] = compare_results(
             output, record, allow_engine_drift=allow_engine_drift
         )
@@ -1871,6 +1929,7 @@ def main(argv: list[str] | None = None) -> int:
         help="record supplying retired/historical off-mode cells when emitting",
     )
     parser.add_argument("--allow-engine-drift", action="store_true")
+    parser.add_argument("--allow-uncommitted-baseline", action="store_true")
     parser.add_argument("--deep-verify", action="store_true", help="rehash every cached corpus WAV")
     parser.add_argument(
         "--band",
@@ -1899,6 +1958,7 @@ def main(argv: list[str] | None = None) -> int:
             deep_verify=args.deep_verify,
             band=args.band,
             historical_record_path=args.historical_record,
+            allow_uncommitted_baseline=args.allow_uncommitted_baseline,
         )
     except (OSError, RuntimeError, subprocess.CalledProcessError) as exc:
         parser.exit(1, f"BM1 failed: {exc}\n")

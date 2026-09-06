@@ -47,6 +47,7 @@ from pstrain.benchmarks.arctic import (
     render_configuration_provenance,
     render_results_report,
     reproducible_binary_sha256,
+    require_committed_baseline,
     resolve_data_dir,
     resolved_configuration_provenance,
     run,
@@ -407,6 +408,7 @@ def test_emitted_record_uses_child_resolved_cli_override(
         3,
         emit_record=emitted,
         historical_record_path=historical_path,
+        allow_uncommitted_baseline=True,
     )
     record = json.loads(emitted.read_text())
 
@@ -475,6 +477,7 @@ def test_adopt_uncovered_keeps_cell_provenance_consistent(tmp_path: Path) -> Non
             "--record",
             str(adopted),
             "--adopt-uncovered",
+            "--allow-uncommitted-baseline",
         ],
         check=True,
         capture_output=True,
@@ -530,6 +533,7 @@ def test_adopt_uncovered_refuses_existing_drift(
             "--record",
             str(path),
             "--adopt-uncovered",
+            "--allow-uncommitted-baseline",
         ],
         capture_output=True,
         text=True,
@@ -554,6 +558,7 @@ def test_adopt_uncovered_refuses_stale_engine_identity_binding(tmp_path: Path) -
             "--record",
             str(path),
             "--adopt-uncovered",
+            "--allow-uncommitted-baseline",
         ],
         capture_output=True,
         text=True,
@@ -583,6 +588,7 @@ def test_adopt_record_refuses_any_retired_cell_drift(tmp_path: Path) -> None:
             str(target),
             "--adopt-record",
             str(source),
+            "--allow-uncommitted-baseline",
         ],
         capture_output=True,
         text=True,
@@ -659,6 +665,7 @@ def test_adopt_record_refuses_historical_provenance_drift(tmp_path: Path) -> Non
             str(target),
             "--adopt-record",
             str(source),
+            "--allow-uncommitted-baseline",
         ],
         capture_output=True,
         text=True,
@@ -667,6 +674,193 @@ def test_adopt_record_refuses_historical_provenance_drift(tmp_path: Path) -> Non
     assert completed.returncode != 0
     assert "historical provenance mismatch" in completed.stderr
     assert target.read_bytes() == before
+
+
+def _committed_record_copy(tmp_path: Path) -> tuple[Path, Path]:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    record = repository / "record.json"
+    candidate = repository / "candidate.json"
+    contents = Path("evidence/arctic-pin/record.json").read_text()
+    record.write_text(contents)
+    candidate.write_text(contents)
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    subprocess.run(["git", "-C", str(repository), "add", "record.json"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repository),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "record baseline",
+        ],
+        check=True,
+    )
+    return record, candidate
+
+
+def test_adopt_record_refuses_modified_baseline(tmp_path: Path) -> None:
+    record, candidate = _committed_record_copy(tmp_path)
+    record.write_text(record.read_text() + "\n")
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/check_arctic_pin.py",
+            "--record",
+            str(record),
+            "--adopt-record",
+            str(candidate),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 1
+    assert f"baseline {record} has uncommitted modifications" in completed.stderr
+    assert "so it is not the recorded thing" in completed.stderr
+    assert "commit it, stash it, or pass --allow-uncommitted-baseline" in completed.stderr
+
+
+def _alter_retired_utterance(record: dict[str, Any]) -> None:
+    cell = record["results"]["off"]["slt55"]
+    cell["utterance_rows"][0][2] += 1
+    cell["errors"] += 1
+    cell["wer"] = 100.0 * cell["errors"] / cell["ref_words"]
+    bind_record(record)
+    validate_record(record)
+
+
+def test_adopt_record_refuses_mutually_altered_retired_cell(tmp_path: Path) -> None:
+    record, candidate_path = _committed_record_copy(tmp_path)
+    baseline = json.loads(record.read_text())
+    candidate = json.loads(record.read_text())
+    _alter_retired_utterance(baseline)
+    _alter_retired_utterance(candidate)
+    record.write_text(json.dumps(baseline))
+    candidate_path.write_text(json.dumps(candidate))
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/check_arctic_pin.py",
+            "--record",
+            str(record),
+            "--adopt-record",
+            str(candidate_path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 1
+    assert f"baseline {record} has uncommitted modifications" in completed.stderr
+
+
+@pytest.mark.parametrize("operation", ["ordinary", "adopt-uncovered"])
+def test_pin_check_refuses_modified_record_for_every_comparison(
+    tmp_path: Path, operation: str
+) -> None:
+    record, _ = _committed_record_copy(tmp_path)
+    altered = json.loads(record.read_text())
+    _alter_retired_utterance(altered)
+    record.write_text(json.dumps(altered))
+    command = [sys.executable, "scripts/check_arctic_pin.py", "--record", str(record)]
+    if operation == "adopt-uncovered":
+        command.append("--adopt-uncovered")
+
+    completed = subprocess.run(command, capture_output=True, text=True)
+
+    assert completed.returncode == 1
+    assert f"baseline {record} has uncommitted modifications" in completed.stderr
+
+
+def test_adopt_record_accepts_clean_committed_baseline(tmp_path: Path) -> None:
+    record, candidate = _committed_record_copy(tmp_path)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/check_arctic_pin.py",
+            "--record",
+            str(record),
+            "--adopt-record",
+            str(candidate),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.stdout == "adopted fresh MULTIPRON-ONLY Arctic benchmark record\n"
+    assert completed.stderr == ""
+
+
+def test_uncommitted_baseline_override_is_visible(tmp_path: Path) -> None:
+    record, candidate = _committed_record_copy(tmp_path)
+    record.write_text(record.read_text() + "\n")
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/check_arctic_pin.py",
+            "--record",
+            str(record),
+            "--adopt-record",
+            str(candidate),
+            "--allow-uncommitted-baseline",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "WARNING: --allow-uncommitted-baseline used" in completed.stderr
+    assert "not against a verified committed baseline" in completed.stderr
+
+
+def test_baseline_guard_fails_closed_when_git_probe_cannot_answer(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def unavailable(*args: object, **kwargs: object) -> None:
+        raise FileNotFoundError("git")
+
+    path = tmp_path / "record.json"
+    path.write_text("{}")
+    monkeypatch.setattr("pstrain.benchmarks.arctic.subprocess.run", unavailable)
+
+    with pytest.raises(RuntimeError, match="git probe could not answer") as raised:
+        require_committed_baseline(path)
+    assert "commit it, stash it, or pass --allow-uncommitted-baseline" in str(raised.value)
+
+
+def test_baseline_guard_returns_the_exact_bytes_it_verified(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    path = tmp_path / "record.json"
+    original = b'{"recorded": true}\n'
+    path.write_bytes(original)
+    calls = 0
+
+    def git_probe(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes | str]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return subprocess.CompletedProcess(args=[], returncode=0, stdout=str(tmp_path) + "\n")
+        path.write_bytes(b'{"recorded": false}\n')
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout=original)
+
+    monkeypatch.setattr("pstrain.benchmarks.arctic.subprocess.run", git_probe)
+
+    verified = require_committed_baseline(path)
+
+    assert verified == original
+    assert path.read_bytes() != verified
 
 
 def _cell(errors: tuple[int, ...], *, recorded: bool) -> dict[str, object]:
@@ -753,7 +947,15 @@ def test_pin_check_rejects_tampered_producing_identity(tmp_path: Path, identity:
     path.write_text(json.dumps(record))
 
     completed = subprocess.run(
-        [sys.executable, "scripts/check_arctic_pin.py", "--record", str(path)],
+        [
+            sys.executable,
+            "scripts/check_arctic_pin.py",
+            "--record",
+            str(path),
+            "--allow-uncommitted-baseline",
+        ],
+        # This test exercises record validation rather than baseline provenance.
+        # The dedicated gate tests above cover ordinary invocation.
         capture_output=True,
         text=True,
     )

@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT))
 from pstrain.benchmarks.arctic import (  # noqa: E402
     comparison_comparability,
     paired_delta_ci,
+    require_committed_baseline,
     validate_record,
 )
 
@@ -23,10 +24,6 @@ DEFAULT_RECORD = ROOT / "evidence/arctic-pin/record.json"
 DEFAULT_ORACLE = ROOT / "evidence/arctic-pin/oracle-sidecar.json"
 DEFAULT_OUTPUT = ROOT / "evidence/arctic-pin/paired-analysis.json"
 PAIRED_ANALYSIS_SCHEMA_VERSION = 3
-
-
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _pairs(rows: list[list[Any]]) -> dict[str, dict[str, int]]:
@@ -87,9 +84,17 @@ def validate_analysis(analysis: dict[str, Any]) -> None:
             )
 
 
-def regenerate(record_path: Path, oracle_path: Path) -> str:
-    record = json.loads(record_path.read_text(encoding="utf-8"))
-    oracle = json.loads(oracle_path.read_text(encoding="utf-8"))
+def regenerate(
+    record_path: Path, oracle_path: Path, *, allow_uncommitted_baseline: bool = False
+) -> str:
+    record_bytes = require_committed_baseline(
+        record_path, allow_uncommitted=allow_uncommitted_baseline
+    )
+    oracle_bytes = require_committed_baseline(
+        oracle_path, allow_uncommitted=allow_uncommitted_baseline
+    )
+    record = json.loads(record_bytes)
+    oracle = json.loads(oracle_bytes)
     validate_record(record)
     resource_axis = _resource_axis(record, oracle)
     bootstrap = record["conditions"]["bootstrap"]
@@ -137,9 +142,12 @@ def regenerate(record_path: Path, oracle_path: Path) -> str:
         "generated_from": {
             "oracle_sidecar": {
                 "path": "oracle-sidecar.json",
-                "sha256": _sha256(oracle_path),
+                "sha256": hashlib.sha256(oracle_bytes).hexdigest(),
             },
-            "record": {"path": "record.json", "sha256": _sha256(record_path)},
+            "record": {
+                "path": "record.json",
+                "sha256": hashlib.sha256(record_bytes).hexdigest(),
+            },
         },
         "pstrain_vs_oracle": comparisons,
         "schema_version": PAIRED_ANALYSIS_SCHEMA_VERSION,
@@ -154,10 +162,18 @@ def main() -> None:
     parser.add_argument("--oracle", type=Path, default=DEFAULT_ORACLE)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--allow-uncommitted-baseline", action="store_true")
     args = parser.parse_args()
-    rendered = regenerate(args.record, args.oracle)
+    rendered = regenerate(
+        args.record,
+        args.oracle,
+        allow_uncommitted_baseline=args.allow_uncommitted_baseline,
+    )
     if args.check:
-        if not args.output.is_file() or args.output.read_text(encoding="utf-8") != rendered:
+        output_bytes = require_committed_baseline(
+            args.output, allow_uncommitted=args.allow_uncommitted_baseline
+        )
+        if output_bytes.decode("utf-8") != rendered:
             raise SystemExit(f"stale generated artifact: {args.output}")
         return
     args.output.write_text(rendered, encoding="utf-8")

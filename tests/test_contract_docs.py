@@ -2,6 +2,8 @@
 
 import difflib
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -36,6 +38,52 @@ def test_arctic_pin_document_matches_its_evidence() -> None:
     root = Path(__file__).parents[1]
     expected = (root / "docs/benchmarks/arctic-pin.md").read_text()
     assert generate_arctic_pin_document(root) == expected
+
+
+@pytest.mark.parametrize("artifact", ["record.json", "oracle-sidecar.json", "paired-analysis.json"])
+def test_arctic_pin_document_refuses_modified_evidence(tmp_path: Path, artifact: str) -> None:
+    source = Path(__file__).parents[1]
+    root = tmp_path / "repo"
+    evidence = root / "evidence/arctic-pin"
+    docs = root / "docs/benchmarks"
+    evidence.mkdir(parents=True)
+    docs.mkdir(parents=True)
+    for name in ("record.json", "oracle-sidecar.json", "paired-analysis.json"):
+        shutil.copyfile(source / "evidence/arctic-pin" / name, evidence / name)
+    shutil.copyfile(source / "docs/benchmarks/arctic-pin.md", docs / "arctic-pin.md")
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "evidence", "docs"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "baseline evidence",
+        ],
+        check=True,
+    )
+    path = evidence / artifact
+    path.write_bytes(path.read_bytes() + b"\n")
+
+    with pytest.raises(RuntimeError, match=f"baseline .*{artifact} has uncommitted modifications"):
+        generate_arctic_pin_document(root)
+
+
+def test_arctic_pin_document_uncommitted_override_is_visible(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = Path(__file__).parents[1]
+
+    generate_arctic_pin_document(root, allow_uncommitted_baseline=True)
+
+    captured = capsys.readouterr()
+    assert captured.err.count("WARNING: --allow-uncommitted-baseline used") == 3
 
 
 def test_arctic_pin_document_refuses_an_unstated_resource_digest() -> None:
