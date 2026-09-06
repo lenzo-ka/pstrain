@@ -19,6 +19,7 @@ from pstrain.benchmarks.arctic import (
     DATA_DIR,
     DECODER_CONDITIONS,
     FILLER_DICTIONARY,
+    HISTORICAL_PROVENANCE,
     KNOWN_SKIPS,
     PIN_CONFIGS,
     PINNED_RESOURCE_HASHES,
@@ -591,6 +592,82 @@ def test_adopt_record_refuses_any_retired_cell_drift(tmp_path: Path) -> None:
     assert target.read_bytes() == before
 
 
+def test_record_keeps_retired_cells_on_their_own_producing_identity() -> None:
+    record = json.loads(Path("evidence/arctic-pin/record.json").read_text())
+    retained = record["historical_provenance"]
+
+    assert retained == HISTORICAL_PROVENANCE
+    assert sorted(retained["cells"]) == sorted(record["basis"]["retired_cells"])
+    # The retired cells predate the current dictionary and engine. Their identity
+    # must stay distinguishable from the run that produced the live cells.
+    assert retained["resources"]["dictionary_sha256"] != record["resources"]["dictionary_sha256"]
+    assert retained["engine"]["native_library_sha256"] != record["engine"]["native_library_sha256"]
+    assert (
+        retained["engine"]["decode_dictionary_sha256"]
+        == (retained["resources"]["dictionary_sha256"])
+    )
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param(lambda record: record.pop("historical_provenance"), id="removed"),
+        pytest.param(
+            lambda record: record["historical_provenance"]["engine"].update(record["engine"]),
+            id="reattributed-engine",
+        ),
+        pytest.param(
+            lambda record: record["historical_provenance"]["resources"].update(
+                {"dictionary_sha256": record["resources"]["dictionary_sha256"]}
+            ),
+            id="reattributed-dictionary",
+        ),
+        pytest.param(
+            lambda record: record["historical_provenance"].update({"cells": ["on/slt55"]}),
+            id="recovers-live-cells",
+        ),
+    ],
+)
+def test_validate_record_refuses_to_reattribute_retired_cells(
+    mutate: Callable[[dict[str, Any]], object],
+) -> None:
+    record = json.loads(Path("evidence/arctic-pin/record.json").read_text())
+    mutate(record)
+    bind_record(record)
+
+    with pytest.raises(RuntimeError):
+        validate_record(record)
+
+
+def test_adopt_record_refuses_historical_provenance_drift(tmp_path: Path) -> None:
+    record = json.loads(Path("evidence/arctic-pin/record.json").read_text())
+    candidate = json.loads(json.dumps(record))
+    candidate["historical_provenance"]["engine"]["git_describe"] = record["engine"]["git_describe"]
+    bind_record(candidate)
+    target = tmp_path / "record.json"
+    source = tmp_path / "candidate.json"
+    target.write_text(json.dumps(record))
+    source.write_text(json.dumps(candidate))
+    before = target.read_bytes()
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/check_arctic_pin.py",
+            "--record",
+            str(target),
+            "--adopt-record",
+            str(source),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode != 0
+    assert "historical provenance mismatch" in completed.stderr
+    assert target.read_bytes() == before
+
+
 def _cell(errors: tuple[int, ...], *, recorded: bool) -> dict[str, object]:
     rows = [[f"voice/u{index}", 10, error] for index, error in enumerate(errors)]
     total_errors = sum(errors)
@@ -644,6 +721,7 @@ def _comparison_documents() -> tuple[dict[str, object], dict[str, object]]:
             "live_cells": ["on/slt55", "on/big"],
             "retired_cells": ["off/slt55", "off/big"],
         },
+        "historical_provenance": json.loads(json.dumps(HISTORICAL_PROVENANCE)),
         "resources": actual["resources"],
         "conditions": actual["conditions"],
         "engine": actual["engine"],

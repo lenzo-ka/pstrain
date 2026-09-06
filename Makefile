@@ -113,7 +113,7 @@ cffi-exports-check:
 docs-gen cffi-exports-check: | $(AMBIENT_IMPORT_PREREQUISITE)
 
 .PHONY: config-check
-config-check: cffi-exports-check coverage-check
+config-check: cffi-exports-check pin-docs-check
 	python scripts/run_verified_tests.py tests/test_config.py \
 		tests/test_pipeline_runner.py::test_config_reference_names_runner_keys_used_by_context \
 		tests/test_decoder_config.py \
@@ -125,6 +125,7 @@ config-check: cffi-exports-check coverage-check
 .PHONY: pin-check
 pin-check:
 	python scripts/check_arctic_pin.py
+	python scripts/regenerate_arctic_oracle.py --check
 	python scripts/regenerate_arctic_paired_analysis.py --check
 
 .PHONY: contract-docs-gen
@@ -137,13 +138,13 @@ contract-check:
 	$(MAKE) contract-docs-gen
 	git diff --exit-code -- docs/design/bw-sharding-contract.md
 
-.PHONY: coverage-docs-gen
-coverage-docs-gen:
-	python -c "from pstrain.lib.contract_docs import write_arctic_coverage; write_arctic_coverage()"
+.PHONY: pin-docs-gen
+pin-docs-gen:
+	python -c "from pstrain.lib.contract_docs import write_arctic_pin_document; write_arctic_pin_document()"
 
-.PHONY: coverage-check
-coverage-check:
-	$(MAKE) coverage-docs-gen
+.PHONY: pin-docs-check
+pin-docs-check:
+	$(MAKE) pin-docs-gen
 	git diff --exit-code -- docs/benchmarks/arctic-pin.md
 
 .PHONY: docs

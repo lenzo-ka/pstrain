@@ -216,7 +216,6 @@ bankruptcy B AE NG K R AH P S IY
 bankruptcy(2) B AE NG K R AH P T S IY
 banks B AE NG K S
 baptized B AE P T AY Z D
-baptized(2) B AE P T AY Z D
 barbaric B AA R B AE R IH K
 barbaric(2) B AA R B EH R IH K
 bared B EH R D
@@ -227,7 +226,6 @@ barked B AA R K T
 bassett B AE S IH T
 bath B AE TH
 be B IY
-be(2) B IY
 beach B IY CH
 beady B IY D IY
 bear B EH R
@@ -244,13 +242,11 @@ became(2) B IY K EY M
 because B IH K AO Z
 because(2) B IH K AH Z
 because(3) B IH K AA Z
-because(4) B IH K AH Z
 become B IH K AH M
 becoming B IH K AH M IH NG
 bed B EH D
 been B IH N
 been(2) B AH N
-been(3) B IH N
 beer B IH R
 before B IH F AO R
 before(2) B IY F AO R
@@ -328,7 +324,6 @@ bought(2) B AO T
 boundaries B AW N D ER IY Z
 boundaries(2) B AW N D R IY Z
 bourgeois B UH R ZH W AA
-bourgeois(2) B UH R ZH W AA
 bow B AW
 bow(2) B OW
 bowed B AW D
@@ -483,7 +478,6 @@ charmed CH AA R M D
 chased CH EY S T
 chattering CH AE T ER IH NG
 chauffeur SH OW F ER
-chauffeur(2) SH OW F ER
 chauncey CH AO N S IY
 cheer CH IH R
 cheerful CH IH R F AH L
@@ -586,7 +580,6 @@ concerned K AH N S ER N D
 concrete K AH N K R IY T
 concrete(2) K AA N K R IY T
 conduct K AA N D AH K T
-conduct(2) K AA N D AH K T
 conferring K AH N F ER IH NG
 confessed K AH N F EH S T
 confide K AH N F AY D
@@ -624,7 +617,6 @@ corrected K ER EH K T AH D
 corrected(2) K ER EH K T IH D
 corry K AO R IY
 costume K AA S T UW M
-costume(2) K AA S T UW M
 cottonwoods K AA T AH N W UH D Z
 could K UH D
 count K AW N T
@@ -735,7 +727,6 @@ devotion D IH V OW SH AH N
 diameter D AY AE M AH T ER
 dick D IH K
 did D IH D
-did(2) D IH D
 die D AY
 died D AY D
 difficulty D IH F AH K AH L T IY
@@ -759,7 +750,6 @@ discouraged D IH S K ER AH JH D
 discouraged(2) D IH S K ER IH JH D
 discovery D IH S K AH V ER IY
 discovery(2) D IH S K AH V R IY
-discovery(3) D IH S K AH V R IY
 discussion D IH S K AH SH AH N
 disease D IH Z IY Z
 disgust D IH S G AH S T
@@ -875,9 +865,7 @@ eggshell EH G SH EH L
 ego IY G OW
 eight EY T
 eighteen EY T IY N
-eighteen(2) EY T IY N
 eighteenth EY T IY N TH
-eighteenth(2) EY T IY N TH
 eighty EY T IY
 eileen AY L IY N
 elaborated IH L AE B ER EY T AH D
@@ -1042,7 +1030,6 @@ ferguson F ER G AH S AH N
 ferry F EH R IY
 few F Y UW
 fifteen F IH F T IY N
-fifteen(2) F IH F T IY N
 fifth F IH F TH
 fifth(2) F IH TH
 fifty F IH F T IY
@@ -1324,11 +1311,9 @@ helpless HH EH L P L AH S
 helplessly HH EH L P L AH S L IY
 helter-skelter HH EH L T ER S K EH L T ER
 her HH ER
-her(2) HH ER
 here HH IY R
 here's HH IH R Z
 hers HH ER Z
-hers(2) HH ER Z
 herself HH ER S EH L F
 hesitated HH EH Z IH T EY T IH D
 hid HH IH D
@@ -1340,7 +1325,6 @@ him(2) IH M
 himself HH IH M S EH L F
 hip HH IH P
 his HH IH Z
-his(2) HH IH Z
 history HH IH S T ER IY
 history(2) HH IH S T R IY
 hitch HH IH CH
@@ -1416,7 +1400,6 @@ ideals AY D IY L Z
 ideas AY D IY AH Z
 identified AY D EH N T AH F AY D
 if IH F
-if(2) IH F
 ignoring IH G N AO R IH NG
 illuminating IH L UW M AH N EY T IH NG
 illusion IH L UW ZH AH N
@@ -1426,14 +1409,11 @@ immaculate IH M AE K Y UW L IH T
 immersion IH M ER ZH AH N
 immortal IH M AO R T AH L
 import IH M P AO R T
-import(2) IH M P AO R T
 impossible IH M P AA S AH B AH L
 impression IH M P R EH SH AH N
 improvement IH M P R UW V M AH N T
 impulse IH M P AH L S
-impulse(2) IH M P AH L S
 in IH N
-in(2) IH N
 inadequacy IH N AE D IH K W AH S IY
 inch IH N CH
 incident IH N S AH D AH N T
@@ -1461,7 +1441,6 @@ instead IH N S T EH D
 instinct IH N S T IH NG K T
 instituted IH N S T AH T UW T IH D
 insult IH N S AH L T
-insult(2) IH N S AH L T
 intellectual IH N T AH L EH K CH UW AH L
 intellectual(2) IH N AH L EH K CH UW AH L
 intelligent IH N T EH L AH JH AH N T
@@ -1471,8 +1450,7 @@ interrupted IH N T ER AH P T IH D
 interurban IH N T ER ER B AH N
 intervals IH N T ER V AH L Z
 into IH N T UW
-into(2) IH N T UW
-into(3) IH N T AH
+into(2) IH N T AH
 intoxicated IH N T AA K S AH K EY T IH D
 intoxicated(2) IH N T AA K S IH K EY T IH D
 introduced IH N T R AH D UW S T
@@ -1488,7 +1466,6 @@ irritating IH R AH T EY T IH NG
 irritation IH R IH T EY SH AH N
 irvine ER V AY N
 is IH Z
-is(2) IH Z
 isaac AY Z AH K
 isaac(2) AY Z IH K
 island AY L AH N D
@@ -1498,11 +1475,8 @@ issue IH SH UW
 issued IH SH UW D
 it IH T
 it's IH T S
-it's(2) IH T S
-it(2) IH T
 italian IH T AE L Y AH N
 its IH T S
-its(2) IH T S
 itself IH T S EH L F
 ivory AY V ER IY
 ivory(2) AY V R IY
@@ -1926,7 +1900,6 @@ of AH V
 off AO F
 official AH F IH SH AH L
 offset AO F S EH T
-offset(2) AO F S EH T
 often AO F AH N
 often(2) AO F T AH N
 oh OW
@@ -1994,7 +1967,6 @@ overflowing OW V ER F L OW IH NG
 overhead OW V ER HH EH D
 overseer OW V ER S IY ER
 overt OW V ER T
-overt(2) OW V ER T
 overtures OW V ER CH UH R Z
 overwhelmed OW V ER W EH L M D
 overwhelmed(2) OW V ER HH W EH L M D
@@ -2564,7 +2536,6 @@ sir S ER
 sitting S IH T IH NG
 situation S IH CH UW EY SH AH N
 sixteen S IH K S T IY N
-sixteen(2) S IH K S T IY N
 sixth S IH K S TH
 sketch S K EH CH
 sketchy S K EH CH IY
@@ -2614,7 +2585,6 @@ solomon S AA L AH M AH N
 some S AH M
 something S AH M TH IH NG
 sometimes S AH M T AY M Z
-sometimes(2) S AH M T AY M Z
 son S AH N
 soon S UW N
 sooner S UW N ER
@@ -2755,7 +2725,6 @@ surpluses S ER P L AH S IH Z
 surprise S ER P R AY Z
 surprise(2) S AH P R AY Z
 surveyed S ER V EY D
-surveyed(2) S ER V EY D
 suspiciously S AH S P IH SH AH S L IY
 swam S W AE M
 swamp S W AA M P
@@ -2820,8 +2789,7 @@ that's DH AE T S
 that(2) DH AH T
 thaw TH AO
 the DH AH
-the(2) DH AH
-the(3) DH IY
+the(2) DH IY
 thee DH IY
 their DH EH R
 them DH EH M
@@ -2846,7 +2814,6 @@ thirst TH ER S T
 thirty TH ER D IY
 thirty(2) TH ER T IY
 this DH IH S
-this(2) DH IH S
 thorough TH ER OW
 thorough(2) TH AO R OW
 thoroughly TH ER OW L IY
@@ -2965,8 +2932,7 @@ understood AH N D ER S T UH D
 undue AH N D UW
 unexpected AH N IH K S P EH K T IH D
 unfair AH N F EH R
-unfair(2) AH N F EH R
-unfair(3) AO N F EH R
+unfair(2) AO N F EH R
 unfolded AH N F OW L D IH D
 uninteresting AH N IH N T R AH S T IH NG
 united Y UW N AY T IH D
@@ -3158,8 +3124,6 @@ wish W IH SH
 witchcraft W IH CH K R AE F T
 with W IH DH
 with(2) W IH TH
-with(3) W IH TH
-with(4) W IH DH
 withering W IH DH ER IH NG
 within W IH DH IH N
 within(2) W IH TH IH N

@@ -31,9 +31,43 @@ def _pairs(rows: list[list[Any]]) -> dict[str, dict[str, int]]:
     }
 
 
+def _resource_axis(record: dict[str, Any], oracle: dict[str, Any]) -> dict[str, str]:
+    """Refuse to compare two arms that did not consume the same decode resources.
+
+    A paired comparison across two lexicons or two language models measures the
+    resource change as much as the model, so the arms are authenticated here
+    rather than asserted in prose.
+    """
+    axis = {}
+    for field in ("dictionary_sha256", "lm_sha256"):
+        recorded = record["resources"][field]
+        decoded = oracle["resources"][field]
+        if recorded != decoded:
+            raise SystemExit(
+                f"paired analysis arms disagree on {field}: record={recorded}, oracle={decoded}"
+            )
+        axis[field] = recorded
+    stated = oracle["resources"]["record_resources_match"]
+    if stated != {"dictionary": True, "lm": True}:
+        raise SystemExit(
+            f"oracle sidecar does not claim a resource match with the record: {stated}"
+        )
+    return axis
+
+
+def _engines(record: dict[str, Any], oracle: dict[str, Any]) -> dict[str, dict[str, str]]:
+    """Report each arm's engine so a residual engine difference stays visible."""
+    fields = ("version", "git_describe", "native_library_sha256", "pocketsphinx_version")
+    return {
+        "oracle": {field: oracle["engine"][field] for field in fields},
+        "pstrain": {field: record["engine"][field] for field in fields},
+    }
+
+
 def regenerate(record_path: Path, oracle_path: Path) -> str:
     record = json.loads(record_path.read_text(encoding="utf-8"))
     oracle = json.loads(oracle_path.read_text(encoding="utf-8"))
+    resource_axis = _resource_axis(record, oracle)
     bootstrap = record["conditions"]["bootstrap"]
     comparisons = []
     for dataset in ("slt55", "big"):
@@ -71,7 +105,9 @@ def regenerate(record_path: Path, oracle_path: Path) -> str:
             "big_speaker_stratified": bool(bootstrap["big_speaker_stratified"]),
             "bootstrap_resamples": int(bootstrap["resamples"]),
             "bootstrap_seed": int(bootstrap["seed"]),
+            "engines": _engines(record, oracle),
             "paired_delta_path": "pstrain.benchmarks.arctic.paired_delta_ci",
+            "resource_axis": resource_axis,
         },
         "generated_from": {
             "oracle_sidecar": {
@@ -81,7 +117,7 @@ def regenerate(record_path: Path, oracle_path: Path) -> str:
             "record": {"path": "record.json", "sha256": _sha256(record_path)},
         },
         "pstrain_vs_oracle": comparisons,
-        "schema_version": 1,
+        "schema_version": 2,
     }
     return json.dumps(analysis, indent=2, sort_keys=True) + "\n"
 

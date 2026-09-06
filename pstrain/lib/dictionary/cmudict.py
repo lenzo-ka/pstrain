@@ -94,7 +94,7 @@ def strip_stress(phone: str) -> str:
         strip_stress("AE0") -> "AE"
         strip_stress("HH") -> "HH" (no change, consonants don't have stress)
     """
-    return re.sub(r"\d+$", "", phone)
+    return re.sub(r"[012]$", "", phone)
 
 
 def get_stress(phone: str) -> int | None:
@@ -214,7 +214,12 @@ class CMUDict(Dictionary):
 
 
 def strip_dictionary_stress(input_dict: Path, output_dict: Path) -> tuple[int, int]:
-    """Strip stress from dictionary file.
+    """Strip stress, merge duplicate pronunciations, and renumber variants.
+
+    This mirrors CMUdict's PocketSphinx conversion: entries are grouped by
+    their base word, the first occurrence of each distinct stripped
+    pronunciation is retained, and surviving variants are numbered from two.
+    Comments, blank lines, and malformed lines are preserved in file order.
 
     Args:
         input_dict: Input dictionary (with stress)
@@ -223,8 +228,10 @@ def strip_dictionary_stress(input_dict: Path, output_dict: Path) -> tuple[int, i
     Returns:
         Tuple of (entries_processed, unique_phones)
     """
-    entries = []
+    entries: list[str] = []
     phoneset: set[str] = set()
+    pronunciations: dict[str, set[tuple[str, ...]]] = {}
+    variant_counts: dict[str, int] = {}
 
     with input_dict.open(encoding="utf-8") as f:
         for line in f:
@@ -241,12 +248,22 @@ def strip_dictionary_stress(input_dict: Path, output_dict: Path) -> tuple[int, i
                 entries.append(line)
                 continue
 
-            word = parts[0]
+            base_word = re.sub(r"\(\d+\)$", "", parts[0])
             phones = parts[1:]
 
             # Strip stress from phones
             phones_nostress = [strip_stress(p) for p in phones]
             phoneset.update(phones_nostress)
+
+            pronunciation = tuple(phones_nostress)
+            seen = pronunciations.setdefault(base_word, set())
+            if pronunciation in seen:
+                continue
+            seen.add(pronunciation)
+
+            variant_number = variant_counts.get(base_word, 0) + 1
+            variant_counts[base_word] = variant_number
+            word = base_word if variant_number == 1 else f"{base_word}({variant_number})"
 
             # Reconstruct entry
             entries.append(f"{word} {' '.join(phones_nostress)}")

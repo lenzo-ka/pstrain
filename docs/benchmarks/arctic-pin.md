@@ -29,14 +29,24 @@ together with the re-derivation gate described below.
 
 ## Measurement identity
 
-The decode path is a defining condition of this measurement. Audio is decoded
-from WAV through pinned PocketSphinx 5.1.1 using Python 3.12.3 and native
-library SHA-256
-`5ed31754a35151f9c3ff0feed011ee35ee0fe1f4e83d5d3868c50d9e25b89132`.
-The engine is pstrain 0.1.0. Its exact commit and artifact hashes are recorded
-in the machine-readable record. A
-result obtained through another decode path is not the same measurement even
-when the acoustic-model bytes are identical.
+<!-- BEGIN GENERATED MEASUREMENT IDENTITY -->
+The decode path is a defining condition of this measurement. The live cells are decoded
+from WAV through pinned PocketSphinx 5.1.1 using Python 3.12.12, native library SHA-256
+`a2063f71aa11a60620c8736ccc9f9b0cda628455b60b6800f3891382e776b6a1`, and decode
+dictionary SHA-256 `204f36aa9d0ecad1a567f561a85705ecb4289376a7cdd4538c9abba60fd2969c`.
+The engine is pstrain 0.3.0 at `9e1769d`. A result obtained through another decode path
+is not the same measurement even when the acoustic-model bytes are identical.
+
+The retired off-mode cells were not measured on that path. They were decoded by pstrain
+0.1.0 at `740f112` using Python 3.12.12, native library SHA-256
+`6a5da2377c3b2b033b35d93a12a57bb869413bbc98f045d6c3f3652585792be3`, and decode
+dictionary SHA-256 `24ff2852a707b63f499fd968294d5e4c02d44e0eb1ec511e40be1f380d785846`.
+That identity travels with them in the record's `historical_provenance` and is never
+inherited from a later run.
+<!-- END GENERATED MEASUREMENT IDENTITY -->
+
+The complete commit and artifact hashes are in the machine-readable record,
+which is authoritative for both identities.
 
 ## Pin conditions
 
@@ -44,7 +54,7 @@ when the acoustic-model bytes are identical.
 |---|---|
 | Band | BM1 |
 | Language model | SHA-256 `2cf11ab0474a0bdd165cbee59db674b05764fdb00bf6f9824c0dccce571637b5` |
-| Decode dictionary | SHA-256 `24ff2852a707b63f499fd968294d5e4c02d44e0eb1ec511e40be1f380d785846` |
+| Decode dictionary | SHA-256 `204f36aa9d0ecad1a567f561a85705ecb4289376a7cdd4538c9abba60fd2969c` |
 | Filler dictionary | SHA-256 `fb50883998c41a5030c2a602965935c647563321e84a86f2adabb377ec24b49c` |
 | Shared training | 3 states, 200 senones, `a_beam=1e-90`, `b_beam=1e-10`, maximum skip fraction 0.05, retry beam factor `1e10`, tree state weights `[1.0, 0.05, 0.0]`, `ssplitmax=7`, `ssplitthr=0`, `csplitmax=2000`, `csplitthr=0`, `mwfloor=1e-8`, 12 question permutations, 20 questions/state, 1 question iteration |
 | Basis | `MULTIPRON-ONLY`; off cells retained as retired history |
@@ -108,18 +118,32 @@ The bands are paired 95% bootstrap summaries, not iid confidence intervals:
 utterances are clustered by speaker rather than exchangeable independent
 observations. The big cells therefore resample within speaker strata.
 
+<!-- BEGIN GENERATED BASELINE -->
 | Mode | Cell | pstrain WER | Oracle WER | Delta pp | Paired 95% CI | Interpretation |
 |---|---|---:|---:|---:|---:|---|
 | off (retired) | SLT-55 | 28.8499 | 28.8499 | +0.0000 | [-4.7059, +4.7619] | historical only |
-| on | SLT-55 | 26.9006 | 26.9006 | +0.0000 | [-2.5831, +2.5000] | no statistically significant regression |
+| on | SLT-55 | 27.6803 | 28.0702 | -0.3899 | [-3.0075, +1.9763] | no statistically significant difference |
 | off (retired) | big | 76.6393 | 74.7915 | +1.8478 | [+1.3257, +2.3646] | historical only |
-| on | big | 75.2685 | 75.0017 | +0.2668 | [-0.1991, +0.7309] | no statistically significant regression |
+| on | big | 75.2585 | 75.5053 | -0.2468 | [-0.6983, +0.1980] | no statistically significant difference |
 
-The live intervals are generated from the current record and preserved oracle
-rows by `scripts/regenerate_arctic_paired_analysis.py`; they are not
-hand-entered into the machine-readable analysis.
+The live rows come from the record and the resource-matched oracle sidecar through
+`scripts/regenerate_arctic_paired_analysis.py`; the retired rows come from the
+sidecar's preserved historical comparison. Both are regenerated from the checked-in
+artifacts, so an amended measurement cannot leave this table stale.
+<!-- END GENERATED BASELINE -->
+
+The live oracle rows are re-decoded from the preserved upstream model bytes
+whenever the pinned decode resources change, so the two arms of the live
+comparison always consume the same dictionary and language model. The retired
+rows are the preserved historical comparison and are reported on their own
+resources; see [oracle provenance](oracle-provenance.md).
 
 ### Gap composition
+
+This subsection is a retained earlier experiment. Its figures were computed
+against the 2026-08-11 oracle decode and the dictionary of that era, so they
+describe how the gap decomposed then; they are not the live baseline above and
+do not move with it.
 
 Cross-decoding the preserved earlier-era pstrain models through this pin's
 decode path shows that both model instance and decode path contribute. In the
@@ -141,10 +165,15 @@ era-to-era delta movement, and pin retraining supplies a further roughly
 ## Forward gate
 
 Future runs compare matched pairs against the pinned per-utterance rows. The
-acceptance bar is no statistically significant regression. The big-cell gap
-against the preserved upstream models under the modern decoder is an open,
-tracked improvement target; it is part of this documented baseline and is not
-itself a regression.
+acceptance bar is no statistically significant regression. The live cells'
+standing against the preserved upstream models is part of this documented
+baseline and is not itself a regression; the retired cells' larger gap is
+history and is not a target.
+
+Both arms of the live comparison must stay on the same decode resources. When
+the pinned dictionary or language model changes, re-decode the preserved oracle
+models with `scripts/regenerate_arctic_oracle.py` before regenerating the paired
+analysis; `make pin-check` refuses arms that name different resource bytes.
 
 ## Decode-path transport
 

@@ -47,13 +47,14 @@ def resolve_data_dir(*, package_root: Path | None = None, repo_root: Path | None
 
 
 DATA_DIR = resolve_data_dir()
-RECORD_SCHEMA_VERSION = 7
+RECORD_SCHEMA_VERSION = 8
 RECORD_BINDING_ALGORITHM = "sha256-canonical-json-v1"
 RECORD_BINDING_FIELDS = (
     "schema_version",
     "basis",
     "engine",
     "conditions",
+    "historical_provenance",
     "resources",
     "models",
     "results",
@@ -62,6 +63,64 @@ BENCHMARK_BASIS = {
     "name": "MULTIPRON-ONLY",
     "live_cells": ["on/slt55", "on/big"],
     "retired_cells": ["off/slt55", "off/big"],
+}
+# The retired off-mode cells were measured once, by the run recorded below, and
+# have been copied forward byte-for-byte ever since. A record's top-level
+# engine, resources, and models describe the run that produced its live cells
+# only; without this block a regeneration silently re-attributes the retired
+# measurements to whatever engine and resources the newest run happened to use.
+HISTORICAL_PROVENANCE: dict[str, Any] = {
+    "cells": ["off/slt55", "off/big"],
+    "description": (
+        "Producing identity of the retired off-mode cells. They were decoded by "
+        "the PP8 attempt-6 pin run and are not attributable to the engine, "
+        "resources, or models recorded at the top level of this record."
+    ),
+    "engine": {
+        "decode_dictionary_sha256": (
+            "24ff2852a707b63f499fd968294d5e4c02d44e0eb1ec511e40be1f380d785846"
+        ),
+        "git_describe": "740f112",
+        "native_library_sha256": (
+            "6a5da2377c3b2b033b35d93a12a57bb869413bbc98f045d6c3f3652585792be3"
+        ),
+        "pocketsphinx_version": "5.1.1",
+        "python_version": "3.12.12 (main, Jan 18 2026, 13:43:01) [Clang 17.0.0 (clang-1700.6.3.2)]",
+        "tracked_modifications_sha256": (
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        ),
+        "version": "0.1.0",
+    },
+    "models": None,
+    "models_note": (
+        "The producing record carried schema version 3, which recorded no "
+        "acoustic-model identity. No model identity is available for these "
+        "cells and none may be inferred from a later run."
+    ),
+    "resources": {
+        "band": "pin",
+        "dictionary_sha256": "24ff2852a707b63f499fd968294d5e4c02d44e0eb1ec511e40be1f380d785846",
+        "filler_dictionary_sha256": (
+            "fb50883998c41a5030c2a602965935c647563321e84a86f2adabb377ec24b49c"
+        ),
+        "lm_sha256": "2cf11ab0474a0bdd165cbee59db674b05764fdb00bf6f9824c0dccce571637b5",
+        "training_corpus": {
+            "fileids": {
+                "name": "pin-train.fileids",
+                "sha256": "8ce9a55c5929f6f86579ee1b244c38fd4d0a9d41e436e2057337f74c1bb4d631",
+            },
+            "transcription": {
+                "name": "pin-train.transcription",
+                "sha256": "28788cd1ce2269d344b50420d74007fa8c443778680724f6334e2712ea110959",
+            },
+            "utterances": 1043,
+        },
+    },
+    "source_record": {
+        "commit": "6d56a553b4debefa5adffe41511e71aebba81d55",
+        "path": "docs/benchmarks/arctic-pin/record.json",
+        "schema_version": 3,
+    },
 }
 BOOTSTRAP_RESAMPLES = 100_000
 BOOTSTRAP_SEED = 7
@@ -79,7 +138,7 @@ DECODER_CONDITIONS: dict[str, Any] = {
 }
 PINNED_RESOURCE_HASHES = {
     "lm_sha256": "2cf11ab0474a0bdd165cbee59db674b05764fdb00bf6f9824c0dccce571637b5",
-    "dictionary_sha256": "24ff2852a707b63f499fd968294d5e4c02d44e0eb1ec511e40be1f380d785846",
+    "dictionary_sha256": "204f36aa9d0ecad1a567f561a85705ecb4289376a7cdd4538c9abba60fd2969c",
     "filler_dictionary_sha256": "fb50883998c41a5030c2a602965935c647563321e84a86f2adabb377ec24b49c",
 }
 FILLER_DICTIONARY = "<sil> SIL\n<s> SIL\n</s> SIL\n"
@@ -1276,14 +1335,52 @@ def _validate_cell(cell: Any, label: str, *, recorded: bool) -> None:
             raise RuntimeError(f"benchmark actual pairs disagree with aggregates: {label}")
 
 
+def _validate_historical_provenance(record: dict[str, Any]) -> None:
+    """Require the retired cells to keep their own producing identity.
+
+    The retired off-mode measurements outlive every run that regenerates the
+    live cells. Pinning their identity to a constant means a regeneration
+    cannot quietly re-attribute them to the newest engine, dictionary, or
+    language model, and any deliberate change has to be made here and reviewed.
+    """
+    retained = record["historical_provenance"]
+    _require_equal("historical provenance", retained, HISTORICAL_PROVENANCE)
+    declared = sorted(record["basis"]["retired_cells"])
+    if sorted(retained["cells"]) != declared:
+        raise RuntimeError(
+            f"historical provenance covers {sorted(retained['cells'])!r}, "
+            f"but the basis retires {declared!r}"
+        )
+    for label in ("engine.decode_dictionary_sha256", "resources.dictionary_sha256"):
+        section, field = label.split(".")
+        value = retained[section][field]
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+            raise RuntimeError(f"historical provenance {label} is not a SHA-256")
+
+
 def validate_record(record: dict[str, Any]) -> None:
     """Validate the complete, versioned benchmark-record schema."""
     if record.get("schema_version") != RECORD_SCHEMA_VERSION:
         raise RuntimeError(f"unsupported benchmark record schema: {record.get('schema_version')!r}")
-    for field in ("basis", "engine", "conditions", "resources", "models", "results"):
+    for field in (
+        "basis",
+        "engine",
+        "conditions",
+        "historical_provenance",
+        "resources",
+        "models",
+        "results",
+    ):
         if field not in record:
             raise RuntimeError(f"benchmark record missing required field: {field}")
-    for field in ("engine", "conditions", "resources", "models", "results"):
+    for field in (
+        "engine",
+        "conditions",
+        "historical_provenance",
+        "resources",
+        "models",
+        "results",
+    ):
         if not isinstance(record[field], dict):
             raise RuntimeError(f"benchmark record field must be an object: {field}")
     engine = record["engine"]
@@ -1353,6 +1450,7 @@ def validate_record(record: dict[str, Any]) -> None:
             f"off/{dataset} status", off_cells[dataset].get("status"), "retired/historical"
         )
         _validate_cell(off_cells[dataset], f"off/{dataset}", recorded=True)
+    _validate_historical_provenance(record)
     binding = record.get("record_binding")
     expected_binding = {
         "algorithm": RECORD_BINDING_ALGORITHM,
@@ -1562,6 +1660,7 @@ def make_record(
         "basis": BENCHMARK_BASIS,
         "engine": output["engine"],
         "conditions": output["conditions"],
+        "historical_provenance": json.loads(json.dumps(HISTORICAL_PROVENANCE)),
         "resources": output["resources"],
         "models": output["models"],
         "results": record_results,
