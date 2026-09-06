@@ -18,8 +18,10 @@ pstrain rebuilds SphinxTrain with its C core vendored and its orchestration
 reimplemented. On the shared CMU Arctic benchmark, pstrain under its shipped
 defaults except for `split.test_count=0` (including multiple-pronunciation
 training) shows no statistically significant regression on either cell versus
-stock SphinxTrain. On SLT-55, aggregate WER and error count are identical even
-though 26 of 55 per-utterance error rows differ. The
+stock SphinxTrain. On SLT-55, pstrain's favorable point estimate is 142 errors
+(27.6803% WER) versus 144 (28.0702%) for that comparison, with 20 of 55
+per-utterance error rows differing; the 95% paired confidence interval spans
+zero, so this is not a statistically significant difference. The
 [benchmark pin](https://github.com/lenzo-ka/pstrain/blob/main/docs/benchmarks/arctic-pin.md) and its
 [machine-readable record](https://github.com/lenzo-ka/pstrain/blob/main/evidence/arctic-pin/record.json) preserve the
 evidence and measurement conditions. Run `make verified` for the repository's
