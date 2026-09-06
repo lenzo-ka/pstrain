@@ -70,12 +70,14 @@ def create_mdef(
 def create_topology_file(
     n_state: int = 3,
     output_path: Path | None = None,
+    skip_state: bool = False,
 ) -> str:
     """Create topology file for left-to-right HMM.
 
     Args:
         n_state: Number of emitting states per phone
         output_path: If provided, write topology file
+        skip_state: Add state-to-state-plus-two arcs
 
     Returns:
         Topology file content
@@ -88,12 +90,15 @@ def create_topology_file(
 
     lines = ["0.1", str(n_total)]
 
-    # Left-to-right: self-loop (0.75) + forward (0.25) - matches SphinxTrain
-    # SphinxTrain uses 3:1 ratio which normalizes to 0.75:0.25
+    # Match maketopology.pl: raw self/forward/skip weights are 3:1:1 and
+    # each row is normalized after arcs beyond the final state are truncated.
     for i in range(n_state):
         row = ["0.0"] * n_total
-        row[i] = "0.75"  # self-loop
-        row[i + 1] = "0.25"  # forward
+        last_destination = min(i + (2 if skip_state else 1), n_total - 1)
+        weight_sum = 3 + last_destination - i
+        row[i] = str(3 / weight_sum)
+        for destination in range(i + 1, last_destination + 1):
+            row[destination] = str(1 / weight_sum)
         lines.append(" ".join(row))
 
     content = "\n".join(lines) + "\n"
@@ -286,6 +291,7 @@ def init_flat_model(
     feat_type: str = "1s_c_d_dd",
     ceplen: int = 13,
     max_skip_fraction: float = 0.05,
+    skip_state: bool = False,
 ) -> dict[str, Path]:
     """Initialize a complete flat model.
 
@@ -302,6 +308,7 @@ def init_flat_model(
         cep_ext: Feature file extension
         feat_type: Feature type string
         ceplen: Cepstral dimension
+        skip_state: Add state-to-state-plus-two transition arcs
 
     Returns:
         Dict mapping file type to path
@@ -315,7 +322,7 @@ def init_flat_model(
 
     # Create topology file
     topo_path = output_dir / "topo"
-    create_topology_file(n_state, topo_path)
+    create_topology_file(n_state, topo_path, skip_state=skip_state)
 
     # Create transition matrices via CFFI
     tmat_path = output_dir / "transition_matrices"

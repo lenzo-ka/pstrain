@@ -281,6 +281,11 @@ training
    :Default: ``10000000000.0``
    :Description: Factor that widens the forward beam for one retry after an utterance fails to reach its final state; a retry is counted only when that second attempt runs
 
+``training.skip_state``
+   :Type: ``bool``
+   :Default: ``False``
+   :Description: Enable SphinxTrain's $CFG_SKIPSTATE topology, adding an arc from each eligible emitting state to the state two positions ahead so a phone can be realized with fewer frames than states. SphinxTrain writes raw 3/1/1 weights and normalizes them on read; pstrain writes the behaviorally equivalent normalized values
+
 ``training.tied.convergence_ratio``
    :Type: ``float``
    :Default: ``0.001``

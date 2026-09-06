@@ -262,6 +262,7 @@ def _make_flat_task(ctx: PipelineContext) -> Task:
             out_dir,
             n_density=1,
             n_state=ctx.train.n_state,
+            skip_state=ctx.train.skip_state,
             ctl_path=train_fileids,
             cep_dir=ctx.features_dir,
             cep_ext=".mfc",

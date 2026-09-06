@@ -92,6 +92,18 @@ class TrainingConfig(StrictModel):
     """Acoustic-model training parameters."""
 
     n_state: Annotated[int, Field(ge=1, description="Emitting states per HMM")] = 3
+    skip_state: Annotated[
+        bool,
+        Field(
+            description=(
+                "Enable SphinxTrain's $CFG_SKIPSTATE topology, adding an arc from each "
+                "eligible emitting state to the state two positions ahead so a phone can be "
+                "realized with fewer frames than states. SphinxTrain writes raw 3/1/1 "
+                "weights and normalizes them on read; pstrain writes the behaviorally "
+                "equivalent normalized values"
+            )
+        ),
+    ] = False
     n_senones: Annotated[int, Field(ge=1, description="Target tied-state count")] = 200
     a_beam: Annotated[float, Field(gt=0, description="Forward alignment beam")] = 1e-90
     b_beam: Annotated[float, Field(gt=0, description="Backward alignment beam")] = 1e-10

@@ -27,6 +27,30 @@ def test_bw_iteration_checkpoints_are_off_by_default() -> None:
     assert TrainingConfig().bw_checkpoint_iterations is False
 
 
+def test_skip_state_round_trips_and_appears_in_reference(tmp_path: Path) -> None:
+    (tmp_path / "etc").mkdir()
+    (tmp_path / "etc" / "config.yaml").write_text(
+        "config_version: 1\ntraining:\n  skip_state: true\n"
+    )
+
+    resolved = resolve_config(tmp_path, user_config_path=tmp_path / "absent-user.yaml")
+    assert resolved.profile.training.skip_state is True
+    assert resolved.as_dict()["training"]["skip_state"] is True
+    reference = (Path(__file__).parents[1] / "docs/api/config-reference.rst").read_text()
+    assert "training.skip_state" in reference
+    assert "$CFG_SKIPSTATE" in reference
+
+
+def test_sphinxtrain_profile_explicitly_disables_skip_state(tmp_path: Path) -> None:
+    resolved = resolve_config(
+        Path(__file__).parents[1],
+        profile_name="sphinxtrain",
+        user_config_path=tmp_path / "absent-user.yaml",
+    )
+    assert resolved.profile.training.skip_state is False
+    assert resolved.fields["training.skip_state"].winner.source_kind == "project-profile"
+
+
 def test_tree_semantic_fixes_are_on_by_default() -> None:
     training = TrainingConfig()
     assert training.tree_rotate_state_weights is True

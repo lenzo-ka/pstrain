@@ -100,6 +100,7 @@ CONSUMERS: dict[str, tuple[str, str]] = {
     "features.varnorm": ("pipeline.features", "features"),
     "features.feat_type": ("pipeline.features", "features"),
     "training.n_state": ("pipeline.training", "training"),
+    "training.skip_state": ("pipeline.training", "training"),
     "training.n_senones": ("pipeline.training", "training"),
     "training.a_beam": ("pipeline.training", "training"),
     "training.b_beam": ("pipeline.training", "training"),
@@ -177,6 +178,7 @@ CONSUMER_TOUCHES: dict[str, str] = {
         path: f"train.{path.removeprefix('training.')}"
         for path in (
             "training.n_state",
+            "training.skip_state",
             "training.n_senones",
             "training.a_beam",
             "training.b_beam",
