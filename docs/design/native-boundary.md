@@ -52,8 +52,10 @@ The remaining one-shot wrappers use the generic `python_call` route. Stateful
 BW, alignment and logmath objects live in the helper and are addressed through
 opaque object handles. Raw model I/O is exposed only through coarse complete
 read/write operations, and feature extraction through its complete operation;
-raw C pointers never cross the process boundary. Direct access through the
-private `_pstrainc` implementation module is not a supported public operation.
+raw C pointers never cross the process boundary. The documented
+`pstrain.lib._pstrainc.LogMath` wrapper is supported; direct access to raw
+library handles or symbols through the otherwise private `_pstrainc` module is
+not a supported public operation.
 
 ## Complete-model value validation
 

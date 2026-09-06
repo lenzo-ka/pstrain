@@ -3,8 +3,9 @@ Library API
 
 Core library functionality.
 
-The ``pstrain.api`` module is the recommended public API. It re-exports all
-functions from ``pstrain.lib`` and adds step functions for training workflows.
+The ``pstrain.api`` module is the recommended public API. It re-exports most of
+``pstrain.lib`` and adds higher-level entry points; the modules are not
+interchangeable.
 
 Public API
 ----------
@@ -80,12 +81,14 @@ not, and what each exception means.
    :undoc-members:
    :show-inheritance:
 
-Low-level C Bindings
---------------------
+Guarded Logmath Wrapper
+-----------------------
 
-For advanced users who need direct access to C functions:
+``LogMath`` is the supported wrapper for native log-domain arithmetic. Other
+contents of the private ``_pstrainc`` module, including raw library handles and
+symbols, are implementation details and are not supported application APIs.
 
 .. automodule:: pstrain.lib._pstrainc
-   :members:
+   :members: LogMath
    :undoc-members:
    :show-inheritance:

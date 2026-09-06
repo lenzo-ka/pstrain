@@ -59,6 +59,14 @@ def test_sidecar_check_rejects_a_false_resource_match(field: str) -> None:
         _script("regenerate_arctic_oracle").verify_sidecar(oracle, record)
 
 
+def test_sidecar_check_rejects_a_false_comparability_classification() -> None:
+    record, oracle = _artifacts()
+    oracle["pstrain_vs_oracle"][0]["comparability"]["paired_decode"]["status"] = "NOT COMPARABLE"
+
+    with pytest.raises(SystemExit, match="invalid comparability"):
+        _script("regenerate_arctic_oracle").verify_sidecar(oracle, record)
+
+
 def test_front_end_control_digests_recompute_from_the_emitted_rows() -> None:
     _, oracle = _artifacts()
     module = _script("regenerate_arctic_oracle")
@@ -274,3 +282,13 @@ def test_paired_analysis_matches_its_generated_form() -> None:
     rendered = module.regenerate(EVIDENCE / "record.json", EVIDENCE / "oracle-sidecar.json")
 
     assert rendered == (EVIDENCE / "paired-analysis.json").read_text()
+
+
+def test_paired_analysis_rejects_a_false_comparability_classification() -> None:
+    analysis = json.loads((EVIDENCE / "paired-analysis.json").read_text())
+    analysis["pstrain_vs_oracle"][0]["comparability"]["implementation_attribution"]["status"] = (
+        "COMPARABLE"
+    )
+
+    with pytest.raises(SystemExit, match="invalid comparability"):
+        _script("regenerate_arctic_paired_analysis").validate_analysis(analysis)

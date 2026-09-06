@@ -2,8 +2,8 @@
 
 Basic usage examples.
 
-> **Note**: `pstrain.api` is the recommended public API. `pstrain.lib` provides the same
-> functions and can be used interchangeably.
+> **Note**: `pstrain.api` is the recommended public API. It re-exports most of
+> `pstrain.lib` and adds higher-level entry points; the modules are not interchangeable.
 
 ## Project Setup
 
@@ -30,12 +30,10 @@ from pstrain.api import validate_project
 from pathlib import Path
 
 # Validate a project
-errors = validate_project(Path("my_project"))
+report = validate_project(Path("my_project"))
 
-if errors:
-    print("Validation errors:")
-    for error in errors:
-        print(f"  - {error}")
+if not report.is_valid:
+    print(report.summary())
 else:
     print("Project is valid!")
 ```
@@ -59,7 +57,7 @@ print(f"HMM directory: {hmm_dir}")
 
 # Get default training parameters
 params = model.get_default_training_params()
-print(f"Default max_iterations: {params['max_iterations']}")
+print(f"Save alignments: {params['save_alignments']}")
 ```
 
 ## Data Structures
@@ -82,18 +80,23 @@ fileids = get_fileids(Path("etc/all.transcription"))
 print(f"Found {len(fileids)} fileids")
 ```
 
-## Low-level C Bindings
+## Log-domain Math
 
-For advanced users who need direct access to C functions:
+Use the guarded wrapper for native log-domain arithmetic. Raw library handles
+and symbols in the private `_pstrainc` module are implementation details.
 
 ```python
-from pstrain.lib._pstrainc import get_lib, get_ffi
+from pstrain.lib._pstrainc import LogMath
 
-lib = get_lib()
-ffi = get_ffi()
 
-# Use C functions directly
-logmath = lib.logmath_init(1.0001, 0, 0)
-result = lib.logmath_log(logmath, 2.0)
-lib.logmath_free(logmath)
+def main():
+    logmath = LogMath(base=1.0001)
+    log_probability = logmath.log(0.5)
+    print(logmath.exp(log_probability))
+    print(logmath.add(log_probability, log_probability))
+    print(logmath.get_base())
+
+
+if __name__ == "__main__":
+    main()
 ```

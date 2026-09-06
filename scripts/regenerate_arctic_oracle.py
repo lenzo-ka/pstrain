@@ -41,6 +41,7 @@ from pstrain.benchmarks.arctic import (  # noqa: E402
     DATA_DIR,
     FILLER_DICTIONARY,
     band_resources,
+    comparison_comparability,
     engine_identity,
     extract_archive,
     load_transcripts,
@@ -53,7 +54,7 @@ from pstrain.benchmarks.arctic import (  # noqa: E402
 DEFAULT_RECORD = ROOT / "evidence/arctic-pin/record.json"
 DEFAULT_SIDECAR = ROOT / "evidence/arctic-pin/oracle-sidecar.json"
 DEFAULT_WORK_DIR = Path.home() / ".cache" / "pstrain" / "oracle"
-SIDECAR_SCHEMA_VERSION = 2
+SIDECAR_SCHEMA_VERSION = 3
 LIVE_MODE = "on"
 RETIRED_MODE = "off"
 DATASETS = ("slt55", "big")
@@ -328,10 +329,27 @@ def _verify_historical_control(sidecar: dict[str, Any], record: dict[str, Any]) 
             )
 
 
-def verify_sidecar(sidecar: dict[str, Any], record: dict[str, Any]) -> None:
+def verify_sidecar(
+    sidecar: dict[str, Any], record: dict[str, Any], *, allow_schema_2: bool = False
+) -> None:
     """Refuse a sidecar that misstates its resource axis or either control."""
-    if sidecar.get("schema_version") != SIDECAR_SCHEMA_VERSION:
+    accepted_schema = (2, SIDECAR_SCHEMA_VERSION) if allow_schema_2 else (SIDECAR_SCHEMA_VERSION,)
+    if sidecar.get("schema_version") not in accepted_schema:
         raise SystemExit(f"unsupported oracle sidecar schema: {sidecar.get('schema_version')!r}")
+    if not allow_schema_2 or sidecar.get("schema_version") == SIDECAR_SCHEMA_VERSION:
+        verdicts = sidecar.get("pstrain_vs_oracle")
+        if not isinstance(verdicts, list) or {
+            (verdict.get("mode"), verdict.get("dataset"))
+            for verdict in verdicts
+            if isinstance(verdict, dict)
+        } != {(mode, dataset) for mode in (RETIRED_MODE, LIVE_MODE) for dataset in DATASETS}:
+            raise SystemExit("oracle sidecar must classify all four comparison cells")
+        for verdict in verdicts:
+            mode = verdict.get("mode")
+            if verdict.get("comparability") != comparison_comparability(mode):
+                raise SystemExit(
+                    f"oracle sidecar has invalid comparability for {mode}/{verdict.get('dataset')}"
+                )
     resources = sidecar["resources"]
     expected = {
         "dictionary": resources["dictionary_sha256"] == record["resources"]["dictionary_sha256"],
@@ -601,7 +619,9 @@ def regenerate(
 
     results = {RETIRED_MODE: previous["results"][RETIRED_MODE], LIVE_MODE: live}
     verdicts = [
-        verdict for verdict in previous["pstrain_vs_oracle"] if verdict["mode"] == RETIRED_MODE
+        {**verdict, "comparability": comparison_comparability(RETIRED_MODE)}
+        for verdict in previous["pstrain_vs_oracle"]
+        if verdict["mode"] == RETIRED_MODE
     ]
     for dataset in DATASETS:
         cell = live[dataset]
@@ -619,6 +639,7 @@ def regenerate(
         )
         verdicts.append(
             {
+                "comparability": comparison_comparability(LIVE_MODE),
                 "dataset": dataset,
                 "mode": LIVE_MODE,
                 "oracle_wer": cell["wer"],
@@ -678,6 +699,11 @@ def main() -> None:
     parser.add_argument("--work-dir", type=Path, default=DEFAULT_WORK_DIR)
     parser.add_argument("--historical-dictionary", type=Path, default=None)
     parser.add_argument(
+        "--adopt-comparability",
+        action="store_true",
+        help="upgrade a schema-2 sidecar with schema-owned per-cell comparability",
+    )
+    parser.add_argument(
         "--cache", type=Path, default=Path.home() / ".cache" / "pstrain" / "benchmarks"
     )
     parser.add_argument(
@@ -686,6 +712,21 @@ def main() -> None:
         help="authenticate the checked-in sidecar's resource axis and controls without decoding",
     )
     args = parser.parse_args()
+    if args.adopt_comparability:
+        sidecar = json.loads(args.sidecar.read_text(encoding="utf-8"))
+        record = json.loads(args.record.read_text(encoding="utf-8"))
+        if sidecar.get("schema_version") != 2:
+            raise SystemExit("comparability adoption requires a schema-2 oracle sidecar")
+        verify_sidecar(sidecar, record, allow_schema_2=True)
+        sidecar["schema_version"] = SIDECAR_SCHEMA_VERSION
+        for verdict in sidecar["pstrain_vs_oracle"]:
+            verdict["comparability"] = comparison_comparability(verdict["mode"])
+        verify_sidecar(sidecar, record)
+        args.output.write_text(
+            json.dumps(sidecar, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        print(f"adopted schema-owned comparability in {args.output}")
+        return
     if args.check:
         verify_sidecar(
             json.loads(args.sidecar.read_text(encoding="utf-8")),

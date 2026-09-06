@@ -13,11 +13,16 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pstrain.benchmarks.arctic import paired_delta_ci  # noqa: E402
+from pstrain.benchmarks.arctic import (  # noqa: E402
+    comparison_comparability,
+    paired_delta_ci,
+    validate_record,
+)
 
 DEFAULT_RECORD = ROOT / "evidence/arctic-pin/record.json"
 DEFAULT_ORACLE = ROOT / "evidence/arctic-pin/oracle-sidecar.json"
 DEFAULT_OUTPUT = ROOT / "evidence/arctic-pin/paired-analysis.json"
+PAIRED_ANALYSIS_SCHEMA_VERSION = 3
 
 
 def _sha256(path: Path) -> str:
@@ -64,9 +69,28 @@ def _engines(record: dict[str, Any], oracle: dict[str, Any]) -> dict[str, dict[s
     }
 
 
+def validate_analysis(analysis: dict[str, Any]) -> None:
+    """Validate the generated paired-analysis schema and comparability classification."""
+    if analysis.get("schema_version") != PAIRED_ANALYSIS_SCHEMA_VERSION:
+        raise SystemExit(f"unsupported paired-analysis schema: {analysis.get('schema_version')!r}")
+    comparisons = analysis.get("pstrain_vs_oracle")
+    if not isinstance(comparisons, list) or {
+        row.get("dataset") for row in comparisons if isinstance(row, dict)
+    } != {"slt55", "big"}:
+        raise SystemExit("paired analysis must contain both live comparison cells")
+    for row in comparisons:
+        if not isinstance(row, dict) or row.get("mode") != "on":
+            raise SystemExit("paired analysis contains an invalid comparison cell")
+        if row.get("comparability") != comparison_comparability("on"):
+            raise SystemExit(
+                f"paired analysis has invalid comparability for on/{row.get('dataset')}"
+            )
+
+
 def regenerate(record_path: Path, oracle_path: Path) -> str:
     record = json.loads(record_path.read_text(encoding="utf-8"))
     oracle = json.loads(oracle_path.read_text(encoding="utf-8"))
+    validate_record(record)
     resource_axis = _resource_axis(record, oracle)
     bootstrap = record["conditions"]["bootstrap"]
     comparisons = []
@@ -77,6 +101,7 @@ def regenerate(record_path: Path, oracle_path: Path) -> str:
         upstream_rows = _pairs(upstream["utterance_rows"])
         comparisons.append(
             {
+                "comparability": comparison_comparability("on"),
                 "dataset": dataset,
                 "mode": "on",
                 "oracle_errors": upstream["errors"],
@@ -117,8 +142,9 @@ def regenerate(record_path: Path, oracle_path: Path) -> str:
             "record": {"path": "record.json", "sha256": _sha256(record_path)},
         },
         "pstrain_vs_oracle": comparisons,
-        "schema_version": 2,
+        "schema_version": PAIRED_ANALYSIS_SCHEMA_VERSION,
     }
+    validate_analysis(analysis)
     return json.dumps(analysis, indent=2, sort_keys=True) + "\n"
 
 

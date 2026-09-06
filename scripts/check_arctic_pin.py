@@ -12,10 +12,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from pstrain.benchmarks.arctic import (  # noqa: E402
+    RECORD_BINDING_FIELDS,
     adopt_uncovered_conditions,
     authenticate_conditions,
     benchmark_conditions,
     bind_record,
+    comparison_comparability,
+    record_binding_sha256,
     resolved_configuration_provenance,
     validate_record,
 )
@@ -26,6 +29,11 @@ DEFAULT_RECORD = ROOT / "evidence/arctic-pin/record.json"
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--record", type=Path, default=DEFAULT_RECORD)
+    parser.add_argument(
+        "--adopt-comparability",
+        action="store_true",
+        help="upgrade a schema-8 record with schema-owned per-cell comparability",
+    )
     parser.add_argument(
         "--adopt-uncovered",
         action="store_true",
@@ -39,6 +47,28 @@ def main() -> int:
     )
     args = parser.parse_args()
     record = json.loads(args.record.read_text(encoding="utf-8"))
+    if args.adopt_comparability:
+        if record.get("schema_version") != 8:
+            raise RuntimeError("comparability adoption requires a schema-8 record")
+        binding = record.get("record_binding")
+        expected = {
+            "algorithm": "sha256-canonical-json-v1",
+            "fields": list(RECORD_BINDING_FIELDS),
+            "sha256": record_binding_sha256(record),
+        }
+        if binding != expected:
+            raise RuntimeError("record consistency digest mismatch before comparability adoption")
+        record["schema_version"] = 9
+        for mode, cells in record["results"].items():
+            for cell in cells.values():
+                cell["comparability"] = comparison_comparability(mode)
+        bind_record(record)
+        validate_record(record)
+        args.record.write_text(
+            json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        print("adopted schema-owned Arctic comparability classifications")
+        return 0
     if args.adopt_record:
         candidate = json.loads(args.adopt_record.read_text(encoding="utf-8"))
         validate_record(candidate)

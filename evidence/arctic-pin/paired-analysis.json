@@ -26,15 +26,29 @@
   "generated_from": {
     "oracle_sidecar": {
       "path": "oracle-sidecar.json",
-      "sha256": "af749db8748e01bbfbd71b29e6906641e08f634887d064229dbaf5e28f759c37"
+      "sha256": "5d3ecfb8e3c692789d92c8458fd21aacf65c563543cd81955ff337fd0b4b2989"
     },
     "record": {
       "path": "record.json",
-      "sha256": "20959d8b32c53f38c8fc8215a21d2146c2ed95248d5199ba0967b936eb0dacf4"
+      "sha256": "9bb96e62e1af86852a14e9ae896bfa72b9111c6cd2381bab01cb62d851d050f0"
     }
   },
   "pstrain_vs_oracle": [
     {
+      "comparability": {
+        "implementation_attribution": {
+          "basis": "oracle model producing host, architecture, source revision, build, training configuration, inputs, and full lineage are unknown",
+          "status": "NOT COMPARABLE"
+        },
+        "live_pin": {
+          "basis": "cell is measured on the live pin path",
+          "status": "COMPARABLE"
+        },
+        "paired_decode": {
+          "basis": "both fixed model artifacts use identical utterances and references through one current engine, dictionary, language model, decoder configuration, and scoring path",
+          "status": "COMPARABLE"
+        }
+      },
       "dataset": "slt55",
       "mode": "on",
       "oracle_errors": 144,
@@ -50,6 +64,20 @@
       "ref_words": 513
     },
     {
+      "comparability": {
+        "implementation_attribution": {
+          "basis": "oracle model producing host, architecture, source revision, build, training configuration, inputs, and full lineage are unknown",
+          "status": "NOT COMPARABLE"
+        },
+        "live_pin": {
+          "basis": "cell is measured on the live pin path",
+          "status": "COMPARABLE"
+        },
+        "paired_decode": {
+          "basis": "both fixed model artifacts use identical utterances and references through one current engine, dictionary, language model, decoder configuration, and scoring path",
+          "status": "COMPARABLE"
+        }
+      },
       "dataset": "big",
       "mode": "on",
       "oracle_errors": 22638,
@@ -65,5 +93,5 @@
       "ref_words": 29982
     }
   ],
-  "schema_version": 2
+  "schema_version": 3
 }

@@ -337,7 +337,14 @@ def _identity_block(record: Mapping[str, object]) -> list[str]:
     ]
 
 
-def _row(mode: str, dataset: str, pstrain: float, oracle: float, interval: Sequence[float]) -> str:
+def _row(
+    mode: str,
+    dataset: str,
+    pstrain: float,
+    oracle: float,
+    interval: Sequence[float],
+    comparability: Mapping[str, object],
+) -> str:
     delta = pstrain - oracle
     if mode == "off":
         interpretation = "historical only"
@@ -350,9 +357,21 @@ def _row(mode: str, dataset: str, pstrain: float, oracle: float, interval: Seque
         # improvement. The column must not let a negative delta read as one.
         interpretation = "no statistically significant difference"
     label = "off (retired)" if mode == "off" else mode
+    paired_axis = comparability.get("paired_decode")
+    attribution_axis = comparability.get("implementation_attribution")
+    if not isinstance(paired_axis, Mapping) or not isinstance(attribution_axis, Mapping):
+        raise ValueError("Arctic comparison has invalid comparability axes")
+    paired_decode = paired_axis.get("status")
+    attribution = attribution_axis.get("status")
+    if paired_decode not in ("COMPARABLE", "NOT COMPARABLE") or attribution not in (
+        "COMPARABLE",
+        "NOT COMPARABLE",
+    ):
+        raise ValueError("Arctic comparison has invalid comparability status")
     return (
         f"| {label} | {_CELL_NAMES[dataset]} | {pstrain:.4f} | {oracle:.4f} | {delta:+.4f} "
-        f"| [{interval[0]:+.4f}, {interval[1]:+.4f}] | {interpretation} |"
+        f"| [{interval[0]:+.4f}, {interval[1]:+.4f}] | {paired_decode} "
+        f"| {attribution} | {interpretation} |"
     )
 
 
@@ -391,6 +410,7 @@ def _baseline_block(
                 float(results["off"][dataset]["wer"]),
                 float(oracle_results["off"][dataset]["wer"]),
                 verdict["paired_ci_95_pp"],
+                verdict["comparability"],
             )
         )
         comparison = live[("on", dataset)]
@@ -401,11 +421,13 @@ def _baseline_block(
                 float(comparison["pstrain_wer"]),
                 float(comparison["oracle_wer"]),
                 comparison["paired_ci_95_pp"],
+                comparison["comparability"],
             )
         )
     return [
-        "| Mode | Cell | pstrain WER | Oracle WER | Delta pp | Paired 95% CI | Interpretation |",
-        "|---|---|---:|---:|---:|---:|---|",
+        "| Mode | Cell | pstrain WER | Oracle WER | Delta pp | Paired 95% CI "
+        "| Paired decode | Implementation attribution | Interpretation |",
+        "|---|---|---:|---:|---:|---:|---|---|---|",
         *rows,
         "",
         "The live rows come from the record and the resource-matched oracle sidecar through",
