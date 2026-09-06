@@ -788,6 +788,7 @@ def _make_package_task(
         pkg_dir / "acoustic" / "mixture_weights",
         pkg_dir / "acoustic" / "transition_matrices",
         pkg_dir / "acoustic" / "noisedict",
+        pkg_dir / "pstrain-package.json",
         pkg_dir / "README.txt",
         pkg_dir / "provenance.json",
     )

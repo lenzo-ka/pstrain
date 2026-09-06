@@ -6,6 +6,7 @@ Sphinx3, and other Sphinx-based decoders.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
@@ -17,6 +18,9 @@ from pstrain.lib.model import MODEL_FILES_REQUIRED, require_complete_model
 logger = logging.getLogger(__name__)
 
 __all__ = ["package_model", "create_noisedict"]
+
+PACKAGE_MANIFEST_NAME = "pstrain-package.json"
+PACKAGE_FORMAT_VERSION = 1
 
 
 def create_noisedict(
@@ -129,6 +133,7 @@ def package_model(
             generated_names = ["acoustic", "README.txt"]
             if include_dict:
                 generated_names.insert(1, "dict")
+            generated_names.append(PACKAGE_MANIFEST_NAME)
             _replace_paths([(staging_dir / name, package_dir / name) for name in generated_names])
     finally:
         shutil.rmtree(staging_dir, ignore_errors=True)
@@ -192,9 +197,26 @@ def _build_package(
             result["filler_dict"] = final_dict_dir / filler_dst.name
             logger.debug("Copied filler dict: %s", filler_dst)
 
+    manifest_path = staging_dir / PACKAGE_MANIFEST_NAME
+    manifest_path.write_text(
+        json.dumps(
+            {"format_version": PACKAGE_FORMAT_VERSION, "generator": "pstrain"},
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    result["manifest"] = package_dir / PACKAGE_MANIFEST_NAME
+
     # Create README
     readme_path = staging_dir / "README.txt"
-    _create_readme(readme_path, model_name)
+    _create_readme(
+        readme_path,
+        model_name,
+        include_dictionary=include_dict and bool(dictionary_path and dictionary_path.exists()),
+        include_filler=include_dict and bool(filler_dict_path and filler_dict_path.exists()),
+    )
     result["readme"] = package_dir / readme_path.name
 
     return result
@@ -278,8 +300,26 @@ def _remove_backup(backup_path: Path) -> None:
 def _create_readme(
     output_path: Path,
     model_name: str | None,
+    *,
+    include_dictionary: bool,
+    include_filler: bool,
 ) -> None:
     """Create README file for the model package."""
+    model_path = model_name or "model"
+    dictionary_structure = ""
+    dictionary_path = "/path/to/dictionary.dict"
+    if include_dictionary or include_filler:
+        dictionary_structure = "\ndict/           - Dictionary files included in this package\n"
+        if include_dictionary:
+            dictionary_structure += "  cmudict.dict  - Pronunciation dictionary\n"
+            dictionary_path = f"{model_path}/dict/cmudict.dict"
+        if include_filler:
+            dictionary_structure += "  filler.dict   - Filler word dictionary\n"
+    dictionary_note = ""
+    if not include_dictionary:
+        dictionary_note = (
+            "\nA pronunciation dictionary is not included; supply one when decoding.\n"
+        )
     content = f"""pstrain Acoustic Model Package
 ==========================
 
@@ -288,6 +328,7 @@ Generator: pstrain (SphinxTrain 2)
 
 Directory Structure
 -------------------
+pstrain-package.json - pstrain package marker and format version
 acoustic/       - Acoustic model files for Sphinx decoders
   feat.params   - Feature extraction parameters
   mdef          - Model definition (phones, states, triphones)
@@ -297,9 +338,7 @@ acoustic/       - Acoustic model files for Sphinx decoders
   transition_matrices - Raw HMM transition accumulators (normalized on load)
   noisedict     - Filler/noise dictionary for decoding
 
-dict/           - Dictionary files
-  cmudict.dict  - Pronunciation dictionary
-  filler.dict   - Filler word dictionary
+{dictionary_structure}{dictionary_note}
 
 Usage with PocketSphinx
 -----------------------
@@ -307,13 +346,13 @@ Python:
     from pocketsphinx import Decoder
 
     config = Decoder.default_config()
-    config.set_string('-hmm', '/path/to/{model_name or "model"}/acoustic')
-    config.set_string('-dict', '/path/to/{model_name or "model"}/dict/cmudict.dict')
+    config.set_string('-hmm', '/path/to/{model_path}/acoustic')
+    config.set_string('-dict', '{dictionary_path}')
     decoder = Decoder(config)
 
 Command line:
-    pocketsphinx -hmm {model_name or "model"}/acoustic \\
-                 -dict {model_name or "model"}/dict/cmudict.dict \\
+    pocketsphinx -hmm {model_path}/acoustic \\
+                 -dict {dictionary_path} \\
                  -infile audio.wav
 
 Feature Parameters

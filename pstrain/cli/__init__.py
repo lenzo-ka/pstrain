@@ -7,6 +7,7 @@ The CLI provides commands for the complete acoustic model training workflow:
 - ``pstrain features`` - Extract acoustic features
 - ``pstrain flat`` - Initialize flat HMM models
 - ``pstrain build`` - Build a model target (e.g. ci-1g, cd-8g)
+- ``pstrain package`` - Package a trained model for distribution
 - ``pstrain clean`` - Clean training outputs
 - ``pstrain config`` - Manage configuration
 - ``pstrain step`` - Run numbered training steps

@@ -35,6 +35,7 @@ def main() -> int:
     from pstrain.cli.features import features_command
     from pstrain.cli.flat import flat_command
     from pstrain.cli.info import info_command
+    from pstrain.cli.package import package_command
     from pstrain.cli.setup import setup_command
     from pstrain.cli.split import split_command
     from pstrain.cli.step import register_step_command
@@ -53,6 +54,7 @@ def main() -> int:
         clean_command,
         validate_command,
         test_command,
+        package_command,
         align_command,
         info_command,
         compare_command,
