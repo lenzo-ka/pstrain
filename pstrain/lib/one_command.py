@@ -16,8 +16,13 @@ from pathlib import Path, PurePosixPath
 from pstrain.lib.dictionary import Dictionary
 from pstrain.lib.phoneset import Phoneset
 
-PROMPT_FORMATS = ("auto", "leading-id", "sphinx", "tsv", "csv")
+PROMPT_FORMATS = ("auto", "leading-id", "sphinx", "tsv", "csv", "festival")
 _SPHINX_RE = re.compile(r"^<s>\s+(.*?)\s+</s>\s+\(([^)]+)\)\s*$")
+_FESTIVAL_RE = re.compile(r'^\(\s*(\S+)\s+("(?:[^"\\]|\\.)*")\s*\)$')
+_MALFORMED_FESTIVAL_RE = re.compile(r"^\(\s+")
+_IMMEDIATE_TAB_FESTIVAL_RE = re.compile(r"^\(\t")
+_FESTIVAL_QUOTED_PREFIX_RE = re.compile(r'^\([^\s)]+\s+"')
+_AMBIGUOUS_PARENTHESIZED_RE = re.compile(r"^\([^\s)]+\s+.*\s+\)$")
 
 
 class PromptFormatError(ValueError):
@@ -66,7 +71,31 @@ def detect_prompt_format(path: Path) -> str:
     if not lines:
         raise PromptFormatError(f"Prompt file is empty: {path}")
     values = [line for _, line in lines]
+
+    # This cascade order is load-bearing. Complete Sphinx wrappers come first;
+    # immediate `(\t` is ambiguous between malformed Festival and valid TSV,
+    # while any other tab enters TSV detection. Complete Festival must precede
+    # generic Sphinx-token checks so quoted text stays opaque. Quoted Festival
+    # prefixes are safe to claim, but whitespace-free missing opening quotes
+    # overlap leading-id and are reported as ambiguous, not guessed. Known limit:
+    # a compact Festival record with exactly one tab is also syntactically TSV;
+    # it receives TSV precedence when every line has one tab, while a mixed file
+    # raises Ambiguous TSV. Selecting Festival explicitly resolves either case.
     sphinx = [_SPHINX_RE.fullmatch(line) is not None for line in values]
+    if all(sphinx):
+        return "sphinx"
+    if any(_IMMEDIATE_TAB_FESTIVAL_RE.match(line) for line in values):
+        raise PromptFormatError(
+            "Ambiguous prompt could be Festival or TSV format; "
+            "pass --prompt-format festival or tsv explicitly"
+        )
+    if any("\t" in line for line in values):
+        if not all(line.count("\t") == 1 for line in values):
+            raise PromptFormatError("Ambiguous TSV prompts; pass --prompt-format explicitly")
+        return "tsv"
+    festival = [_FESTIVAL_RE.fullmatch(line) is not None for line in values]
+    if all(festival):
+        return "festival"
     if any(sphinx):
         raise PromptFormatError(
             "Ambiguous Sphinx-form prompts; pass --prompt-format sphinx explicitly"
@@ -76,10 +105,10 @@ def detect_prompt_format(path: Path) -> str:
             "Ambiguous prompts contain <s>/</s> tokens but no Sphinx (fileid); "
             "pass --prompt-format explicitly"
         )
-    if any("\t" in line for line in values):
-        if not all(line.count("\t") == 1 for line in values):
-            raise PromptFormatError("Ambiguous TSV prompts; pass --prompt-format explicitly")
-        return "tsv"
+    if any(_MALFORMED_FESTIVAL_RE.match(line) for line in values):
+        return "festival"
+    if any(festival) or any(_FESTIVAL_QUOTED_PREFIX_RE.match(line) for line in values):
+        return "festival"
     if any("," in line for line in values):
         if all(line.startswith('"') for line in values):
             rows = [next(csv.reader([line], delimiter=",", strict=True)) for line in values]
@@ -88,6 +117,14 @@ def detect_prompt_format(path: Path) -> str:
         raise PromptFormatError(
             "Comma-containing prompts are ambiguous; pass --prompt-format csv or leading-id"
         )
+    if any(_AMBIGUOUS_PARENTHESIZED_RE.fullmatch(line) for line in values):
+        raise PromptFormatError(
+            "Ambiguous parenthesized prompt could be Festival or leading-id format; "
+            "pass --prompt-format festival or leading-id explicitly"
+        )
+    leading_id = [len(parts := line.split(None, 1)) == 2 and parts[0] != "(" for line in values]
+    if all(leading_id):
+        return "leading-id"
     return "leading-id"
 
 
@@ -105,9 +142,25 @@ def parse_prompts(path: Path, prompt_format: str = "auto") -> tuple[str, list[Pr
             if match is None:
                 raise PromptFormatError(f"Line {number}: expected <s> WORDS </s> (fileid)")
             text, fileid = match.groups()
+        elif selected == "festival":
+            match = _FESTIVAL_RE.fullmatch(line)
+            if match is None:
+                raise PromptFormatError(f'Line {number}: expected ( fileid "WORDS" )')
+            fileid, quoted_text = match.groups()
+            try:
+                text = json.loads(quoted_text)
+            except json.JSONDecodeError as exc:
+                raise PromptFormatError(
+                    f"Line {number}: invalid escape in Festival prompt text"
+                ) from exc
         elif selected in {"tsv", "csv"}:
             delimiter = "\t" if selected == "tsv" else ","
-            row = next(csv.reader([line], delimiter=delimiter, strict=True))
+            try:
+                row = next(csv.reader([line], delimiter=delimiter, strict=True))
+            except csv.Error:
+                if selected != "tsv":
+                    raise
+                row = line.split("\t")
             if len(row) != 2:
                 raise PromptFormatError(
                     f"Line {number}: expected exactly two {selected.upper()} fields"
