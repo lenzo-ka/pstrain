@@ -3,8 +3,9 @@ Library API
 
 Core library functionality.
 
-The ``pstrain.api`` module is the recommended public API. It re-exports all
-functions from ``pstrain.lib`` and adds step functions for training workflows.
+The ``pstrain.api`` module is the recommended public API. It re-exports most of
+``pstrain.lib`` and adds higher-level entry points; the modules are not
+interchangeable.
 
 Public API
 ----------

@@ -2,8 +2,8 @@
 
 Basic usage examples.
 
-> **Note**: `pstrain.api` is the recommended public API. `pstrain.lib` provides the same
-> functions and can be used interchangeably.
+> **Note**: `pstrain.api` is the recommended public API. It re-exports most of
+> `pstrain.lib` and adds higher-level entry points; the modules are not interchangeable.
 
 ## Project Setup
 
