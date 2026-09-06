@@ -1,7 +1,8 @@
 # Arctic oracle provenance and reconstruction
 
-The Arctic pin preserves the stock-SphinxTrain oracle's per-utterance scoring
-rows in
+The Arctic pin preserves the upstream oracle's per-utterance scoring rows. The
+oracle is historically attributed to stock SphinxTrain, subject to the
+provenance limits below. Its rows are stored in
 [`oracle-sidecar.json`](../../evidence/arctic-pin/oracle-sidecar.json). Those
 rows make the recorded comparison checkable: they retain the reference-word
 and error counts for each decoded utterance, the aggregate scores, the
@@ -68,7 +69,7 @@ be regenerated rather than explained.
 Two properties of the re-decode are measured rather than asserted, and both
 leave result and row digests in the sidecar that `--check` recomputes.
 
-The preserved stock models carry a nine-field SphinxTrain `feat.params`, and
+The preserved oracle models carry a nine-field SphinxTrain `feat.params`, and
 the current complete-model contract requires twenty-three fields. The
 regeneration completes the staged copy with PocketSphinx's own built-in
 defaults, which are the values the absent fields already had. It then decodes
