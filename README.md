@@ -98,6 +98,12 @@ transcript conversion is needed:
 pstrain test cd-8g --project-dir /tmp/pstrain-demo
 ```
 
+Package the trained model for distribution:
+
+```bash
+pstrain package cd-8g --project-dir /tmp/pstrain-demo
+```
+
 The automatically built language model leaks training vocabulary into decoding, so
 this WER is optimistic and is not comparable to the pinned Arctic benchmark results.
 

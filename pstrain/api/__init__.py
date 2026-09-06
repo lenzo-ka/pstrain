@@ -28,6 +28,7 @@ Example::
 """
 
 from pstrain.api.config import resolve_config
+from pstrain.api.packaging import package_model
 from pstrain.api.steps import (
     run_build_lm,
     run_step_cd_hmm_untied,
@@ -87,6 +88,8 @@ __all__: list[str] = [
     "FeatureConfig",
     "TrainingConfig",
     "resolve_config",
+    # Packaging
+    "package_model",
     # Data structures
     "Dictionary",
     "Phoneset",

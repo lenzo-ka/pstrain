@@ -59,6 +59,7 @@ def test_packaging_success_tree_is_unchanged(tmp_path: Path) -> None:
     ) == sorted(
         [
             "README.txt",
+            "pstrain-package.json",
             "acoustic",
             "acoustic/feat.params",
             "acoustic/noisedict",
@@ -66,6 +67,36 @@ def test_packaging_success_tree_is_unchanged(tmp_path: Path) -> None:
             "dict",
         ]
     )
+
+
+def test_readme_only_documents_dictionary_artifacts_that_exist(tmp_path: Path) -> None:
+    model_dir = tmp_path / "model"
+    _write_complete_model(model_dir)
+    dictionary = tmp_path / "dictionary.dict"
+    dictionary.write_text("WORD W ER D\n")
+
+    result = package_model(
+        model_dir,
+        tmp_path / "dist",
+        model_name="test-model",
+        dictionary_path=dictionary,
+    )
+
+    readme = result["readme"].read_text()
+    assert "cmudict.dict" in readme
+    assert "filler.dict   -" not in readme
+
+
+def test_readme_without_dictionary_does_not_claim_one(tmp_path: Path) -> None:
+    model_dir = tmp_path / "model"
+    _write_complete_model(model_dir)
+
+    result = package_model(model_dir, tmp_path / "dist", include_dict=False)
+
+    readme = result["readme"].read_text()
+    assert "dict/" not in readme
+    assert "A pronunciation dictionary is not included" in readme
+    assert "-dict /path/to/dictionary.dict" in readme
 
 
 def test_packaging_overwrite_removes_stale_files(tmp_path: Path) -> None:
@@ -99,6 +130,7 @@ def test_unnamed_package_preserves_unrelated_output(tmp_path: Path) -> None:
         "acoustic",
         "dict",
         "keep.txt",
+        "pstrain-package.json",
     ]
 
 
@@ -145,6 +177,7 @@ def test_unnamed_package_rolls_back_all_paths_after_install_failure(
         "README.txt",
         "acoustic",
         "dict",
+        "pstrain-package.json",
     ]
 
 

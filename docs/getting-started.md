@@ -47,6 +47,9 @@ pstrain features --project-dir my_project
 
 # Initialize flat model
 pstrain flat --project-dir my_project
+
+# Package a trained model for distribution
+pstrain package cd-8g --project-dir my_project
 ```
 
 ### Supplying an existing train/test split
