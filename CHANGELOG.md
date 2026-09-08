@@ -5,6 +5,19 @@ the version in `pyproject.toml` is authoritative.
 
 ## Unreleased
 
+- The CMU Pronouncing Dictionary can now be fetched, converted, and cached from
+  its original upstream repository through `pstrain.api.dictionary`, defaulting
+  to the latest revision and accepting a pinned one; the resolved commit and
+  per-file digests are recorded alongside the cache (2026-09-08).
+- The bundled Arctic dictionary was regenerated so the committed file and the
+  stress-stripping conversion agree; the entries are unchanged and only their
+  order differs (2026-09-08).
+- The pinned Arctic benchmark band was re-measured under the ten-pass untied
+  schedule and the regenerated dictionary. The live cells moved in opposite
+  directions: SLT-55 improved from 142 to 139 errors, and the larger set moved
+  from 22,564 to 22,703. Neither difference against the preserved upstream
+  model is statistically significant; the paired intervals span zero
+  (2026-09-08).
 - CI, untied CD, and tied CD training schedules now share the
   `max_iterations: 10` default instead of applying different pass limits
   (2026-09-07).
