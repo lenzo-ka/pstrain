@@ -15,8 +15,11 @@ Public API
    :undoc-members:
    :show-inheritance:
 
-The package-level ``pstrain.api.TUTORIAL_FILENAME`` export is documented
-with its defining :data:`pstrain.api.tutorial.TUTORIAL_FILENAME` constant.
+.. currentmodule:: pstrain.api
+
+.. py:data:: TUTORIAL_FILENAME
+
+   The filename used for the bundled tutorial notebook.
 
 Project Setup
 -------------

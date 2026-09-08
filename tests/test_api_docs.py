@@ -17,7 +17,7 @@ ROOT = Path(__file__).parents[1]
 
 def _public_api_modules() -> list[ModuleType]:
     package = importlib.import_module("pstrain.api")
-    modules = []
+    modules = [package]
     for info in pkgutil.walk_packages(package.__path__, prefix=f"{package.__name__}."):
         relative_name = info.name.removeprefix(f"{package.__name__}.")
         if any(part.startswith("_") for part in relative_name.split(".")):
