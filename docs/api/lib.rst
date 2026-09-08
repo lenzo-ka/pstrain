@@ -15,12 +15,19 @@ Public API
    :undoc-members:
    :show-inheritance:
 
+.. currentmodule:: pstrain.api
+
+.. py:data:: TUTORIAL_FILENAME
+
+   The filename used for the bundled tutorial notebook.
+
 Project Setup
 -------------
 
 .. automodule:: pstrain.lib.setup
    :members:
    :undoc-members:
+   :no-index:
 
 Project Validation
 ------------------
@@ -28,6 +35,7 @@ Project Validation
 .. automodule:: pstrain.lib.validate
    :members:
    :undoc-members:
+   :no-index:
 
 Configuration
 -------------
@@ -46,6 +54,7 @@ Dictionary
 .. automodule:: pstrain.lib.dictionary
    :members:
    :undoc-members:
+   :no-index:
 
 Phoneset
 ~~~~~~~~
@@ -53,6 +62,7 @@ Phoneset
 .. automodule:: pstrain.lib.phoneset
    :members:
    :undoc-members:
+   :no-index:
 
 Transcription
 ~~~~~~~~~~~~~
@@ -60,6 +70,7 @@ Transcription
 .. automodule:: pstrain.lib.transcription
    :members:
    :undoc-members:
+   :no-index:
 
 Models
 ------
@@ -68,6 +79,7 @@ Models
    :members:
    :undoc-members:
    :show-inheritance:
+   :no-index:
 
 Native Worker
 -------------
@@ -80,6 +92,7 @@ not, and what each exception means.
    :members:
    :undoc-members:
    :show-inheritance:
+   :no-index:
 
 Guarded Logmath Wrapper
 -----------------------
@@ -92,3 +105,4 @@ symbols, are implementation details and are not supported application APIs.
    :members: LogMath
    :undoc-members:
    :show-inheritance:
+   :no-index:

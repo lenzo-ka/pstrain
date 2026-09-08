@@ -265,12 +265,13 @@ class Phoneset:
 def load_phone_map_json(map_file: Path) -> dict[str, str]:
     """Load phone mapping from JSON file.
 
-    JSON format:
-    {
-      "_description": "Optional (ignored)",
-      "PHONE1": "target1",
-      "PHONE2": "target2"
-    }
+    JSON format::
+
+        {
+          "_description": "Optional (ignored)",
+          "PHONE1": "target1",
+          "PHONE2": "target2"
+        }
 
     Args:
         map_file: Path to JSON mapping file
@@ -361,10 +362,11 @@ def create_stress_strip_map(vowels: set[str], stress_markers: str = "012") -> di
         Phone map: {"AA0": "AA", "AA1": "AA", "AA2": "AA", ...}
 
     Example:
-        vowels = {"AA", "AE", "AH", "AO", "AW", "AY", "EH", "ER", "EY",
-                  "IH", "IY", "OW", "OY", "UH", "UW"}
-        stress_map = create_stress_strip_map(vowels)
-        # Result: {"AA0": "AA", "AA1": "AA", "AA2": "AA", "AE0": "AE", ...}
+        >>> vowels = {"AA", "AE", "AH", "AO", "AW", "AY", "EH", "ER", "EY",
+        ...           "IH", "IY", "OW", "OY", "UH", "UW"}
+        >>> stress_map = create_stress_strip_map(vowels)
+        >>> stress_map["AA0"]
+        'AA'
     """
     stress_map: dict[str, str] = {}
     for vowel in vowels:

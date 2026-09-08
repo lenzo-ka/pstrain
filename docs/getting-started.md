@@ -65,7 +65,7 @@ my_project/experiments/default/etc/test.transcription
 ```
 
 Each `.fileids` file contains one utterance ID per line. Its matching
-`.transcription` uses one of the [accepted transcript forms](input-formats.md#transcripts)
+`.transcription` uses one of the {ref}`accepted transcript forms <transcripts>`
 and contains the same IDs in exactly the same order, with the transcript text
 from `etc/all.transcription`. Together, train and test must
 partition `all.transcription` exactly, may not overlap, and every ID must have a

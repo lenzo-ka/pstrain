@@ -1,8 +1,16 @@
-# M4b SLT run evidence
+# Historical, incomplete evidence: M4b SLT runs
 
 Corpus: the fixed 1,043-utterance training split in
 `pstrain-cmu-arctic-slt`. The source log was
 `/Volumes/experiments/pstrain-parity/pstrain-cmu-arctic-slt/training.log`.
+
+**Arm comparability: incomplete.** The recorded arms used the same stated
+corpus and CD-untied stage, so the artifact-size and graph-growth observations
+below are paired on that limited basis. The baseline raw log was not retained,
+however, so its complete run identity, configuration, skip identities, and
+resource provenance cannot be reconstructed independently. Treat these results
+as historical implementation evidence, not as a reproducible benchmark or a
+controlled performance comparison.
 
 ## Skip counts
 
@@ -13,7 +21,7 @@ Corpus: the fixed 1,043-utterance training split in
 | graph plus dictionary-domain initialization | 10 failed attempts / 1,043 (five utterances, original plus widened retry) |
 
 The five utterance identities and the `1e-100`/`1e-200` direct-probe
-results are in `m4b-slt-skips.tsv`. The normal `1e-90` run automatically
+results are in [`m4b-slt-skips.tsv`](m4b-slt-skips.tsv). The normal `1e-90` run automatically
 retries once at `1e-100`, hence ten failed attempts but five skipped
 utterances. All five also fail with the effectively-off `1e-200` beam.
 
