@@ -6,12 +6,25 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from pstrain.cli.base import Command, CommandContext, CommandResult, add_json_argument
 from pstrain.cli.cli import create_parser, main
+from pstrain.lib.validate import ValidationReport
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_arctic"
+
+
+class _MismatchedJsonCommand(Command):
+    name = "mismatched"
+
+    def add_arguments(self, parser: argparse.ArgumentParser) -> None:
+        add_json_argument(parser, suppress_defaults=True)
+
+    def execute(self, ctx: CommandContext) -> CommandResult:
+        return CommandResult.ok()
 
 
 def _leaf_commands(
@@ -80,6 +93,14 @@ def test_every_command_exposing_json_emits_json_or_refuses_it(
             )
 
 
+def test_command_registration_rejects_json_help_metadata_disagreement() -> None:
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(dest="command")
+
+    with pytest.raises(RuntimeError, match="JSON help and supports_json_output disagree"):
+        _MismatchedJsonCommand().register(subparsers)
+
+
 @pytest.mark.parametrize(
     "selector",
     ["--bin-dir", "--lib-path", "--include-dir", "--cflags", "--ldflags", "--version"],
@@ -97,6 +118,78 @@ def test_info_selectors_honor_json(
         assert isinstance(json.loads(captured.out), str)
     else:
         assert captured.out == ""
+
+
+def test_validate_project_emits_only_report_on_stdout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import pstrain.cli.validate as validate_cli
+
+    project = tmp_path / "project"
+    project.mkdir()
+    report = ValidationReport(total_utterances=3, train_utterances=2, test_utterances=1)
+    monkeypatch.setattr(validate_cli, "validate_project", lambda path: report)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["pstrain", "validate-project", str(project), "--json", "--json-indent", "0"],
+    )
+
+    assert main() == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == report.to_dict()
+    assert captured.out.count("\n") == 1
+    assert f"Validate: {project}" in captured.err
+    assert "Report saved:" in captured.err
+    assert "Project validation passed:" in captured.err
+
+
+def test_model_test_emits_only_report_on_stdout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import pstrain.api.testing as testing_api
+
+    project = tmp_path / "project"
+    model = project / "shared" / "models" / "ci-1g" / "default"
+    model.mkdir(parents=True)
+    (project / "shared" / "dictionary.dict").write_text("WORD W ER D\n")
+    (project / "audio").mkdir()
+    transcripts = project / "experiments" / "default" / "etc"
+    transcripts.mkdir(parents=True)
+    (transcripts / "test.decoder.transcription").write_text("<s> WORD </s> (utt)\n")
+    result = SimpleNamespace(wer=0.0, n_decoded=1, n_utterances=1)
+    payload = {"metrics": {"wer": 0.0}, "counts": {"decoded": 1, "utterances": 1}}
+    report = SimpleNamespace(to_dict=lambda: payload, description="")
+    monkeypatch.setattr(testing_api, "check_pocketsphinx", lambda: (True, ""))
+    monkeypatch.setattr(testing_api, "load_transcripts", lambda path: {"utt": "WORD"})
+    monkeypatch.setattr(testing_api, "test_model", lambda **kwargs: result)
+    monkeypatch.setattr(testing_api, "create_report", lambda **kwargs: report)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "pstrain",
+            "test",
+            "ci-1g",
+            "--project-dir",
+            str(project),
+            "--no-lm",
+            "--json",
+            "--json-indent",
+            "0",
+        ],
+    )
+
+    assert main() == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == payload
+    assert captured.out.count("\n") == 1
+    assert f"Test: {model}" in captured.err
+    assert "WER: 0.00% (1/1 decoded)" in captured.err
 
 
 def test_json_without_a_command_is_rejected(

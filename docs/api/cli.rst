@@ -8,6 +8,8 @@ JSON output
 
 ``--json`` produces a single machine-readable result on standard output for:
 
+* ``validate-project``
+* ``test``
 * ``info``
 * ``train``
 * ``tutorial``
@@ -32,8 +34,6 @@ producing human output:
 * ``features``
 * ``flat``
 * ``clean``
-* ``validate-project``
-* ``test``
 * ``package``
 * ``align``
 * ``compare``

@@ -807,7 +807,9 @@ class CommandContext:
 
     def log(self, message: str) -> None:
         """Log a message."""
-        if self.dry_run:
+        if self.json_output:
+            print(message, file=sys.stderr)
+        elif self.dry_run:
             self._emit_header()
             print(f"# {message}")
         else:
@@ -912,6 +914,9 @@ class Command(ABC):
             add_json_argument(parser, suppress_defaults=True)
 
         self.add_arguments(parser)
+        advertises_json = any("--json" in action.option_strings for action in parser._actions)
+        if advertises_json != self.supports_json_output:
+            raise RuntimeError(f"pstrain {self.name} JSON help and supports_json_output disagree")
         parser.set_defaults(
             command_instance=self,
             json_command=self.name,

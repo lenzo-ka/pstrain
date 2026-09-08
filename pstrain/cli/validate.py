@@ -16,6 +16,7 @@ class ValidateCommand(Command):
     help = "Validate a pstrain project"
     description = "Validate project structure, files, and data consistency"
     needs_project_dir = False  # We handle it ourselves as positional arg
+    supports_json_output = True
 
     def add_arguments(self, parser: argparse.ArgumentParser) -> None:
         """Add command-specific arguments."""
@@ -24,12 +25,6 @@ class ValidateCommand(Command):
             nargs="?",
             type=str,
             help="Project directory (default: current directory)",
-        )
-        parser.add_argument(
-            "--json",
-            action="store_true",
-            default=argparse.SUPPRESS,
-            help="Output JSON to stdout instead of summary",
         )
         parser.add_argument(
             "--output",
@@ -50,6 +45,8 @@ class ValidateCommand(Command):
 
         if ctx.dry_run:
             ctx.log("# Would validate project structure and files")
+            if ctx.json_output:
+                print(ctx.format_json({"status": "dry-run", "project": str(project_dir)}))
             return CommandResult.ok("Dry run complete")
 
         report = validate_project(project_dir)
@@ -66,17 +63,16 @@ class ValidateCommand(Command):
         ctx.log(f"Report saved: {json_path}")
 
         # Output
-        if ctx.args.json:
-            ctx.log(report.to_json())
+        if ctx.json_output:
+            print(ctx.format_json(report.to_dict()))
         else:
             ctx.log(report.summary())
 
         if report.is_valid:
             return CommandResult.ok(f"Project validation passed: {project_dir}")
 
-        return CommandResult.fail(
-            f"Validation failed with {len(report.errors)} error(s)", exit_code=1
-        )
+        message = f"Validation failed with {len(report.errors)} error(s)"
+        return CommandResult.fail("" if ctx.json_output else message, exit_code=1)
 
 
 # Singleton instance for registration
