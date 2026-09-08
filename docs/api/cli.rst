@@ -26,7 +26,10 @@ standard error.
 
 The following commands do not yet have a stable machine-readable result
 contract and reject ``--json`` with a nonzero exit status instead of silently
-producing human output:
+producing human output. Unsupported JSON requests exit with status
+64; parser usage errors retain status 2.
+
+The rejecting commands are:
 
 * ``setup``
 * ``build``

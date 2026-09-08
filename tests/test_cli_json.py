@@ -10,7 +10,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from pstrain.cli.base import Command, CommandContext, CommandResult, add_json_argument
+from pstrain.cli.base import (
+    UNSUPPORTED_JSON_EXIT_CODE,
+    Command,
+    CommandContext,
+    CommandResult,
+    add_json_argument,
+)
 from pstrain.cli.cli import create_parser, main
 from pstrain.lib.validate import ValidationReport
 
@@ -101,7 +107,7 @@ def test_every_command_exposing_json_emits_json_or_refuses_it(
                 assert return_code in (0, 1)
                 json.loads(captured.out)
             else:
-                assert return_code == 2
+                assert return_code == UNSUPPORTED_JSON_EXIT_CODE
                 assert captured.out == ""
                 assert captured.err.strip() == (
                     f"Error: --json is not supported by 'pstrain {' '.join(command)}'"
@@ -263,6 +269,24 @@ def test_json_without_a_command_is_rejected(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err.strip() == "Error: --json requires a command"
+
+
+def test_unsupported_json_and_parser_errors_have_distinct_statuses(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["pstrain", "--json", "build", "ci-1g"])
+    assert main() == UNSUPPORTED_JSON_EXIT_CODE
+    unsupported = capsys.readouterr()
+    assert unsupported.out == ""
+    assert unsupported.err.strip() == "Error: --json is not supported by 'pstrain build'"
+
+    monkeypatch.setattr(sys, "argv", ["pstrain", "build", "ci-1g", "--json"])
+    with pytest.raises(SystemExit) as raised:
+        main()
+    assert raised.value.code == 2
+    malformed = capsys.readouterr()
+    assert malformed.out == ""
+    assert "unrecognized arguments: --json" in malformed.err
 
 
 def test_config_schema_rejects_conflicting_json_format(

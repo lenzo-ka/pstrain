@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Self
 
+UNSUPPORTED_JSON_EXIT_CODE = 64
+
 
 def format_json(data: Any, indent: int = 2, sort_keys: bool = False) -> str:
     """Format data as JSON with consistent settings."""
@@ -38,7 +40,10 @@ def add_json_argument(parser: argparse.ArgumentParser, *, suppress_defaults: boo
         "--json",
         action="store_true",
         default=argparse.SUPPRESS if suppress_defaults else False,
-        help="Output a supported command result as JSON (unsupported commands reject it)",
+        help=(
+            "Output a supported command result as JSON "
+            f"(unsupported commands exit {UNSUPPORTED_JSON_EXIT_CODE})"
+        ),
     )
     parser.add_argument(
         "--json-indent",
@@ -1032,7 +1037,7 @@ def execute_command(args: argparse.Namespace) -> int:
     if getattr(args, "json", False) and not getattr(args, "supports_json_output", False):
         command = getattr(args, "json_command", getattr(args, "command", ""))
         print(f"Error: --json is not supported by 'pstrain {command}'", file=sys.stderr)
-        return 2
+        return UNSUPPORTED_JSON_EXIT_CODE
     if hasattr(args, "command_instance"):
         return int(args.command_instance.run(args))
     if hasattr(args, "func"):

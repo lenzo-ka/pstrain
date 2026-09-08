@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 
+from pstrain.cli.base import UNSUPPORTED_JSON_EXIT_CODE
 from pstrain.cli.cli import create_parser
 
 _JSON_OPTIONS = {"--json", "--json-indent", "--json-ascii"}
@@ -73,7 +74,10 @@ standard error.
 
 The following commands do not yet have a stable machine-readable result
 contract and reject ``--json`` with a nonzero exit status instead of silently
-producing human output:
+producing human output. Unsupported JSON requests exit with status
+{UNSUPPORTED_JSON_EXIT_CODE}; parser usage errors retain status 2.
+
+The rejecting commands are:
 
 {_format_commands(rejected)}
 
