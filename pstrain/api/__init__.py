@@ -28,6 +28,7 @@ Example::
 """
 
 from pstrain.api.config import resolve_config
+from pstrain.api.dictionary import CMUDictSource, default_cmudict_cache, fetch_cmudict
 from pstrain.api.packaging import package_model, validate_package_destination
 from pstrain.api.steps import (
     run_build_lm,
@@ -108,6 +109,9 @@ __all__: list[str] = [
     "CMUDict",
     "strip_stress",
     "strip_dictionary_stress",
+    "CMUDictSource",
+    "default_cmudict_cache",
+    "fetch_cmudict",
     "Phoneset",
     "get_fileids",
     "parse_transcription_file",

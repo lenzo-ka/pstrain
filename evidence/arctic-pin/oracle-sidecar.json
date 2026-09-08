@@ -17,36 +17,36 @@
     "platform": "macOS-27.0-arm64-arm-64bit",
     "score_path": "pstrain.benchmarks.arctic.score_model"
   },
-  "created_utc": "2026-09-06T04:44:31Z",
-  "decode_wall_seconds": 1275.8275578022003,
+  "created_utc": "2026-09-08T22:22:21Z",
+  "decode_wall_seconds": 1166.9708240032196,
   "engine": {
-    "decode_dictionary_sha256": "204f36aa9d0ecad1a567f561a85705ecb4289376a7cdd4538c9abba60fd2969c",
-    "git_describe": "c80480e",
+    "decode_dictionary_sha256": "b9d8271957f978287620d9b20a79e12b0b84470f520942c580145570021d0588",
+    "git_describe": "8b1ebf4",
     "native_library_fp_contract_declared": "off",
-    "native_library_sha256": "a2063f71aa11a60620c8736ccc9f9b0cda628455b60b6800f3891382e776b6a1",
-    "native_program_agg_seg_sha256": "e6e04acf182b821139c917243095c43fe06f7e34591c0457507c5f796a7b5c78",
-    "native_program_bldtree_sha256": "940c195a3e23065668eb5f5bcd9b0bc308d965116c1b8ad5670f934f157ff32f",
-    "native_program_bw_sha256": "52be4a5c373438307854aa6e475cb1284393780ad7cbe4a860eb1f68d3cf2abf",
-    "native_program_delint_sha256": "59981884e92c6ee57b20c1754ed9fb5a91966918758ac3fcc1ec4d70b8e560be",
-    "native_program_inc_comp_sha256": "7a0dfdfaac3b828037a063a3fef906961cc6a425667e807c24a0ed46f89db42a",
-    "native_program_init_gau_sha256": "76bd2f8ff20284b8485b3a0dc518dac6b1b2b0946c6ab59fced0597e66eb50f9",
-    "native_program_kdtree_sha256": "46a56f734dd0be6695f3c27b1898c7569727bb45e180e95f72cc89486f0dd386",
-    "native_program_kmeans_init_sha256": "80ef36e7a6f30d23cbf0b45e5982bf7959a80cddd8bd4bc4bc1dab3141687d32",
-    "native_program_make_quests_sha256": "b83ed1925e263e944d4979a5cda558bf5f21baed79a7e385a0c6b66a407ec08b",
-    "native_program_map_adapt_sha256": "bfaa255bf8cebfe4f51f08201f3f1c3fda6454f931f72163f5a22f734532ced9",
-    "native_program_mk_flat_sha256": "5e808f4720138dc3488aaadac9cb946fbf6e6e06cf3d242861de0bd5784da04f",
-    "native_program_mk_mdef_gen_sha256": "44f39aa7a2863ede8867a47b4db96a7cdb05a8a951e79f9f4f163244861b6fc9",
-    "native_program_mk_ts2cb_sha256": "91fa7202182ad34c180e9d723494f1454d4cd5dd50db93d6f760b229edd1c677",
-    "native_program_mllr_solve_sha256": "8d71a87f53295350e2e84fb08c598b936a2cf6bad4b8feaa4c1fa88b809a2db2",
-    "native_program_mllr_transform_sha256": "cd3ca048818b9a862cc4c5faa8e81ea916171c92f241390d1f14923d1dc0a576",
-    "native_program_norm_sha256": "b541c486fdf1a980c99243f9ac7e937cbc3fcc6438614459b2420e5c51247803",
-    "native_program_param_cnt_sha256": "dbb3e92b81db0c40c657706fd9ac472c6c64ab9a074b235d5bcb2a4c263ab80c",
-    "native_program_printp_sha256": "b54c6be0524487779e4a050a9ed66e2b643e6f6224f11d338427ecfb98217145",
-    "native_program_prunetree_sha256": "a45b1c05834718f46d12c0ea73c3895ed242bb21349f0381b19d449434ce4daf",
-    "native_program_sphinx3_align_sha256": "55d2669bac32e9e16447ef7242ddcc14e530e54a1b1b6c89ee2a4926a0a47a64",
-    "native_program_sphinx_cepview_sha256": "d839d65742681248f57212695d535ef9b0fd4605187549f2ffc1bebf88ed4bdb",
-    "native_program_sphinx_fe_sha256": "fb988cb3217965148dafabc8b1cdee2779ddefe94b0167e3e3109c742472fbc1",
-    "native_program_tiestate_sha256": "85eafd660889630dc37bcd31fa38bfb6f7632ee9d8363a12c7d4826bba6ff4fa",
+    "native_library_sha256": "cee055880a3fde6ae54439b353d0f243246db2a266af5a269cca5890a616ea04",
+    "native_program_agg_seg_sha256": "cc0e2dd39d4bd43cb5873b038bba09aa47baef8df876ddadbe898d0f8b125535",
+    "native_program_bldtree_sha256": "dde38732ee832472e763985bd7c04143a73733a59da69be433dc906742ccaa03",
+    "native_program_bw_sha256": "4c8d76ef9e0b95d07d07f073d6f2e63a1d6a73404ec5c6648749157d852e7310",
+    "native_program_delint_sha256": "2f7f1ca6a02ce07019437833e1e1c430840dd9855c0fc2eb6334c4889be89f60",
+    "native_program_inc_comp_sha256": "4ae1013d9d2b80a2ea06337fe9fd2495a936ba26ab47a4fbcfff5fd9c93ccc09",
+    "native_program_init_gau_sha256": "808c82cf1036995a38eb8d9da12cc9f3f7fdeec03538e478c9c327ca2d850ae5",
+    "native_program_kdtree_sha256": "dc478fbc6adaaa39e3c5fbc7940143dcbb86dcfaf0ce61c8a5a50f2f6a83d447",
+    "native_program_kmeans_init_sha256": "90820c2aea978f15e616bfabd9754477197ce365c57c08113d3c6514e69ab20d",
+    "native_program_make_quests_sha256": "258aadafbc0915018e2dbccac8e0027e6fa67e1146125c8d57d8b14898cd9fdd",
+    "native_program_map_adapt_sha256": "0b8688c215c63a434eb6f610da50f76d92384d588cb6c8fe99274c842596a89b",
+    "native_program_mk_flat_sha256": "b3a00cd72a361a20a9ecf5d2af2290dba696980c3ecddaa8e863742244e80c44",
+    "native_program_mk_mdef_gen_sha256": "2cdf2365f91c0deeae20ef610c6540b6b36fc8fee795619d211a6f53a8699f60",
+    "native_program_mk_ts2cb_sha256": "97abb5f611a55781ae29d8535739e40af71d91218cb856e09dba54bb15359ba9",
+    "native_program_mllr_solve_sha256": "5104916f4ba4d3d8865b3f3c09770e0c447cf4ca7c1c4a03e60ec942274744f6",
+    "native_program_mllr_transform_sha256": "dd616b7dcdb2a7c4ef8548a0f18a0b5788d5377cbb6f271a4905ac8cf4df7504",
+    "native_program_norm_sha256": "95e8e7405c46a1c0b4b9ca9670d69b05287dbf7162d1282c3e73598938d2e037",
+    "native_program_param_cnt_sha256": "cb039501718c95b3223fe41778acaec9e4dd3289ae46826f93cb2d45e3690581",
+    "native_program_printp_sha256": "31772a6dbee9faf41a0faac074bb98f50575b5da1f83c769b7513a3812073209",
+    "native_program_prunetree_sha256": "b28ec399a4234dc53f5ba906a56002021796bd2fd917c8452c3959df67f80fa0",
+    "native_program_sphinx3_align_sha256": "66ce805e5fc177c1bd5a0eaf0d1c37d617d7a539471d935eb5c3d92ddbd37dd6",
+    "native_program_sphinx_cepview_sha256": "64cf53776d2ef59ae73cc7c1dff0b71e26d9ceebda184878d363ac4a7cf40db5",
+    "native_program_sphinx_fe_sha256": "1e57daadff07dcf57d0a660e64e191792f845828af138362eb9e1877a4277572",
+    "native_program_tiestate_sha256": "d10b82d8c7875cdf10e894bc2b6273131472a461ea7dccd2ab5e869cec09421c",
     "pocketsphinx_version": "5.1.1+511126b492dcb267cf30d49d631946d7b61a9530",
     "python_version": "3.12.12 (main, Jan 18 2026, 13:43:01) [Clang 17.0.0 (clang-1700.6.3.2)]",
     "tracked_modifications_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -104,10 +104,10 @@
           }
         }
       },
-      "dictionary_sha256": "204f36aa9d0ecad1a567f561a85705ecb4289376a7cdd4538c9abba60fd2969c",
+      "dictionary_sha256": "b9d8271957f978287620d9b20a79e12b0b84470f520942c580145570021d0588",
       "engine": {
-        "git_describe": "c80480e",
-        "native_library_sha256": "a2063f71aa11a60620c8736ccc9f9b0cda628455b60b6800f3891382e776b6a1",
+        "git_describe": "8b1ebf4",
+        "native_library_sha256": "cee055880a3fde6ae54439b353d0f243246db2a266af5a269cca5890a616ea04",
         "pocketsphinx_version": "5.1.1+511126b492dcb267cf30d49d631946d7b61a9530",
         "version": "0.3.0"
       },
@@ -186,8 +186,8 @@
       "path": "benchmarks/arctic/data/cmu_arctic_slt.dict"
     },
     "engine": {
-      "git_describe": "c80480e",
-      "native_library_sha256": "a2063f71aa11a60620c8736ccc9f9b0cda628455b60b6800f3891382e776b6a1",
+      "git_describe": "8b1ebf4",
+      "native_library_sha256": "cee055880a3fde6ae54439b353d0f243246db2a266af5a269cca5890a616ea04",
       "pocketsphinx_version": "5.1.1+511126b492dcb267cf30d49d631946d7b61a9530",
       "version": "0.3.0"
     },
@@ -17653,12 +17653,12 @@
       "mode": "on",
       "oracle_wer": 28.07017543859649,
       "paired_ci_95_pp": [
-        -3.007518796992481,
-        1.976284584980237
+        -3.6964980544747084,
+        1.6574585635359116
       ],
       "pass": false,
-      "pstrain_minus_oracle_pp": -0.389863547758285,
-      "pstrain_wer": 27.680311890838205,
+      "pstrain_minus_oracle_pp": -0.9746588693957108,
+      "pstrain_wer": 27.09551656920078,
       "upper_bound_bar_pp": 0.0
     },
     {
@@ -17680,19 +17680,19 @@
       "mode": "on",
       "oracle_wer": 75.50530318190914,
       "paired_ci_95_pp": [
-        -0.6982780430167788,
-        0.19796116800226038
+        -0.24138458868268817,
+        0.6712765443012775
       ],
       "pass": false,
-      "pstrain_minus_oracle_pp": -0.24681475551997778,
-      "pstrain_wer": 75.25848842638916,
+      "pstrain_minus_oracle_pp": 0.21679674471350552,
+      "pstrain_wer": 75.72209992662265,
       "upper_bound_bar_pp": 0.0
     }
   ],
   "resources": {
     "band": "pin",
     "dictionary_path": "benchmarks/arctic/data/cmu_arctic_slt.dict",
-    "dictionary_sha256": "204f36aa9d0ecad1a567f561a85705ecb4289376a7cdd4538c9abba60fd2969c",
+    "dictionary_sha256": "b9d8271957f978287620d9b20a79e12b0b84470f520942c580145570021d0588",
     "lm_path": "benchmarks/arctic/data/training-unigram.lm",
     "lm_sha256": "2cf11ab0474a0bdd165cbee59db674b05764fdb00bf6f9824c0dccce571637b5",
     "record_resources_match": {

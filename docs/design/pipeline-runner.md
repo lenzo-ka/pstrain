@@ -142,10 +142,10 @@ training:
 ```
 
 All three use the SphinxTrain signed likelihood-delta decision and may stop
-before their ten-pass cap after `min_iterations`. The separately frozen Arctic
-benchmark pin retains the six-pass effective endpoint of the preserved CMU
-Arctic SLT run; upstream stage 30 is a converge-with-cap loop, not a fixed-count
-loop. All stages use the A7c-matched 0.001 decision threshold by default.
+before their ten-pass cap after `min_iterations`; upstream stage 30 is a
+converge-with-cap loop, not a fixed-count loop. The separately frozen Arctic
+benchmark pin runs the same ten-pass untied cap. All stages use the A7c-matched
+0.001 decision threshold by default.
 
 Variance accumulation is deliberately code-defined by stage. CI and each newly
 split tied stage use one-pass variance on their first iteration and centered

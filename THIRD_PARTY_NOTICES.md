@@ -51,6 +51,16 @@ The CMU notice, reproduced in full, is:
 > (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 > OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+## CMU Pronouncing Dictionary
+
+The dictionary fetched by `pstrain.api.fetch_cmudict` comes directly from the
+[CMU Sphinx CMUdict repository](https://github.com/cmusphinx/cmudict). It is
+Copyright (c) 1993-2015 Carnegie Mellon University and acknowledges the many
+volunteers who expanded and improved it. The complete upstream license is
+carried in [`pstrain/licenses/LICENSE.cmudict`](pstrain/licenses/LICENSE.cmudict)
+and is also cached beside every downloaded dictionary. pstrain's conversion
+removes lexical stress for PocketSphinx; the dictionary data remains CMU's.
+
 ## LAPACK `slapack_lite`
 
 The vendored file does not state a separate copyright sentence. Its applicable

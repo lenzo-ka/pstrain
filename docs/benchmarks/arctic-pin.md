@@ -32,9 +32,9 @@ together with the re-derivation gate described below.
 <!-- BEGIN GENERATED MEASUREMENT IDENTITY -->
 The decode path is a defining condition of this measurement. The live cells are decoded
 from WAV through pinned PocketSphinx 5.1.1 using Python 3.12.12, native library SHA-256
-`a2063f71aa11a60620c8736ccc9f9b0cda628455b60b6800f3891382e776b6a1`, and decode
-dictionary SHA-256 `204f36aa9d0ecad1a567f561a85705ecb4289376a7cdd4538c9abba60fd2969c`.
-The engine is pstrain 0.3.0 at `9e1769d`. A result obtained through another decode path
+`cee055880a3fde6ae54439b353d0f243246db2a266af5a269cca5890a616ea04`, and decode
+dictionary SHA-256 `b9d8271957f978287620d9b20a79e12b0b84470f520942c580145570021d0588`.
+The engine is pstrain 0.3.0 at `80ca415`. A result obtained through another decode path
 is not the same measurement even when the acoustic-model bytes are identical.
 
 The retired off-mode cells were not measured on that path. They were decoded by pstrain
@@ -50,21 +50,15 @@ which is authoritative for both identities.
 
 ## Pin conditions
 
-The band freezes the untied schedule at six passes while the shipped default
-is now ten. It therefore no longer tracks the product default on that axis;
-re-earning the band at the new default remains outstanding work. Nothing else
-about the band changed, and its numbers remain valid for the frozen conditions
-they measure.
-
 | Condition | Pinned value |
 |---|---|
 | Band | BM1 |
 | Language model | SHA-256 `2cf11ab0474a0bdd165cbee59db674b05764fdb00bf6f9824c0dccce571637b5` |
-| Decode dictionary | SHA-256 `204f36aa9d0ecad1a567f561a85705ecb4289376a7cdd4538c9abba60fd2969c` |
+| Decode dictionary | SHA-256 `b9d8271957f978287620d9b20a79e12b0b84470f520942c580145570021d0588` |
 | Filler dictionary | SHA-256 `fb50883998c41a5030c2a602965935c647563321e84a86f2adabb377ec24b49c` |
 | Shared training | 3 states, 200 senones, `a_beam=1e-90`, `b_beam=1e-10`, maximum skip fraction 0.05, retry beam factor `1e10`, tree state weights `[1.0, 0.05, 0.0]`, `ssplitmax=7`, `ssplitthr=0`, `csplitmax=2000`, `csplitthr=0`, `mwfloor=1e-8`, 12 question permutations, 20 questions/state, 1 question iteration |
 | Basis | `MULTIPRON-ONLY`; off cells retained as retired history |
-| Multipron on training | Frozen settings: `multipron_training=true`, transcript-reachable untied inventory, optional final silence, one retry at a beam widened by `1e10`; CI/tied 1–10 iterations and untied 1–6, convergence 0.001 |
+| Multipron on training | Frozen settings: `multipron_training=true`, transcript-reachable untied inventory, optional final silence, one retry at a beam widened by `1e10`; CI, untied, and tied 1–10 iterations, convergence 0.001 |
 | Acoustic features | 16 kHz, 13 cepstra, 25 filters, 512-point FFT, 130–6800 Hz, alpha 0.97, `1s_c_d_dd`, lifter 22, DCT, no AGC, batch CMN, no variance normalization |
 | Split | Seed 42, test count 0 |
 | Decoder | `beam=pbeam=lpbeam=lponlybeam=fwdflatbeam=1e-80`; `wbeam=fwdflatwbeam=1e-40`; `pl_window=5`, `lw=10`, `wip=0.2` |
@@ -77,10 +71,9 @@ The live cells `on/slt55` and `on/big` come from the named benchmark profile
 the shipped schema defaults; an unlisted setting equals its shipped default.
 The record's
 conditions and each cell's provenance come from the same resolved build-child
-snapshot, and validation rejects disagreement between them. Its semantic
-differences from shipped product defaults are the six-pass untied cap described
-above and `split.test_count=0`, which keeps the established external evaluation
-cells intact.
+snapshot, and validation rejects disagreement between them. Its only semantic
+difference from shipped product defaults is `split.test_count=0`, which keeps
+the established external evaluation cells intact.
 
 | Cells | Setting | Shipped default | Cell value | Winning source kind |
 |---|---|---:|---:|---|
@@ -142,9 +135,9 @@ observations. The big cells therefore resample within speaker strata.
 | Mode | Cell | pstrain WER | Oracle WER | Delta pp | Paired 95% CI | Paired decode | Implementation attribution | Interpretation |
 |---|---|---:|---:|---:|---:|---|---|---|
 | off (retired) | SLT-55 | 28.8499 | 28.8499 | +0.0000 | [-4.7059, +4.7619] | COMPARABLE | NOT COMPARABLE | historical only |
-| on | SLT-55 | 27.6803 | 28.0702 | -0.3899 | [-3.0075, +1.9763] | COMPARABLE | NOT COMPARABLE | no statistically significant difference |
+| on | SLT-55 | 27.0955 | 28.0702 | -0.9747 | [-3.6965, +1.6575] | COMPARABLE | NOT COMPARABLE | no statistically significant difference |
 | off (retired) | big | 76.6393 | 74.7915 | +1.8478 | [+1.3257, +2.3646] | COMPARABLE | NOT COMPARABLE | historical only |
-| on | big | 75.2585 | 75.5053 | -0.2468 | [-0.6983, +0.1980] | COMPARABLE | NOT COMPARABLE | no statistically significant difference |
+| on | big | 75.7221 | 75.5053 | +0.2168 | [-0.2414, +0.6713] | COMPARABLE | NOT COMPARABLE | no statistically significant difference |
 
 The live rows come from the record and the resource-matched oracle sidecar through
 `scripts/regenerate_arctic_paired_analysis.py`; the retired rows come from the

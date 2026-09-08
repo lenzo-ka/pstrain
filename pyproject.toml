@@ -4,7 +4,7 @@ version = "0.3.0"
 description = "Continuous-density HMM/GMM acoustic model training toolkit"
 readme = "README.md"
 license = "BSD-2-Clause"
-license-files = ["LICENSE", "csrc/LICENSE.sphinx", "THIRD_PARTY_NOTICES.md"]
+license-files = ["LICENSE", "csrc/LICENSE.sphinx", "pstrain/licenses/LICENSE.cmudict", "THIRD_PARTY_NOTICES.md"]
 requires-python = ">=3.11"
 authors = [
     { name = "Kevin Lenzo", email = "kevinlenzo@gmail.com" }

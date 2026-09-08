@@ -186,7 +186,7 @@ DECODER_CONDITIONS: dict[str, Any] = {
 }
 PINNED_RESOURCE_HASHES = {
     "lm_sha256": "2cf11ab0474a0bdd165cbee59db674b05764fdb00bf6f9824c0dccce571637b5",
-    "dictionary_sha256": "204f36aa9d0ecad1a567f561a85705ecb4289376a7cdd4538c9abba60fd2969c",
+    "dictionary_sha256": "b9d8271957f978287620d9b20a79e12b0b84470f520942c580145570021d0588",
     "filler_dictionary_sha256": "fb50883998c41a5030c2a602965935c647563321e84a86f2adabb377ec24b49c",
 }
 FILLER_DICTIONARY = "<sil> SIL\n<s> SIL\n</s> SIL\n"
@@ -388,7 +388,7 @@ PIN_CONFIGS: dict[str, dict[str, Any]] = {
             "untied_inventory": "transcript-reachable",
             "exclusion_schedule": {},
             "ci": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.001},
-            "untied": {"max_iterations": 6, "min_iterations": 1, "convergence_ratio": 0.001},
+            "untied": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.001},
             "tied": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.001},
         },
         "split": {"test_count": 0, "seed": 42},
@@ -1313,43 +1313,6 @@ def _require_equal(label: str, actual: Any, recorded: Any) -> None:
         raise RuntimeError(f"benchmark {label} mismatch: recorded={recorded!r}, actual={actual!r}")
 
 
-# The frozen band pins six untied passes while the shipped default is ten. The
-# record was captured before that divergence existed, so its provenance block
-# omits the row. Keyed to the divergence itself, the allowance cannot outlive
-# it: re-earning the band at the shipped default drops the row from the
-# expected provenance, and nothing can invoke this again.
-CAPTURE_TIME_UNTIED_PROVENANCE_ROW = {
-    "setting": "training.untied.max_iterations",
-    "shipped_default": 10,
-    "value": 6,
-    "source": {"kind": "project-profile"},
-}
-
-
-def _require_pin_provenance(label: str, actual: Any, expected: dict[str, Any]) -> None:
-    """Require provenance to match, allowing only the frozen untied divergence.
-
-    A record whose frozen profile pins six untied passes against a ten-pass
-    shipped default may omit that one row, because it was written when the two
-    agreed. Every other difference is a mismatch, and once the band is re-earned
-    at the shipped default the row is gone from `expected` and this allowance is
-    unreachable.
-    """
-    if actual == expected:
-        return
-    rows = expected["diff_from_shipped_defaults"]
-    if CAPTURE_TIME_UNTIED_PROVENANCE_ROW in rows:
-        legacy = {
-            **expected,
-            "diff_from_shipped_defaults": [
-                row for row in rows if row != CAPTURE_TIME_UNTIED_PROVENANCE_ROW
-            ],
-        }
-        if actual == legacy:
-            return
-    raise RuntimeError(f"benchmark {label} mismatch: expected={expected!r}, actual={actual!r}")
-
-
 def record_binding_sha256(record: dict[str, Any]) -> str:
     """Digest record fields together for internal consistency and tamper evidence.
 
@@ -1571,7 +1534,7 @@ def validate_record(record: dict[str, Any]) -> None:
                         "field_source_kinds": source_kinds[mode],
                     }
                 )
-                _require_pin_provenance(
+                _require_equal(
                     f"{mode}/{dataset} provenance/conditions consistency",
                     record["results"][mode][dataset]["configuration_provenance"],
                     expected_provenance,

@@ -15,6 +15,7 @@ creation, and training workflows.
    config
    corpus
    diagnostics
+   dictionary
    one_command
    packaging
    pipeline

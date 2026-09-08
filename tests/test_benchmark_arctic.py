@@ -275,7 +275,7 @@ def test_pin_configs_resolve_ratified_conditions(tmp_path: Path) -> None:
     assert on["accept_arctic_a0587_known_skip"] is False
     assert on["arctic_a0302_zero_codebook_band"] is None
     assert {on[stage]["convergence_ratio"] for stage in ("ci", "untied", "tied")} == {0.001}
-    assert on["untied"]["max_iterations"] == 6
+    assert on["untied"]["max_iterations"] == 10
     assert PIN_CONFIGS["off"]["split"]["test_count"] == 0
     assert PIN_CONFIGS["on"]["split"]["test_count"] == 0
     from pstrain.lib.pipeline.context import FeatParams, TrainParams
@@ -448,24 +448,6 @@ def test_record_rejects_provenance_that_disagrees_with_conditions() -> None:
     ]
     with pytest.raises(RuntimeError, match="provenance/conditions consistency"):
         validate_record(record)
-
-
-def test_untied_provenance_allowance_is_keyed_to_the_frozen_divergence() -> None:
-    """The allowance covers the frozen six-pass row and nothing near it.
-
-    The committed record was written when six untied passes were the shipped
-    default, so its provenance omits that row. A record pinning any other untied
-    value must state the divergence: the allowance is keyed to the frozen row
-    itself, so re-earning the band at the shipped default retires it.
-    """
-    frozen = json.loads(Path("evidence/arctic-pin/record.json").read_text())
-    validate_record(frozen)
-
-    moved = json.loads(Path("evidence/arctic-pin/record.json").read_text())
-    moved["conditions"]["pin_conditions"]["on"]["training"]["untied"]["max_iterations"] = 8
-    bind_record(moved)
-    with pytest.raises(RuntimeError, match="provenance/conditions consistency"):
-        validate_record(moved)
 
 
 def test_adopt_uncovered_keeps_cell_provenance_consistent(tmp_path: Path) -> None:
