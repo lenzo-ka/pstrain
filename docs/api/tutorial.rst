@@ -3,7 +3,7 @@ Tutorial API
 
 .. automodule:: pstrain.api.tutorial
    :members:
-   :exclude-members: TutorialExistsError, TutorialResult, copy_tutorial
+   :exclude-members: TutorialExistsError, TutorialResult
    :undoc-members:
    :show-inheritance:
 
