@@ -29,6 +29,24 @@ class TutorialExistsError(FileExistsError):
         )
 
 
+def _read_tutorial() -> bytes:
+    """Read the packaged tutorial, or its source-checkout counterpart."""
+    packaged = files("pstrain.data").joinpath("notebooks", TUTORIAL_FILENAME)
+    if packaged.is_file():
+        return packaged.read_bytes()
+
+    repository_root = Path(__file__).resolve().parents[2]
+    checkout = repository_root / "notebooks" / TUTORIAL_FILENAME
+    if (repository_root / "pyproject.toml").is_file() and checkout.is_file():
+        return checkout.read_bytes()
+
+    raise FileNotFoundError(
+        "the pstrain tutorial notebook is missing from this installation. "
+        "Reinstall pstrain, or restore notebooks/arctic_hmm_gmm_tutorial.ipynb "
+        "if this is a source checkout."
+    )
+
+
 def copy_tutorial(
     output: str | Path = TUTORIAL_FILENAME, *, force: bool = False, dry_run: bool = False
 ) -> TutorialResult:
@@ -53,7 +71,7 @@ def copy_tutorial(
         return result
 
     destination.parent.mkdir(parents=True, exist_ok=True)
-    content = files("pstrain.data").joinpath("notebooks", TUTORIAL_FILENAME).read_bytes()
+    content = _read_tutorial()
     descriptor, temporary_name = tempfile.mkstemp(
         dir=destination.parent, prefix=f".{destination.name}.", suffix=".tmp"
     )
