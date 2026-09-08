@@ -102,6 +102,15 @@ clean-c:
 docs-gen:
 	python scripts/run_verified_tests.py --exec "from pstrain.lib.config import generate_rst_docs; open('docs/api/config-reference.rst', 'w').write(generate_rst_docs())"
 
+.PHONY: cli-docs-gen
+cli-docs-gen:
+	python scripts/run_verified_tests.py --exec "from pstrain.cli.docs import generate_cli_reference; open('docs/api/cli.rst', 'w').write(generate_cli_reference())"
+
+.PHONY: cli-docs-check
+cli-docs-check:
+	$(MAKE) cli-docs-gen
+	git diff --exit-code -- docs/api/cli.rst
+
 .PHONY: cffi-exports-gen
 cffi-exports-gen:
 	python scripts/generate_cffi_exports.py
@@ -110,7 +119,7 @@ cffi-exports-gen:
 cffi-exports-check:
 	python scripts/generate_cffi_exports.py --check
 
-docs-gen cffi-exports-check: | $(AMBIENT_IMPORT_PREREQUISITE)
+docs-gen cli-docs-gen cffi-exports-check: | $(AMBIENT_IMPORT_PREREQUISITE)
 
 .PHONY: config-check
 config-check: cffi-exports-check pin-docs-check
@@ -120,6 +129,7 @@ config-check: cffi-exports-check pin-docs-check
 		tests/test_features.py::TestFeatureExtractor::test_new_front_end_options_change_produced_features
 	$(MAKE) docs-gen
 	git diff --exit-code -- docs/api/config-reference.rst
+	$(MAKE) cli-docs-check
 	$(MAKE) pin-check
 
 .PHONY: pin-check
