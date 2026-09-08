@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 import shutil
@@ -12,8 +13,6 @@ from typing import Any, Literal
 
 import numpy as np
 import pytest
-
-pytest.importorskip("fcntl", reason="POSIX-only pipeline locking requires the fcntl module")
 
 from pstrain.lib import _pstrainc
 from pstrain.lib.bw import HMM, BWConfig, BWTrainer
@@ -86,12 +85,16 @@ def _runtime_contexts(
 @pytest.fixture(scope="module")
 def flat_project(tmp_path_factory: pytest.TempPathFactory) -> PipelineContext:
     """One fixed flat model shared by the BW-level invariants."""
+    if importlib.util.find_spec("fcntl") is None:
+        pytest.skip("building numeric fixtures requires POSIX provenance locking")
     return create_project(tmp_path_factory.mktemp("numeric-flat") / "project")
 
 
 @pytest.fixture(scope="module")
 def full_project(tmp_path_factory: pytest.TempPathFactory) -> PipelineContext:
     """One full 1→2→4→8 run shared by split and tree invariants."""
+    if importlib.util.find_spec("fcntl") is None:
+        pytest.skip("building numeric fixtures requires POSIX provenance locking")
     return create_project(
         tmp_path_factory.mktemp("numeric-full") / "project",
         "cd-8g",

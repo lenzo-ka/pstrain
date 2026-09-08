@@ -8,6 +8,7 @@ by some other task or treated as required external files.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import shutil
 from dataclasses import replace
@@ -18,8 +19,6 @@ from typing import Any
 
 import pytest
 import yaml
-
-pytest.importorskip("fcntl", reason="POSIX-only pipeline locking requires the fcntl module")
 
 from pstrain.lib.pipeline import PipelineContext
 from pstrain.lib.pipeline.context import (
@@ -36,6 +35,11 @@ from pstrain.lib.pipeline.feat_params import (
 )
 from pstrain.lib.pipeline.tasks import DEFAULT_TARGET, TARGETS, build_pipeline
 from tests.clib import C_LIBRARY_AVAILABLE
+
+requires_posix_provenance_lock = pytest.mark.skipif(
+    importlib.util.find_spec("fcntl") is None,
+    reason="pipeline provenance replacement requires POSIX file locking",
+)
 
 
 @pytest.fixture
@@ -195,6 +199,7 @@ def test_extract_task_forwards_preemphasis_alpha(empty_project: Path) -> None:
     assert extract_task.fn.args[2]["alpha"] == 0.42
 
 
+@requires_posix_provenance_lock
 def test_meaningful_feature_config_change_rebuilds_features(
     empty_project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -223,6 +228,7 @@ def test_meaningful_feature_config_change_rebuilds_features(
     assert runs == [0.42, 0.21]
 
 
+@requires_posix_provenance_lock
 def test_reverting_feature_config_rebuilds_features(
     empty_project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -244,6 +250,7 @@ def test_reverting_feature_config_rebuilds_features(
     assert runs == [0.42, 0.21, 0.42]
 
 
+@requires_posix_provenance_lock
 def test_irrelevant_config_edit_does_not_rebuild_features(
     empty_project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -275,6 +282,7 @@ def test_irrelevant_config_edit_does_not_rebuild_features(
     assert runs == ["ran"]
 
 
+@requires_posix_provenance_lock
 def test_model_and_package_copy_build_provenance(
     empty_project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -758,6 +766,7 @@ def test_split_task_produces_fileid_files(empty_project: Path) -> None:
     assert pl.targets()["split"].name == ".split.validated.json"
 
 
+@requires_posix_provenance_lock
 def test_split_runs_end_to_end_and_partitions(tmp_path: Path) -> None:
     """The split task should write all four files when invoked."""
     project = tmp_path / "proj"
@@ -783,6 +792,7 @@ def test_split_runs_end_to_end_and_partitions(tmp_path: Path) -> None:
     assert set(train_ids).isdisjoint(set(test_ids))
 
 
+@requires_posix_provenance_lock
 def test_lm_target_succeeds_on_setup_project_layout(tmp_path: Path) -> None:
     from pstrain.lib.setup import setup_project
 
@@ -802,6 +812,7 @@ def test_lm_target_succeeds_on_setup_project_layout(tmp_path: Path) -> None:
     assert (ctx.lm_dir / "train.arpa").is_file()
 
 
+@requires_posix_provenance_lock
 def test_editing_persistent_split_revalidates_and_changes_membership(tmp_path: Path) -> None:
     """A consistent edit becomes authoritative and invalidates the split marker."""
     project = tmp_path / "proj"
@@ -1183,6 +1194,7 @@ def test_bw_config_requires_explicit_normalization_policies() -> None:
         BWConfig(pass2var=True)  # type: ignore[call-arg]
 
 
+@requires_posix_provenance_lock
 def test_configured_bw_parameters_reach_training_call(
     empty_project: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1292,6 +1304,7 @@ def test_configured_bw_parameters_reach_training_call(
     assert captured["checkpoint_iterations"] is True
 
 
+@requires_posix_provenance_lock
 def test_configured_untied_schedule_and_variance_reach_training_call(
     empty_project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
