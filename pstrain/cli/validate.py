@@ -59,13 +59,14 @@ class ValidateCommand(Command):
             json_path = project_dir / "experiments" / "default" / "etc" / "validation.json"
 
         json_path.parent.mkdir(parents=True, exist_ok=True)
-        report.save_json(json_path)
+        if ctx.json_output:
+            ctx.emit_json(report.to_dict(), json_path)
+        else:
+            report.save_json(json_path)
         ctx.log(f"Report saved: {json_path}")
 
         # Output
-        if ctx.json_output:
-            print(ctx.format_json(report.to_dict()))
-        else:
+        if not ctx.json_output:
             ctx.log(report.summary())
 
         if report.is_valid:

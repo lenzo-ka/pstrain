@@ -19,7 +19,11 @@ from pstrain.api.config import (
     migrate_project,
     resolve_config,
 )
-from pstrain.cli.base import add_json_argument, ensure_global_option_defaults
+from pstrain.cli.base import (
+    add_json_argument,
+    emit_json_document,
+    ensure_global_option_defaults,
+)
 
 
 def _selectors(parser: Any, *, key: bool = False, key_required: bool = False) -> None:
@@ -202,12 +206,10 @@ def cmd_config_schema(args: Any) -> int:
         else generate_rst_docs()
     )
     if args.json:
-        output += "\n"
-    if args.output:
+        emit_json_document(output, Path(args.output) if args.output else None)
+    elif args.output:
         Path(args.output).write_text(output, encoding="utf-8")
-    if args.json:
-        sys.stdout.write(output)
-    elif not args.output:
+    else:
         print(output)
     return 0
 

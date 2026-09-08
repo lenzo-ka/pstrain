@@ -21,6 +21,14 @@ def format_json(data: Any, indent: int = 2, sort_keys: bool = False) -> str:
     return json.dumps(data, indent=indent, ensure_ascii=False, sort_keys=sort_keys)
 
 
+def emit_json_document(serialized: str, output_path: Path | None = None) -> None:
+    """Emit one newline-terminated JSON serialization to every destination."""
+    document = serialized + "\n"
+    if output_path is not None:
+        output_path.write_text(document, encoding="utf-8")
+    sys.stdout.write(document)
+
+
 def add_dry_run_argument(
     parser: argparse.ArgumentParser, *, suppress_default: bool = False
 ) -> None:
@@ -546,6 +554,10 @@ class CommandContext:
         """Format data as JSON using context settings."""
         indent = self.json_indent if self.json_indent > 0 else None
         return json.dumps(data, indent=indent, ensure_ascii=self.json_ascii)
+
+    def emit_json(self, data: Any, output_path: Path | None = None) -> None:
+        """Serialize JSON once and emit identical bytes to its destinations."""
+        emit_json_document(self.format_json(data), output_path)
 
     @property
     def project_dir(self) -> Path:

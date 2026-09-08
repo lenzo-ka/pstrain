@@ -244,17 +244,22 @@ class TestCommand(Command):
             )
 
         # Output
+        json_output_path = None
         if ctx.args.output:
             output_path = Path(ctx.args.output)
             if output_path.suffix == ".json":
-                report.save_json(output_path)
+                if ctx.json_output:
+                    output_path.parent.mkdir(parents=True, exist_ok=True)
+                    json_output_path = output_path
+                else:
+                    report.save_json(output_path)
                 ctx.log(f"JSON report saved: {output_path}")
             else:
                 report.save_text(output_path, show_per_utterance=ctx.args.verbose)
                 ctx.log(f"Text report saved: {output_path}")
 
         if ctx.json_output:
-            print(ctx.format_json(report.to_dict()))
+            ctx.emit_json(report.to_dict(), json_output_path)
         else:
             ctx.log(report.format_text(show_per_utterance=ctx.args.verbose))
 

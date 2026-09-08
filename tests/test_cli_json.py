@@ -393,10 +393,13 @@ def test_every_supported_json_output_path_is_exercised(
             scenario_patch.setattr(sys, "argv", ["pstrain", *arguments, "--json"])
             assert main() == 0, command
         captured = capsys.readouterr()
-        _one_json_document(captured.out)
+        stdout_document = _one_json_document(captured.out)
         assert output.is_file(), command
         assert output.stat().st_size > 0, command
-        json.loads(output.read_text(encoding="utf-8"))
+        output_document = json.loads(output.read_text(encoding="utf-8"))
+        if output.suffix == ".json":
+            assert output_document == stdout_document, command
+            assert output.read_bytes() == captured.out.encode("utf-8"), command
 
 
 def test_every_unsupported_json_command_is_refused(
