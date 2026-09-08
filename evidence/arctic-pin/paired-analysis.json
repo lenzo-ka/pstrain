@@ -5,32 +5,32 @@
     "bootstrap_seed": 7,
     "engines": {
       "oracle": {
-        "git_describe": "c80480e",
-        "native_library_sha256": "a2063f71aa11a60620c8736ccc9f9b0cda628455b60b6800f3891382e776b6a1",
+        "git_describe": "5e8190c",
+        "native_library_sha256": "cee055880a3fde6ae54439b353d0f243246db2a266af5a269cca5890a616ea04",
         "pocketsphinx_version": "5.1.1+511126b492dcb267cf30d49d631946d7b61a9530",
         "version": "0.3.0"
       },
       "pstrain": {
-        "git_describe": "9e1769d",
-        "native_library_sha256": "a2063f71aa11a60620c8736ccc9f9b0cda628455b60b6800f3891382e776b6a1",
+        "git_describe": "80ca415",
+        "native_library_sha256": "cee055880a3fde6ae54439b353d0f243246db2a266af5a269cca5890a616ea04",
         "pocketsphinx_version": "5.1.1+511126b492dcb267cf30d49d631946d7b61a9530",
         "version": "0.3.0"
       }
     },
     "paired_delta_path": "pstrain.benchmarks.arctic.paired_delta_ci",
     "resource_axis": {
-      "dictionary_sha256": "204f36aa9d0ecad1a567f561a85705ecb4289376a7cdd4538c9abba60fd2969c",
+      "dictionary_sha256": "b9d8271957f978287620d9b20a79e12b0b84470f520942c580145570021d0588",
       "lm_sha256": "2cf11ab0474a0bdd165cbee59db674b05764fdb00bf6f9824c0dccce571637b5"
     }
   },
   "generated_from": {
     "oracle_sidecar": {
       "path": "oracle-sidecar.json",
-      "sha256": "5d3ecfb8e3c692789d92c8458fd21aacf65c563543cd81955ff337fd0b4b2989"
+      "sha256": "0304662cd445906775edf2bd057fe1f567255ea7c62dc1bc44e7303c2005dbd6"
     },
     "record": {
       "path": "record.json",
-      "sha256": "9bb96e62e1af86852a14e9ae896bfa72b9111c6cd2381bab01cb62d851d050f0"
+      "sha256": "ae938df9dd6b6d50ee39676d2b12ded81bd67976a506d2828aff651505dee4d4"
     }
   },
   "pstrain_vs_oracle": [
@@ -54,13 +54,13 @@
       "oracle_errors": 144,
       "oracle_wer": 28.07017543859649,
       "paired_ci_95_pp": [
-        -3.007518796992481,
-        1.976284584980237
+        -3.6964980544747084,
+        1.6574585635359116
       ],
-      "per_utterance_error_rows_differ": 20,
-      "pstrain_errors": 142,
-      "pstrain_minus_oracle_pp": -0.3898635477582846,
-      "pstrain_wer": 27.680311890838205,
+      "per_utterance_error_rows_differ": 23,
+      "pstrain_errors": 139,
+      "pstrain_minus_oracle_pp": -0.9746588693957114,
+      "pstrain_wer": 27.09551656920078,
       "ref_words": 513
     },
     {
@@ -83,13 +83,13 @@
       "oracle_errors": 22638,
       "oracle_wer": 75.50530318190914,
       "paired_ci_95_pp": [
-        -0.6982780430167788,
-        0.19796116800226038
+        -0.24138458868268817,
+        0.6712765443012775
       ],
-      "per_utterance_error_rows_differ": 1825,
-      "pstrain_errors": 22564,
-      "pstrain_minus_oracle_pp": -0.24681475551997864,
-      "pstrain_wer": 75.25848842638916,
+      "per_utterance_error_rows_differ": 1863,
+      "pstrain_errors": 22703,
+      "pstrain_minus_oracle_pp": 0.21679674471349478,
+      "pstrain_wer": 75.72209992662265,
       "ref_words": 29982
     }
   ],
