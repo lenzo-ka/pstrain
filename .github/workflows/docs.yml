@@ -3,18 +3,8 @@ name: Docs
 on:
   push:
     branches: [master, main]
-    paths:
-      - "docs/**"
-      - "pstrain/**"
-      - "pyproject.toml"
-      - ".github/workflows/docs.yml"
   pull_request:
     branches: [master, main]
-    paths:
-      - "docs/**"
-      - "pstrain/**"
-      - "pyproject.toml"
-      - ".github/workflows/docs.yml"
   workflow_dispatch:
 
 concurrency:
