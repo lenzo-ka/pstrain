@@ -58,7 +58,14 @@ intersphinx_mapping = {
 }
 
 # Exclude patterns
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+exclude_patterns = [
+    "_build",
+    "Thumbs.db",
+    ".DS_Store",
+    # Internal historical audit and experiment evidence, not user documentation.
+    "code-review-2026-01-15.md",
+    "evidence/m4b-slt-runs.md",
+]
 
 # Source file extensions
 source_suffix = {
