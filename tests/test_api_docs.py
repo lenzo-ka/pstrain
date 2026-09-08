@@ -40,7 +40,13 @@ def _reachable_documents(toctree_includes: dict[str, list[str]], root: str) -> s
 
 @pytest.mark.filterwarnings("ignore::sphinx.deprecation.RemovedInSphinx11Warning")
 def test_public_api_is_present_in_built_reference(tmp_path: Path) -> None:
-    """Every public API module and export must be reachable in built docs."""
+    """Every declared public API module and export must be reachable in built docs.
+
+    The expected exports and autodoc both ultimately consume ``__all__``, so this
+    does not independently prove that those declarations are complete. It does
+    detect missing modules and pages, qualification or exclusion mistakes,
+    inventory omissions, and inventory entries whose documents are unreachable.
+    """
     output = tmp_path / "html"
     warnings = io.StringIO()
     app = Sphinx(
@@ -59,9 +65,13 @@ def test_public_api_is_present_in_built_reference(tmp_path: Path) -> None:
     assert app.statuscode == 0, warnings.getvalue()
 
     inventory = InventoryFile.loads((output / "objects.inv").read_bytes(), uri="").data
-    python_objects = set().union(
-        *(objects for role, objects in inventory.items() if role.startswith("py:"))
-    )
+    python_object_locations: dict[str, set[str]] = {}
+    for role, objects in inventory.items():
+        if not role.startswith("py:"):
+            continue
+        for name, item in objects.items():
+            document = item.uri.partition("#")[0].removesuffix(".html")
+            python_object_locations.setdefault(name, set()).add(document)
     documented_modules = inventory.get("py:module", {})
     reachable = _reachable_documents(app.env.toctree_includes, app.config.root_doc)
 
@@ -78,7 +88,20 @@ def test_public_api_is_present_in_built_reference(tmp_path: Path) -> None:
         )
 
         expected = {f"{module.__name__}.{name}" for name in exports}
-        missing = sorted(expected - python_objects)
+        missing = sorted(expected - python_object_locations.keys())
         assert not missing, (
             f"{module.__name__} public names are missing from objects.inv: {', '.join(missing)}"
+        )
+
+        unreachable = {
+            name: sorted(python_object_locations[name] - reachable)
+            for name in expected
+            if name in python_object_locations and python_object_locations[name] - reachable
+        }
+        assert not unreachable, (
+            f"{module.__name__} public names have unreachable inventory locations: "
+            + ", ".join(
+                f"{name} ({', '.join(documents)})"
+                for name, documents in sorted(unreachable.items())
+            )
         )
