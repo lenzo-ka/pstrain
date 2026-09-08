@@ -218,8 +218,8 @@ def strip_dictionary_stress(input_dict: Path, output_dict: Path) -> tuple[int, i
 
     This mirrors CMUdict's PocketSphinx conversion: entries are grouped by
     their base word, the first occurrence of each distinct stripped
-    pronunciation is retained, and surviving variants are numbered from two.
-    Comments, blank lines, and malformed lines are preserved in file order.
+    pronunciation is retained, words are sorted, and surviving variants are
+    numbered from two. Comments, blank lines, and malformed lines are omitted.
 
     Args:
         input_dict: Input dictionary (with stress)
@@ -228,24 +228,24 @@ def strip_dictionary_stress(input_dict: Path, output_dict: Path) -> tuple[int, i
     Returns:
         Tuple of (entries_processed, unique_phones)
     """
-    entries: list[str] = []
     phoneset: set[str] = set()
-    pronunciations: dict[str, set[tuple[str, ...]]] = {}
-    variant_counts: dict[str, int] = {}
+    pronunciations: dict[str, list[tuple[str, ...]]] = {}
 
-    with input_dict.open(encoding="utf-8") as f:
+    # Upstream opens cmudict.dict as Latin-1. ASCII CMUdict releases are
+    # unchanged, and this preserves exact behavior for arbitrary source bytes.
+    with input_dict.open(encoding="latin-1") as f:
         for line in f:
             line = line.strip()
 
-            # Keep comments and empty lines
-            if not line or line.startswith("#"):
-                entries.append(line)
+            if not line or line.startswith(";;;"):
                 continue
+
+            # Match upstream make_ps_dict.py's treatment of inline comments.
+            line = line.split("#", 1)[0].strip()
 
             # Process entry
             parts = line.split()
             if len(parts) < 2:
-                entries.append(line)
                 continue
 
             base_word = re.sub(r"\(\d+\)$", "", parts[0])
@@ -256,24 +256,19 @@ def strip_dictionary_stress(input_dict: Path, output_dict: Path) -> tuple[int, i
             phoneset.update(phones_nostress)
 
             pronunciation = tuple(phones_nostress)
-            seen = pronunciations.setdefault(base_word, set())
+            seen = pronunciations.setdefault(base_word, [])
             if pronunciation in seen:
                 continue
-            seen.add(pronunciation)
-
-            variant_number = variant_counts.get(base_word, 0) + 1
-            variant_counts[base_word] = variant_number
-            word = base_word if variant_number == 1 else f"{base_word}({variant_number})"
-
-            # Reconstruct entry
-            entries.append(f"{word} {' '.join(phones_nostress)}")
+            seen.append(pronunciation)
 
     # Write stress-less dictionary
     with output_dict.open("w", encoding="utf-8") as f:
-        for entry in entries:
-            f.write(entry + "\n")
+        for base_word in sorted(pronunciations):
+            for index, pronunciation in enumerate(pronunciations[base_word], start=1):
+                word = base_word if index == 1 else f"{base_word}({index})"
+                f.write(f"{word} {' '.join(pronunciation)}\n")
 
-    n_entries = len([e for e in entries if e and not e.startswith("#")])
+    n_entries = sum(map(len, pronunciations.values()))
     return n_entries, len(phoneset)
 
 

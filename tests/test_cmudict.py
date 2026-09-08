@@ -23,12 +23,10 @@ def test_strip_dictionary_stress_merges_and_renumbers_variants(tmp_path: Path) -
     entries, phones = strip_dictionary_stress(source, output)
 
     assert output.read_text(encoding="utf-8").splitlines() == [
-        "# fixture",
-        "",
-        "the DH AH",
-        "the(2) DH IY",
         "stay S T EY",
         "stay(2) S T IY",
+        "the DH AH",
+        "the(2) DH IY",
         "x EH K S",
         "x(2) IH K S",
     ]
