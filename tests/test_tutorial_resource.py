@@ -1,5 +1,7 @@
 """Tests for resolving the tutorial resource in supported and hostile layouts."""
 
+import subprocess
+import sys
 from importlib import import_module
 from pathlib import Path
 
@@ -38,3 +40,33 @@ def test_installed_package_does_not_use_adjacent_checkout_markers(
     with pytest.raises(FileNotFoundError, match="missing from this installation"):
         copy_tutorial(output)
     assert not output.exists()
+
+
+def test_tutorial_cli_imports_without_posix_pipeline_locking(tmp_path: Path) -> None:
+    output = tmp_path / TUTORIAL_FILENAME
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.modules['fcntl'] = None; "
+            "from pstrain.cli import main; raise SystemExit(main())",
+            "tutorial",
+            "--output",
+            str(output),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (
+        output.read_bytes()
+        == (
+            Path(__file__).resolve().parents[1]
+            / "pstrain"
+            / "data"
+            / "notebooks"
+            / TUTORIAL_FILENAME
+        ).read_bytes()
+    )

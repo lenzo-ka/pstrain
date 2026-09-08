@@ -29,7 +29,6 @@ Targets exposed to `pstrain build`:
 
 from __future__ import annotations
 
-import fcntl
 import functools
 import json
 import os
@@ -95,6 +94,14 @@ def _build_tree_worker(
 @contextmanager
 def _provenance_lock(directory: Path, stage: str) -> Iterator[None]:
     """Exclusively lock one stage's provenance replacement critical section."""
+    try:
+        import fcntl
+    except ImportError as error:
+        raise RuntimeError(
+            "pipeline provenance locking requires the POSIX fcntl module; "
+            "pipeline execution is unavailable on this platform"
+        ) from error
+
     with (directory / f".{stage}.lock").open("a", encoding="utf-8") as lockfile:
         fcntl.flock(lockfile, fcntl.LOCK_EX)
         try:
