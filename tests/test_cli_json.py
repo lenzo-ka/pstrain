@@ -432,22 +432,32 @@ def _required_arguments(parser: argparse.ArgumentParser) -> list[str]:
     return arguments
 
 
-def test_config_schema_json_output_is_written_and_emitted(
+@pytest.mark.parametrize("indent", [None, 0], ids=["default-indent", "compact"])
+@pytest.mark.parametrize("ascii_output", [False, True], ids=["unicode", "ascii"])
+def test_config_schema_json_output_file_is_byte_identical_to_stdout(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    indent: int | None,
+    ascii_output: bool,
 ) -> None:
     output = tmp_path / "schema.json"
+    arguments = ["pstrain", "config", "schema", "--json", "--output", str(output)]
+    if indent is not None:
+        arguments.extend(("--json-indent", str(indent)))
+    if ascii_output:
+        arguments.append("--json-ascii")
     monkeypatch.setattr(
         sys,
         "argv",
-        ["pstrain", "config", "schema", "--json", "--output", str(output)],
+        arguments,
     )
 
     assert main() == 0
     captured = capsys.readouterr()
     assert captured.err == ""
-    assert json.loads(captured.out) == json.loads(output.read_text())
+    assert captured.out.encode("utf-8") == output.read_bytes()
+    json.loads(captured.out)
 
 
 def test_config_get_requires_a_key(

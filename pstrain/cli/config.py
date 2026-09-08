@@ -201,9 +201,13 @@ def cmd_config_schema(args: Any) -> int:
         if args.format == "markdown"
         else generate_rst_docs()
     )
+    if args.json:
+        output += "\n"
     if args.output:
         Path(args.output).write_text(output, encoding="utf-8")
-    if args.json or not args.output:
+    if args.json:
+        sys.stdout.write(output)
+    elif not args.output:
         print(output)
     return 0
 
