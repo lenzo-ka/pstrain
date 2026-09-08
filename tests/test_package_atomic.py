@@ -20,6 +20,13 @@ def _write_complete_model(model_dir: Path) -> None:
     write_feat_params(model_dir / "feat.params", FeatParams())
 
 
+def _open_descriptor_count() -> int:
+    descriptor_directory = Path("/dev/fd")
+    if not descriptor_directory.exists():
+        descriptor_directory = Path("/proc/self/fd")
+    return len(list(descriptor_directory.iterdir()))
+
+
 def test_packaging_copy_failure_leaves_no_partial_package(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -482,6 +489,101 @@ def test_named_interruption_after_successful_install_reconciles_and_restores(
     assert raised.value is interruption
     assert injected
     assert (output / "release" / "acoustic" / "mdef").read_text() == "old destination"
+
+
+def test_completed_staging_swap_is_refused_and_substitute_is_not_published(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model = tmp_path / "model"
+    _write_complete_model(model)
+    output = tmp_path / "dist"
+    displaced = tmp_path / "completed-staging"
+    original_replace = package_step._replace_named_package_by_descriptor
+    injected = False
+
+    def swap_before_publication(
+        staging_dir: Path,
+        package_dir: Path,
+        *,
+        overwrite: bool,
+        parent: object,
+        staging: object,
+        model: object,
+    ) -> None:
+        nonlocal injected
+        staging_dir.rename(displaced)
+        staging_dir.mkdir()
+        (staging_dir / "belongs-to-nobody.txt").write_text("substitute survived")
+        injected = True
+        original_replace(
+            staging_dir,
+            package_dir,
+            overwrite=overwrite,
+            parent=parent,
+            staging=staging,
+            model=model,
+        )
+
+    monkeypatch.setattr(
+        package_step,
+        "_replace_named_package_by_descriptor",
+        swap_before_publication,
+    )
+
+    with pytest.raises(RuntimeError, match="staging directory.*changed before publication"):
+        package_model(model, output, model_name="release", include_dict=False)
+
+    assert injected
+    assert not (output / "release").exists()
+    assert (displaced / "pstrain-package.json").is_file()
+    substitutes = list(output.glob(".release-*"))
+    assert len(substitutes) == 1
+    assert (substitutes[0] / "belongs-to-nobody.txt").read_text() == "substitute survived"
+
+
+def test_staging_open_error_releases_descriptors_and_removes_staging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model = tmp_path / "model"
+    _write_complete_model(model)
+    output = tmp_path / "dist"
+    original_open_child = package_step._open_child
+    injected = OSError("injected staging open failure")
+
+    def fail_staging_open(parent_fd: int, name: str):
+        if name.startswith(".release-"):
+            raise injected
+        return original_open_child(parent_fd, name)
+
+    before = _open_descriptor_count()
+    monkeypatch.setattr(package_step, "_open_child", fail_staging_open)
+
+    with pytest.raises(OSError, match="injected staging open failure") as raised:
+        package_model(model, output, model_name="release", include_dict=False)
+
+    assert raised.value is injected
+    assert _open_descriptor_count() == before
+    assert not list(output.glob(".release-*"))
+
+
+def test_open_directory_closes_descriptor_when_fstat_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original_fstat = package_step.os.fstat
+    injected = OSError("injected fstat failure")
+
+    def fail_fstat(_fd: int):
+        raise injected
+
+    before = _open_descriptor_count()
+    monkeypatch.setattr(package_step.os, "fstat", fail_fstat)
+
+    with pytest.raises(OSError, match="injected fstat failure") as raised:
+        package_step._open_directory_path(tmp_path)
+
+    monkeypatch.setattr(package_step.os, "fstat", original_fstat)
+    assert raised.value is injected
+    assert _open_descriptor_count() == before
 
 
 def test_first_publish_file_exists_remains_primary_when_cleanup_also_fails(

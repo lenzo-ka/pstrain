@@ -16,6 +16,8 @@ import shutil
 import stat
 import sys
 import tempfile
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -54,6 +56,30 @@ class _OwnedDirectory:
 
     def close(self) -> None:
         self.entry.close()
+
+
+@dataclass
+class _StagingDirectory:
+    """A newly created staging path whose descriptor owner is attached after opening."""
+
+    path: Path
+    owner: _OwnedDirectory | None = None
+
+
+@contextmanager
+def _staging_directory(parent: Path, prefix: str) -> Iterator[_StagingDirectory]:
+    """Own a staging directory from creation through descriptor-relative cleanup."""
+    path: Path | None = None
+    staging: _StagingDirectory | None = None
+    try:
+        path = Path(tempfile.mkdtemp(prefix=prefix, dir=parent))
+        staging = _StagingDirectory(path)
+        yield staging
+    finally:
+        if staging is not None and staging.owner is not None:
+            _cleanup_owned_directory(staging.owner, strict=False, missing_ok=True)
+        elif path is not None:
+            shutil.rmtree(path, ignore_errors=True)
 
 
 def create_noisedict(
@@ -126,10 +152,13 @@ def package_model(
         validation and traversal remain descriptor-relative; and every rename is
         reconciled from the filesystem even when its call raises. Windows retains
         the path-based transaction and makes no guarantee against an active process
-        substituting names during packaging. No supported platform promises safety
-        against every active same-filesystem race because final directory-entry
-        deletion has no portable conditional-by-descriptor primitive. See
-        ``docs/package-safety.md`` for the exact guarantee and remaining seams.
+        substituting names during packaging. An asynchronous interruption can also
+        leave a mixed unnamed package on Windows because its path transaction cannot
+        reconcile a rename that completed before raising. No supported platform
+        promises safety against every active same-filesystem race because final
+        directory-entry deletion has no portable conditional-by-descriptor
+        primitive. See ``docs/package-safety.md`` for the exact guarantee, recovery
+        instructions, and remaining seams.
 
         With no model name, ``acoustic``, ``dict``, ``README.txt``, and
         ``pstrain-package.json`` transition separately. On a handled failure the
@@ -168,25 +197,31 @@ def package_model(
 
     staging_parent = package_dir.parent if model_name is not None else package_dir
     staging_parent.mkdir(parents=True, exist_ok=True)
-    staging_dir = Path(tempfile.mkdtemp(prefix=f".{package_dir.name}-", dir=staging_parent))
-    staging_parent_entry: _OpenEntry | None = None
-    staging_owner: _OwnedDirectory | None = None
-    if _descriptor_transactions_available():
-        staging_parent_entry = _open_directory_path(staging_parent)
-        staging_entry = _open_child(staging_parent_entry.fd, staging_dir.name)
-        if staging_entry is None or not staging_entry.is_directory:
-            if staging_entry is not None:
-                staging_entry.close()
-            staging_parent_entry.close()
-            raise RuntimeError(f"staging directory {staging_dir} changed during creation")
-        staging_owner = _OwnedDirectory(
-            staging_parent_entry.fd,
-            staging_dir.name,
-            staging_dir,
-            staging_entry,
-        )
+    with (
+        ExitStack() as resources,
+        _staging_directory(staging_parent, f".{package_dir.name}-") as staging_scope,
+    ):
+        staging_dir = staging_scope.path
+        parent_entry: _OpenEntry | None = None
+        model_entry: _OpenEntry | None = None
+        if _descriptor_transactions_available():
+            parent_entry = _open_directory_path(staging_parent)
+            resources.callback(parent_entry.close)
+            staging_entry = _open_child(parent_entry.fd, staging_dir.name)
+            if staging_entry is None or not staging_entry.is_directory:
+                if staging_entry is not None:
+                    staging_entry.close()
+                raise RuntimeError(f"staging directory {staging_dir} changed during creation")
+            resources.callback(staging_entry.close)
+            staging_scope.owner = _OwnedDirectory(
+                parent_entry.fd,
+                staging_dir.name,
+                staging_dir,
+                staging_entry,
+            )
+            model_entry = _open_directory_path(model_dir.resolve())
+            resources.callback(model_entry.close)
 
-    try:
         result = _build_package(
             model_dir=model_dir,
             package_dir=package_dir,
@@ -203,6 +238,9 @@ def package_model(
                 package_dir,
                 model_dir=model_dir,
                 overwrite=overwrite,
+                parent_entry=parent_entry,
+                staging_entry=(staging_scope.owner.entry if staging_scope.owner else None),
+                model_entry=model_entry,
             )
         else:
             generated_names = ["acoustic", "README.txt"]
@@ -215,17 +253,10 @@ def package_model(
                 generated_names,
                 model_dir=model_dir,
                 overwrite=overwrite,
+                parent_entry=parent_entry,
+                staging_entry=(staging_scope.owner.entry if staging_scope.owner else None),
+                model_entry=model_entry,
             )
-    finally:
-        if staging_owner is None:
-            shutil.rmtree(staging_dir, ignore_errors=True)
-        else:
-            try:
-                _cleanup_owned_directory(staging_owner, strict=False, missing_ok=True)
-            finally:
-                staging_owner.close()
-                assert staging_parent_entry is not None
-                staging_parent_entry.close()
 
     logger.info("Packaged model to: %s", package_dir)
     return result
@@ -705,8 +736,12 @@ def _metadata_identity(metadata: os.stat_result) -> _Identity:
 def _open_directory_path(path: Path) -> _OpenEntry:
     """Open one directory path and derive its identity only from that descriptor."""
     fd = os.open(path, _directory_open_flags())
-    metadata = os.fstat(fd)
-    return _OpenEntry(fd, _metadata_identity(metadata), True)
+    try:
+        metadata = os.fstat(fd)
+        return _OpenEntry(fd, _metadata_identity(metadata), True)
+    except BaseException:
+        os.close(fd)
+        raise
 
 
 def _open_child(parent_fd: int, name: str) -> _OpenEntry | None:
@@ -754,7 +789,18 @@ def _create_owned_directory(parent_fd: int, parent_path: Path, prefix: str) -> _
             os.mkdir(name, mode=0o700, dir_fd=parent_fd)
         except FileExistsError:
             continue
-        entry = _open_child(parent_fd, name)
+        try:
+            entry = _open_child(parent_fd, name)
+        except BaseException as error:
+            try:
+                os.rmdir(name, dir_fd=parent_fd)
+            except BaseException as cleanup_error:
+                _add_recovery_note(
+                    error,
+                    f"could not remove unowned transaction directory {parent_path / name}",
+                    cleanup_error,
+                )
+            raise
         if entry is None or not entry.is_directory:
             if entry is not None:
                 entry.close()
@@ -875,6 +921,9 @@ def _replace_named_package(
     *,
     model_dir: Path,
     overwrite: bool,
+    parent_entry: _OpenEntry | None,
+    staging_entry: _OpenEntry | None,
+    model_entry: _OpenEntry | None,
 ) -> None:
     """Replace a named package with descriptor anchoring where the platform supports it."""
     if not _descriptor_transactions_available():
@@ -885,11 +934,15 @@ def _replace_named_package(
             overwrite=overwrite,
         )
         return
+    if parent_entry is None or staging_entry is None or model_entry is None:
+        raise RuntimeError("descriptor-relative package transaction was not anchored")
     _replace_named_package_by_descriptor(
         staging_dir,
         package_dir,
-        model_dir=model_dir,
         overwrite=overwrite,
+        parent=parent_entry,
+        staging=staging_entry,
+        model=model_entry,
     )
 
 
@@ -897,20 +950,18 @@ def _replace_named_package_by_descriptor(
     staging_dir: Path,
     package_dir: Path,
     *,
-    model_dir: Path,
     overwrite: bool,
+    parent: _OpenEntry,
+    staging: _OpenEntry,
+    model: _OpenEntry,
 ) -> None:
     """Retain, validate, install, and clean a named package through open directories."""
-    parent = _open_directory_path(package_dir.parent)
-    model = _open_directory_path(model_dir.resolve())
     backup: _OwnedDirectory | None = None
     retained: _OpenEntry | None = None
-    staging: _OpenEntry | None = None
     success = False
     try:
-        staging = _open_child(parent.fd, staging_dir.name)
-        if staging is None or not staging.is_directory:
-            raise RuntimeError(f"staging directory {staging_dir} is no longer accessible")
+        if not _entry_matches(parent.fd, staging_dir.name, staging.identity):
+            raise RuntimeError(f"staging directory {staging_dir} changed before publication")
         backup = _create_owned_directory(parent.fd, package_dir.parent, f".{package_dir.name}-old-")
         retained = _open_child(parent.fd, package_dir.name)
         if retained is not None:
@@ -958,10 +1009,6 @@ def _replace_named_package_by_descriptor(
             if not success and not backup.cleaned:
                 logger.warning("Preserved package transaction directory at %s", backup.path)
             backup.close()
-        if staging is not None:
-            staging.close()
-        model.close()
-        parent.close()
 
 
 def _rollback_named_descriptor(
@@ -1066,6 +1113,9 @@ def _replace_unnamed_package(
     *,
     model_dir: Path,
     overwrite: bool,
+    parent_entry: _OpenEntry | None,
+    staging_entry: _OpenEntry | None,
+    model_entry: _OpenEntry | None,
 ) -> None:
     """Replace unnamed package entries with descriptor anchoring where available."""
     if not _descriptor_transactions_available():
@@ -1077,12 +1127,16 @@ def _replace_unnamed_package(
             overwrite=overwrite,
         )
         return
+    if parent_entry is None or staging_entry is None or model_entry is None:
+        raise RuntimeError("descriptor-relative package transaction was not anchored")
     _replace_unnamed_package_by_descriptor(
         staging_dir,
         package_dir,
         generated_names,
-        model_dir=model_dir,
         overwrite=overwrite,
+        package=parent_entry,
+        staging=staging_entry,
+        model=model_entry,
     )
 
 
@@ -1091,21 +1145,19 @@ def _replace_unnamed_package_by_descriptor(
     package_dir: Path,
     generated_names: list[str],
     *,
-    model_dir: Path,
     overwrite: bool,
+    package: _OpenEntry,
+    staging: _OpenEntry,
+    model: _OpenEntry,
 ) -> None:
     """Reconcile every unnamed-package move from its open identity on all returns."""
-    package = _open_directory_path(package_dir)
-    model = _open_directory_path(model_dir.resolve())
-    staging: _OpenEntry | None = None
     backup: _OwnedDirectory | None = None
     retained: dict[str, _OpenEntry] = {}
     installed: dict[str, _OpenEntry] = {}
     success = False
     try:
-        staging = _open_child(package.fd, staging_dir.name)
-        if staging is None or not staging.is_directory:
-            raise RuntimeError(f"staging directory {staging_dir} is no longer accessible")
+        if not _entry_matches(package.fd, staging_dir.name, staging.identity):
+            raise RuntimeError(f"staging directory {staging_dir} changed before publication")
         backup = _create_owned_directory(package.fd, package_dir, ".pstrain-package-old-")
 
         try:
@@ -1155,10 +1207,6 @@ def _replace_unnamed_package_by_descriptor(
             entry.close()
         for entry in retained.values():
             entry.close()
-        if staging is not None:
-            staging.close()
-        model.close()
-        package.close()
 
 
 def _rollback_unnamed_descriptor(
