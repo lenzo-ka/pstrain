@@ -275,7 +275,7 @@ def test_pin_configs_resolve_ratified_conditions(tmp_path: Path) -> None:
     assert on["accept_arctic_a0587_known_skip"] is False
     assert on["arctic_a0302_zero_codebook_band"] is None
     assert {on[stage]["convergence_ratio"] for stage in ("ci", "untied", "tied")} == {0.001}
-    assert on["untied"]["max_iterations"] == 6
+    assert on["untied"]["max_iterations"] == 10
     assert PIN_CONFIGS["off"]["split"]["test_count"] == 0
     assert PIN_CONFIGS["on"]["split"]["test_count"] == 0
     from pstrain.lib.pipeline.context import FeatParams, TrainParams
