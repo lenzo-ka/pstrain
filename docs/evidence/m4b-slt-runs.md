@@ -21,7 +21,7 @@ controlled performance comparison.
 | graph plus dictionary-domain initialization | 10 failed attempts / 1,043 (five utterances, original plus widened retry) |
 
 The five utterance identities and the `1e-100`/`1e-200` direct-probe
-results are in `m4b-slt-skips.tsv`. The normal `1e-90` run automatically
+results are in [`m4b-slt-skips.tsv`](m4b-slt-skips.tsv). The normal `1e-90` run automatically
 retries once at `1e-100`, hence ten failed attempts but five skipped
 utterances. All five also fail with the effectively-off `1e-200` beam.
 
