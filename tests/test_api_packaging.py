@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+import pstrain.lib.steps.package as package_step
 from pstrain.api import package_model
 
 FIXTURE = Path(__file__).parent / "fixtures" / "multipron_final_state" / "model"
@@ -178,6 +179,47 @@ def test_api_refuses_source_and_destination_overlap(tmp_path: Path, relationship
 
     assert (model / "mdef").read_bytes() == original
     assert not list(tmp_path.rglob(".*-old-*"))
+
+
+def test_api_refuses_source_identity_found_beneath_destination(tmp_path: Path) -> None:
+    old_model = _copy_model(tmp_path / "old-model")
+    source = _copy_model(tmp_path / "source")
+    output = tmp_path / "dist"
+    destination = output / "release"
+    package_model(old_model, output, model_name="release", include_dict=False)
+    (destination / "source-alias").symlink_to(source, target_is_directory=True)
+    original = (source / "mdef").read_bytes()
+
+    with pytest.raises(ValueError, match="overlaps source model"):
+        package_model(source, output, model_name="release", include_dict=False)
+
+    assert (source / "mdef").read_bytes() == original
+    assert (destination / "source-alias").is_symlink()
+
+
+def test_api_fails_closed_when_destination_identity_walk_is_inconclusive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old_model = _copy_model(tmp_path / "old-model")
+    source = _copy_model(tmp_path / "source")
+    output = tmp_path / "dist"
+    destination = output / "release"
+    package_model(old_model, output, model_name="release", include_dict=False)
+    marker = destination / "pstrain-package.json"
+    original_scandir = package_step.os.scandir
+
+    def deny_destination(path: Path) -> object:
+        if Path(path) == destination:
+            raise PermissionError("identity walk denied")
+        return original_scandir(path)
+
+    monkeypatch.setattr(package_step.os, "scandir", deny_destination)
+
+    with pytest.raises(ValueError, match="Cannot safely inspect.*identity walk denied"):
+        package_model(source, output, model_name="release", include_dict=False)
+
+    assert marker.is_file()
+    assert (source / "mdef").is_file()
 
 
 def test_api_permits_ordinary_name_and_separate_destination(tmp_path: Path) -> None:

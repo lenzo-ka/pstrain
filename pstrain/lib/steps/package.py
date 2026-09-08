@@ -147,6 +147,7 @@ def package_model(
             _replace_named_package(
                 staging_dir,
                 package_dir,
+                model_dir=model_dir,
                 overwrite=overwrite,
             )
         else:
@@ -158,6 +159,7 @@ def package_model(
                 staging_dir,
                 package_dir,
                 generated_names,
+                model_dir=model_dir,
                 overwrite=overwrite,
             )
     finally:
@@ -232,11 +234,22 @@ def validate_package_destination(
     if not destination_exists:
         return package_dir
 
-    _validate_existing_package(package_dir, display_path=package_dir, overwrite=overwrite)
+    _validate_existing_package(
+        package_dir,
+        display_path=package_dir,
+        model_dir=model_dir,
+        overwrite=overwrite,
+    )
     return package_dir
 
 
-def _validate_existing_package(path: Path, *, display_path: Path, overwrite: bool) -> None:
+def _validate_existing_package(
+    path: Path,
+    *,
+    display_path: Path,
+    model_dir: Path,
+    overwrite: bool,
+) -> None:
     """Validate the ownership marker and structure of one existing package object."""
     if path.is_symlink() or not _has_package_structure(path):
         raise ValueError(
@@ -255,6 +268,64 @@ def _validate_existing_package(path: Path, *, display_path: Path, overwrite: boo
             "or uses an unsupported format version. An overwrite replaces the entire "
             "existing directory, so the marker must be understood before replacement."
         )
+    if _directory_tree_contains(path, model_dir, display_path=display_path):
+        raise ValueError(
+            f"Package destination {display_path.resolve()} overlaps source model "
+            f"{model_dir.resolve()}; choose a separate output directory and package name."
+        )
+
+
+def _directory_tree_contains(root: Path, target: Path, *, display_path: Path) -> bool:
+    """Return whether a directory in *root* has the target's filesystem identity."""
+    try:
+        target_metadata = target.stat()
+    except OSError as error:
+        raise ValueError(
+            f"Cannot safely inspect {display_path} for source overlap: {error}"
+        ) from error
+    target_identity = (target_metadata.st_dev, target_metadata.st_ino)
+    pending = [root]
+    visited: set[tuple[int, int]] = set()
+
+    while pending:
+        directory = pending.pop()
+        try:
+            metadata = directory.stat()
+            identity = (metadata.st_dev, metadata.st_ino)
+            if identity == target_identity:
+                return True
+            if identity in visited:
+                continue
+            visited.add(identity)
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    if entry.is_symlink():
+                        try:
+                            entry_metadata = entry.stat(follow_symlinks=True)
+                        except FileNotFoundError:
+                            continue
+                        except OSError as error:
+                            raise ValueError(
+                                f"Cannot safely inspect {display_path} for source overlap: {error}"
+                            ) from error
+                        if (
+                            stat.S_ISDIR(entry_metadata.st_mode)
+                            and (
+                                entry_metadata.st_dev,
+                                entry_metadata.st_ino,
+                            )
+                            == target_identity
+                        ):
+                            return True
+                    elif entry.is_dir(follow_symlinks=False):
+                        pending.append(Path(entry.path))
+        except ValueError:
+            raise
+        except OSError as error:
+            raise ValueError(
+                f"Cannot safely inspect {display_path} for source overlap: {error}"
+            ) from error
+    return False
 
 
 def _generated_names(include_dict: bool) -> tuple[str, ...]:
@@ -403,6 +474,7 @@ def _replace_named_package(
     staging_dir: Path,
     package_dir: Path,
     *,
+    model_dir: Path,
     overwrite: bool,
 ) -> None:
     """Retain, validate, and replace a complete named package without clobbering races."""
@@ -418,6 +490,7 @@ def _replace_named_package(
             _validate_existing_package(
                 backup_path,
                 display_path=package_dir,
+                model_dir=model_dir,
                 overwrite=overwrite,
             )
         except BaseException as validation_error:
@@ -450,6 +523,7 @@ def _replace_unnamed_package(
     package_dir: Path,
     generated_names: list[str],
     *,
+    model_dir: Path,
     overwrite: bool,
 ) -> None:
     """Retain, validate, and replace generated paths while preserving unrelated entries."""
@@ -472,6 +546,7 @@ def _replace_unnamed_package(
                 _validate_existing_package(
                     backup_root,
                     display_path=package_dir,
+                    model_dir=model_dir,
                     overwrite=overwrite,
                 )
         except BaseException as retention_error:
