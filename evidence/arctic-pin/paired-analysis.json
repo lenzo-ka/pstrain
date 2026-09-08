@@ -5,7 +5,7 @@
     "bootstrap_seed": 7,
     "engines": {
       "oracle": {
-        "git_describe": "5e8190c",
+        "git_describe": "8b1ebf4",
         "native_library_sha256": "cee055880a3fde6ae54439b353d0f243246db2a266af5a269cca5890a616ea04",
         "pocketsphinx_version": "5.1.1+511126b492dcb267cf30d49d631946d7b61a9530",
         "version": "0.3.0"
@@ -26,7 +26,7 @@
   "generated_from": {
     "oracle_sidecar": {
       "path": "oracle-sidecar.json",
-      "sha256": "0304662cd445906775edf2bd057fe1f567255ea7c62dc1bc44e7303c2005dbd6"
+      "sha256": "fb79c871683006d0532d00d3583aa6f244fcf4b6af9ca1f6d5124b6a7ddbad7e"
     },
     "record": {
       "path": "record.json",
