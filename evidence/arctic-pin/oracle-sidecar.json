@@ -17,11 +17,11 @@
     "platform": "macOS-27.0-arm64-arm-64bit",
     "score_path": "pstrain.benchmarks.arctic.score_model"
   },
-  "created_utc": "2026-09-08T21:41:09Z",
-  "decode_wall_seconds": 1182.5372927188873,
+  "created_utc": "2026-09-08T22:22:21Z",
+  "decode_wall_seconds": 1166.9708240032196,
   "engine": {
     "decode_dictionary_sha256": "b9d8271957f978287620d9b20a79e12b0b84470f520942c580145570021d0588",
-    "git_describe": "5e8190c",
+    "git_describe": "8b1ebf4",
     "native_library_fp_contract_declared": "off",
     "native_library_sha256": "cee055880a3fde6ae54439b353d0f243246db2a266af5a269cca5890a616ea04",
     "native_program_agg_seg_sha256": "cc0e2dd39d4bd43cb5873b038bba09aa47baef8df876ddadbe898d0f8b125535",
@@ -106,7 +106,7 @@
       },
       "dictionary_sha256": "b9d8271957f978287620d9b20a79e12b0b84470f520942c580145570021d0588",
       "engine": {
-        "git_describe": "5e8190c",
+        "git_describe": "8b1ebf4",
         "native_library_sha256": "cee055880a3fde6ae54439b353d0f243246db2a266af5a269cca5890a616ea04",
         "pocketsphinx_version": "5.1.1+511126b492dcb267cf30d49d631946d7b61a9530",
         "version": "0.3.0"
@@ -186,7 +186,7 @@
       "path": "benchmarks/arctic/data/cmu_arctic_slt.dict"
     },
     "engine": {
-      "git_describe": "5e8190c",
+      "git_describe": "8b1ebf4",
       "native_library_sha256": "cee055880a3fde6ae54439b353d0f243246db2a266af5a269cca5890a616ea04",
       "pocketsphinx_version": "5.1.1+511126b492dcb267cf30d49d631946d7b61a9530",
       "version": "0.3.0"
