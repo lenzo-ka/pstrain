@@ -64,6 +64,8 @@ build. `--force` retains the build command's meaning of rebuilding reachable
 tasks; it must not imply overwriting source corpus files. Replacing existing
 inputs needs a separately explicit setup choice if supported. `--dry-run`
 shows setup writes, validation, resolved configuration, and the build plan.
+When combined with `--json`, standard output contains one JSON result document
+and the human-readable build plan is written to standard error.
 
 ## Pre-normalized prompts are the default
 

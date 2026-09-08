@@ -13,10 +13,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Self
 
+UNSUPPORTED_JSON_EXIT_CODE = 64
+
 
 def format_json(data: Any, indent: int = 2, sort_keys: bool = False) -> str:
     """Format data as JSON with consistent settings."""
     return json.dumps(data, indent=indent, ensure_ascii=False, sort_keys=sort_keys)
+
+
+def emit_json_document(serialized: str, output_path: Path | None = None) -> None:
+    """Emit one newline-terminated JSON serialization to every destination."""
+    document = serialized + "\n"
+    if output_path is not None:
+        output_path.write_text(document, encoding="utf-8")
+    sys.stdout.write(document)
 
 
 def add_dry_run_argument(
@@ -38,7 +48,10 @@ def add_json_argument(parser: argparse.ArgumentParser, *, suppress_defaults: boo
         "--json",
         action="store_true",
         default=argparse.SUPPRESS if suppress_defaults else False,
-        help="Output as JSON",
+        help=(
+            "Output a supported command result as JSON "
+            f"(unsupported commands exit {UNSUPPORTED_JSON_EXIT_CODE})"
+        ),
     )
     parser.add_argument(
         "--json-indent",
@@ -542,6 +555,10 @@ class CommandContext:
         indent = self.json_indent if self.json_indent > 0 else None
         return json.dumps(data, indent=indent, ensure_ascii=self.json_ascii)
 
+    def emit_json(self, data: Any, output_path: Path | None = None) -> None:
+        """Serialize JSON once and emit identical bytes to its destinations."""
+        emit_json_document(self.format_json(data), output_path)
+
     @property
     def project_dir(self) -> Path:
         """Get resolved project directory."""
@@ -807,7 +824,9 @@ class CommandContext:
 
     def log(self, message: str) -> None:
         """Log a message."""
-        if self.dry_run:
+        if self.json_output:
+            print(message, file=sys.stderr)
+        elif self.dry_run:
             self._emit_header()
             print(f"# {message}")
         else:
@@ -912,7 +931,11 @@ class Command(ABC):
             add_json_argument(parser, suppress_defaults=True)
 
         self.add_arguments(parser)
-        parser.set_defaults(command_instance=self)
+        parser.set_defaults(
+            command_instance=self,
+            json_command=self.name,
+            supports_json_output=self.supports_json_output,
+        )
         return parser
 
     @abstractmethod
@@ -950,23 +973,32 @@ class Command(ABC):
             if result.message:
                 if result.success:
                     ctx.log(result.message)
+                elif ctx.json_output:
+                    print(ctx.format_json({"status": "error", "message": result.message}))
                 else:
                     ctx.error(result.message)
 
             return result.exit_code
 
         except FileNotFoundError as e:
-            ctx.error(f"File not found: {e}")
+            self._report_error(ctx, f"File not found: {e}")
             return 1
         except PermissionError as e:
-            ctx.error(f"Permission denied: {e}")
+            self._report_error(ctx, f"Permission denied: {e}")
             return 1
         except subprocess.CalledProcessError as e:
-            ctx.error(f"Command failed: {e}")
+            self._report_error(ctx, f"Command failed: {e}")
             return e.returncode
         except Exception as e:
-            ctx.error(str(e))
+            self._report_error(ctx, str(e))
             return 1
+
+    @staticmethod
+    def _report_error(ctx: CommandContext, message: str) -> None:
+        if ctx.json_output:
+            print(ctx.format_json({"status": "error", "message": message}))
+        else:
+            ctx.error(message)
 
 
 class ProjectCommand(Command):
@@ -1011,6 +1043,10 @@ class ModelCommand(ProjectCommand):
 
 def execute_command(args: argparse.Namespace) -> int:
     """Execute command from parsed args (used by main CLI)."""
+    if getattr(args, "json", False) and not getattr(args, "supports_json_output", False):
+        command = getattr(args, "json_command", getattr(args, "command", ""))
+        print(f"Error: --json is not supported by 'pstrain {command}'", file=sys.stderr)
+        return UNSUPPORTED_JSON_EXIT_CODE
     if hasattr(args, "command_instance"):
         return int(args.command_instance.run(args))
     if hasattr(args, "func"):

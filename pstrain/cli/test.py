@@ -15,6 +15,7 @@ class TestCommand(Command):
     help = "Test a trained model"
     description = "Decode test utterances and calculate WER with all jiwer metrics"
     needs_project_dir = False
+    supports_json_output = True
 
     def add_arguments(self, parser: argparse.ArgumentParser) -> None:
         """Add command-specific arguments."""
@@ -78,12 +79,6 @@ class TestCommand(Command):
             type=int,
             default=None,
             help="Decoder workers (-1 or omitted: auto, capped at 12)",
-        )
-        parser.add_argument(
-            "--json",
-            action="store_true",
-            default=argparse.SUPPRESS,
-            help="Output JSON to stdout instead of summary",
         )
         parser.add_argument(
             "--output",
@@ -194,6 +189,16 @@ class TestCommand(Command):
 
         if ctx.dry_run:
             ctx.log("# Would run decoding and calculate WER")
+            if ctx.json_output:
+                print(
+                    ctx.format_json(
+                        {
+                            "status": "dry-run",
+                            "model": str(model_dir),
+                            "test_utterances": len(test_transcripts),
+                        }
+                    )
+                )
             return CommandResult.ok("Dry run complete")
 
         # Run test
@@ -239,17 +244,22 @@ class TestCommand(Command):
             )
 
         # Output
+        json_output_path = None
         if ctx.args.output:
             output_path = Path(ctx.args.output)
             if output_path.suffix == ".json":
-                report.save_json(output_path)
+                if ctx.json_output:
+                    output_path.parent.mkdir(parents=True, exist_ok=True)
+                    json_output_path = output_path
+                else:
+                    report.save_json(output_path)
                 ctx.log(f"JSON report saved: {output_path}")
             else:
                 report.save_text(output_path, show_per_utterance=ctx.args.verbose)
                 ctx.log(f"Text report saved: {output_path}")
 
-        if ctx.args.json:
-            ctx.log(report.to_json())
+        if ctx.json_output:
+            ctx.emit_json(report.to_dict(), json_output_path)
         else:
             ctx.log(report.format_text(show_per_utterance=ctx.args.verbose))
 

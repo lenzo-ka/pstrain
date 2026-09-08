@@ -71,30 +71,27 @@ class InfoCommand(Command):
         # Single-value outputs (for scripting)
         if getattr(args, "bin_dir", False):
             if paths.bin_dir:
-                print(paths.bin_dir)
+                self._print_value(ctx, str(paths.bin_dir))
                 return CommandResult.ok()
-            print("not found", file=sys.stderr)
             return CommandResult.fail("Binary directory not found")
 
         if getattr(args, "lib_path", False):
             if paths.lib_path:
-                print(paths.lib_path)
+                self._print_value(ctx, str(paths.lib_path))
                 return CommandResult.ok()
-            print("not found", file=sys.stderr)
             return CommandResult.fail("Library not found")
 
         if getattr(args, "include_dir", False):
             if paths.include_dir:
-                print(paths.include_dir)
+                self._print_value(ctx, str(paths.include_dir))
                 return CommandResult.ok()
-            print("not found", file=sys.stderr)
             return CommandResult.fail("Include directory not found")
 
         if getattr(args, "cflags", False):
             flags = []
             if paths.include_dir:
                 flags.append(f"-I{paths.include_dir}")
-            print(" ".join(flags) if flags else "")
+            self._print_value(ctx, " ".join(flags) if flags else "")
             return CommandResult.ok()
 
         if getattr(args, "ldflags", False):
@@ -103,11 +100,11 @@ class InfoCommand(Command):
                 lib_dir = paths.lib_path.parent
                 flags.append(f"-L{lib_dir}")
                 flags.append("-lpstrainc")
-            print(" ".join(flags) if flags else "")
+            self._print_value(ctx, " ".join(flags) if flags else "")
             return CommandResult.ok()
 
         if getattr(args, "show_version", False):
-            print(__version__)
+            self._print_value(ctx, __version__)
             return CommandResult.ok()
 
         # Full info output
@@ -119,6 +116,10 @@ class InfoCommand(Command):
             self._print_info(info)
 
         return CommandResult.ok()
+
+    @staticmethod
+    def _print_value(ctx: CommandContext, value: str) -> None:
+        print(ctx.format_json(value) if ctx.json_output else value)
 
     def _gather_info(self, paths: PstrainPaths) -> dict[str, Any]:
         """Gather all system information."""

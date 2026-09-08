@@ -528,12 +528,16 @@ class TrainCommand(Command):
                         else None,
                     )
                     plan = build_pipeline(plan_ctx)
-                    plan.run(
-                        ctx.args.target,
-                        dry_run=True,
-                        force=ctx.args.force,
-                        jobs=ctx.args.jobs,
+                    output_context = (
+                        redirect_stdout(sys.stderr) if ctx.json_output else nullcontext()
                     )
+                    with output_context:
+                        plan.run(
+                            ctx.args.target,
+                            dry_run=True,
+                            force=ctx.args.force,
+                            jobs=ctx.args.jobs,
+                        )
                 except ValueError as exc:
                     return self._failure(ctx, "unknown_profile", str(exc))
             payload = {

@@ -62,7 +62,11 @@ def register_step_command(subparsers: Any) -> None:
         default=0.001,
         help="Convergence threshold (default: 0.001)",
     )
-    ci_hmm_parser.set_defaults(func=cmd_ci_hmm)
+    ci_hmm_parser.set_defaults(
+        func=cmd_ci_hmm,
+        json_command="step ci_hmm",
+        supports_json_output=False,
+    )
 
     # CD HMM untied
     cd_hmm_untied_parser = step_subparsers.add_parser(
@@ -88,7 +92,11 @@ def register_step_command(subparsers: Any) -> None:
         default="baseline",
         help="Model configuration name (default: baseline)",
     )
-    cd_hmm_untied_parser.set_defaults(func=cmd_cd_hmm_untied)
+    cd_hmm_untied_parser.set_defaults(
+        func=cmd_cd_hmm_untied,
+        json_command="step cd_hmm_untied",
+        supports_json_output=False,
+    )
 
 
 def cmd_ci_hmm(args: Any) -> int:
