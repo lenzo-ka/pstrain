@@ -11,6 +11,7 @@ import hashlib
 import importlib.util
 import json
 import shutil
+import sys
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
@@ -36,8 +37,13 @@ from pstrain.lib.pipeline.feat_params import (
 from pstrain.lib.pipeline.tasks import DEFAULT_TARGET, TARGETS, build_pipeline
 from tests.clib import C_LIBRARY_AVAILABLE
 
+WINDOWS_NATIVE_WORKER_REASON = "native worker request transport is unavailable on Windows"
+requires_windows_native_worker = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=WINDOWS_NATIVE_WORKER_REASON,
+)
 requires_posix_provenance_lock = pytest.mark.skipif(
-    importlib.util.find_spec("fcntl") is None,
+    sys.platform != "win32" and importlib.util.find_spec("fcntl") is None,
     reason="pipeline provenance replacement requires POSIX file locking",
 )
 
@@ -60,6 +66,7 @@ def empty_project(tmp_path: Path) -> Path:
     return project
 
 
+@requires_windows_native_worker
 def test_pipeline_builds_without_error(empty_project: Path) -> None:
     ctx = PipelineContext.from_config(empty_project)
     pl = build_pipeline(ctx)
@@ -67,6 +74,7 @@ def test_pipeline_builds_without_error(empty_project: Path) -> None:
     assert len(pl.targets()) > 0
 
 
+@requires_windows_native_worker
 def test_all_registered_targets_have_producers(empty_project: Path) -> None:
     ctx = PipelineContext.from_config(empty_project)
     pl = build_pipeline(ctx)
@@ -78,6 +86,7 @@ def test_all_registered_targets_have_producers(empty_project: Path) -> None:
         )
 
 
+@requires_windows_native_worker
 def test_every_target_in_TARGETS_is_registered(empty_project: Path) -> None:
     ctx = PipelineContext.from_config(empty_project)
     pl = build_pipeline(ctx)
@@ -96,6 +105,7 @@ def test_target_registry_declares_one_default() -> None:
     assert defaults[0] == DEFAULT_TARGET
 
 
+@requires_windows_native_worker
 def test_can_plan_each_ci_and_cd_target(empty_project: Path) -> None:
     """Plan every CI/CD target. With empty fileids, feature files are
     absent, so the plan will mark them stale. We just want a clean plan
@@ -112,6 +122,7 @@ def test_can_plan_each_ci_and_cd_target(empty_project: Path) -> None:
             assert sentinel in {Path(p) for p in last.task.outputs}
 
 
+@requires_windows_native_worker
 def test_cd_8g_plan_includes_full_chain(empty_project: Path) -> None:
     """Sanity: building cd-8g should require flat, ci-1g, cd-untied, etc."""
     ctx = PipelineContext.from_config(empty_project)
@@ -143,6 +154,7 @@ def test_cd_8g_plan_includes_full_chain(empty_project: Path) -> None:
     assert names.index("cd-1g") < names.index("cd-2g") < names.index("cd-8g")
 
 
+@requires_windows_native_worker
 def test_fanout_tasks_share_parallel_group(empty_project: Path) -> None:
     """Add two audio files and ensure their extract tasks share the same
     parallel group. Note: extract tasks now derive from `audio/*.wav`
@@ -160,6 +172,7 @@ def test_fanout_tasks_share_parallel_group(empty_project: Path) -> None:
     assert groups == {"features"}
 
 
+@requires_windows_native_worker
 def test_extract_task_forwards_lifter(empty_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
@@ -173,6 +186,7 @@ def test_extract_task_forwards_lifter(empty_project: Path, monkeypatch: pytest.M
     assert captured["lifter"] == 17
 
 
+@requires_windows_native_worker
 def test_extract_task_forwards_every_recorded_waveform_field(empty_project: Path) -> None:
     """Both consumers receive declared non-defaults, checked independently of the schema."""
     feat = FeatParams(remove_noise=False, transform="legacy", frate=80, wlen=0.02)
@@ -189,6 +203,7 @@ def test_extract_task_forwards_every_recorded_waveform_field(empty_project: Path
     assert alignment_params["transform"] == "legacy"
 
 
+@requires_windows_native_worker
 def test_extract_task_forwards_preemphasis_alpha(empty_project: Path) -> None:
     (empty_project / "etc" / "configs.yaml").write_text("custom:\n  features:\n    alpha: 0.42\n")
     ctx = PipelineContext.from_config(empty_project, config_name="custom")
@@ -199,6 +214,7 @@ def test_extract_task_forwards_preemphasis_alpha(empty_project: Path) -> None:
     assert extract_task.fn.args[2]["alpha"] == 0.42
 
 
+@requires_windows_native_worker
 @requires_posix_provenance_lock
 def test_meaningful_feature_config_change_rebuilds_features(
     empty_project: Path, monkeypatch: pytest.MonkeyPatch
@@ -228,6 +244,7 @@ def test_meaningful_feature_config_change_rebuilds_features(
     assert runs == [0.42, 0.21]
 
 
+@requires_windows_native_worker
 @requires_posix_provenance_lock
 def test_reverting_feature_config_rebuilds_features(
     empty_project: Path, monkeypatch: pytest.MonkeyPatch
@@ -250,6 +267,7 @@ def test_reverting_feature_config_rebuilds_features(
     assert runs == [0.42, 0.21, 0.42]
 
 
+@requires_windows_native_worker
 @requires_posix_provenance_lock
 def test_irrelevant_config_edit_does_not_rebuild_features(
     empty_project: Path, monkeypatch: pytest.MonkeyPatch
@@ -282,6 +300,7 @@ def test_irrelevant_config_edit_does_not_rebuild_features(
     assert runs == ["ran"]
 
 
+@requires_windows_native_worker
 @requires_posix_provenance_lock
 def test_model_and_package_copy_build_provenance(
     empty_project: Path, monkeypatch: pytest.MonkeyPatch
@@ -330,6 +349,7 @@ def test_model_and_package_copy_build_provenance(
     assert json.loads(package_provenance.read_text()) == expected
 
 
+@requires_windows_native_worker
 def test_stage_fingerprints_cover_only_effective_relevant_values(empty_project: Path) -> None:
     base = PipelineContext.from_config(empty_project)
     feature_change = replace(base, feat=FeatParams(alpha=0.5))
@@ -351,6 +371,7 @@ def test_stage_fingerprints_cover_only_effective_relevant_values(empty_project: 
     assert document["fingerprint"] in base.provenance_path("training").name
 
 
+@requires_windows_native_worker
 def test_skip_state_change_invalidates_training_fingerprint(empty_project: Path) -> None:
     base = PipelineContext.from_config(empty_project)
     skip_enabled = replace(base, train=replace(base.train, skip_state=True))
@@ -359,6 +380,7 @@ def test_skip_state_change_invalidates_training_fingerprint(empty_project: Path)
     assert skip_enabled.provenance_path("training") != base.provenance_path("training")
 
 
+@requires_windows_native_worker
 def test_project_sharding_policy_changes_training_provenance(empty_project: Path) -> None:
     config = empty_project / "etc" / "config.yaml"
     config.write_text("config_version: 1\nsharding:\n  partition_position: remainder-first\n")
@@ -383,6 +405,7 @@ def test_project_sharding_policy_changes_training_provenance(empty_project: Path
     )
 
 
+@requires_windows_native_worker
 def test_training_fingerprint_excludes_config_source_metadata(empty_project: Path) -> None:
     schema_default = PipelineContext.from_config(empty_project)
 
@@ -419,6 +442,7 @@ def test_training_fingerprint_excludes_config_source_metadata(empty_project: Pat
     )
 
 
+@requires_windows_native_worker
 def test_training_fingerprint_payload_composition_is_pinned(empty_project: Path) -> None:
     """Make additions anywhere in the cache key fail until their role is declared."""
     ctx = PipelineContext.from_config(empty_project)
@@ -579,6 +603,7 @@ def test_training_fingerprint_payload_composition_is_pinned(empty_project: Path)
     ("multipron", "effective_shards"),
     [(False, 3), (True, 1)],
 )
+@requires_windows_native_worker
 def test_training_provenance_declares_requested_and_effective_bw_shard_count(
     empty_project: Path, monkeypatch: pytest.MonkeyPatch, multipron: bool, effective_shards: int
 ) -> None:
@@ -602,6 +627,7 @@ def test_training_provenance_declares_requested_and_effective_bw_shard_count(
     }
 
 
+@requires_windows_native_worker
 def test_exclusion_schedule_config_and_provenance_are_verbatim(empty_project: Path) -> None:
     schedule = {
         "ci-1g": {5: ["arctic_a0587"], 6: ["arctic_a0587"]},
@@ -617,6 +643,7 @@ def test_exclusion_schedule_config_and_provenance_are_verbatim(empty_project: Pa
     assert ctx.provenance_payload("training")["training"]["exclusion_schedule"] == schedule
 
 
+@requires_windows_native_worker
 def test_exclusion_schedule_does_not_change_decode_eval_inputs(empty_project: Path) -> None:
     (empty_project / "etc" / "configs.yaml").write_text(
         "scheduled:\n  training:\n    exclusion_schedule:\n      ci-8g: {'*': [arctic_a0587]}\n"
@@ -686,6 +713,7 @@ def test_missing_native_library_is_recorded(
     assert payload["native_library"] == {"state": "absent"}
 
 
+@requires_windows_native_worker
 def test_provenance_rejects_non_finite_config(empty_project: Path) -> None:
     ctx = PipelineContext(project_dir=empty_project, feat=FeatParams(alpha=float("nan")))
 
@@ -693,6 +721,7 @@ def test_provenance_rejects_non_finite_config(empty_project: Path) -> None:
         ctx.provenance_path("features")
 
 
+@requires_windows_native_worker
 def test_nested_and_flat_audio_fanout_uses_relative_fileids(empty_project: Path) -> None:
     (empty_project / "audio" / "placeholder.wav").unlink()
     for relative_path in ["flat.wav", "spk1/utt2.wav", "spk1/utt1.wav", "spk2/utt1.wav"]:
@@ -725,6 +754,7 @@ def test_audio_fileids_are_recursive_sorted_relative_posix_paths(empty_project: 
     assert all("\\" not in fileid for fileid in ctx.audio_fileids())
 
 
+@requires_windows_native_worker
 def test_empty_audio_directory_fails_during_pipeline_construction(
     empty_project: Path,
 ) -> None:
@@ -735,6 +765,7 @@ def test_empty_audio_directory_fails_during_pipeline_construction(
         build_pipeline(ctx)
 
 
+@requires_windows_native_worker
 def test_missing_audio_directory_fails_during_pipeline_construction(
     empty_project: Path,
 ) -> None:
@@ -746,6 +777,7 @@ def test_missing_audio_directory_fails_during_pipeline_construction(
         build_pipeline(ctx)
 
 
+@requires_windows_native_worker
 def test_split_task_produces_fileid_files(empty_project: Path) -> None:
     """Split should be registered as a task with the typed expected outputs
     and as a target whose sentinel is train.fileids."""
@@ -766,6 +798,7 @@ def test_split_task_produces_fileid_files(empty_project: Path) -> None:
     assert pl.targets()["split"].name == ".split.validated.json"
 
 
+@requires_windows_native_worker
 @requires_posix_provenance_lock
 def test_split_runs_end_to_end_and_partitions(tmp_path: Path) -> None:
     """The split task should write all four files when invoked."""
@@ -792,6 +825,7 @@ def test_split_runs_end_to_end_and_partitions(tmp_path: Path) -> None:
     assert set(train_ids).isdisjoint(set(test_ids))
 
 
+@requires_windows_native_worker
 @requires_posix_provenance_lock
 def test_lm_target_succeeds_on_setup_project_layout(tmp_path: Path) -> None:
     from pstrain.lib.setup import setup_project
@@ -812,6 +846,7 @@ def test_lm_target_succeeds_on_setup_project_layout(tmp_path: Path) -> None:
     assert (ctx.lm_dir / "train.arpa").is_file()
 
 
+@requires_windows_native_worker
 @requires_posix_provenance_lock
 def test_editing_persistent_split_revalidates_and_changes_membership(tmp_path: Path) -> None:
     """A consistent edit becomes authoritative and invalidates the split marker."""
@@ -875,6 +910,7 @@ def test_editing_persistent_split_revalidates_and_changes_membership(tmp_path: P
     assert (etc / "train.fileids").read_text().splitlines() == reordered_train
 
 
+@requires_windows_native_worker
 def test_tree_building_is_fanned_out(empty_project: Path) -> None:
     """Each (phone, state) gets its own task in the 'trees' parallel
     group, plus a sentinel 'trees' task that depends on all of them."""
@@ -894,6 +930,7 @@ def test_tree_building_is_fanned_out(empty_project: Path) -> None:
     assert tree_outputs.issubset(set(sentinel.inputs))
 
 
+@requires_windows_native_worker
 def test_model_tasks_depend_on_split_outputs(empty_project: Path) -> None:
     """flat and ci-Ng tasks should depend on train.fileids etc, which the
     split task produces. Planning cd-1g without prior split should plan
@@ -1023,6 +1060,7 @@ def test_explicit_untied_inventory_is_honored(
     assert PipelineContext.from_config(empty_project).train.untied_inventory == policy
 
 
+@requires_windows_native_worker
 def test_resolved_untied_inventory_appears_in_provenance(empty_project: Path) -> None:
     (empty_project / "etc" / "configs.yaml").write_text(
         "default:\n  training:\n    multipron_training: false\n"
@@ -1034,6 +1072,7 @@ def test_resolved_untied_inventory_appears_in_provenance(empty_project: Path) ->
 
 
 @pytest.mark.skipif(not C_LIBRARY_AVAILABLE, reason="libpstrainc not built")
+@requires_windows_native_worker
 def test_linear_default_untied_stage_builds_occurrence_inventory(
     empty_project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1194,6 +1233,7 @@ def test_bw_config_requires_explicit_normalization_policies() -> None:
         BWConfig(pass2var=True)  # type: ignore[call-arg]
 
 
+@requires_windows_native_worker
 @requires_posix_provenance_lock
 def test_configured_bw_parameters_reach_training_call(
     empty_project: Path,
@@ -1304,6 +1344,7 @@ def test_configured_bw_parameters_reach_training_call(
     assert captured["checkpoint_iterations"] is True
 
 
+@requires_windows_native_worker
 @requires_posix_provenance_lock
 def test_configured_untied_schedule_and_variance_reach_training_call(
     empty_project: Path, monkeypatch: pytest.MonkeyPatch
