@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,6 +19,8 @@ from pstrain.cli.cli import _audit_json_capabilities, create_parser, main
 from pstrain.lib.validate import ValidationReport
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_arctic"
+ScenarioFactory = Callable[[Path, pytest.MonkeyPatch], list[str]]
+OutputScenarioFactory = Callable[[Path, pytest.MonkeyPatch], tuple[list[str], Path]]
 
 
 def _leaf_commands(
@@ -36,69 +39,397 @@ def _leaf_commands(
     ]
 
 
-def _probe_arguments(
-    command: tuple[str, ...],
-    parser: argparse.ArgumentParser,
-    tmp_path: Path,
-    *,
-    dry_run: bool,
-) -> list[str]:
-    tmp_path.mkdir(parents=True, exist_ok=True)
-    if command == ("validate-project",):
-        (tmp_path / "project").mkdir(parents=True)
-    values = {
-        "audio": str(FIXTURE / "wav" if dry_run else tmp_path / "missing-audio"),
-        "dictionary": str(FIXTURE / "dictionary.dict"),
-        "key": "runner.jobs",
-        "project_dir": str(tmp_path / "project"),
-        "prompts": str(FIXTURE / "transcription.txt"),
+def _one_json_document(output: str) -> object:
+    document, end = json.JSONDecoder().raw_decode(output.lstrip())
+    assert output.lstrip()[end:].strip() == ""
+    return document
+
+
+def _validate_success(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    import pstrain.cli.validate as validate_cli
+
+    project = root / "project"
+    project.mkdir(parents=True)
+    report = ValidationReport(total_utterances=1, train_utterances=1)
+    monkeypatch.setattr(validate_cli, "validate_project", lambda path: report)
+    return ["validate-project", str(project)]
+
+
+def _validate_failure(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    return ["validate-project", str(root / "missing-project")]
+
+
+def _model_test_success(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    import pstrain.api.testing as testing_api
+
+    project = root / "project"
+    model = project / "shared" / "models" / "ci-1g" / "default"
+    model.mkdir(parents=True)
+    (project / "shared" / "dictionary.dict").write_text("WORD W ER D\n")
+    (project / "audio").mkdir()
+    transcripts = project / "experiments" / "default" / "etc"
+    transcripts.mkdir(parents=True)
+    (transcripts / "test.decoder.transcription").write_text("<s> WORD </s> (utt)\n")
+    result = SimpleNamespace(wer=0.0, n_decoded=1, n_utterances=1)
+    payload = {"metrics": {"wer": 0.0}, "counts": {"decoded": 1, "utterances": 1}}
+
+    def save_json(path: Path) -> None:
+        Path(path).write_text(json.dumps(payload) + "\n", encoding="utf-8")
+
+    report = SimpleNamespace(
+        to_dict=lambda: payload,
+        description="",
+        save_json=save_json,
+    )
+    monkeypatch.setattr(testing_api, "check_pocketsphinx", lambda: (True, ""))
+    monkeypatch.setattr(testing_api, "load_transcripts", lambda path: {"utt": "WORD"})
+    monkeypatch.setattr(testing_api, "test_model", lambda **kwargs: result)
+    monkeypatch.setattr(testing_api, "create_report", lambda **kwargs: report)
+    return ["test", "ci-1g", "--project-dir", str(project), "--no-lm"]
+
+
+def _model_test_failure(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    import pstrain.api.testing as testing_api
+
+    monkeypatch.setattr(testing_api, "check_pocketsphinx", lambda: (True, ""))
+    return ["test", "ci-1g", "--project-dir", str(root / "missing-project"), "--no-lm"]
+
+
+class _SuccessfulPipeline:
+    def run(self, *args: object, **kwargs: object) -> int:
+        return 0
+
+
+def _train_success(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    import pstrain.cli.train as train_cli
+
+    monkeypatch.setattr(train_cli, "build_pipeline", lambda context: _SuccessfulPipeline())
+    return [
+        "train",
+        str(root / "project"),
+        "--audio",
+        str(FIXTURE / "wav"),
+        "--prompts",
+        str(FIXTURE / "transcription.txt"),
+        "--dictionary",
+        str(FIXTURE / "dictionary.dict"),
+        "--phoneset",
+        str(FIXTURE / "phoneset.txt"),
+        "--filler-dict",
+        str(FIXTURE / "filler.dict"),
+        "--target",
+        "ci-1g",
+        "--jobs",
+        "1",
+    ]
+
+
+def _train_failure(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    return [
+        "train",
+        str(root / "project"),
+        "--audio",
+        str(root / "missing-audio"),
+        "--prompts",
+        str(FIXTURE / "transcription.txt"),
+        "--dictionary",
+        str(FIXTURE / "dictionary.dict"),
+    ]
+
+
+def _info_success(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    return ["info", "--version"]
+
+
+def _info_failure(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    import pstrain.cli.info as info_cli
+
+    monkeypatch.setattr(info_cli, "get_paths", lambda: SimpleNamespace(bin_dir=None))
+    return ["info", "--bin-dir"]
+
+
+def _tutorial_success(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    _patch_tutorial_copy(monkeypatch)
+    monkeypatch.chdir(root)
+    return ["tutorial"]
+
+
+def _tutorial_failure(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    _patch_tutorial_copy(monkeypatch)
+    output = root / "tutorial.ipynb"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text("occupied", encoding="utf-8")
+    return ["tutorial", "--output", str(output)]
+
+
+def _patch_tutorial_copy(monkeypatch: pytest.MonkeyPatch) -> None:
+    import pstrain.api as api
+
+    def copy_tutorial(
+        output: str | Path, *, force: bool = False, dry_run: bool = False
+    ) -> dict[str, str]:
+        destination = Path(output).absolute()
+        if destination.exists() and not force:
+            raise api.TutorialExistsError(destination)
+        if not dry_run:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text("{}\n", encoding="utf-8")
+        return {
+            "status": "dry-run" if dry_run else "written",
+            "path": str(destination),
+        }
+
+    monkeypatch.setattr(api, "copy_tutorial", copy_tutorial)
+
+
+def _config_explain_success(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    return ["config", "explain", "runner.jobs", "--project-dir", str(root)]
+
+
+def _config_explain_failure(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    return ["config", "explain", "not.a.key", "--project-dir", str(root)]
+
+
+def _config_profiles_success(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    return ["config", "profiles", "--project-dir", str(root)]
+
+
+def _config_profiles_failure(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    import pstrain.cli.config as config_cli
+
+    def fail(path: Path) -> list[dict[str, object]]:
+        raise ValueError("invalid profiles")
+
+    monkeypatch.setattr(config_cli, "list_profiles", fail)
+    return ["config", "profiles", "--project-dir", str(root)]
+
+
+def _config_show_success(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    return ["config", "show", "--project-dir", str(root)]
+
+
+def _config_show_failure(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    import pstrain.cli.config as config_cli
+
+    def fail(*args: object, **kwargs: object) -> object:
+        raise ValueError("invalid configuration")
+
+    monkeypatch.setattr(config_cli, "resolve_config", fail)
+    return ["config", "show", "--project-dir", str(root)]
+
+
+def _config_get_success(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    return ["config", "get", "runner.jobs", "--project-dir", str(root)]
+
+
+def _config_get_failure(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    return ["config", "get", "not.a.key", "--project-dir", str(root)]
+
+
+def _config_schema_success(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    return ["config", "schema"]
+
+
+def _config_schema_failure(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    return ["config", "schema", "--format", "markdown"]
+
+
+def _config_list_success(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    return ["config", "list", "--section", "runner"]
+
+
+def _config_list_failure(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    return ["config", "list", "--section", "not-a-section"]
+
+
+@pytest.fixture
+def json_success_scenarios() -> dict[tuple[str, ...], ScenarioFactory]:
+    return {
+        ("validate-project",): _validate_success,
+        ("test",): _model_test_success,
+        ("info",): _info_success,
+        ("train",): _train_success,
+        ("tutorial",): _tutorial_success,
+        ("config", "explain"): _config_explain_success,
+        ("config", "profiles"): _config_profiles_success,
+        ("config", "show"): _config_show_success,
+        ("config", "get"): _config_get_success,
+        ("config", "schema"): _config_schema_success,
+        ("config", "list"): _config_list_success,
     }
-    arguments = ["--json"]
-    if dry_run:
-        arguments.append("--dry-run")
-    arguments.extend(command)
-    for action in parser._actions:
-        if action.option_strings:
-            if action.required:
-                arguments.extend([action.option_strings[0], values.get(action.dest, "probe")])
-            continue
-        if action.dest == "help":
-            continue
-        if action.nargs in (None, "+") or action.dest in values:
-            arguments.append(values.get(action.dest, "probe"))
-    if not dry_run and any("--output" in action.option_strings for action in parser._actions):
-        arguments.extend(["--output", str(tmp_path / "output")])
-    return arguments
 
 
-def test_every_command_exposing_json_emits_json_or_refuses_it(
+@pytest.fixture
+def json_failure_scenarios() -> dict[tuple[str, ...], ScenarioFactory]:
+    return {
+        ("validate-project",): _validate_failure,
+        ("test",): _model_test_failure,
+        ("info",): _info_failure,
+        ("train",): _train_failure,
+        ("tutorial",): _tutorial_failure,
+        ("config", "explain"): _config_explain_failure,
+        ("config", "profiles"): _config_profiles_failure,
+        ("config", "show"): _config_show_failure,
+        ("config", "get"): _config_get_failure,
+        ("config", "schema"): _config_schema_failure,
+        ("config", "list"): _config_list_failure,
+    }
+
+
+def _validate_output_scenario(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[list[str], Path]:
+    arguments = _validate_success(root, monkeypatch)
+    output = root / "validation.json"
+    return [*arguments, "--output", str(output)], output
+
+
+def _model_test_output_scenario(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[list[str], Path]:
+    arguments = _model_test_success(root, monkeypatch)
+    output = root / "test-report.json"
+    return [*arguments, "--output", str(output)], output
+
+
+def _tutorial_output_scenario(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[list[str], Path]:
+    _patch_tutorial_copy(monkeypatch)
+    output = root / "tutorial.ipynb"
+    return ["tutorial", "--output", str(output)], output
+
+
+def _config_schema_output_scenario(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[list[str], Path]:
+    output = root / "schema.json"
+    return ["config", "schema", "--output", str(output)], output
+
+
+@pytest.fixture
+def json_output_scenarios() -> dict[tuple[str, ...], OutputScenarioFactory]:
+    return {
+        ("validate-project",): _validate_output_scenario,
+        ("test",): _model_test_output_scenario,
+        ("tutorial",): _tutorial_output_scenario,
+        ("config", "schema"): _config_schema_output_scenario,
+    }
+
+
+def test_json_scenario_inventory_matches_supported_parser_inventory(
+    json_success_scenarios: dict[tuple[str, ...], ScenarioFactory],
+    json_failure_scenarios: dict[tuple[str, ...], ScenarioFactory],
+    json_output_scenarios: dict[tuple[str, ...], OutputScenarioFactory],
+) -> None:
+    parser = create_parser()
+    leaves = _leaf_commands(parser)
+    supported = {
+        command
+        for command, command_parser in leaves
+        if command_parser.get_default("supports_json_output")
+    }
+    supported_with_output = {
+        command
+        for command, command_parser in leaves
+        if command in supported
+        and any("--output" in action.option_strings for action in command_parser._actions)
+    }
+
+    assert set(json_success_scenarios) == supported
+    assert set(json_failure_scenarios) == supported
+    assert set(json_output_scenarios) == supported_with_output
+
+
+@pytest.mark.parametrize("dry_run", [False, True], ids=["normal", "dry-run"])
+def test_every_supported_json_command_has_a_succeeding_scenario(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    json_success_scenarios: dict[tuple[str, ...], ScenarioFactory],
+    dry_run: bool,
+) -> None:
+    for command, prepare in json_success_scenarios.items():
+        root = tmp_path / ("dry" if dry_run else "normal") / "-".join(command)
+        root.mkdir(parents=True)
+        with monkeypatch.context() as scenario_patch:
+            arguments = prepare(root, scenario_patch)
+            if dry_run:
+                arguments = ["--dry-run", *arguments]
+            scenario_patch.setattr(sys, "argv", ["pstrain", *arguments, "--json"])
+            assert main() == 0, command
+        captured = capsys.readouterr()
+        _one_json_document(captured.out)
+
+
+def test_every_supported_json_command_has_a_failing_scenario(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    json_failure_scenarios: dict[tuple[str, ...], ScenarioFactory],
+) -> None:
+    for command, prepare in json_failure_scenarios.items():
+        root = tmp_path / "failure" / "-".join(command)
+        root.mkdir(parents=True)
+        with monkeypatch.context() as scenario_patch:
+            arguments = prepare(root, scenario_patch)
+            scenario_patch.setattr(sys, "argv", ["pstrain", *arguments, "--json"])
+            assert main() != 0, command
+        captured = capsys.readouterr()
+        _one_json_document(captured.out)
+
+
+def test_every_supported_json_output_path_is_exercised(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    json_output_scenarios: dict[tuple[str, ...], OutputScenarioFactory],
+) -> None:
+    for command, prepare in json_output_scenarios.items():
+        root = tmp_path / "output" / "-".join(command)
+        root.mkdir(parents=True)
+        with monkeypatch.context() as scenario_patch:
+            arguments, output = prepare(root, scenario_patch)
+            scenario_patch.setattr(sys, "argv", ["pstrain", *arguments, "--json"])
+            assert main() == 0, command
+        captured = capsys.readouterr()
+        _one_json_document(captured.out)
+        assert output.is_file(), command
+        assert output.stat().st_size > 0, command
+        json.loads(output.read_text(encoding="utf-8"))
+
+
+def test_every_unsupported_json_command_is_refused(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     parser = create_parser()
-    commands = _leaf_commands(parser)
-    assert commands
+    for command, command_parser in _leaf_commands(parser):
+        if command_parser.get_default("supports_json_output"):
+            continue
+        arguments = ["--json", *command, *_required_arguments(command_parser)]
+        monkeypatch.setattr(sys, "argv", ["pstrain", *arguments])
+        assert main() == UNSUPPORTED_JSON_EXIT_CODE
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err.strip() == (
+            f"Error: --json is not supported by 'pstrain {' '.join(command)}'"
+        )
 
-    for dry_run in (False, True):
-        for command, command_parser in commands:
-            probe_path = tmp_path / ("dry" if dry_run else "normal") / "-".join(command)
-            arguments = _probe_arguments(command, command_parser, probe_path, dry_run=dry_run)
-            parsed = parser.parse_args(arguments)
-            assert parsed.json is True
 
-            monkeypatch.setattr(sys, "argv", ["pstrain", *arguments])
-            return_code = main()
-            captured = capsys.readouterr()
-            if parsed.supports_json_output:
-                assert return_code in (0, 1)
-                json.loads(captured.out)
-            else:
-                assert return_code == UNSUPPORTED_JSON_EXIT_CODE
-                assert captured.out == ""
-                assert captured.err.strip() == (
-                    f"Error: --json is not supported by 'pstrain {' '.join(command)}'"
-                )
+def _required_arguments(parser: argparse.ArgumentParser) -> list[str]:
+    arguments: list[str] = []
+    for action in parser._actions:
+        if action.dest == "help":
+            continue
+        value = str(next(iter(action.choices))) if action.choices else "probe"
+        if action.option_strings:
+            if action.required:
+                arguments.extend((action.option_strings[0], value))
+            continue
+        count = action.nargs if isinstance(action.nargs, int) else 1
+        if action.nargs not in ("?", "*"):
+            arguments.extend(value for _ in range(count))
+    return arguments
 
 
 def test_config_schema_json_output_is_written_and_emitted(
