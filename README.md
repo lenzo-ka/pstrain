@@ -131,6 +131,7 @@ as the comparison baseline.
 ## Documentation
 
 - [Getting started](https://github.com/lenzo-ka/pstrain/blob/main/docs/getting-started.md)
+- [Package replacement safety](https://github.com/lenzo-ka/pstrain/blob/main/docs/package-safety.md)
 - [Input formats](https://github.com/lenzo-ka/pstrain/blob/main/docs/input-formats.md)
 - [Examples](https://github.com/lenzo-ka/pstrain/blob/main/docs/examples.md)
 - [API reference](https://github.com/lenzo-ka/pstrain/blob/main/docs/api/index.rst)
