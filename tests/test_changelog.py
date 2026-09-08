@@ -1,6 +1,7 @@
 """Checks for release metadata drift in the changelog."""
 
 import re
+from datetime import date
 from pathlib import Path
 from tomllib import load
 
@@ -17,8 +18,11 @@ def test_latest_changelog_version_matches_project_version() -> None:
         latest_release = headings[1]
     else:
         latest_release = headings[0]
-    heading = re.fullmatch(r"(?P<version>\S+)[ \t]+-[ \t]+(?P<label>.+?)", latest_release)
+    heading = re.fullmatch(
+        r"(?P<version>\S+)[ \t]+-[ \t]+(?P<date>\d{4}-\d{2}-\d{2})", latest_release
+    )
     assert heading is not None, "CHANGELOG.md has no dated release heading"
+    date.fromisoformat(heading["date"])
     with (root / "pyproject.toml").open("rb") as pyproject:
         project_version = load(pyproject)["project"]["version"]
 
