@@ -56,8 +56,10 @@ def default_cmudict_cache() -> Path:
 def fetch_cmudict(ref: str = "HEAD", cache: Path | None = None) -> CMUDictSource:
     """Fetch, convert, and cache CMUdict from its original upstream source.
 
-    ``ref`` may be a tag, branch, or commit SHA. Network access occurs only in
-    a fresh child process, keeping the caller safe from macOS D13 fork crashes.
+    ``ref`` may be a tag, branch, or commit SHA. Network access happens only in
+    a fresh child process. On macOS, an in-process HTTPS download followed by a
+    native worker spawn crashes the interpreter, so the download is kept out of
+    any process that later spawns workers.
     """
     cache_root = (cache or default_cmudict_cache()).expanduser().resolve()
     command = [
