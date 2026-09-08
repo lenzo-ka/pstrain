@@ -462,6 +462,23 @@ def test_resume_command_preserves_explicit_intermediate_target(
     assert resume_arguments[-1] == "--resume"
 
 
+def test_json_dry_run_stdout_is_one_document(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = tmp_path / "project"
+
+    assert _invoke(monkeypatch, *_base_arguments(project), "--json", "--dry-run") == 0
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["status"] == "dry-run"
+    assert payload["project"] == str(project)
+    assert "# Plan for target:" in captured.err
+    assert not project.exists()
+
+
 @requires_c_library
 def test_json_training_stdout_is_one_document(
     tmp_path: Path,
