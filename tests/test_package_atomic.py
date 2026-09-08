@@ -1,6 +1,5 @@
 """Regression tests for complete package installation."""
 
-import os
 import shutil
 from pathlib import Path
 
@@ -113,6 +112,53 @@ def test_packaging_overwrite_removes_stale_files(tmp_path: Path) -> None:
     assert (package_dir / "acoustic" / MODEL_FILES_REQUIRED[0]).is_file()
 
 
+def test_destination_introduced_after_final_validation_is_not_replaced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model_dir = tmp_path / "model"
+    _write_complete_model(model_dir)
+    output_dir = tmp_path / "dist"
+    package_dir = output_dir / "test-model"
+    unrelated = package_dir / "belongs-to-nobody.txt"
+    original_rename = package_step._rename_noreplace
+    injected = False
+
+    def inject_before_install(source: Path, destination: Path) -> None:
+        nonlocal injected
+        if destination == package_dir and not injected:
+            injected = True
+            package_dir.mkdir()
+            unrelated.write_text("racing destination")
+        original_rename(source, destination)
+
+    monkeypatch.setattr(package_step, "_rename_noreplace", inject_before_install)
+
+    with pytest.raises(FileExistsError):
+        package_model(model_dir, output_dir, model_name="test-model")
+
+    assert injected
+    assert unrelated.read_text() == "racing destination"
+
+
+def test_packaging_fails_closed_without_atomic_noreplace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model_dir = tmp_path / "model"
+    _write_complete_model(model_dir)
+    package_dir = tmp_path / "dist" / "test-model"
+
+    def unsupported(_source: Path, _destination: Path) -> None:
+        raise OSError("atomic no-replace rename unavailable")
+
+    monkeypatch.setattr(package_step, "_rename_noreplace", unsupported)
+
+    with pytest.raises(OSError, match="atomic no-replace rename unavailable"):
+        package_model(model_dir, tmp_path / "dist", model_name="test-model")
+
+    assert not package_dir.exists()
+    assert (model_dir / "mdef").is_file()
+
+
 def test_unnamed_package_preserves_unrelated_output(tmp_path: Path) -> None:
     model_dir = tmp_path / "model"
     _write_complete_model(model_dir)
@@ -151,7 +197,7 @@ def test_unnamed_package_rolls_back_all_paths_after_install_failure(
         for path in output_dir.rglob("*")
         if path.is_file()
     }
-    original_replace = os.replace
+    original_rename = package_step._rename_noreplace
     install_count = 0
 
     def fail_second_install(src: Path, dst: Path) -> None:
@@ -160,9 +206,9 @@ def test_unnamed_package_rolls_back_all_paths_after_install_failure(
             install_count += 1
             if install_count == 2:
                 raise OSError("injected second-subtree install failure")
-        original_replace(src, dst)
+        original_rename(src, dst)
 
-    monkeypatch.setattr(package_step.os, "replace", fail_second_install)
+    monkeypatch.setattr(package_step, "_rename_noreplace", fail_second_install)
 
     with pytest.raises(OSError, match="second-subtree"):
         package_model(new_model, output_dir, dictionary_path=dictionary)
@@ -212,7 +258,7 @@ def test_restore_failure_reports_original_error_and_backup(
     _write_complete_model(model_dir)
     package_dir = tmp_path / "dist" / "test-model"
     package_model(model_dir, tmp_path / "dist", model_name="test-model")
-    original_replace = os.replace
+    original_rename = package_step._rename_noreplace
     install_error = OSError("injected install failure")
     replace_count = 0
 
@@ -221,9 +267,9 @@ def test_restore_failure_reports_original_error_and_backup(
         replace_count += 1
         if replace_count > 1:
             raise OSError("injected restore failure") if replace_count == 3 else install_error
-        original_replace(src, dst)
+        original_rename(src, dst)
 
-    monkeypatch.setattr(package_step.os, "replace", fail_install_and_restore)
+    monkeypatch.setattr(package_step, "_rename_noreplace", fail_install_and_restore)
 
     with pytest.raises(RuntimeError, match=r"\.test-model-old-") as raised:
         package_model(model_dir, tmp_path / "dist", model_name="test-model")

@@ -6,11 +6,14 @@ Sphinx3, and other Sphinx-based decoders.
 
 from __future__ import annotations
 
+import ctypes
+import errno
 import json
 import logging
 import os
 import shutil
 import stat
+import sys
 import tempfile
 from pathlib import Path
 
@@ -140,23 +143,23 @@ def package_model(
             filler_dict_path=filler_dict_path,
             include_dict=include_dict,
         )
-        # Recheck after staging so a destination introduced or changed while the
-        # package was being built cannot bypass the replacement policy.
-        validate_package_destination(
-            model_dir,
-            output_dir,
-            model_name,
-            include_dict=include_dict,
-            overwrite=overwrite,
-        )
         if model_name is not None:
-            _replace_paths([(staging_dir, package_dir)])
+            _replace_named_package(
+                staging_dir,
+                package_dir,
+                overwrite=overwrite,
+            )
         else:
             generated_names = ["acoustic", "README.txt"]
             if include_dict:
                 generated_names.insert(1, "dict")
             generated_names.append(PACKAGE_MANIFEST_NAME)
-            _replace_paths([(staging_dir / name, package_dir / name) for name in generated_names])
+            _replace_unnamed_package(
+                staging_dir,
+                package_dir,
+                generated_names,
+                overwrite=overwrite,
+            )
     finally:
         shutil.rmtree(staging_dir, ignore_errors=True)
 
@@ -229,24 +232,29 @@ def validate_package_destination(
     if not destination_exists:
         return package_dir
 
-    if package_dir.is_symlink() or not _has_package_structure(package_dir):
+    _validate_existing_package(package_dir, display_path=package_dir, overwrite=overwrite)
+    return package_dir
+
+
+def _validate_existing_package(path: Path, *, display_path: Path, overwrite: bool) -> None:
+    """Validate the ownership marker and structure of one existing package object."""
+    if path.is_symlink() or not _has_package_structure(path):
         raise ValueError(
-            f"Refusing to replace {package_dir}: existing destination "
+            f"Refusing to replace {display_path}: existing destination "
             "is not a recognizable pstrain package."
         )
-    marker_status = _package_marker_status(package_dir)
+    marker_status = _package_marker_status(path)
     if marker_status == "absent" and not overwrite:
         raise ValueError(
-            f"Refusing to replace {package_dir}: existing package has no pstrain package "
+            f"Refusing to replace {display_path}: existing package has no pstrain package "
             "marker. Use --overwrite to replace the entire existing directory."
         )
     if marker_status == "invalid":
         raise ValueError(
-            f"Refusing to replace {package_dir}: existing pstrain package marker is invalid "
+            f"Refusing to replace {display_path}: existing pstrain package marker is invalid "
             "or uses an unsupported format version. An overwrite replaces the entire "
             "existing directory, so the marker must be understood before replacement."
         )
-    return package_dir
 
 
 def _generated_names(include_dict: bool) -> tuple[str, ...]:
@@ -391,63 +399,235 @@ def _build_package(
     return result
 
 
-def _replace_paths(paths: list[tuple[Path, Path]]) -> None:
-    """Install staged paths as a transaction, retaining old paths for rollback."""
-    backups: dict[Path, Path | None] = {}
+def _replace_named_package(
+    staging_dir: Path,
+    package_dir: Path,
+    *,
+    overwrite: bool,
+) -> None:
+    """Retain, validate, and replace a complete named package without clobbering races."""
+    backup_path = _reserve_absent_path(package_dir)
+    retained_identity: tuple[int, int] | None = None
     try:
-        for _, destination in paths:
-            backup_path: Path | None = None
-            if destination.exists():
-                backup_path = Path(
-                    tempfile.mkdtemp(prefix=f".{destination.name}-old-", dir=destination.parent)
+        _rename_noreplace(package_dir, backup_path)
+    except FileNotFoundError:
+        pass
+    else:
+        retained_identity = _path_identity(backup_path)
+        try:
+            _validate_existing_package(
+                backup_path,
+                display_path=package_dir,
+                overwrite=overwrite,
+            )
+        except BaseException as validation_error:
+            _restore_retained_path(
+                backup_path,
+                package_dir,
+                retained_identity,
+                validation_error,
+            )
+            raise
+
+    try:
+        _rename_noreplace(staging_dir, package_dir)
+    except BaseException as install_error:
+        if retained_identity is not None:
+            _restore_retained_path(
+                backup_path,
+                package_dir,
+                retained_identity,
+                install_error,
+            )
+        raise
+
+    if retained_identity is not None:
+        _remove_backup(backup_path, retained_identity)
+
+
+def _replace_unnamed_package(
+    staging_dir: Path,
+    package_dir: Path,
+    generated_names: list[str],
+    *,
+    overwrite: bool,
+) -> None:
+    """Retain, validate, and replace generated paths while preserving unrelated entries."""
+    backup_root = Path(tempfile.mkdtemp(prefix=f".{package_dir.name}-old-", dir=package_dir.parent))
+    backup_root_identity = _path_identity(backup_root)
+    retained: dict[str, tuple[int, int]] = {}
+    installed: dict[str, tuple[int, int]] = {}
+    try:
+        try:
+            for name in generated_names:
+                destination = package_dir / name
+                backup_path = backup_root / name
+                try:
+                    _rename_noreplace(destination, backup_path)
+                except FileNotFoundError:
+                    continue
+                retained[name] = _path_identity(backup_path)
+
+            if retained:
+                _validate_existing_package(
+                    backup_root,
+                    display_path=package_dir,
+                    overwrite=overwrite,
                 )
-                backup_path.rmdir()
-                os.replace(destination, backup_path)  # noqa: PTH105
-            backups[destination] = backup_path
-    except BaseException as install_error:
-        _rollback_paths(paths, backups, set(), install_error)
-        raise
+        except BaseException as retention_error:
+            _rollback_unnamed_paths(
+                package_dir,
+                backup_root,
+                retained,
+                installed,
+                retention_error,
+            )
+            raise
 
-    installed: set[Path] = set()
+        try:
+            for name in generated_names:
+                staging_path = staging_dir / name
+                identity = _path_identity(staging_path)
+                _rename_noreplace(staging_path, package_dir / name)
+                installed[name] = identity
+        except BaseException as install_error:
+            _rollback_unnamed_paths(
+                package_dir,
+                backup_root,
+                retained,
+                installed,
+                install_error,
+            )
+            raise
+    finally:
+        if not retained and not installed:
+            backup_root.rmdir()
+
+    _remove_backup(backup_root, backup_root_identity)
+
+
+def _reserve_absent_path(destination: Path) -> Path:
+    """Reserve an unpredictable sibling name, then make it available for a rename."""
+    path = Path(tempfile.mkdtemp(prefix=f".{destination.name}-old-", dir=destination.parent))
+    path.rmdir()
+    return path
+
+
+def _path_identity(path: Path) -> tuple[int, int]:
+    """Return the filesystem identity of a path without following a final symlink."""
+    metadata = path.lstat()
+    return metadata.st_dev, metadata.st_ino
+
+
+def _require_identity(path: Path, expected: tuple[int, int]) -> None:
+    """Fail if a private retained path no longer names the object that was moved there."""
     try:
-        for staging_path, destination in paths:
-            os.replace(staging_path, destination)  # noqa: PTH105
-            installed.add(destination)
-    except BaseException as install_error:
-        _rollback_paths(paths, backups, installed, install_error)
-        raise
-
-    for backup_path in backups.values():
-        if backup_path is not None:
-            _remove_backup(backup_path)
+        actual = _path_identity(path)
+    except OSError as error:
+        raise RuntimeError(f"retained package object at {path} is no longer accessible") from error
+    if actual != expected:
+        raise RuntimeError(f"retained package object at {path} changed during installation")
 
 
-def _rollback_paths(
-    paths: list[tuple[Path, Path]],
-    backups: dict[Path, Path | None],
-    installed: set[Path],
+def _restore_retained_path(
+    backup_path: Path,
+    destination: Path,
+    retained_identity: tuple[int, int],
     install_error: BaseException,
 ) -> None:
-    """Restore every retained path, reporting any backup that remains."""
+    """Restore one retained object without replacing a destination that appeared meanwhile."""
+    try:
+        _require_identity(backup_path, retained_identity)
+        _rename_noreplace(backup_path, destination)
+    except BaseException as restore_error:
+        raise RuntimeError(
+            f"could not restore previous package from {backup_path}: {restore_error}"
+        ) from install_error
+
+
+def _rollback_unnamed_paths(
+    package_dir: Path,
+    backup_root: Path,
+    retained: dict[str, tuple[int, int]],
+    installed: dict[str, tuple[int, int]],
+    install_error: BaseException,
+) -> None:
+    """Remove only installed objects and restore retained paths without clobbering races."""
     restore_failure: tuple[Path, BaseException] | None = None
-    for _, destination in reversed(paths):
-        if destination not in backups:
-            continue
-        backup_path = backups[destination]
+    for name, identity in reversed(installed.items()):
+        destination = package_dir / name
+        quarantine = backup_root / f".new-{name}"
         try:
-            if destination in installed:
-                _remove_path(destination)
-            if backup_path is not None:
-                os.replace(backup_path, destination)  # noqa: PTH105
+            _rename_noreplace(destination, quarantine)
+            _require_identity(quarantine, identity)
+            _remove_path(quarantine)
         except BaseException as error:
             if restore_failure is None:
-                restore_failure = (backup_path or destination, error)
+                restore_failure = (quarantine, error)
+
+    for name, identity in reversed(retained.items()):
+        backup_path = backup_root / name
+        destination = package_dir / name
+        try:
+            _require_identity(backup_path, identity)
+            _rename_noreplace(backup_path, destination)
+        except BaseException as error:
+            if restore_failure is None:
+                restore_failure = (backup_path, error)
 
     if restore_failure is not None:
         recovery_path, restore_error = restore_failure
         raise RuntimeError(
             f"could not restore previous package from {recovery_path}: {restore_error}"
         ) from install_error
+
+    backup_root.rmdir()
+
+
+def _rename_noreplace(source: Path, destination: Path) -> None:
+    """Atomically rename without replacing an existing destination, or fail closed."""
+    if sys.platform == "darwin":
+        library = ctypes.CDLL(None, use_errno=True)
+        try:
+            rename_exclusive = library.renamex_np
+        except AttributeError as error:
+            raise OSError(
+                errno.ENOTSUP,
+                "atomic no-replace rename is unavailable on this platform",
+            ) from error
+        result = rename_exclusive(os.fsencode(source), os.fsencode(destination), 0x00000004)
+    elif sys.platform.startswith("linux"):
+        library = ctypes.CDLL(None, use_errno=True)
+        try:
+            rename_exclusive = library.renameat2
+        except AttributeError as error:
+            raise OSError(
+                errno.ENOTSUP,
+                "atomic no-replace rename is unavailable on this platform",
+            ) from error
+        result = rename_exclusive(
+            -100,
+            os.fsencode(source),
+            -100,
+            os.fsencode(destination),
+            0x00000001,
+        )
+    elif os.name == "nt":
+        source.rename(destination)
+        return
+    else:
+        raise OSError(
+            errno.ENOTSUP,
+            "atomic no-replace rename is unavailable on this platform",
+        )
+
+    if result != 0:
+        error_number = ctypes.get_errno() or errno.EIO
+        raise OSError(
+            error_number,
+            os.strerror(error_number),
+            f"{source} -> {destination}",
+        )
 
 
 def _remove_path(path: Path) -> None:
@@ -458,11 +638,12 @@ def _remove_path(path: Path) -> None:
         path.unlink()
 
 
-def _remove_backup(backup_path: Path) -> None:
+def _remove_backup(backup_path: Path, retained_identity: tuple[int, int]) -> None:
     """Remove an obsolete backup without failing a completed install."""
     try:
+        _require_identity(backup_path, retained_identity)
         _remove_path(backup_path)
-    except OSError as error:
+    except (OSError, RuntimeError) as error:
         logger.warning("Could not remove old package at %s: %s", backup_path, error)
 
 
