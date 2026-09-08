@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import tempfile
+from importlib.resources import files
 from pathlib import Path
 
 import pstrain
+from pstrain.api import TUTORIAL_FILENAME
 from pstrain.lib import _pstrainc
 from pstrain.lib.testing.decoder import pocketsphinx_version
 
@@ -26,3 +29,27 @@ result = subprocess.run(
 )
 if pstrain.__version__ not in result.stdout:
     raise RuntimeError("installed version is not reported by a fresh interpreter")
+
+with tempfile.TemporaryDirectory() as temporary_directory:
+    tutorial_path = Path(temporary_directory) / TUTORIAL_FILENAME
+    tutorial_result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; from pstrain.cli import main; raise SystemExit(main())",
+            "tutorial",
+            "--output",
+            str(tutorial_path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if tutorial_result.returncode != 0:
+        raise RuntimeError(
+            "installed tutorial command failed:\n"
+            f"stdout:\n{tutorial_result.stdout}\n"
+            f"stderr:\n{tutorial_result.stderr}"
+        )
+    packaged_tutorial = files("pstrain.data").joinpath("notebooks", TUTORIAL_FILENAME)
+    if tutorial_path.read_bytes() != packaged_tutorial.read_bytes():
+        raise RuntimeError("tutorial command did not copy the packaged notebook")

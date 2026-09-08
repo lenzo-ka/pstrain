@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 import shutil
+import sys
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
@@ -12,8 +14,6 @@ from typing import Any, Literal
 
 import numpy as np
 import pytest
-
-pytest.importorskip("fcntl", reason="POSIX-only pipeline locking requires the fcntl module")
 
 from pstrain.lib import _pstrainc
 from pstrain.lib.bw import HMM, BWConfig, BWTrainer
@@ -45,6 +45,7 @@ _CHECKPOINT_MODEL_FILES = {
     "transition_matrices",
     "gauden_counts",
 }
+WINDOWS_NATIVE_WORKER_REASON = "native worker request transport is unavailable on Windows"
 _CONTRACT_MODEL_FILES = ("mdef", "means", "variances", "mixture_weights", "transition_matrices")
 _CONTRACT_ACCUMULATOR_FILES = ("artifact.json", "gauden_counts", "mixw_counts", "tmat_counts")
 _CONTRACT_DISCRETE_FIELDS = (
@@ -86,12 +87,20 @@ def _runtime_contexts(
 @pytest.fixture(scope="module")
 def flat_project(tmp_path_factory: pytest.TempPathFactory) -> PipelineContext:
     """One fixed flat model shared by the BW-level invariants."""
+    if sys.platform == "win32":
+        pytest.skip(WINDOWS_NATIVE_WORKER_REASON)
+    if importlib.util.find_spec("fcntl") is None:
+        pytest.skip("building numeric fixtures requires POSIX provenance locking")
     return create_project(tmp_path_factory.mktemp("numeric-flat") / "project")
 
 
 @pytest.fixture(scope="module")
 def full_project(tmp_path_factory: pytest.TempPathFactory) -> PipelineContext:
     """One full 1→2→4→8 run shared by split and tree invariants."""
+    if sys.platform == "win32":
+        pytest.skip(WINDOWS_NATIVE_WORKER_REASON)
+    if importlib.util.find_spec("fcntl") is None:
+        pytest.skip("building numeric fixtures requires POSIX provenance locking")
     return create_project(
         tmp_path_factory.mktemp("numeric-full") / "project",
         "cd-8g",
@@ -1123,6 +1132,7 @@ def test_withheld_context_uses_live_ci_fallback_across_passes(
 
 
 @requires_c_library
+@pytest.mark.skipif(sys.platform == "win32", reason=WINDOWS_NATIVE_WORKER_REASON)
 @pytest.mark.parametrize("fileid", ["arctic_a0257", "arctic_a0336", "arctic_b0424"])
 def test_m4_real_utterances_reach_shared_final_state(
     fileid: str,

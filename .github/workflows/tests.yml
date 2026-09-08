@@ -186,7 +186,7 @@ jobs:
         run: >-
           python -m jupyter nbconvert --to notebook --execute
           --ExecutePreprocessor.timeout=900 --output /tmp/executed.ipynb
-          notebooks/arctic_hmm_gmm_tutorial.ipynb
+          pstrain/data/notebooks/arctic_hmm_gmm_tutorial.ipynb
 
       - name: Run tests
         if: needs.changes.outputs.code == 'true'

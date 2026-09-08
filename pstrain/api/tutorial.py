@@ -29,6 +29,19 @@ class TutorialExistsError(FileExistsError):
         )
 
 
+def _read_tutorial() -> bytes:
+    """Read the tutorial from the package resource shared by every layout."""
+    packaged = files("pstrain.data").joinpath("notebooks", TUTORIAL_FILENAME)
+    if packaged.is_file():
+        return packaged.read_bytes()
+
+    raise FileNotFoundError(
+        "the pstrain tutorial notebook is missing from this installation or checkout. "
+        "Reinstall pstrain, or restore "
+        "pstrain/data/notebooks/arctic_hmm_gmm_tutorial.ipynb in a source checkout."
+    )
+
+
 def copy_tutorial(
     output: str | Path = TUTORIAL_FILENAME, *, force: bool = False, dry_run: bool = False
 ) -> TutorialResult:
@@ -53,7 +66,7 @@ def copy_tutorial(
         return result
 
     destination.parent.mkdir(parents=True, exist_ok=True)
-    content = files("pstrain.data").joinpath("notebooks", TUTORIAL_FILENAME).read_bytes()
+    content = _read_tutorial()
     descriptor, temporary_name = tempfile.mkstemp(
         dir=destination.parent, prefix=f".{destination.name}.", suffix=".tmp"
     )

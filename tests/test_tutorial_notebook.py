@@ -13,7 +13,8 @@ import pytest
 NOTEBOOK = Path(
     os.environ.get(
         "PSTRAIN_TUTORIAL_NOTEBOOK_UNDER_TEST",
-        Path(__file__).resolve().parents[1] / "notebooks/arctic_hmm_gmm_tutorial.ipynb",
+        Path(__file__).resolve().parents[1]
+        / "pstrain/data/notebooks/arctic_hmm_gmm_tutorial.ipynb",
     )
 )
 CHECKOUT_ONLY_MARKERS = (
