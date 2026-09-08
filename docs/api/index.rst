@@ -11,6 +11,17 @@ creation, and training workflows.
    :maxdepth: 2
 
    lib
+   alignment
+   config
+   corpus
+   diagnostics
+   one_command
+   packaging
+   pipeline
+   steps
+   testing
+   timings
+   tutorial
    cli
    data
    config-reference
