@@ -22,9 +22,13 @@ from pstrain.api.config import (
 from pstrain.cli.base import add_json_argument, ensure_global_option_defaults
 
 
-def _selectors(parser: Any, *, key: bool = False) -> None:
+def _selectors(parser: Any, *, key: bool = False, key_required: bool = False) -> None:
     if key:
-        parser.add_argument("key", nargs="?", help="Canonical dotted field path")
+        parser.add_argument(
+            "key",
+            nargs=None if key_required else "?",
+            help="Canonical dotted field path",
+        )
     parser.add_argument("--project-dir", default=".")
     parser.add_argument("--experiment", default="default")
     parser.add_argument("-c", "--config", dest="profile_name", default="default")
@@ -45,6 +49,14 @@ def _set_handler(
 def _format_json(args: Any, data: Any, *, default: Any = None) -> str:
     indent = args.json_indent if args.json_indent > 0 else None
     return json.dumps(data, indent=indent, ensure_ascii=args.json_ascii, default=default)
+
+
+def _error(args: Any, message: str, *, exit_code: int = 1) -> int:
+    if args.json:
+        print(_format_json(args, {"status": "error", "message": message}))
+    else:
+        print(f"Error: {message}", file=sys.stderr)
+    return exit_code
 
 
 def register_config_command(subparsers: Any) -> None:
@@ -68,7 +80,7 @@ def register_config_command(subparsers: Any) -> None:
     _set_handler(show, cmd_config_show, "show", supports_json_output=True)
 
     get = commands.add_parser("get", help="Get one resolved value")
-    _selectors(get, key=True)
+    _selectors(get, key=True, key_required=True)
     _set_handler(get, cmd_config_get, "get", supports_json_output=True)
 
     schema = commands.add_parser("schema", help="Export the canonical JSON Schema")
@@ -106,13 +118,11 @@ def cmd_config_explain(args: Any) -> int:
     try:
         resolved = _resolve(args)
     except ValueError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
+        return _error(args, str(exc))
     fields = resolved.fields
     if args.key:
         if args.key not in fields:
-            print(f"Unknown config key: {args.key}", file=sys.stderr)
-            return 1
+            return _error(args, f"Unknown config key: {args.key}")
         fields = {args.key: fields[args.key]}
     output = {
         key: {
@@ -147,8 +157,7 @@ def cmd_config_profiles(args: Any) -> int:
     try:
         rows = list_profiles(Path(args.project_dir))
     except ValueError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
+        return _error(args, str(exc))
     if args.json:
         print(_format_json(args, rows))
     else:
@@ -164,8 +173,7 @@ def cmd_config_show(args: Any) -> int:
     try:
         resolved = _resolve(args)
     except ValueError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
+        return _error(args, str(exc))
     data: dict[str, Any] = resolved.as_dict()
     if args.sources:
         data["_sources"] = {key: value.winner.__dict__ for key, value in resolved.fields.items()}
@@ -178,16 +186,14 @@ def cmd_config_get(args: Any) -> int:
         resolved = _resolve(args)
         item = resolved.fields[args.key]
     except (ValueError, KeyError) as exc:
-        print(f"Error: unknown or invalid config key {args.key!r}: {exc}", file=sys.stderr)
-        return 1
+        return _error(args, f"unknown or invalid config key {args.key!r}: {exc}")
     print(_format_json(args, item.value) if args.json else f"{args.key} = {item.value}")
     return 0
 
 
 def cmd_config_schema(args: Any) -> int:
     if args.json and args.format != "json":
-        print("Error: --json cannot be combined with a non-JSON --format", file=sys.stderr)
-        return 2
+        return _error(args, "--json cannot be combined with a non-JSON --format")
     output = (
         _format_json(args, get_schema())
         if args.format == "json"
@@ -197,7 +203,7 @@ def cmd_config_schema(args: Any) -> int:
     )
     if args.output:
         Path(args.output).write_text(output, encoding="utf-8")
-    else:
+    if args.json or not args.output:
         print(output)
     return 0
 

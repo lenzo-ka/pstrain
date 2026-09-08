@@ -44,16 +44,26 @@ def _leaf_commands(
 
 
 def _probe_arguments(
-    command: tuple[str, ...], parser: argparse.ArgumentParser, tmp_path: Path
+    command: tuple[str, ...],
+    parser: argparse.ArgumentParser,
+    tmp_path: Path,
+    *,
+    dry_run: bool,
 ) -> list[str]:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    if command == ("validate-project",):
+        (tmp_path / "project").mkdir(parents=True)
     values = {
-        "audio": str(FIXTURE / "wav"),
+        "audio": str(FIXTURE / "wav" if dry_run else tmp_path / "missing-audio"),
         "dictionary": str(FIXTURE / "dictionary.dict"),
         "key": "runner.jobs",
         "project_dir": str(tmp_path / "project"),
         "prompts": str(FIXTURE / "transcription.txt"),
     }
-    arguments = ["--json", "--dry-run", *command]
+    arguments = ["--json"]
+    if dry_run:
+        arguments.append("--dry-run")
+    arguments.extend(command)
     for action in parser._actions:
         if action.option_strings:
             if action.required:
@@ -63,6 +73,8 @@ def _probe_arguments(
             continue
         if action.nargs in (None, "+") or action.dest in values:
             arguments.append(values.get(action.dest, "probe"))
+    if not dry_run and any("--output" in action.option_strings for action in parser._actions):
+        arguments.extend(["--output", str(tmp_path / "output")])
     return arguments
 
 
@@ -75,22 +87,71 @@ def test_every_command_exposing_json_emits_json_or_refuses_it(
     commands = _leaf_commands(parser)
     assert commands
 
-    for command, command_parser in commands:
-        arguments = _probe_arguments(command, command_parser, tmp_path / "-".join(command))
-        parsed = parser.parse_args(arguments)
-        assert parsed.json is True
+    for dry_run in (False, True):
+        for command, command_parser in commands:
+            probe_path = tmp_path / ("dry" if dry_run else "normal") / "-".join(command)
+            arguments = _probe_arguments(command, command_parser, probe_path, dry_run=dry_run)
+            parsed = parser.parse_args(arguments)
+            assert parsed.json is True
 
-        monkeypatch.setattr(sys, "argv", ["pstrain", *arguments])
-        return_code = main()
-        captured = capsys.readouterr()
-        if return_code == 0:
-            json.loads(captured.out)
-        else:
-            assert return_code == 2
-            assert captured.out == ""
-            assert captured.err.strip() == (
-                f"Error: --json is not supported by 'pstrain {' '.join(command)}'"
-            )
+            monkeypatch.setattr(sys, "argv", ["pstrain", *arguments])
+            return_code = main()
+            captured = capsys.readouterr()
+            if parsed.supports_json_output:
+                assert return_code in (0, 1)
+                json.loads(captured.out)
+            else:
+                assert return_code == 2
+                assert captured.out == ""
+                assert captured.err.strip() == (
+                    f"Error: --json is not supported by 'pstrain {' '.join(command)}'"
+                )
+
+
+def test_config_schema_json_output_is_written_and_emitted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    output = tmp_path / "schema.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["pstrain", "config", "schema", "--json", "--output", str(output)],
+    )
+
+    assert main() == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert json.loads(captured.out) == json.loads(output.read_text())
+
+
+def test_config_get_requires_a_key(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["pstrain", "config", "get", "--json"])
+
+    with pytest.raises(SystemExit) as raised:
+        main()
+
+    assert raised.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "the following arguments are required: key" in captured.err
+
+
+def test_config_get_invalid_key_error_is_json(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["pstrain", "config", "get", "not.a.key", "--json"])
+
+    assert main() == 1
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert json.loads(captured.out) == {
+        "status": "error",
+        "message": "unknown or invalid config key 'not.a.key': 'not.a.key'",
+    }
 
 
 def test_command_registration_rejects_json_help_metadata_disagreement() -> None:
@@ -117,7 +178,8 @@ def test_info_selectors_honor_json(
     if return_code == 0:
         assert isinstance(json.loads(captured.out), str)
     else:
-        assert captured.out == ""
+        assert json.loads(captured.out)["status"] == "error"
+        assert captured.err == ""
 
 
 def test_validate_project_emits_only_report_on_stdout(
@@ -212,7 +274,10 @@ def test_config_schema_rejects_conflicting_json_format(
         ["pstrain", "config", "schema", "--json", "--format", "markdown"],
     )
 
-    assert main() == 2
+    assert main() == 1
     captured = capsys.readouterr()
-    assert captured.out == ""
-    assert captured.err.strip() == ("Error: --json cannot be combined with a non-JSON --format")
+    assert captured.err == ""
+    assert json.loads(captured.out) == {
+        "status": "error",
+        "message": "--json cannot be combined with a non-JSON --format",
+    }

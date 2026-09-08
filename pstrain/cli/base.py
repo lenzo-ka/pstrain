@@ -959,23 +959,32 @@ class Command(ABC):
             if result.message:
                 if result.success:
                     ctx.log(result.message)
+                elif ctx.json_output:
+                    print(ctx.format_json({"status": "error", "message": result.message}))
                 else:
                     ctx.error(result.message)
 
             return result.exit_code
 
         except FileNotFoundError as e:
-            ctx.error(f"File not found: {e}")
+            self._report_error(ctx, f"File not found: {e}")
             return 1
         except PermissionError as e:
-            ctx.error(f"Permission denied: {e}")
+            self._report_error(ctx, f"Permission denied: {e}")
             return 1
         except subprocess.CalledProcessError as e:
-            ctx.error(f"Command failed: {e}")
+            self._report_error(ctx, f"Command failed: {e}")
             return e.returncode
         except Exception as e:
-            ctx.error(str(e))
+            self._report_error(ctx, str(e))
             return 1
+
+    @staticmethod
+    def _report_error(ctx: CommandContext, message: str) -> None:
+        if ctx.json_output:
+            print(ctx.format_json({"status": "error", "message": message}))
+        else:
+            ctx.error(message)
 
 
 class ProjectCommand(Command):
