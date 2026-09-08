@@ -24,6 +24,7 @@ case-sensitive, and the parser does not impose a particular phoneset. An expande
 pstrain-native dictionary format is under discussion for the future; the
 CMU/Sphinx format above is the format accepted now.
 
+(transcripts)=
 ## Transcripts
 
 Two word-level transcript forms are accepted:

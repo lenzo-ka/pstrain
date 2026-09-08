@@ -1,5 +1,5 @@
 pstrain Documentation
-==================
+=====================
 
 pstrain is an acoustic model training toolkit.
 

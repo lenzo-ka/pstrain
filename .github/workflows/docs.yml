@@ -5,14 +5,14 @@ on:
     branches: [master, main]
     paths:
       - "docs/**"
-      - "pstrain/lib/config/**"
+      - "pstrain/**"
       - "pyproject.toml"
       - ".github/workflows/docs.yml"
   pull_request:
     branches: [master, main]
     paths:
       - "docs/**"
-      - "pstrain/lib/config/**"
+      - "pstrain/**"
       - "pyproject.toml"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
@@ -31,4 +31,4 @@ jobs:
           python-version: "3.12"
       - run: pip install -e ".[docs]"
       - name: Build documentation
-        run: sphinx-build -b html docs docs/_build/html
+        run: make docs

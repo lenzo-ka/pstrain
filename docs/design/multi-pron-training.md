@@ -38,7 +38,7 @@ every multi-pron word for the entire life of the model.
 
 The state structure already supports arbitrary topology:
 
-```68:99:csrc/include/s3/state.h
+```c
 typedef struct state_s {
     /* ... */
     uint32 n_prior;
