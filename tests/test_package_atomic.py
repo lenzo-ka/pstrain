@@ -20,6 +20,13 @@ def _write_complete_model(model_dir: Path) -> None:
     write_feat_params(model_dir / "feat.params", FeatParams())
 
 
+def _open_descriptor_count() -> int:
+    descriptor_directory = Path("/dev/fd")
+    if not descriptor_directory.exists():
+        descriptor_directory = Path("/proc/self/fd")
+    return len(list(descriptor_directory.iterdir()))
+
+
 def test_packaging_copy_failure_leaves_no_partial_package(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -103,14 +110,88 @@ def test_packaging_overwrite_removes_stale_files(tmp_path: Path) -> None:
     model_dir = tmp_path / "model"
     _write_complete_model(model_dir)
     package_dir = tmp_path / "dist" / "test-model"
+    package_model(model_dir, tmp_path / "dist", model_name="test-model")
     stale_file = package_dir / "acoustic" / "stale"
-    stale_file.parent.mkdir(parents=True)
     stale_file.write_text("old package")
 
     package_model(model_dir, tmp_path / "dist", model_name="test-model")
 
     assert not stale_file.exists()
     assert (package_dir / "acoustic" / MODEL_FILES_REQUIRED[0]).is_file()
+
+
+def test_repeated_named_replacements_do_not_leak_descriptors(tmp_path: Path) -> None:
+    model_dir = tmp_path / "model"
+    _write_complete_model(model_dir)
+    output_dir = tmp_path / "dist"
+    package_model(model_dir, output_dir, model_name="test-model", include_dict=False)
+    before = _open_descriptor_count()
+
+    for _iteration in range(5):
+        package_model(model_dir, output_dir, model_name="test-model", include_dict=False)
+
+    assert _open_descriptor_count() == before
+
+
+def test_destination_introduced_after_final_validation_is_not_replaced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model_dir = tmp_path / "model"
+    _write_complete_model(model_dir)
+    output_dir = tmp_path / "dist"
+    package_dir = output_dir / "test-model"
+    unrelated = package_dir / "belongs-to-nobody.txt"
+    original_rename = package_step._rename_noreplace_at
+    injected = False
+
+    def inject_before_install(
+        source_parent_fd: int,
+        source: str,
+        destination_parent_fd: int,
+        destination: str,
+    ) -> None:
+        nonlocal injected
+        if (
+            destination == package_dir.name
+            and source.startswith(f".{package_dir.name}-")
+            and not injected
+        ):
+            injected = True
+            package_dir.mkdir()
+            unrelated.write_text("racing destination")
+        original_rename(source_parent_fd, source, destination_parent_fd, destination)
+
+    monkeypatch.setattr(package_step, "_rename_noreplace_at", inject_before_install)
+
+    with pytest.raises(FileExistsError):
+        package_model(model_dir, output_dir, model_name="test-model")
+
+    assert injected
+    assert unrelated.read_text() == "racing destination"
+
+
+def test_packaging_fails_closed_without_atomic_noreplace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model_dir = tmp_path / "model"
+    _write_complete_model(model_dir)
+    package_dir = tmp_path / "dist" / "test-model"
+
+    def unsupported(
+        _source_parent_fd: int,
+        _source: str,
+        _destination_parent_fd: int,
+        _destination: str,
+    ) -> None:
+        raise OSError("atomic no-replace rename unavailable")
+
+    monkeypatch.setattr(package_step, "_rename_noreplace_at", unsupported)
+
+    with pytest.raises(OSError, match="atomic no-replace rename unavailable"):
+        package_model(model_dir, tmp_path / "dist", model_name="test-model")
+
+    assert not package_dir.exists()
+    assert (model_dir / "mdef").is_file()
 
 
 def test_unnamed_package_preserves_unrelated_output(tmp_path: Path) -> None:
@@ -151,18 +232,22 @@ def test_unnamed_package_rolls_back_all_paths_after_install_failure(
         for path in output_dir.rglob("*")
         if path.is_file()
     }
-    original_replace = os.replace
-    install_count = 0
+    original_rename = package_step._rename_noreplace_at
+    rename_count = 0
 
-    def fail_second_install(src: Path, dst: Path) -> None:
-        nonlocal install_count
-        if Path(src).parent.name.startswith(".dist-"):
-            install_count += 1
-            if install_count == 2:
-                raise OSError("injected second-subtree install failure")
-        original_replace(src, dst)
+    def fail_second_install(
+        source_parent_fd: int,
+        source: str,
+        destination_parent_fd: int,
+        destination: str,
+    ) -> None:
+        nonlocal rename_count
+        rename_count += 1
+        if rename_count == 6:
+            raise OSError("injected second-subtree install failure")
+        original_rename(source_parent_fd, source, destination_parent_fd, destination)
 
-    monkeypatch.setattr(package_step.os, "replace", fail_second_install)
+    monkeypatch.setattr(package_step, "_rename_noreplace_at", fail_second_install)
 
     with pytest.raises(OSError, match="second-subtree"):
         package_model(new_model, output_dir, dictionary_path=dictionary)
@@ -182,27 +267,33 @@ def test_unnamed_package_rolls_back_all_paths_after_install_failure(
 
 
 def test_installed_package_survives_backup_cleanup_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     model_dir = tmp_path / "model"
     _write_complete_model(model_dir)
     package_dir = tmp_path / "dist" / "test-model"
     package_model(model_dir, tmp_path / "dist", model_name="test-model")
-    original_rmtree = shutil.rmtree
+    original_remove = package_step._remove_open_entry
 
-    def fail_backup_cleanup(path: Path, *args: object, **kwargs: object) -> None:
-        if "-old-" in Path(path).name:
+    def fail_backup_cleanup(
+        parent_fd: int,
+        name: str,
+        entry: object,
+        display_path: Path,
+    ) -> None:
+        if name == "retained":
             raise OSError("injected cleanup failure")
-        original_rmtree(path, *args, **kwargs)
+        original_remove(parent_fd, name, entry, display_path)
 
-    monkeypatch.setattr(package_step.shutil, "rmtree", fail_backup_cleanup)
+    monkeypatch.setattr(package_step, "_remove_open_entry", fail_backup_cleanup)
 
-    package_model(model_dir, tmp_path / "dist", model_name="test-model")
+    with pytest.raises(OSError, match="injected cleanup failure"):
+        package_model(model_dir, tmp_path / "dist", model_name="test-model")
 
     backups = list((tmp_path / "dist").glob(".test-model-old-*"))
     assert (package_dir / "README.txt").is_file()
     assert len(backups) == 1
-    assert str(backups[0]) in caplog.text
+    assert (backups[0] / "retained" / "README.txt").is_file()
 
 
 def test_restore_failure_reports_original_error_and_backup(
@@ -212,22 +303,336 @@ def test_restore_failure_reports_original_error_and_backup(
     _write_complete_model(model_dir)
     package_dir = tmp_path / "dist" / "test-model"
     package_model(model_dir, tmp_path / "dist", model_name="test-model")
-    original_replace = os.replace
+    original_rename = package_step._rename_noreplace_at
     install_error = OSError("injected install failure")
     replace_count = 0
 
-    def fail_install_and_restore(src: Path, dst: Path) -> None:
+    def fail_install_and_restore(
+        source_parent_fd: int,
+        source: str,
+        destination_parent_fd: int,
+        destination: str,
+    ) -> None:
         nonlocal replace_count
         replace_count += 1
         if replace_count > 1:
             raise OSError("injected restore failure") if replace_count == 3 else install_error
-        original_replace(src, dst)
+        original_rename(source_parent_fd, source, destination_parent_fd, destination)
 
-    monkeypatch.setattr(package_step.os, "replace", fail_install_and_restore)
+    monkeypatch.setattr(package_step, "_rename_noreplace_at", fail_install_and_restore)
 
-    with pytest.raises(RuntimeError, match=r"\.test-model-old-") as raised:
+    with pytest.raises(OSError, match="injected install failure") as raised:
         package_model(model_dir, tmp_path / "dist", model_name="test-model")
 
-    assert raised.value.__cause__ is install_error
+    assert raised.value is install_error
+    assert any(
+        "could not restore retained package entry" in note for note in raised.value.__notes__
+    )
     assert not package_dir.exists()
     assert len(list((tmp_path / "dist").glob(".test-model-old-*"))) == 1
+
+
+def test_retained_package_swap_after_rename_refuses_without_deleting_either_package(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old_model = tmp_path / "old-model"
+    new_model = tmp_path / "new-model"
+    substitute_model = tmp_path / "substitute-model"
+    _write_complete_model(old_model)
+    _write_complete_model(new_model)
+    _write_complete_model(substitute_model)
+    (old_model / "mdef").write_text("old destination")
+    (substitute_model / "mdef").write_text("substituted package")
+    output = tmp_path / "dist"
+    destination = output / "release"
+    substitute = tmp_path / "substitute"
+    package_model(old_model, output, model_name="release", include_dict=False)
+    package_model(substitute_model, tmp_path, model_name="substitute", include_dict=False)
+    original_rename = package_step._rename_noreplace_at
+    injected = False
+
+    def swap_after_rename(
+        source_parent_fd: int,
+        source: str,
+        destination_parent_fd: int,
+        destination_name: str,
+    ) -> None:
+        nonlocal injected
+        original_rename(source_parent_fd, source, destination_parent_fd, destination_name)
+        if source == "release" and destination_name == "retained" and not injected:
+            os.rename(
+                "retained",
+                "real-retained",
+                src_dir_fd=destination_parent_fd,
+                dst_dir_fd=destination_parent_fd,
+            )
+            os.rename(substitute, "retained", dst_dir_fd=destination_parent_fd)
+            injected = True
+
+    monkeypatch.setattr(package_step, "_rename_noreplace_at", swap_after_rename)
+
+    with pytest.raises(RuntimeError, match="neither rename endpoint"):
+        package_model(new_model, output, model_name="release", include_dict=False)
+
+    backup = next(output.glob(".release-old-*"))
+    assert injected
+    assert not destination.exists()
+    assert (backup / "real-retained" / "acoustic" / "mdef").read_text() == "old destination"
+    assert (backup / "retained" / "acoustic" / "mdef").read_text() == "substituted package"
+
+
+def test_backup_root_swap_during_cleanup_refuses_without_deleting_substitute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old_model = tmp_path / "old-model"
+    new_model = tmp_path / "new-model"
+    _write_complete_model(old_model)
+    _write_complete_model(new_model)
+    output = tmp_path / "dist"
+    package_model(old_model, output, model_name="release", include_dict=False)
+    original_remove = package_step._remove_open_entry
+    displaced = tmp_path / "open-backup"
+    unrelated: Path | None = None
+
+    def swap_before_descriptor_cleanup(
+        parent_fd: int,
+        name: str,
+        entry: object,
+        display_path: Path,
+    ) -> None:
+        nonlocal unrelated
+        if name == "retained" and unrelated is None:
+            backup_root = display_path.parent
+            backup_root.rename(displaced)
+            backup_root.mkdir()
+            unrelated = backup_root / "belongs-to-nobody.txt"
+            unrelated.write_text("unrelated file survived")
+        original_remove(parent_fd, name, entry, display_path)
+
+    monkeypatch.setattr(package_step, "_remove_open_entry", swap_before_descriptor_cleanup)
+
+    with pytest.raises(RuntimeError, match="changed identity"):
+        package_model(new_model, output, model_name="release", include_dict=False)
+
+    assert unrelated is not None
+    assert unrelated.read_text() == "unrelated file survived"
+    assert (output / "release" / "acoustic" / "mdef").is_file()
+
+
+def test_unnamed_interruption_after_successful_rename_reconciles_and_restores(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old_model = tmp_path / "old-model"
+    new_model = tmp_path / "new-model"
+    _write_complete_model(old_model)
+    _write_complete_model(new_model)
+    output = tmp_path / "dist"
+    package_model(old_model, output, include_dict=False)
+    old_files = {
+        path.relative_to(output).as_posix(): path.read_bytes()
+        for path in output.rglob("*")
+        if path.is_file()
+    }
+    original_rename = package_step._rename_noreplace_at
+    interruption = RuntimeError("injected after successful rename")
+    injected = False
+
+    def interrupt_after_rename(
+        source_parent_fd: int,
+        source: str,
+        destination_parent_fd: int,
+        destination: str,
+    ) -> None:
+        nonlocal injected
+        original_rename(source_parent_fd, source, destination_parent_fd, destination)
+        if source == "acoustic" and destination == "acoustic" and not injected:
+            injected = True
+            raise interruption
+
+    monkeypatch.setattr(package_step, "_rename_noreplace_at", interrupt_after_rename)
+
+    with pytest.raises(RuntimeError, match="injected after successful rename") as raised:
+        package_model(new_model, output, include_dict=False)
+
+    restored_files = {
+        path.relative_to(output).as_posix(): path.read_bytes()
+        for path in output.rglob("*")
+        if path.is_file() and ".pstrain-package-old-" not in path.as_posix()
+    }
+    assert raised.value is interruption
+    assert injected
+    assert restored_files == old_files
+    assert (output / "acoustic").is_dir()
+    assert (output / "README.txt").is_file()
+    assert (output / "pstrain-package.json").is_file()
+
+
+def test_named_interruption_after_successful_install_reconciles_and_restores(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old_model = tmp_path / "old-model"
+    new_model = tmp_path / "new-model"
+    _write_complete_model(old_model)
+    _write_complete_model(new_model)
+    (old_model / "mdef").write_text("old destination")
+    (new_model / "mdef").write_text("new destination")
+    output = tmp_path / "dist"
+    package_model(old_model, output, model_name="release", include_dict=False)
+    original_rename = package_step._rename_noreplace_at
+    interruption = RuntimeError("injected after named install")
+    injected = False
+
+    def interrupt_after_install(
+        source_parent_fd: int,
+        source: str,
+        destination_parent_fd: int,
+        destination: str,
+    ) -> None:
+        nonlocal injected
+        original_rename(source_parent_fd, source, destination_parent_fd, destination)
+        if source.startswith(".release-") and destination == "release" and not injected:
+            injected = True
+            raise interruption
+
+    monkeypatch.setattr(package_step, "_rename_noreplace_at", interrupt_after_install)
+
+    with pytest.raises(RuntimeError, match="injected after named install") as raised:
+        package_model(new_model, output, model_name="release", include_dict=False)
+
+    assert raised.value is interruption
+    assert injected
+    assert (output / "release" / "acoustic" / "mdef").read_text() == "old destination"
+
+
+def test_completed_staging_swap_is_refused_and_substitute_is_not_published(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model = tmp_path / "model"
+    _write_complete_model(model)
+    output = tmp_path / "dist"
+    displaced = tmp_path / "completed-staging"
+    original_replace = package_step._replace_named_package_by_descriptor
+    injected = False
+
+    def swap_before_publication(
+        staging_dir: Path,
+        package_dir: Path,
+        *,
+        overwrite: bool,
+        parent: object,
+        staging: object,
+        model: object,
+    ) -> None:
+        nonlocal injected
+        staging_dir.rename(displaced)
+        staging_dir.mkdir()
+        (staging_dir / "belongs-to-nobody.txt").write_text("substitute survived")
+        injected = True
+        original_replace(
+            staging_dir,
+            package_dir,
+            overwrite=overwrite,
+            parent=parent,
+            staging=staging,
+            model=model,
+        )
+
+    monkeypatch.setattr(
+        package_step,
+        "_replace_named_package_by_descriptor",
+        swap_before_publication,
+    )
+
+    with pytest.raises(RuntimeError, match="staging directory.*changed before publication"):
+        package_model(model, output, model_name="release", include_dict=False)
+
+    assert injected
+    assert not (output / "release").exists()
+    assert (displaced / "pstrain-package.json").is_file()
+    substitutes = list(output.glob(".release-*"))
+    assert len(substitutes) == 1
+    assert (substitutes[0] / "belongs-to-nobody.txt").read_text() == "substitute survived"
+
+
+def test_staging_open_error_releases_descriptors_and_removes_staging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model = tmp_path / "model"
+    _write_complete_model(model)
+    output = tmp_path / "dist"
+    original_open_child = package_step._open_child
+    injected = OSError("injected staging open failure")
+
+    def fail_staging_open(parent_fd: int, name: str, *, owner=None):
+        if name.startswith(".release-"):
+            raise injected
+        return original_open_child(parent_fd, name, owner=owner)
+
+    before = _open_descriptor_count()
+    monkeypatch.setattr(package_step, "_open_child", fail_staging_open)
+
+    with pytest.raises(OSError, match="injected staging open failure") as raised:
+        package_model(model, output, model_name="release", include_dict=False)
+
+    assert raised.value is injected
+    assert _open_descriptor_count() == before
+    assert not list(output.glob(".release-*"))
+
+
+def test_open_directory_closes_descriptor_when_fstat_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original_fstat = package_step.os.fstat
+    injected = OSError("injected fstat failure")
+
+    def fail_fstat(_fd: int):
+        raise injected
+
+    before = _open_descriptor_count()
+    monkeypatch.setattr(package_step.os, "fstat", fail_fstat)
+
+    with pytest.raises(OSError, match="injected fstat failure") as raised:
+        package_step._open_directory_path(tmp_path)
+
+    monkeypatch.setattr(package_step.os, "fstat", original_fstat)
+    assert raised.value is injected
+    assert _open_descriptor_count() == before
+
+
+def test_first_publish_file_exists_remains_primary_when_cleanup_also_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model = tmp_path / "model"
+    _write_complete_model(model)
+    output = tmp_path / "dist"
+    original_rename = package_step._rename_noreplace_at
+    original_empty = package_step._empty_open_directory
+    injected = False
+
+    def introduce_destination(
+        source_parent_fd: int,
+        source: str,
+        destination_parent_fd: int,
+        destination: str,
+    ) -> None:
+        nonlocal injected
+        if source == "acoustic" and destination == "acoustic" and not injected:
+            injected = True
+            (output / "acoustic").mkdir()
+            (output / "acoustic" / "belongs-to-nobody.txt").write_text("unrelated")
+        original_rename(source_parent_fd, source, destination_parent_fd, destination)
+
+    def fail_staging_cleanup(directory_fd: int, display_path: Path) -> None:
+        if display_path.name.startswith(".dist-"):
+            raise OSError("injected cleanup failure")
+        original_empty(directory_fd, display_path)
+
+    monkeypatch.setattr(package_step, "_rename_noreplace_at", introduce_destination)
+    monkeypatch.setattr(package_step, "_empty_open_directory", fail_staging_cleanup)
+
+    with pytest.raises(FileExistsError) as raised:
+        package_model(model, output, include_dict=False)
+
+    assert injected
+    assert "acoustic -> acoustic" in str(raised.value)
+    assert (output / "acoustic" / "belongs-to-nobody.txt").read_text() == "unrelated"

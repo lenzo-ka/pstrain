@@ -47,6 +47,7 @@ def test_cmudict_stress_helpers_are_in_public_api() -> None:
         "TrainingConfig",
         "resolve_config",
         "package_model",
+        "validate_package_destination",
         "TUTORIAL_FILENAME",
         "TutorialExistsError",
         "TutorialResult",
