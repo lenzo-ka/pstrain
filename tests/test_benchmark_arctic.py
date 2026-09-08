@@ -440,7 +440,12 @@ def test_record_rejects_provenance_that_disagrees_with_conditions() -> None:
         for dataset in ("slt55", "big"):
             actual["results"][mode][dataset]["configuration_provenance"] = provenance
     record = make_record(actual)
-    record["results"]["on"]["slt55"]["configuration_provenance"]["diff_from_shipped_defaults"].pop()
+    provenance = record["results"]["on"]["slt55"]["configuration_provenance"]
+    provenance["diff_from_shipped_defaults"] = [
+        row
+        for row in provenance["diff_from_shipped_defaults"]
+        if row["setting"] != "split.test_count"
+    ]
     with pytest.raises(RuntimeError, match="provenance/conditions consistency"):
         validate_record(record)
 

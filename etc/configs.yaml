@@ -31,7 +31,7 @@ profiles:
       a_beam: 1.0e-90
       b_beam: 1.0e-10
       ci: {max_iterations: 10, min_iterations: 1, convergence_ratio: 0.001}
-      untied: {max_iterations: 6, min_iterations: 1, convergence_ratio: 0.001}
+      untied: {max_iterations: 10, min_iterations: 1, convergence_ratio: 0.001}
       tied: {max_iterations: 10, min_iterations: 1, convergence_ratio: 0.001}
       max_skip_fraction: 0.05
       retry_beam_factor: 1.0e10

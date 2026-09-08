@@ -1313,6 +1313,29 @@ def _require_equal(label: str, actual: Any, recorded: Any) -> None:
         raise RuntimeError(f"benchmark {label} mismatch: recorded={recorded!r}, actual={actual!r}")
 
 
+def _require_pin_provenance(label: str, actual: Any, expected: dict[str, Any]) -> None:
+    """Accept provenance relative to either capture-time or current defaults.
+
+    The live pin was captured when the six-pass untied schedule was the shipped
+    default, so its frozen provenance correctly omits that setting. A newly
+    emitted record describes the same frozen profile relative to the current
+    ten-pass default and includes the divergence.
+    """
+    legacy = {
+        **expected,
+        "diff_from_shipped_defaults": [
+            row
+            for row in expected["diff_from_shipped_defaults"]
+            if row["setting"] != "training.untied.max_iterations"
+        ],
+    }
+    if actual not in (expected, legacy):
+        raise RuntimeError(
+            f"benchmark {label} mismatch: expected current={expected!r} "
+            f"or capture-time={legacy!r}, actual={actual!r}"
+        )
+
+
 def record_binding_sha256(record: dict[str, Any]) -> str:
     """Digest record fields together for internal consistency and tamper evidence.
 
@@ -1534,7 +1557,7 @@ def validate_record(record: dict[str, Any]) -> None:
                         "field_source_kinds": source_kinds[mode],
                     }
                 )
-                _require_equal(
+                _require_pin_provenance(
                     f"{mode}/{dataset} provenance/conditions consistency",
                     record["results"][mode][dataset]["configuration_provenance"],
                     expected_provenance,

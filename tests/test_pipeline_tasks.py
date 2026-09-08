@@ -1143,7 +1143,7 @@ def test_slt_profile_resolves_per_stage_schedule(empty_project: Path) -> None:
     # stage; a profile that claims to match SphinxTrain must carry it.
     assert (ci.max_iterations, ci.min_iterations, ci.convergence_ratio) == (10, 1, 0.1)
     assert (untied.max_iterations, untied.min_iterations, untied.convergence_ratio) == (
-        6,
+        10,
         1,
         0.1,
     )
