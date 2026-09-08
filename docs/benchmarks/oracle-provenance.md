@@ -111,10 +111,12 @@ The live arms are comparable as paired decode measurements because they share
 the current decode and scoring path, but they are **NOT COMPARABLE** for
 implementation attribution because the oracle model's producing host,
 architecture, build, training configuration, inputs, and full lineage are
-unknown. Under that resource-matched comparison the live cells sit below the
-oracle on the point estimate, by 0.3899 pp on SLT-55 and 0.2468 pp on big. Both
-paired 95% intervals include zero, so that is a favorable point estimate and
-not a statistically significant improvement.
+unknown. Under that resource-matched comparison SLT-55 sits below the oracle on
+the point estimate and big sits above it, and both paired 95% intervals include
+zero, so neither cell shows a statistically significant difference. The measured
+deltas and intervals are in the pin's generated
+[baseline table](arctic-pin.md), which is rebuilt from the checked-in evidence
+and is not restated here.
 
 ## Procedure for an independently derived stock arm
 
