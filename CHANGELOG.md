@@ -35,6 +35,9 @@ the version in `pyproject.toml` is authoritative.
   (2026-09-05).
 - Parallel decoding now shuts down its native helpers cleanly instead of hanging
   after decoding has finished (2026-09-05).
+- `scripts/procctl.py launch` now tolerates slow identity readers and exec
+  wrappers and records untruncated command observations; a refused launch can
+  take about sixty-eight seconds while settling and cleanup finish (2026-09-05).
 - `pstrain train` and `pstrain.api.one_command.validate_inputs()` now accept
   Festival and FestVox prompt files; `pstrain.api.diagnostics` exposes
   Baum-Welch telemetry readers, while the top-level public API exports CMUdict
