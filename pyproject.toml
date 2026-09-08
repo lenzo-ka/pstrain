@@ -86,7 +86,7 @@ editable.rebuild = false
 sdist.include = [
     "benchmarks/arctic/data/**",
     "benchmarks/corpora/**",
-    "notebooks/arctic_hmm_gmm_tutorial.ipynb",
+    "pstrain/data/notebooks/arctic_hmm_gmm_tutorial.ipynb",
 ]
 # Package files are mapped explicitly below. This keeps redirect-mode editable
 # installs from adding their package search directory (the repository root) to
@@ -101,7 +101,6 @@ cmake.version = ">=3.25"
 "pstrain" = "pstrain"
 "benchmarks/arctic/data" = "benchmarks/arctic/data"
 "benchmarks/corpora" = "benchmarks/corpora"
-"notebooks/arctic_hmm_gmm_tutorial.ipynb" = "pstrain/data/notebooks/arctic_hmm_gmm_tutorial.ipynb"
 
 [tool.scikit-build.cmake.define]
 BUILD_SHARED_LIBS = "ON"
@@ -151,6 +150,7 @@ repair-wheel-command = "delvewheel repair -w {dest_dir} -v {wheel}"
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+extend-exclude = ["pstrain/data/notebooks/*.ipynb"]
 
 [tool.ruff.lint]
 select = [

@@ -13,15 +13,15 @@ import pytest
 from pstrain.api import TUTORIAL_FILENAME, copy_tutorial
 from pstrain.cli.cli import main
 
-SOURCE_NOTEBOOK = Path(__file__).resolve().parents[1] / "notebooks" / TUTORIAL_FILENAME
-REPOSITORY_ROOT = SOURCE_NOTEBOOK.parents[1]
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+SOURCE_NOTEBOOK = REPOSITORY_ROOT / "pstrain" / "data" / "notebooks" / TUTORIAL_FILENAME
 
 
 @pytest.fixture(autouse=True)
 def _source_checkout_resource(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make source-tree API tests stand in for the build backend's wheel mapping."""
+    """Keep destination tests independent from resource discovery."""
     tutorial_api = import_module("pstrain.api.tutorial")
-    monkeypatch.setattr(tutorial_api, "files", lambda package: REPOSITORY_ROOT)
+    monkeypatch.setattr(tutorial_api, "files", lambda package: SOURCE_NOTEBOOK.parents[1])
 
 
 def _run(monkeypatch: pytest.MonkeyPatch, *args: str) -> int:
@@ -206,12 +206,13 @@ def test_tutorial_api_result_is_json_serializable(tmp_path: Path) -> None:
     }
 
 
-def test_tutorial_has_one_canonical_wheel_mapping() -> None:
+def test_tutorial_has_one_canonical_package_resource() -> None:
     configuration = (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    mapping = (
+    legacy_mapping = (
         '"notebooks/arctic_hmm_gmm_tutorial.ipynb" = '
         '"pstrain/data/notebooks/arctic_hmm_gmm_tutorial.ipynb"'
     )
 
-    assert configuration.count(mapping) == 1
-    assert not (REPOSITORY_ROOT / "pstrain/data/notebooks" / TUTORIAL_FILENAME).exists()
+    assert legacy_mapping not in configuration
+    assert SOURCE_NOTEBOOK.is_file()
+    assert not (REPOSITORY_ROOT / "notebooks" / TUTORIAL_FILENAME).exists()

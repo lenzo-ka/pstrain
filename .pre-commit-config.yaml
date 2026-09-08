@@ -32,11 +32,11 @@ repos:
       - id: ruff
         args: [--fix]
         files: ^(pstrain|tests)/
-        exclude: ^(build/|csrc/libs/libsphinxbase/(fe|util)/.*\.py$)
+        exclude: ^(build/|pstrain/data/notebooks/|csrc/libs/libsphinxbase/(fe|util)/.*\.py$)
       # Run the formatter
       - id: ruff-format
         files: ^(pstrain|tests)/
-        exclude: ^(build/|csrc/libs/libsphinxbase/(fe|util)/.*\.py$)
+        exclude: ^(build/|pstrain/data/notebooks/|csrc/libs/libsphinxbase/(fe|util)/.*\.py$)
 
   # Type checking with mypy
   - repo: https://github.com/pre-commit/mirrors-mypy

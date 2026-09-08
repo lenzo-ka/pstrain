@@ -30,20 +30,15 @@ class TutorialExistsError(FileExistsError):
 
 
 def _read_tutorial() -> bytes:
-    """Read the packaged tutorial, or its source-checkout counterpart."""
+    """Read the tutorial from the package resource shared by every layout."""
     packaged = files("pstrain.data").joinpath("notebooks", TUTORIAL_FILENAME)
     if packaged.is_file():
         return packaged.read_bytes()
 
-    repository_root = Path(__file__).resolve().parents[2]
-    checkout = repository_root / "notebooks" / TUTORIAL_FILENAME
-    if (repository_root / "pyproject.toml").is_file() and checkout.is_file():
-        return checkout.read_bytes()
-
     raise FileNotFoundError(
-        "the pstrain tutorial notebook is missing from this installation. "
-        "Reinstall pstrain, or restore notebooks/arctic_hmm_gmm_tutorial.ipynb "
-        "if this is a source checkout."
+        "the pstrain tutorial notebook is missing from this installation or checkout. "
+        "Reinstall pstrain, or restore "
+        "pstrain/data/notebooks/arctic_hmm_gmm_tutorial.ipynb in a source checkout."
     )
 
 
