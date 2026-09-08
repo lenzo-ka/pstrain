@@ -81,7 +81,7 @@ def fetch_cmudict(ref: str = "HEAD", cache: Path | None = None) -> CMUDictSource
         detail = exc.stderr.strip() or exc.stdout.strip() or str(exc)
         raise RuntimeError(f"Could not fetch CMUdict ref {ref!r}: {detail}") from exc
     try:
-        return _source_from_metadata(Path(result.stdout.strip()))
+        return _source_from_metadata(Path(result.stdout.strip()), ref)
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
         raise RuntimeError(
             "CMUdict fetch helper returned invalid provenance; remove the CMUdict cache "
@@ -197,7 +197,6 @@ def _fetch_in_helper(ref: str, cache_root: Path) -> Path:
         names = (*REQUIRED_FILES, "cmudict.dict.pocketsphinx")
         metadata = {
             "upstream": UPSTREAM,
-            "requested_ref": ref,
             "resolved_ref": resolved,
             "sha256": {name: _sha256(temporary / name) for name in names},
         }
@@ -215,7 +214,7 @@ def _fetch_in_helper(ref: str, cache_root: Path) -> Path:
         raise
 
 
-def _source_from_metadata(directory: Path) -> CMUDictSource:
+def _source_from_metadata(directory: Path, requested_ref: str) -> CMUDictSource:
     metadata = _validate_cache(directory)
     return CMUDictSource(
         dictionary=directory / "cmudict.dict.pocketsphinx",
@@ -223,7 +222,7 @@ def _source_from_metadata(directory: Path) -> CMUDictSource:
         symbols=directory / "cmudict.symbols",
         license=directory / "LICENSE",
         source_dictionary=directory / "cmudict.dict",
-        requested_ref=metadata["requested_ref"],
+        requested_ref=requested_ref,
         resolved_ref=metadata["resolved_ref"],
         cache_directory=directory,
     )

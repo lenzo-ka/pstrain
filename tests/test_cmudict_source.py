@@ -58,7 +58,7 @@ def test_fresh_fetch_and_cache_hit_do_not_redownload(
 
     assert first == second == tmp_path / COMMIT
     assert len(downloads) == 1
-    source = _source_from_metadata(first)
+    source = _source_from_metadata(first, "HEAD")
     assert isinstance(source, CMUDictSource)
     assert source.resolved_ref == COMMIT
     assert source.requested_ref == "HEAD"
@@ -68,7 +68,7 @@ def test_fresh_fetch_and_cache_hit_do_not_redownload(
     assert metadata["resolved_ref"] == COMMIT
 
 
-def test_explicit_pinned_ref_is_resolved_and_recorded(
+def test_explicit_pinned_ref_is_resolved_without_caching_invocation_metadata(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     downloads: list[str] = []
@@ -86,7 +86,30 @@ def test_explicit_pinned_ref_is_resolved_and_recorded(
 
     assert seen[0].endswith("/commits/0.7b")
     assert downloads[0].endswith(f"/{COMMIT}")
-    assert json.loads((directory / "source.json").read_text())["requested_ref"] == "0.7b"
+    assert "requested_ref" not in json.loads((directory / "source.json").read_text())
+
+
+@pytest.mark.parametrize("first_ref,second_ref", [("HEAD", COMMIT), (COMMIT, "HEAD")])
+def test_public_fetch_reports_each_requested_ref_for_shared_commit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, first_ref: str, second_ref: str
+) -> None:
+    downloads: list[str] = []
+    _stub_transport(monkeypatch, downloads)
+
+    def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        directory = _fetch_in_helper(command[3], Path(command[4]))
+        return subprocess.CompletedProcess(command, 0, stdout=f"{directory}\n", stderr="")
+
+    monkeypatch.setattr("pstrain.lib.dictionary.cmudict_source.subprocess.run", run)
+
+    first = fetch_cmudict(first_ref, cache=tmp_path)
+    second = fetch_cmudict(second_ref, cache=tmp_path)
+
+    assert first.requested_ref == first_ref
+    assert second.requested_ref == second_ref
+    assert first.resolved_ref == second.resolved_ref == COMMIT
+    assert first.cache_directory == second.cache_directory
+    assert len(downloads) == 1
 
 
 def test_unknown_ref_names_recovery(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
