@@ -13,6 +13,7 @@ concurrency:
 
 jobs:
   build:
+    name: Documentation build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
