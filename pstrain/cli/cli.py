@@ -9,6 +9,41 @@ import sys
 from pstrain import __version__
 from pstrain.cli.base import add_dry_run_argument, add_json_argument
 
+_JSON_OPTIONS = {"--json", "--json-indent", "--json-ascii"}
+
+
+def _leaf_commands(
+    parser: argparse.ArgumentParser, prefix: tuple[str, ...] = ()
+) -> list[tuple[tuple[str, ...], argparse.ArgumentParser]]:
+    subcommands = next(
+        (action for action in parser._actions if isinstance(action, argparse._SubParsersAction)),
+        None,
+    )
+    if subcommands is None:
+        return [(prefix, parser)]
+    return [
+        leaf
+        for name, child in subcommands.choices.items()
+        for leaf in _leaf_commands(child, (*prefix, name))
+    ]
+
+
+def _audit_json_capabilities(parser: argparse.ArgumentParser) -> None:
+    """Reject JSON capability metadata that disagrees with finished leaf help."""
+    for path, command_parser in _leaf_commands(parser):
+        command = " ".join(path)
+        if command_parser.get_default("json_command") != command:
+            raise RuntimeError(f"missing JSON capability metadata for pstrain {command}")
+        options = {option for action in command_parser._actions for option in action.option_strings}
+        advertised = options & _JSON_OPTIONS
+        supported = bool(command_parser.get_default("supports_json_output"))
+        if supported and advertised != _JSON_OPTIONS:
+            missing = ", ".join(sorted(_JSON_OPTIONS - advertised))
+            raise RuntimeError(f"pstrain {command} JSON help is missing: {missing}")
+        if not supported and advertised:
+            unexpected = ", ".join(sorted(advertised))
+            raise RuntimeError(f"pstrain {command} advertises unsupported JSON help: {unexpected}")
+
 
 def create_parser() -> argparse.ArgumentParser:
     """Build the complete command-line parser."""
@@ -71,6 +106,7 @@ def create_parser() -> argparse.ArgumentParser:
     register_config_command(subparsers)
     register_step_command(subparsers)
 
+    _audit_json_capabilities(parser)
     return parser
 
 

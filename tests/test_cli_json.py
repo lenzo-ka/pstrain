@@ -12,25 +12,12 @@ import pytest
 
 from pstrain.cli.base import (
     UNSUPPORTED_JSON_EXIT_CODE,
-    Command,
-    CommandContext,
-    CommandResult,
     add_json_argument,
 )
-from pstrain.cli.cli import create_parser, main
+from pstrain.cli.cli import _audit_json_capabilities, create_parser, main
 from pstrain.lib.validate import ValidationReport
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mini_arctic"
-
-
-class _MismatchedJsonCommand(Command):
-    name = "mismatched"
-
-    def add_arguments(self, parser: argparse.ArgumentParser) -> None:
-        add_json_argument(parser, suppress_defaults=True)
-
-    def execute(self, ctx: CommandContext) -> CommandResult:
-        return CommandResult.ok()
 
 
 def _leaf_commands(
@@ -160,12 +147,19 @@ def test_config_get_invalid_key_error_is_json(
     }
 
 
-def test_command_registration_rejects_json_help_metadata_disagreement() -> None:
-    parser = argparse.ArgumentParser()
-    subparsers = parser.add_subparsers(dest="command")
+def test_finished_parser_rejects_json_help_metadata_disagreement() -> None:
+    parser = create_parser()
+    migrate = dict(_leaf_commands(parser))[("config", "migrate")]
+    add_json_argument(migrate, suppress_defaults=True)
 
-    with pytest.raises(RuntimeError, match="JSON help and supports_json_output disagree"):
-        _MismatchedJsonCommand().register(subparsers)
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "pstrain config migrate advertises unsupported JSON help: "
+            "--json, --json-ascii, --json-indent"
+        ),
+    ):
+        _audit_json_capabilities(parser)
 
 
 @pytest.mark.parametrize(
