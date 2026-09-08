@@ -52,6 +52,26 @@ pstrain flat --project-dir my_project
 pstrain package cd-8g --project-dir my_project
 ```
 
+Packages created before the `pstrain-package.json` marker was introduced are
+recognizable as legacy packages, but replacement now requires explicit consent.
+The training pipeline deliberately does not set that consent automatically:
+doing so would make a legacy pipeline directory indistinguishable from a
+hand-assembled decoder package with the same structure. Before rerunning a
+package target against pre-marker output, move
+`dist/models/<model>-<profile>` aside so it remains recoverable. Alternatively,
+after inspecting the directory, replace it explicitly with the equivalent
+package command:
+
+```bash
+pstrain package cd-8g --project-dir my_project \
+    --out my_project/dist/models \
+    --name cd-8g-default \
+    --overwrite
+```
+
+Subsequent pipeline runs recognize the marker written by that command and do
+not require another opt-in.
+
 ### Supplying an existing train/test split
 
 To preserve a corpus's canonical partition or your own held-out set, create all
