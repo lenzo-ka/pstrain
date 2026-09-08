@@ -1,8 +1,16 @@
-# M4b SLT run evidence
+# Historical, incomplete evidence: M4b SLT runs
 
 Corpus: the fixed 1,043-utterance training split in
 `pstrain-cmu-arctic-slt`. The source log was
 `/Volumes/experiments/pstrain-parity/pstrain-cmu-arctic-slt/training.log`.
+
+**Arm comparability: incomplete.** The recorded arms used the same stated
+corpus and CD-untied stage, so the artifact-size and graph-growth observations
+below are paired on that limited basis. The baseline raw log was not retained,
+however, so its complete run identity, configuration, skip identities, and
+resource provenance cannot be reconstructed independently. Treat these results
+as historical implementation evidence, not as a reproducible benchmark or a
+controlled performance comparison.
 
 ## Skip counts
 

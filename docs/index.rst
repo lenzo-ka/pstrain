@@ -53,6 +53,12 @@ pstrain is an acoustic model training toolkit.
    benchmarks/arctic-pin
    benchmarks/oracle-provenance
 
+.. toctree::
+   :maxdepth: 2
+   :caption: Historical, Incomplete Evidence:
+
+   evidence/m4b-slt-runs
+
 Indices and tables
 ==================
 

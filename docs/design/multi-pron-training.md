@@ -229,8 +229,13 @@ This setting does not promise score invariance.
 
 ## M4b SLT growth measurement
 
-The preserved 1,043-utterance CMU Arctic SLT parity run changed from 9,786
-to 10,052 untied triphone rows (+266, +2.72%). Parameter files grew from
+This is [historical evidence with incomplete arm
+comparability](../evidence/m4b-slt-runs.md), not a reproducible benchmark: the
+arms used the same stated 1,043-utterance corpus and CD-untied stage, but the
+baseline log was not retained, so its complete run identity, configuration,
+skip identities, and resource provenance cannot be reconstructed. Within that
+limited comparison, the CMU Arctic SLT parity run changed from 9,786 to 10,052
+untied triphone rows (+266, +2.72%). Parameter files grew from
 9,309,224 to 9,561,400 bytes (+252,176, +2.71%): mdef 491,359→504,926;
 means and variances 4,598,636→4,723,124 each; mixture weights
 117,976→121,168; transition matrices stayed 1,984 bytes. The measured

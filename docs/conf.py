@@ -62,9 +62,8 @@ exclude_patterns = [
     "_build",
     "Thumbs.db",
     ".DS_Store",
-    # Internal historical audit and experiment evidence, not user documentation.
+    # Internal historical audit, not a source for published documentation claims.
     "code-review-2026-01-15.md",
-    "evidence/m4b-slt-runs.md",
 ]
 
 # Source file extensions
