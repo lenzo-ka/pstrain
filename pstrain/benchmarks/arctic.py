@@ -1313,27 +1313,41 @@ def _require_equal(label: str, actual: Any, recorded: Any) -> None:
         raise RuntimeError(f"benchmark {label} mismatch: recorded={recorded!r}, actual={actual!r}")
 
 
-def _require_pin_provenance(label: str, actual: Any, expected: dict[str, Any]) -> None:
-    """Accept provenance relative to either capture-time or current defaults.
+# The frozen band pins six untied passes while the shipped default is ten. The
+# record was captured before that divergence existed, so its provenance block
+# omits the row. Keyed to the divergence itself, the allowance cannot outlive
+# it: re-earning the band at the shipped default drops the row from the
+# expected provenance, and nothing can invoke this again.
+CAPTURE_TIME_UNTIED_PROVENANCE_ROW = {
+    "setting": "training.untied.max_iterations",
+    "shipped_default": 10,
+    "value": 6,
+    "source": {"kind": "project-profile"},
+}
 
-    The live pin was captured when the six-pass untied schedule was the shipped
-    default, so its frozen provenance correctly omits that setting. A newly
-    emitted record describes the same frozen profile relative to the current
-    ten-pass default and includes the divergence.
+
+def _require_pin_provenance(label: str, actual: Any, expected: dict[str, Any]) -> None:
+    """Require provenance to match, allowing only the frozen untied divergence.
+
+    A record whose frozen profile pins six untied passes against a ten-pass
+    shipped default may omit that one row, because it was written when the two
+    agreed. Every other difference is a mismatch, and once the band is re-earned
+    at the shipped default the row is gone from `expected` and this allowance is
+    unreachable.
     """
-    legacy = {
-        **expected,
-        "diff_from_shipped_defaults": [
-            row
-            for row in expected["diff_from_shipped_defaults"]
-            if row["setting"] != "training.untied.max_iterations"
-        ],
-    }
-    if actual not in (expected, legacy):
-        raise RuntimeError(
-            f"benchmark {label} mismatch: expected current={expected!r} "
-            f"or capture-time={legacy!r}, actual={actual!r}"
-        )
+    if actual == expected:
+        return
+    rows = expected["diff_from_shipped_defaults"]
+    if CAPTURE_TIME_UNTIED_PROVENANCE_ROW in rows:
+        legacy = {
+            **expected,
+            "diff_from_shipped_defaults": [
+                row for row in rows if row != CAPTURE_TIME_UNTIED_PROVENANCE_ROW
+            ],
+        }
+        if actual == legacy:
+            return
+    raise RuntimeError(f"benchmark {label} mismatch: expected={expected!r}, actual={actual!r}")
 
 
 def record_binding_sha256(record: dict[str, Any]) -> str:
