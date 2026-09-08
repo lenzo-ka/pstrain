@@ -74,7 +74,7 @@ class TrainingScheduleConfig(StrictModel):
                 "this many nats between passes. Despite the name -- kept because SphinxTrain's "
                 "$CFG_CONVERGENCE_RATIO is the same signed per-frame delta -- this is an "
                 "absolute difference, not a ratio. At the default, corpora of Arctic's size "
-                "run every pass to max_iterations, which is the more accurate outcome as "
+                "run all ten passes in every schedule, which is the more accurate outcome as "
                 "measured; treat max_iterations as the operative control. The sphinxtrain "
                 "profile carries SphinxTrain's own 0.1"
             ),
@@ -109,9 +109,7 @@ class TrainingConfig(StrictModel):
     b_beam: Annotated[float, Field(gt=0, description="Backward alignment beam")] = 1e-10
     ci: TrainingScheduleConfig = Field(default_factory=TrainingScheduleConfig)
     tied: TrainingScheduleConfig = Field(default_factory=TrainingScheduleConfig)
-    untied: TrainingScheduleConfig = Field(
-        default_factory=lambda: TrainingScheduleConfig(max_iterations=6)
-    )
+    untied: TrainingScheduleConfig = Field(default_factory=TrainingScheduleConfig)
     max_skip_fraction: Annotated[
         float, Field(ge=0, le=1, description="Maximum skipped-update fraction")
     ] = 0.05

@@ -137,15 +137,15 @@ do not apply one variance history and endpoint to every stage:
 ```yaml
 training:
   ci: {max_iterations: 10, min_iterations: 1, convergence_ratio: 0.001}
-  untied: {max_iterations: 6, min_iterations: 1, convergence_ratio: 0.001}
+  untied: {max_iterations: 10, min_iterations: 1, convergence_ratio: 0.001}
   tied: {max_iterations: 10, min_iterations: 1, convergence_ratio: 0.001}
 ```
 
 All three use the SphinxTrain signed likelihood-delta decision and may stop
-before their cap after `min_iterations`. The six-pass untied cap records the
-effective endpoint of the preserved CMU Arctic SLT run; upstream stage 30 is a
-converge-with-cap loop, not a fixed-count loop. CI and tied stages retain the
-A7c-matched 0.001 decision threshold and upstream ten-pass cap.
+before their ten-pass cap after `min_iterations`. The separately frozen Arctic
+benchmark pin retains the six-pass effective endpoint of the preserved CMU
+Arctic SLT run; upstream stage 30 is a converge-with-cap loop, not a fixed-count
+loop. All stages use the A7c-matched 0.001 decision threshold by default.
 
 Variance accumulation is deliberately code-defined by stage. CI and each newly
 split tied stage use one-pass variance on their first iteration and centered

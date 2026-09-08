@@ -1313,6 +1313,43 @@ def _require_equal(label: str, actual: Any, recorded: Any) -> None:
         raise RuntimeError(f"benchmark {label} mismatch: recorded={recorded!r}, actual={actual!r}")
 
 
+# The frozen band pins six untied passes while the shipped default is ten. The
+# record was captured before that divergence existed, so its provenance block
+# omits the row. Keyed to the divergence itself, the allowance cannot outlive
+# it: re-earning the band at the shipped default drops the row from the
+# expected provenance, and nothing can invoke this again.
+CAPTURE_TIME_UNTIED_PROVENANCE_ROW = {
+    "setting": "training.untied.max_iterations",
+    "shipped_default": 10,
+    "value": 6,
+    "source": {"kind": "project-profile"},
+}
+
+
+def _require_pin_provenance(label: str, actual: Any, expected: dict[str, Any]) -> None:
+    """Require provenance to match, allowing only the frozen untied divergence.
+
+    A record whose frozen profile pins six untied passes against a ten-pass
+    shipped default may omit that one row, because it was written when the two
+    agreed. Every other difference is a mismatch, and once the band is re-earned
+    at the shipped default the row is gone from `expected` and this allowance is
+    unreachable.
+    """
+    if actual == expected:
+        return
+    rows = expected["diff_from_shipped_defaults"]
+    if CAPTURE_TIME_UNTIED_PROVENANCE_ROW in rows:
+        legacy = {
+            **expected,
+            "diff_from_shipped_defaults": [
+                row for row in rows if row != CAPTURE_TIME_UNTIED_PROVENANCE_ROW
+            ],
+        }
+        if actual == legacy:
+            return
+    raise RuntimeError(f"benchmark {label} mismatch: expected={expected!r}, actual={actual!r}")
+
+
 def record_binding_sha256(record: dict[str, Any]) -> str:
     """Digest record fields together for internal consistency and tamper evidence.
 
@@ -1534,7 +1571,7 @@ def validate_record(record: dict[str, Any]) -> None:
                         "field_source_kinds": source_kinds[mode],
                     }
                 )
-                _require_equal(
+                _require_pin_provenance(
                     f"{mode}/{dataset} provenance/conditions consistency",
                     record["results"][mode][dataset]["configuration_provenance"],
                     expected_provenance,
