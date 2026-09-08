@@ -13,6 +13,13 @@ def test_latest_changelog_version_matches_project_version() -> None:
     headings = re.findall(r"^##[ \t]+(?P<heading>[^\n]+?)[ \t]*$", changelog, re.MULTILINE)
 
     assert headings, "CHANGELOG.md has no section heading"
+    unreleased = [
+        index for index, heading in enumerate(headings) if heading.casefold() == "unreleased"
+    ]
+    assert unreleased in ([], [0]), (
+        "CHANGELOG.md has an Unreleased section below a release, where pending "
+        f"changes read as already shipped: heading positions {unreleased}"
+    )
     if headings[0].casefold() == "unreleased":
         assert len(headings) > 1, "CHANGELOG.md has no release below Unreleased"
         latest_release = headings[1]
