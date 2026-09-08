@@ -16,6 +16,7 @@ creation, and training workflows.
    corpus
    diagnostics
    dictionary
+   lm
    one_command
    packaging
    pipeline
