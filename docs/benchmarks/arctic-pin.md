@@ -32,9 +32,9 @@ together with the re-derivation gate described below.
 <!-- BEGIN GENERATED MEASUREMENT IDENTITY -->
 The decode path is a defining condition of this measurement. The live cells are decoded
 from WAV through pinned PocketSphinx 5.1.1 using Python 3.12.12, native library SHA-256
-`a2063f71aa11a60620c8736ccc9f9b0cda628455b60b6800f3891382e776b6a1`, and decode
-dictionary SHA-256 `204f36aa9d0ecad1a567f561a85705ecb4289376a7cdd4538c9abba60fd2969c`.
-The engine is pstrain 0.3.0 at `9e1769d`. A result obtained through another decode path
+`cee055880a3fde6ae54439b353d0f243246db2a266af5a269cca5890a616ea04`, and decode
+dictionary SHA-256 `b9d8271957f978287620d9b20a79e12b0b84470f520942c580145570021d0588`.
+The engine is pstrain 0.3.0 at `80ca415`. A result obtained through another decode path
 is not the same measurement even when the acoustic-model bytes are identical.
 
 The retired off-mode cells were not measured on that path. They were decoded by pstrain
@@ -135,9 +135,9 @@ observations. The big cells therefore resample within speaker strata.
 | Mode | Cell | pstrain WER | Oracle WER | Delta pp | Paired 95% CI | Paired decode | Implementation attribution | Interpretation |
 |---|---|---:|---:|---:|---:|---|---|---|
 | off (retired) | SLT-55 | 28.8499 | 28.8499 | +0.0000 | [-4.7059, +4.7619] | COMPARABLE | NOT COMPARABLE | historical only |
-| on | SLT-55 | 27.6803 | 28.0702 | -0.3899 | [-3.0075, +1.9763] | COMPARABLE | NOT COMPARABLE | no statistically significant difference |
+| on | SLT-55 | 27.0955 | 28.0702 | -0.9747 | [-3.6965, +1.6575] | COMPARABLE | NOT COMPARABLE | no statistically significant difference |
 | off (retired) | big | 76.6393 | 74.7915 | +1.8478 | [+1.3257, +2.3646] | COMPARABLE | NOT COMPARABLE | historical only |
-| on | big | 75.2585 | 75.5053 | -0.2468 | [-0.6983, +0.1980] | COMPARABLE | NOT COMPARABLE | no statistically significant difference |
+| on | big | 75.7221 | 75.5053 | +0.2168 | [-0.2414, +0.6713] | COMPARABLE | NOT COMPARABLE | no statistically significant difference |
 
 The live rows come from the record and the resource-matched oracle sidecar through
 `scripts/regenerate_arctic_paired_analysis.py`; the retired rows come from the
