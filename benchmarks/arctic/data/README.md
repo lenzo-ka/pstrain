@@ -7,7 +7,7 @@ source and deduplicated so that pronunciations differing only by stress do not
 survive stress stripping as duplicate variants. It is distributed under the CMU
 license in `csrc/LICENSE.sphinx`.
 
-- Dictionary SHA-256: `204f36aa9d0ecad1a567f561a85705ecb4289376a7cdd4538c9abba60fd2969c`
+- Dictionary SHA-256: `b9d8271957f978287620d9b20a79e12b0b84470f520942c580145570021d0588`
 - LM SHA-256: `2cf11ab0474a0bdd165cbee59db674b05764fdb00bf6f9824c0dccce571637b5`
 - Generated filler SHA-256: `fb50883998c41a5030c2a602965935c647563321e84a86f2adabb377ec24b49c`
 

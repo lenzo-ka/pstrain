@@ -50,21 +50,15 @@ which is authoritative for both identities.
 
 ## Pin conditions
 
-The band freezes the untied schedule at six passes while the shipped default
-is now ten. It therefore no longer tracks the product default on that axis;
-re-earning the band at the new default remains outstanding work. Nothing else
-about the band changed, and its numbers remain valid for the frozen conditions
-they measure.
-
 | Condition | Pinned value |
 |---|---|
 | Band | BM1 |
 | Language model | SHA-256 `2cf11ab0474a0bdd165cbee59db674b05764fdb00bf6f9824c0dccce571637b5` |
-| Decode dictionary | SHA-256 `204f36aa9d0ecad1a567f561a85705ecb4289376a7cdd4538c9abba60fd2969c` |
+| Decode dictionary | SHA-256 `b9d8271957f978287620d9b20a79e12b0b84470f520942c580145570021d0588` |
 | Filler dictionary | SHA-256 `fb50883998c41a5030c2a602965935c647563321e84a86f2adabb377ec24b49c` |
 | Shared training | 3 states, 200 senones, `a_beam=1e-90`, `b_beam=1e-10`, maximum skip fraction 0.05, retry beam factor `1e10`, tree state weights `[1.0, 0.05, 0.0]`, `ssplitmax=7`, `ssplitthr=0`, `csplitmax=2000`, `csplitthr=0`, `mwfloor=1e-8`, 12 question permutations, 20 questions/state, 1 question iteration |
 | Basis | `MULTIPRON-ONLY`; off cells retained as retired history |
-| Multipron on training | Frozen settings: `multipron_training=true`, transcript-reachable untied inventory, optional final silence, one retry at a beam widened by `1e10`; CI/tied 1–10 iterations and untied 1–6, convergence 0.001 |
+| Multipron on training | Frozen settings: `multipron_training=true`, transcript-reachable untied inventory, optional final silence, one retry at a beam widened by `1e10`; CI, untied, and tied 1–10 iterations, convergence 0.001 |
 | Acoustic features | 16 kHz, 13 cepstra, 25 filters, 512-point FFT, 130–6800 Hz, alpha 0.97, `1s_c_d_dd`, lifter 22, DCT, no AGC, batch CMN, no variance normalization |
 | Split | Seed 42, test count 0 |
 | Decoder | `beam=pbeam=lpbeam=lponlybeam=fwdflatbeam=1e-80`; `wbeam=fwdflatwbeam=1e-40`; `pl_window=5`, `lw=10`, `wip=0.2` |
@@ -77,10 +71,9 @@ The live cells `on/slt55` and `on/big` come from the named benchmark profile
 the shipped schema defaults; an unlisted setting equals its shipped default.
 The record's
 conditions and each cell's provenance come from the same resolved build-child
-snapshot, and validation rejects disagreement between them. Its semantic
-differences from shipped product defaults are the six-pass untied cap described
-above and `split.test_count=0`, which keeps the established external evaluation
-cells intact.
+snapshot, and validation rejects disagreement between them. Its only semantic
+difference from shipped product defaults is `split.test_count=0`, which keeps
+the established external evaluation cells intact.
 
 | Cells | Setting | Shipped default | Cell value | Winning source kind |
 |---|---|---:|---:|---|
