@@ -16,9 +16,10 @@ import shutil
 import stat
 import sys
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 from pstrain.lib.model import MODEL_FILES_REQUIRED, require_complete_model
@@ -80,6 +81,18 @@ def _staging_directory(parent: Path, prefix: str) -> Iterator[_StagingDirectory]
             _cleanup_owned_directory(staging.owner, strict=False, missing_ok=True)
         elif path is not None:
             shutil.rmtree(path, ignore_errors=True)
+
+
+@contextmanager
+def _owned_descriptor(open_descriptor: Callable[[], int]) -> Iterator[int]:
+    """Put a descriptor under cleanup before its acquiring call can return."""
+    descriptor: int | None = None
+    try:
+        descriptor = open_descriptor()
+        yield descriptor
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
 
 
 def create_noisedict(
@@ -205,22 +218,17 @@ def package_model(
         parent_entry: _OpenEntry | None = None
         model_entry: _OpenEntry | None = None
         if _descriptor_transactions_available():
-            parent_entry = _open_directory_path(staging_parent)
-            resources.callback(parent_entry.close)
-            staging_entry = _open_child(parent_entry.fd, staging_dir.name)
+            parent_entry = _open_directory_path(staging_parent, owner=resources)
+            staging_entry = _open_child(parent_entry.fd, staging_dir.name, owner=resources)
             if staging_entry is None or not staging_entry.is_directory:
-                if staging_entry is not None:
-                    staging_entry.close()
                 raise RuntimeError(f"staging directory {staging_dir} changed during creation")
-            resources.callback(staging_entry.close)
             staging_scope.owner = _OwnedDirectory(
                 parent_entry.fd,
                 staging_dir.name,
                 staging_dir,
                 staging_entry,
             )
-            model_entry = _open_directory_path(model_dir.resolve())
-            resources.callback(model_entry.close)
+            model_entry = _open_directory_path(model_dir.resolve(), owner=resources)
 
         result = _build_package(
             model_dir=model_dir,
@@ -465,33 +473,31 @@ def _has_package_structure_fd(package_fd: int) -> bool:
     """Recognize historical package structure without reopening the package root."""
     if not _regular_child_exists(package_fd, "README.txt"):
         return False
-    acoustic = _open_child(package_fd, "acoustic")
-    if acoustic is None:
-        return False
-    try:
+    with ExitStack() as resources:
+        acoustic = _open_child(package_fd, "acoustic", owner=resources)
+        if acoustic is None:
+            return False
         required = (*MODEL_FILES_REQUIRED, "feat.params", "noisedict")
         return acoustic.is_directory and all(
             _regular_child_exists(acoustic.fd, name) for name in required
         )
-    finally:
-        acoustic.close()
 
 
 def _package_marker_status_fd(package_fd: int) -> str:
     """Read a marker relative to an open package without following substitutions."""
-    marker = _open_child(package_fd, PACKAGE_MANIFEST_NAME)
-    if marker is None:
-        return "absent"
-    try:
-        metadata = os.fstat(marker.fd)
-        if not stat.S_ISREG(metadata.st_mode):
+    with ExitStack() as resources:
+        marker = _open_child(package_fd, PACKAGE_MANIFEST_NAME, owner=resources)
+        if marker is None:
+            return "absent"
+        try:
+            metadata = os.fstat(marker.fd)
+            if not stat.S_ISREG(metadata.st_mode):
+                return "invalid"
+            marker_copy = resources.enter_context(_owned_descriptor(lambda: os.dup(marker.fd)))
+            with os.fdopen(marker_copy, closefd=False, encoding="utf-8") as marker_file:
+                document = json.load(marker_file)
+        except (OSError, UnicodeError, json.JSONDecodeError):
             return "invalid"
-        with os.fdopen(os.dup(marker.fd), encoding="utf-8") as marker_file:
-            document = json.load(marker_file)
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return "invalid"
-    finally:
-        marker.close()
     supported = (
         isinstance(document, dict)
         and type(document.get("format_version")) is int
@@ -508,12 +514,13 @@ def _directory_tree_contains_fd(
     display_path: Path,
 ) -> bool:
     """Walk directory identities through anchored descriptors, failing closed on change."""
-    pending = [os.dup(root_fd)]
-    visited: set[_Identity] = set()
-    try:
-        while pending:
-            directory_fd = pending.pop()
-            try:
+    with ExitStack() as resources:
+        root_copy = resources.enter_context(_owned_descriptor(lambda: os.dup(root_fd)))
+        pending = [root_copy]
+        visited: set[_Identity] = set()
+        try:
+            while pending:
+                directory_fd = pending.pop()
                 identity = _metadata_identity(os.fstat(directory_fd))
                 if identity == target_identity:
                     return True
@@ -532,25 +539,28 @@ def _directory_tree_contains_fd(
                         ):
                             return True
                     elif stat.S_ISDIR(metadata.st_mode):
-                        child_fd = os.open(name, _directory_open_flags(), dir_fd=directory_fd)
+                        child_fd = resources.enter_context(
+                            _owned_descriptor(
+                                partial(
+                                    os.open,
+                                    name,
+                                    _directory_open_flags(),
+                                    dir_fd=directory_fd,
+                                )
+                            )
+                        )
                         child_identity = _metadata_identity(os.fstat(child_fd))
                         if child_identity != _metadata_identity(metadata):
-                            os.close(child_fd)
                             raise RuntimeError(
                                 f"directory entry {name!r} changed during overlap scan"
                             )
                         pending.append(child_fd)
-            finally:
-                os.close(directory_fd)
-    except BaseException as error:
-        if isinstance(error, ValueError):
-            raise
-        raise ValueError(
-            f"Cannot safely inspect {display_path} for source overlap: {error}"
-        ) from error
-    finally:
-        for directory_fd in pending:
-            os.close(directory_fd)
+        except BaseException as error:
+            if isinstance(error, ValueError):
+                raise
+            raise ValueError(
+                f"Cannot safely inspect {display_path} for source overlap: {error}"
+            ) from error
     return False
 
 
@@ -733,21 +743,35 @@ def _metadata_identity(metadata: os.stat_result) -> _Identity:
     return metadata.st_dev, metadata.st_ino
 
 
-def _open_directory_path(path: Path) -> _OpenEntry:
+def _open_directory_path(path: Path, *, owner: ExitStack | None = None) -> _OpenEntry:
     """Open one directory path and derive its identity only from that descriptor."""
-    fd = os.open(path, _directory_open_flags())
+    if owner is None:
+        fd = os.open(path, _directory_open_flags())
+    else:
+        fd = owner.enter_context(_owned_descriptor(lambda: os.open(path, _directory_open_flags())))
     try:
         metadata = os.fstat(fd)
         return _OpenEntry(fd, _metadata_identity(metadata), True)
     except BaseException:
-        os.close(fd)
+        if owner is None:
+            os.close(fd)
         raise
 
 
-def _open_child(parent_fd: int, name: str) -> _OpenEntry | None:
+def _open_child(
+    parent_fd: int,
+    name: str,
+    *,
+    owner: ExitStack | None = None,
+) -> _OpenEntry | None:
     """Open one anchored child, rejecting symlinks and substitutions during open."""
     try:
-        fd = os.open(name, _entry_open_flags(), dir_fd=parent_fd)
+        if owner is None:
+            fd = os.open(name, _entry_open_flags(), dir_fd=parent_fd)
+        else:
+            fd = owner.enter_context(
+                _owned_descriptor(lambda: os.open(name, _entry_open_flags(), dir_fd=parent_fd))
+            )
     except FileNotFoundError:
         return None
     except OSError as error:
@@ -763,7 +787,8 @@ def _open_child(parent_fd: int, name: str) -> _OpenEntry | None:
             raise RuntimeError(f"filesystem entry {name!r} changed while it was opened")
         return _OpenEntry(fd, descriptor_identity, stat.S_ISDIR(descriptor_metadata.st_mode))
     except BaseException:
-        os.close(fd)
+        if owner is None:
+            os.close(fd)
         raise
 
 
@@ -781,7 +806,13 @@ def _entry_identity_at(parent_fd: int, name: str) -> _Identity | None:
     return _metadata_identity(metadata)
 
 
-def _create_owned_directory(parent_fd: int, parent_path: Path, prefix: str) -> _OwnedDirectory:
+def _create_owned_directory(
+    parent_fd: int,
+    parent_path: Path,
+    prefix: str,
+    *,
+    owner: ExitStack | None = None,
+) -> _OwnedDirectory:
     """Create and open a private directory, rejecting a creation/open substitution."""
     for _attempt in range(100):
         name = f"{prefix}{secrets.token_hex(8)}"
@@ -790,7 +821,7 @@ def _create_owned_directory(parent_fd: int, parent_path: Path, prefix: str) -> _
         except FileExistsError:
             continue
         try:
-            entry = _open_child(parent_fd, name)
+            entry = _open_child(parent_fd, name, owner=owner)
         except BaseException as error:
             try:
                 os.rmdir(name, dir_fd=parent_fd)
@@ -802,7 +833,7 @@ def _create_owned_directory(parent_fd: int, parent_path: Path, prefix: str) -> _
                 )
             raise
         if entry is None or not entry.is_directory:
-            if entry is not None:
+            if entry is not None and owner is None:
                 entry.close()
             raise RuntimeError(f"private transaction directory {parent_path / name} changed")
         return _OwnedDirectory(parent_fd, name, parent_path / name, entry)
@@ -956,59 +987,65 @@ def _replace_named_package_by_descriptor(
     model: _OpenEntry,
 ) -> None:
     """Retain, validate, install, and clean a named package through open directories."""
-    backup: _OwnedDirectory | None = None
-    retained: _OpenEntry | None = None
-    success = False
-    try:
-        if not _entry_matches(parent.fd, staging_dir.name, staging.identity):
-            raise RuntimeError(f"staging directory {staging_dir} changed before publication")
-        backup = _create_owned_directory(parent.fd, package_dir.parent, f".{package_dir.name}-old-")
-        retained = _open_child(parent.fd, package_dir.name)
-        if retained is not None:
+    with ExitStack() as transaction:
+        backup: _OwnedDirectory | None = None
+        retained: _OpenEntry | None = None
+        success = False
+        try:
+            if not _entry_matches(parent.fd, staging_dir.name, staging.identity):
+                raise RuntimeError(f"staging directory {staging_dir} changed before publication")
+            backup = _create_owned_directory(
+                parent.fd,
+                package_dir.parent,
+                f".{package_dir.name}-old-",
+                owner=transaction,
+            )
+            retained = _open_child(parent.fd, package_dir.name, owner=transaction)
+            if retained is not None:
+                try:
+                    _move_or_raise(
+                        retained, parent.fd, package_dir.name, backup.entry.fd, "retained"
+                    )
+                    _validate_existing_package_fd(
+                        retained.fd,
+                        display_path=package_dir,
+                        model_identity=model.identity,
+                        overwrite=overwrite,
+                    )
+                except BaseException as error:
+                    _restore_open_entry(
+                        retained,
+                        backup.entry.fd,
+                        "retained",
+                        parent.fd,
+                        package_dir.name,
+                        error,
+                    )
+                    _cleanup_empty_owned_directory(backup, error)
+                    raise
+
             try:
-                _move_or_raise(retained, parent.fd, package_dir.name, backup.entry.fd, "retained")
-                _validate_existing_package_fd(
-                    retained.fd,
-                    display_path=package_dir,
-                    model_identity=model.identity,
-                    overwrite=overwrite,
-                )
+                _move_or_raise(staging, parent.fd, staging_dir.name, parent.fd, package_dir.name)
             except BaseException as error:
-                _restore_open_entry(
+                _rollback_named_descriptor(
+                    staging,
                     retained,
-                    backup.entry.fd,
-                    "retained",
-                    parent.fd,
+                    parent,
+                    backup,
+                    staging_dir.name,
                     package_dir.name,
                     error,
                 )
                 _cleanup_empty_owned_directory(backup, error)
                 raise
 
-        try:
-            _move_or_raise(staging, parent.fd, staging_dir.name, parent.fd, package_dir.name)
-        except BaseException as error:
-            _rollback_named_descriptor(
-                staging,
-                retained,
-                parent,
-                backup,
-                staging_dir.name,
-                package_dir.name,
-                error,
-            )
-            _cleanup_empty_owned_directory(backup, error)
-            raise
-
-        if retained is not None:
-            _remove_open_entry(backup.entry.fd, "retained", retained, backup.path / "retained")
-        _remove_empty_owned_directory(backup)
-        success = True
-    finally:
-        if backup is not None:
-            if not success and not backup.cleaned:
+            if retained is not None:
+                _remove_open_entry(backup.entry.fd, "retained", retained, backup.path / "retained")
+            _remove_empty_owned_directory(backup)
+            success = True
+        finally:
+            if backup is not None and not success and not backup.cleaned:
                 logger.warning("Preserved package transaction directory at %s", backup.path)
-            backup.close()
 
 
 def _rollback_named_descriptor(
@@ -1151,62 +1188,62 @@ def _replace_unnamed_package_by_descriptor(
     model: _OpenEntry,
 ) -> None:
     """Reconcile every unnamed-package move from its open identity on all returns."""
-    backup: _OwnedDirectory | None = None
-    retained: dict[str, _OpenEntry] = {}
-    installed: dict[str, _OpenEntry] = {}
-    success = False
-    try:
-        if not _entry_matches(package.fd, staging_dir.name, staging.identity):
-            raise RuntimeError(f"staging directory {staging_dir} changed before publication")
-        backup = _create_owned_directory(package.fd, package_dir, ".pstrain-package-old-")
-
+    with ExitStack() as transaction:
+        backup: _OwnedDirectory | None = None
+        retained: dict[str, _OpenEntry] = {}
+        installed: dict[str, _OpenEntry] = {}
+        success = False
         try:
-            for name in generated_names:
-                entry = _open_child(package.fd, name)
-                if entry is None:
-                    continue
-                retained[name] = entry
-                _move_or_raise(entry, package.fd, name, backup.entry.fd, name)
-
-            if retained:
-                _validate_existing_package_fd(
-                    backup.entry.fd,
-                    display_path=package_dir,
-                    model_identity=model.identity,
-                    overwrite=overwrite,
-                )
-
-            for name in generated_names:
-                entry = _open_child(staging.fd, name)
-                if entry is None:
-                    raise RuntimeError(f"staged package entry {name!r} disappeared")
-                installed[name] = entry
-                _move_or_raise(entry, staging.fd, name, package.fd, name)
-        except BaseException as error:
-            _rollback_unnamed_descriptor(
-                package,
-                staging,
-                backup,
-                retained,
-                installed,
-                error,
+            if not _entry_matches(package.fd, staging_dir.name, staging.identity):
+                raise RuntimeError(f"staging directory {staging_dir} changed before publication")
+            backup = _create_owned_directory(
+                package.fd,
+                package_dir,
+                ".pstrain-package-old-",
+                owner=transaction,
             )
-            _cleanup_empty_owned_directory(backup, error)
-            raise
 
-        for name, entry in retained.items():
-            _remove_open_entry(backup.entry.fd, name, entry, backup.path / name)
-        _remove_empty_owned_directory(backup)
-        success = True
-    finally:
-        if backup is not None:
-            if not success and not backup.cleaned:
+            try:
+                for name in generated_names:
+                    entry = _open_child(package.fd, name, owner=transaction)
+                    if entry is None:
+                        continue
+                    retained[name] = entry
+                    _move_or_raise(entry, package.fd, name, backup.entry.fd, name)
+
+                if retained:
+                    _validate_existing_package_fd(
+                        backup.entry.fd,
+                        display_path=package_dir,
+                        model_identity=model.identity,
+                        overwrite=overwrite,
+                    )
+
+                for name in generated_names:
+                    entry = _open_child(staging.fd, name, owner=transaction)
+                    if entry is None:
+                        raise RuntimeError(f"staged package entry {name!r} disappeared")
+                    installed[name] = entry
+                    _move_or_raise(entry, staging.fd, name, package.fd, name)
+            except BaseException as error:
+                _rollback_unnamed_descriptor(
+                    package,
+                    staging,
+                    backup,
+                    retained,
+                    installed,
+                    error,
+                )
+                _cleanup_empty_owned_directory(backup, error)
+                raise
+
+            for name, entry in retained.items():
+                _remove_open_entry(backup.entry.fd, name, entry, backup.path / name)
+            _remove_empty_owned_directory(backup)
+            success = True
+        finally:
+            if backup is not None and not success and not backup.cleaned:
                 logger.warning("Preserved package transaction directory at %s", backup.path)
-            backup.close()
-        for entry in installed.values():
-            entry.close()
-        for entry in retained.values():
-            entry.close()
 
 
 def _rollback_unnamed_descriptor(
@@ -1537,14 +1574,12 @@ def _empty_open_directory(directory_fd: int, display_path: Path) -> None:
     """Remove package-owned children relative to an open directory descriptor."""
     with os.scandir(directory_fd) as entries:
         names = [entry.name for entry in entries]
-    for name in names:
-        child = _open_child(directory_fd, name)
-        if child is None:
-            continue
-        try:
+    with ExitStack() as resources:
+        for name in names:
+            child = _open_child(directory_fd, name, owner=resources)
+            if child is None:
+                continue
             _remove_open_entry(directory_fd, name, child, display_path / name)
-        finally:
-            child.close()
 
 
 def _cleanup_owned_directory(

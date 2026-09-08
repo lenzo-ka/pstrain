@@ -120,6 +120,19 @@ def test_packaging_overwrite_removes_stale_files(tmp_path: Path) -> None:
     assert (package_dir / "acoustic" / MODEL_FILES_REQUIRED[0]).is_file()
 
 
+def test_repeated_named_replacements_do_not_leak_descriptors(tmp_path: Path) -> None:
+    model_dir = tmp_path / "model"
+    _write_complete_model(model_dir)
+    output_dir = tmp_path / "dist"
+    package_model(model_dir, output_dir, model_name="test-model", include_dict=False)
+    before = _open_descriptor_count()
+
+    for _iteration in range(5):
+        package_model(model_dir, output_dir, model_name="test-model", include_dict=False)
+
+    assert _open_descriptor_count() == before
+
+
 def test_destination_introduced_after_final_validation_is_not_replaced(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -550,10 +563,10 @@ def test_staging_open_error_releases_descriptors_and_removes_staging(
     original_open_child = package_step._open_child
     injected = OSError("injected staging open failure")
 
-    def fail_staging_open(parent_fd: int, name: str):
+    def fail_staging_open(parent_fd: int, name: str, *, owner=None):
         if name.startswith(".release-"):
             raise injected
-        return original_open_child(parent_fd, name)
+        return original_open_child(parent_fd, name, owner=owner)
 
     before = _open_descriptor_count()
     monkeypatch.setattr(package_step, "_open_child", fail_staging_open)
