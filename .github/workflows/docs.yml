@@ -19,6 +19,8 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - run: pip install -e ".[docs]"
+      - run: pip install -e ".[docs]" pytest
       - name: Build documentation
         run: make docs
+      - name: Verify public API documentation coverage
+        run: PYTHONPATH=$(pwd) python -m pytest -q tests/test_api_docs.py
