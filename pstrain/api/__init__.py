@@ -28,7 +28,7 @@ Example::
 """
 
 from pstrain.api.config import resolve_config
-from pstrain.api.packaging import package_model
+from pstrain.api.packaging import package_model, validate_package_destination
 from pstrain.api.steps import (
     run_build_lm,
     run_step_cd_hmm_untied,
@@ -97,6 +97,7 @@ __all__: list[str] = [
     "resolve_config",
     # Packaging
     "package_model",
+    "validate_package_destination",
     # Tutorial
     "TUTORIAL_FILENAME",
     "TutorialExistsError",

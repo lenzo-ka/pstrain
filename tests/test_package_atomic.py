@@ -103,8 +103,8 @@ def test_packaging_overwrite_removes_stale_files(tmp_path: Path) -> None:
     model_dir = tmp_path / "model"
     _write_complete_model(model_dir)
     package_dir = tmp_path / "dist" / "test-model"
+    package_model(model_dir, tmp_path / "dist", model_name="test-model")
     stale_file = package_dir / "acoustic" / "stale"
-    stale_file.parent.mkdir(parents=True)
     stale_file.write_text("old package")
 
     package_model(model_dir, tmp_path / "dist", model_name="test-model")

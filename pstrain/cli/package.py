@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
-import stat
 from pathlib import Path
 
 from pstrain.cli.base import Command, CommandContext, CommandResult
@@ -65,7 +63,7 @@ class PackageCommand(Command):
 
     def execute(self, ctx: CommandContext) -> CommandResult:
         """Package the requested trained model."""
-        from pstrain.api import package_model
+        from pstrain.api import package_model, validate_package_destination
 
         project_dir = ctx.project_dir
         target = ctx.args.target
@@ -94,59 +92,24 @@ class PackageCommand(Command):
 
         output_dir = (ctx.args.out if ctx.args.out else project_dir / "packages").resolve()
         package_name = default_name if ctx.args.name is None else ctx.args.name
-        requested_destination = output_dir / package_name
-        destination = requested_destination.resolve()
-        if (
-            not package_name
-            or package_name in {".", ".."}
-            or len(Path(package_name).parts) != 1
-            or not destination.is_relative_to(output_dir)
-        ):
-            return CommandResult.fail(
-                f"Invalid package destination {destination}: package name {package_name!r} "
-                "must be exactly one ordinary path component."
-            )
-
         model_dir = model_dir.resolve()
-        if _paths_overlap(model_dir, destination):
-            return CommandResult.fail(
-                f"Package destination {destination} overlaps source model {model_dir}; "
-                "choose a separate output directory and package name."
-            )
-
-        if requested_destination.exists() or requested_destination.is_symlink():
-            if requested_destination.is_symlink() or not _has_package_structure(
-                requested_destination
-            ):
-                return CommandResult.fail(
-                    f"Refusing to replace {requested_destination}: existing destination "
-                    "is not a recognizable pstrain package."
-                )
-            marker_status = _package_marker_status(requested_destination)
-            if marker_status == "absent" and not ctx.args.overwrite:
-                return CommandResult.fail(
-                    f"Refusing to replace {requested_destination}: existing package has no "
-                    "pstrain package marker. Use --overwrite to replace the entire existing "
-                    "directory."
-                )
-            if marker_status == "invalid":
-                return CommandResult.fail(
-                    f"Refusing to replace {requested_destination}: existing pstrain package "
-                    "marker is invalid or uses an unsupported format version. An overwrite "
-                    "replaces the entire existing directory, so the marker must be understood "
-                    "before replacement."
-                )
+        include_dict = not ctx.args.no_dict
+        package_dir = validate_package_destination(
+            model_dir,
+            output_dir,
+            package_name,
+            include_dict=include_dict,
+            overwrite=ctx.args.overwrite,
+        )
 
         dictionary = ctx.args.dict or project_dir / "shared" / "dictionary.dict"
         filler = ctx.args.filler_dict or project_dir / "shared" / "filler.dict"
         filler_path = filler if filler.exists() else None
-        include_dict = not ctx.args.no_dict
         if include_dict and not dictionary.is_file():
             return CommandResult.fail(
                 f"Dictionary not found: {dictionary}. Provide --dict PATH or use --no-dict."
             )
 
-        package_dir = requested_destination
         artifact_paths = _artifact_paths(
             package_dir,
             include_dict=include_dict,
@@ -170,6 +133,7 @@ class PackageCommand(Command):
             dictionary_path=dictionary,
             filler_dict_path=filler_path,
             include_dict=include_dict,
+            overwrite=ctx.args.overwrite,
         )
         if replacing:
             print(f"replaced\t{package_dir}")
@@ -199,65 +163,3 @@ def _artifact_paths(
 
 
 package_command = PackageCommand()
-
-
-def _paths_overlap(first: Path, second: Path) -> bool:
-    """Return whether either resolved path contains the other."""
-    return (
-        first == second
-        or first.is_relative_to(second)
-        or second.is_relative_to(first)
-        or _same_as_existing_ancestor(first, second)
-        or _same_as_existing_ancestor(second, first)
-    )
-
-
-def _same_as_existing_ancestor(path: Path, other: Path) -> bool:
-    """Compare one existing path with every existing ancestor of another."""
-    if not path.exists():
-        return False
-    for ancestor in (other, *other.parents):
-        if ancestor.exists() and path.samefile(ancestor):
-            return True
-    return False
-
-
-def _has_package_structure(path: Path) -> bool:
-    """Return whether a destination has the historical package structure."""
-    if not path.is_dir() or not (path / "README.txt").is_file():
-        return False
-    acoustic = path / "acoustic"
-    required = (
-        "mdef",
-        "means",
-        "variances",
-        "mixture_weights",
-        "transition_matrices",
-        "feat.params",
-        "noisedict",
-    )
-    return acoustic.is_dir() and all((acoustic / name).is_file() for name in required)
-
-
-def _package_marker_status(path: Path) -> str:
-    """Classify a package marker as supported, absent, or invalid."""
-    marker_path = path / "pstrain-package.json"
-    try:
-        marker_mode = marker_path.lstat().st_mode
-    except FileNotFoundError:
-        return "absent"
-    except OSError:
-        return "invalid"
-    if not stat.S_ISREG(marker_mode):
-        return "invalid"
-    try:
-        marker = json.loads(marker_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return "invalid"
-    supported = (
-        isinstance(marker, dict)
-        and type(marker.get("format_version")) is int
-        and marker["format_version"] == 1
-        and marker.get("generator") == "pstrain"
-    )
-    return "supported" if supported else "invalid"
