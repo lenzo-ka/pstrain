@@ -35,6 +35,18 @@ those names between system calls can redirect an operation on Windows. Stop writ
 and package from a directory that other processes cannot modify when replacement
 must be protected from concurrent interference.
 
+Windows also cannot reconcile an asynchronous interruption that arrives after an
+unnamed-package rename has completed but before Python records its result. The
+public output can then contain new entries already published, such as `acoustic`,
+beside old entries not yet replaced, such as `README.txt`, `dict`, and
+`pstrain-package.json`. Old entries already retained may remain in a sibling
+`.<output-name>-old-*` directory, and a later recovery error can obscure the
+original interruption. Stop writers, move the mixed public output aside without
+deleting it, and inspect that recovery directory. Restore its retained entries to
+reconstruct the old package, or publish again into an empty controlled output and
+move unrelated entries back afterward. Do not infer from the old public marker that
+the mixed tree is internally consistent.
+
 Even on macOS and Linux, the system interfaces do not provide a portable operation
 meaning “unlink the directory entry only if it still names this open descriptor.”
 Cleanup uses `unlinkat()` or directory-relative `rmdir()` against an open parent and
@@ -60,3 +72,10 @@ package after `package_model()` returns. Recovery directories named
 `.<package>-old-*` or `.pstrain-package-old-*` are intentionally retained whenever
 the transaction cannot prove that cleanup or restoration is safe; inspect them
 before removing them.
+
+Cleanup occurs after publication. If cleanup cannot prove that a recovery object is
+still the one it owns, `package_model()` raises even though the new package may
+already be fully published at the requested destination. The recovery directory is
+preserved when it may still contain data. A caller must inspect both the destination
+and the reported recovery directory after such an exception; treating every
+exception as “nothing was published” is incorrect.
