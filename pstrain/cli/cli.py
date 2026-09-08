@@ -10,7 +10,8 @@ from pstrain import __version__
 from pstrain.cli.base import add_dry_run_argument, add_json_argument
 
 
-def main() -> int:
+def create_parser() -> argparse.ArgumentParser:
+    """Build the complete command-line parser."""
     parser = argparse.ArgumentParser(
         prog="pstrain",
         description="pstrain - Acoustic model training toolkit",
@@ -70,9 +71,18 @@ def main() -> int:
     register_config_command(subparsers)
     register_step_command(subparsers)
 
+    return parser
+
+
+def main() -> int:
+    parser = create_parser()
+
     args = parser.parse_args()
 
     if args.command is None:
+        if args.json:
+            print("Error: --json requires a command", file=sys.stderr)
+            return 2
         parser.print_help()
         return 0
 

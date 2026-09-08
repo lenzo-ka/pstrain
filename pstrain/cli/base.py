@@ -38,7 +38,7 @@ def add_json_argument(parser: argparse.ArgumentParser, *, suppress_defaults: boo
         "--json",
         action="store_true",
         default=argparse.SUPPRESS if suppress_defaults else False,
-        help="Output as JSON",
+        help="Output a supported command result as JSON (unsupported commands reject it)",
     )
     parser.add_argument(
         "--json-indent",
@@ -912,7 +912,11 @@ class Command(ABC):
             add_json_argument(parser, suppress_defaults=True)
 
         self.add_arguments(parser)
-        parser.set_defaults(command_instance=self)
+        parser.set_defaults(
+            command_instance=self,
+            json_command=self.name,
+            supports_json_output=self.supports_json_output,
+        )
         return parser
 
     @abstractmethod
@@ -1011,6 +1015,10 @@ class ModelCommand(ProjectCommand):
 
 def execute_command(args: argparse.Namespace) -> int:
     """Execute command from parsed args (used by main CLI)."""
+    if getattr(args, "json", False) and not getattr(args, "supports_json_output", False):
+        command = getattr(args, "json_command", getattr(args, "command", ""))
+        print(f"Error: --json is not supported by 'pstrain {command}'", file=sys.stderr)
+        return 2
     if hasattr(args, "command_instance"):
         return int(args.command_instance.run(args))
     if hasattr(args, "func"):

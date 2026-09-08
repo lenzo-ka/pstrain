@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from pathlib import Path
@@ -20,7 +19,7 @@ from pstrain.api.config import (
     migrate_project,
     resolve_config,
 )
-from pstrain.cli.base import ensure_global_option_defaults
+from pstrain.cli.base import add_json_argument, ensure_global_option_defaults
 
 
 def _selectors(parser: Any, *, key: bool = False) -> None:
@@ -30,7 +29,22 @@ def _selectors(parser: Any, *, key: bool = False) -> None:
     parser.add_argument("--experiment", default="default")
     parser.add_argument("-c", "--config", dest="profile_name", default="default")
     parser.add_argument("-j", "--jobs", type=int, default=None)
-    parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    add_json_argument(parser, suppress_defaults=True)
+
+
+def _set_handler(
+    parser: Any, func: Any, command: str, *, supports_json_output: bool = False
+) -> None:
+    parser.set_defaults(
+        func=func,
+        json_command=f"config {command}",
+        supports_json_output=supports_json_output,
+    )
+
+
+def _format_json(args: Any, data: Any, *, default: Any = None) -> str:
+    indent = args.json_indent if args.json_indent > 0 else None
+    return json.dumps(data, indent=indent, ensure_ascii=args.json_ascii, default=default)
 
 
 def register_config_command(subparsers: Any) -> None:
@@ -40,41 +54,42 @@ def register_config_command(subparsers: Any) -> None:
 
     explain = commands.add_parser("explain", help="Explain resolved values and provenance")
     _selectors(explain, key=True)
-    explain.set_defaults(func=cmd_config_explain)
+    _set_handler(explain, cmd_config_explain, "explain", supports_json_output=True)
 
     profiles = commands.add_parser("profiles", help="List available named profiles")
     profiles.add_argument("--project-dir", default=".")
-    profiles.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
-    profiles.set_defaults(func=cmd_config_profiles)
+    add_json_argument(profiles, suppress_defaults=True)
+    _set_handler(profiles, cmd_config_profiles, "profiles", supports_json_output=True)
 
     show = commands.add_parser("show", help="Show a resolved profile")
     _selectors(show)
     show.add_argument("--resolved", action="store_true", default=True)
     show.add_argument("--sources", action="store_true")
-    show.set_defaults(func=cmd_config_show)
+    _set_handler(show, cmd_config_show, "show", supports_json_output=True)
 
     get = commands.add_parser("get", help="Get one resolved value")
     _selectors(get, key=True)
-    get.set_defaults(func=cmd_config_get)
+    _set_handler(get, cmd_config_get, "get", supports_json_output=True)
 
     schema = commands.add_parser("schema", help="Export the canonical JSON Schema")
     schema.add_argument("--format", choices=["json", "markdown", "rst"], default="json")
     schema.add_argument("--output")
-    schema.set_defaults(func=cmd_config_schema)
+    add_json_argument(schema, suppress_defaults=True)
+    _set_handler(schema, cmd_config_schema, "schema", supports_json_output=True)
 
     listing = commands.add_parser("list", help="List canonical semantic fields")
     listing.add_argument("--section")
-    listing.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
-    listing.set_defaults(func=cmd_config_list)
+    add_json_argument(listing, suppress_defaults=True)
+    _set_handler(listing, cmd_config_list, "list", supports_json_output=True)
 
     migrate = commands.add_parser("migrate", help="Migrate legacy files to version 1")
     migrate.add_argument("--project-dir", default=".")
     migrate.add_argument("--check", action="store_true")
-    migrate.set_defaults(func=cmd_config_migrate)
+    _set_handler(migrate, cmd_config_migrate, "migrate")
 
     path = commands.add_parser("path", help="Show configuration layer paths")
     path.add_argument("--project-dir", default=".")
-    path.set_defaults(func=cmd_config_path)
+    _set_handler(path, cmd_config_path, "path")
 
 
 def _resolve(args: Any) -> Any:
@@ -116,7 +131,7 @@ def cmd_config_explain(args: Any) -> int:
         for key, item in fields.items()
     }
     if args.json:
-        print(json.dumps(output, indent=2, default=str))
+        print(_format_json(args, output, default=str))
     else:
         for key, item in output.items():
             print(f"{key} = {item['value']!r} ({item['type']})")
@@ -135,7 +150,7 @@ def cmd_config_profiles(args: Any) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     if args.json:
-        print(json.dumps(rows, indent=2))
+        print(_format_json(args, rows))
     else:
         for row in rows:
             shadow = " (shadows built-in)" if row["shadows_builtin"] else ""
@@ -154,7 +169,7 @@ def cmd_config_show(args: Any) -> int:
     data: dict[str, Any] = resolved.as_dict()
     if args.sources:
         data["_sources"] = {key: value.winner.__dict__ for key, value in resolved.fields.items()}
-    print(json.dumps(data, indent=2) if args.json else yaml.safe_dump(data, sort_keys=False))
+    print(_format_json(args, data) if args.json else yaml.safe_dump(data, sort_keys=False))
     return 0
 
 
@@ -165,13 +180,16 @@ def cmd_config_get(args: Any) -> int:
     except (ValueError, KeyError) as exc:
         print(f"Error: unknown or invalid config key {args.key!r}: {exc}", file=sys.stderr)
         return 1
-    print(json.dumps(item.value) if args.json else f"{args.key} = {item.value}")
+    print(_format_json(args, item.value) if args.json else f"{args.key} = {item.value}")
     return 0
 
 
 def cmd_config_schema(args: Any) -> int:
+    if args.json and args.format != "json":
+        print("Error: --json cannot be combined with a non-JSON --format", file=sys.stderr)
+        return 2
     output = (
-        json.dumps(get_schema(), indent=2)
+        _format_json(args, get_schema())
         if args.format == "json"
         else generate_markdown_docs()
         if args.format == "markdown"
@@ -188,7 +206,7 @@ def cmd_config_list(args: Any) -> int:
     params = list_parameters(args.section or "")
     rows = [item.__dict__ for item in params]
     if args.json:
-        print(json.dumps(rows, indent=2, default=str))
+        print(_format_json(args, rows, default=str))
     else:
         for item in params:
             print(f"{item.key}: {item.type} = {item.default!r} — {item.description}")
