@@ -208,11 +208,7 @@ def test_tutorial_api_result_is_json_serializable(tmp_path: Path) -> None:
 
 def test_tutorial_has_one_canonical_package_resource() -> None:
     configuration = (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    legacy_mapping = (
-        '"notebooks/arctic_hmm_gmm_tutorial.ipynb" = '
-        '"pstrain/data/notebooks/arctic_hmm_gmm_tutorial.ipynb"'
-    )
+    resource_path = f"pstrain/data/notebooks/{TUTORIAL_FILENAME}"
 
-    assert legacy_mapping not in configuration
+    assert configuration.count(f'"{resource_path}"') == 1
     assert SOURCE_NOTEBOOK.is_file()
-    assert not (REPOSITORY_ROOT / "notebooks" / TUTORIAL_FILENAME).exists()

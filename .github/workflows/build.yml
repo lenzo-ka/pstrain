@@ -9,7 +9,6 @@ on:
     paths:
       - csrc/**
       - pstrain/**
-      - notebooks/**
       - scripts/test_installed_distribution.py
       - CMakeLists.txt
       - pyproject.toml
@@ -19,7 +18,6 @@ on:
     paths:
       - csrc/**
       - pstrain/**
-      - notebooks/**
       - scripts/test_installed_distribution.py
       - CMakeLists.txt
       - pyproject.toml
