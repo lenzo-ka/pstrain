@@ -8,6 +8,9 @@ on:
     branches: [master, main]
     paths:
       - csrc/**
+      - pstrain/**
+      - notebooks/**
+      - scripts/test_installed_distribution.py
       - CMakeLists.txt
       - pyproject.toml
       - .github/workflows/build.yml
@@ -15,6 +18,9 @@ on:
     branches: [master, main]
     paths:
       - csrc/**
+      - pstrain/**
+      - notebooks/**
+      - scripts/test_installed_distribution.py
       - CMakeLists.txt
       - pyproject.toml
       - .github/workflows/build.yml
