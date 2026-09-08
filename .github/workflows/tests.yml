@@ -58,11 +58,12 @@ jobs:
             while IFS= read -r -d '' path; do
               printf '  %q\n' "$path"
               # A path is "code" (runs the expensive jobs) unless it is a
-              # Markdown file or lives under docs/. Machine-readable evidence a
-              # gate authenticates MUST NOT live under docs/, or a change to it
-              # is classed as documentation and escapes its own gate: that is
-              # why the Arctic pin record lives under evidence/, not docs/.
-              if [[ "$path" != *.md && "$path" != docs/* ]]; then
+              # Markdown file or lives under docs/. The generated CLI reference
+              # is an explicit exception so an edit or deletion cannot escape the
+              # gate that regenerates and checks them. Machine-readable evidence
+              # a gate authenticates MUST NOT live under docs/; that is why the
+              # Arctic pin record lives under evidence/, not docs/.
+              if [[ "$path" == "docs/api/cli.rst" || ( "$path" != *.md && "$path" != docs/* ) ]]; then
                 code=true
               fi
             done < "$changed_files"
