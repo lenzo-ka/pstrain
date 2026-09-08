@@ -563,6 +563,34 @@ def test_package_rejects_empty_name(
     assert not (project / "packages").exists()
 
 
+def test_package_escapes_newline_in_line_oriented_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    project, _ = _project_with_model(tmp_path)
+    output = tmp_path / "output"
+    package_name = "release\nsecond-line"
+
+    assert (
+        _run(
+            monkeypatch,
+            "ci-1g",
+            "--project-dir",
+            str(project),
+            "--out",
+            str(output),
+            "--name",
+            package_name,
+            "--no-dict",
+        )
+        == 0
+    )
+
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == len(ARTIFACT_KEYS - {"dictionary", "filler_dict"})
+    assert all("release\\nsecond-line" in line for line in lines)
+    assert (output / package_name / "pstrain-package.json").is_file()
+
+
 def test_package_missing_model_reports_complete_model_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:

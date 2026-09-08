@@ -116,12 +116,12 @@ class PackageCommand(Command):
             include_filler=include_dict and filler_path is not None,
         )
         if ctx.dry_run:
-            print(f"source\t{model_dir}")
-            print(f"destination\t{package_dir}")
-            print(f"dictionary\t{dictionary if include_dict else 'excluded'}")
-            print(f"filler_dictionary\t{filler_path or 'generated noisedict'}")
+            _print_row("source", model_dir)
+            _print_row("destination", package_dir)
+            _print_row("dictionary", dictionary if include_dict else "excluded")
+            _print_row("filler_dictionary", filler_path or "generated noisedict")
             for key, path in artifact_paths.items():
-                print(f"{key}\t{path}")
+                _print_row(key, path)
             return CommandResult.ok()
 
         replacing = package_dir.exists()
@@ -136,9 +136,9 @@ class PackageCommand(Command):
             overwrite=ctx.args.overwrite,
         )
         if replacing:
-            print(f"replaced\t{package_dir}")
+            _print_row("replaced", package_dir)
         for key, path in artifacts.items():
-            print(f"{key}\t{path}")
+            _print_row(key, path)
         return CommandResult.ok()
 
 
@@ -163,3 +163,16 @@ def _artifact_paths(
 
 
 package_command = PackageCommand()
+
+
+def _print_row(key: str, value: object) -> None:
+    """Print one tabular row without allowing a field to create extra rows or columns."""
+    print(f"{key}\t{_line_field(value)}")
+
+
+def _line_field(value: object) -> str:
+    """Backslash-escape controls only when a field would disrupt line-oriented output."""
+    text = str(value)
+    if not any(character in text for character in "\t\r\n"):
+        return text
+    return text.replace("\\", "\\\\").replace("\t", "\\t").replace("\r", "\\r").replace("\n", "\\n")
