@@ -3,6 +3,82 @@
 Release-relevant changes are recorded here. The project is currently an alpha;
 the version in `pyproject.toml` is authoritative.
 
+## Unreleased
+
+- CI, untied CD, and tied CD training schedules now share the
+  `max_iterations: 10` default instead of applying different pass limits
+  (2026-09-07).
+- `pstrain tutorial` now copies the bundled HMM/GMM tutorial notebook from an
+  installed package, explains how to launch it, and protects an existing copy
+  unless `--force` is given (2026-09-06).
+- `strip_dictionary_stress()` now merges pronunciations that become duplicates
+  and renumbers the surviving variants; the bundled Arctic dictionary and its
+  benchmark evidence have been regenerated from that output (2026-09-06).
+- The Arctic benchmark documentation now identifies the preserved upstream
+  oracle and its provenance limits, compares resource-matched runs, and states
+  when a measured difference is not statistically significant (2026-09-06).
+- Documentation now accurately describes Windows support, the distinction
+  between `pstrain.api` and `pstrain.lib`, the evaluation-metrics extra, project
+  validation reports, model parameters, and the supported `LogMath` wrapper
+  (2026-09-06).
+- Guarded Arctic comparison, adoption, and documentation commands now refuse
+  baseline evidence that differs from the committed files unless a local
+  experiment explicitly overrides the check (2026-09-06).
+- `pstrain package` now provides dry-run planning and packages trained models
+  from the command line; it refuses source overlap, unrelated destinations, and
+  unsupported markers, requires `--overwrite` for unmarked legacy packages,
+  and replaces recognized packages transactionally (2026-09-05).
+- Training now supports SphinxTrain-compatible skip-state phone topology through
+  the canonical `skip_state` configuration setting (2026-09-05).
+- Training output now reports concise tab-separated progress, avoids repeated
+  warnings, and summarizes omitted utterances and affected pass ranges
+  (2026-09-05).
+- Parallel decoding now shuts down its native helpers cleanly instead of hanging
+  after decoding has finished (2026-09-05).
+- `scripts/procctl.py launch` now tolerates slow identity readers and exec
+  wrappers and records untruncated command observations; a refused launch can
+  take about sixty-eight seconds while settling and cleanup finish (2026-09-05).
+- `pstrain train` and `pstrain.api.one_command.validate_inputs()` now accept
+  Festival and FestVox prompt files; `pstrain.api.diagnostics` exposes
+  Baum-Welch telemetry readers, while the top-level public API exports CMUdict
+  and stress-stripping helpers and remains importable on Windows (2026-09-05).
+- Arctic setup now records every missing vocabulary word and the affected
+  utterances that remain in the corpus. Segment aggregation and flat
+  initialization report omitted utterances and their reasons; standalone
+  aggregation fails on omissions unless they are explicitly allowed, and flat
+  initialization enforces the configured skip tolerance (2026-09-05).
+- Malformed model indexes and inconsistent transition matrices now stop native
+  initialization with model-specific diagnostics instead of risking invalid
+  memory access or incomplete output (2026-09-05).
+- `mllr_transform` now returns failure and explains the problem when required
+  transform or model paths are missing (2026-09-05).
+- The decoder now logs expected density-probe failures before falling back to
+  PocketSphinx's default top-N setting (2026-09-05).
+- Big-endian segment reads now use defined unsigned byte swaps, avoiding
+  platform-dependent results and native undefined behavior (2026-09-05).
+- The `sphinxtrain` profile now uses SphinxTrain's convergence threshold while
+  the accuracy-oriented default profile retains its stricter threshold
+  (2026-09-04).
+- Baum-Welch per-utterance diagnostics now go to tab-separated project log files
+  instead of flooding terminal and notebook output (2026-09-04).
+- Training now retries an unalignable utterance with a wider beam and, if it
+  still fails, reports and omits it while enforcing the configured skip limit;
+  strict abort behavior remains available (2026-09-04).
+- Native worker failures now preserve their diagnostics across process
+  boundaries and distinguish a startup timeout from a worker crash
+  (2026-09-03 through 2026-09-04).
+- Language-model building now reads both supported transcript forms, and
+  malformed transcripts fail with a file and line number. `pstrain test`
+  automatically builds a language model from training text when no model option
+  is supplied (2026-09-04).
+- `pstrain test` now fails with the recorded decoder reasons when requested
+  utterances produce no result instead of reporting a fabricated score
+  (2026-09-03).
+- The tutorial notebook now follows the checkout version, renders its likelihood
+  formula correctly, installs its evaluation dependency, tolerates the optional
+  PocketSphinx package, and safely replaces stale project configuration
+  (2026-09-03).
+
 ## 0.3.0 - 2026-08-24
 
 - Forced alignment now retries once with a wider beam when an utterance cannot
