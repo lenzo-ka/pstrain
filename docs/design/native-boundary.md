@@ -117,8 +117,12 @@ Those two sites are now compiled out of the library build
   classified, raised, and followed by a fresh helper on the next call.
 - Control requests are limited to a 64 KiB serialized payload. Coarse operations
   that explicitly accept arrays (model I/O and in-memory BW/alignment calls) have
-  a 256 MiB ceiling. One deadline covers both a non-blocking pipe send and the
-  response wait; expiry kills the helper so the next call starts fresh.
+  a 256 MiB ceiling. One deadline covers both the request send and the response
+  wait; expiry kills the helper so the next call starts fresh. The send is
+  bounded in whichever terms the platform's pipe offers — a non-blocking
+  descriptor and `select` over the POSIX socket pair, a bounded wait on the
+  overlapped completion event over the Windows message-mode named pipe — so a
+  helper that stops reading cannot park the owning process on either.
 
 ## No silent fallback
 

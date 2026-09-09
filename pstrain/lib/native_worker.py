@@ -26,6 +26,7 @@ import multiprocessing.util
 import os
 import select
 import struct
+import sys
 import tempfile
 import threading
 import time
@@ -320,6 +321,90 @@ def _worker_main(connection: Connection, state: _WorkerState) -> None:
     os.close(original_stdout_fd)
 
 
+# One request write, bounded by a deadline, in the terms of the transport that
+# ``multiprocessing`` actually hands us.
+#
+# ``Connection.send_bytes`` is the obvious call and it is the wrong one: it
+# waits for the peer to drain the pipe with no bound at all, so a helper that
+# is alive but not reading -- stopped, wedged in native code, or simply slower
+# than the request deadline -- parks the owning process forever.  What follows
+# is ``Connection.send_bytes`` with the wait bounded, written twice because the
+# duplex pipe is a different object on each platform and the two mechanisms do
+# not translate into one another:
+#
+#   POSIX: ``multiprocessing.Pipe(duplex=True)`` is a ``socketpair``.  The
+#   framing is a big-endian ``!i`` length header followed by the payload, and a
+#   deadline is expressed by putting the descriptor in non-blocking mode and
+#   waiting for writability with ``select``.
+#
+#   Windows: ``multiprocessing.Pipe(duplex=True)`` is an overlapped, message
+#   mode named pipe.  There is no length header -- the message boundary is the
+#   frame, and the peer's ``recv`` returns exactly the bytes given to one
+#   ``WriteFile`` -- and a deadline is expressed by waiting on the overlapped
+#   completion event for a bounded time, then cancelling.  ``os.set_blocking``,
+#   ``select.select`` and ``os.write`` all take a C-runtime file descriptor or
+#   a socket; ``Connection.fileno()`` there returns a Win32 ``HANDLE``, which
+#   is why applying any of them raised ``OSError: [Errno 9] Bad file
+#   descriptor`` before the first request was ever sent.
+if sys.platform == "win32":
+
+    def _write_request(connection: Connection, payload: bytes, deadline: float) -> None:
+        """Write one request message to a Windows named pipe, bounded by ``deadline``."""
+        # Private, but it is the same module ``multiprocessing.connection``
+        # itself uses for this pipe; without it there is no pipe to write to.
+        import _winapi
+
+        overlapped, error = _winapi.WriteFile(connection.fileno(), payload, True)
+        try:
+            if error == _winapi.ERROR_IO_PENDING:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError
+                waited = _winapi.WaitForMultipleObjects(
+                    [overlapped.event], False, int(remaining * 1000)
+                )
+                if waited == _winapi.WAIT_TIMEOUT:
+                    raise TimeoutError
+        except BaseException:
+            overlapped.cancel()
+            raise
+        finally:
+            # Always reap the operation before the buffer goes out of scope,
+            # cancelled or not; ``GetOverlappedResult(True)`` waits for the
+            # cancellation to land.
+            written, error = overlapped.GetOverlappedResult(True)
+        if error == _winapi.ERROR_OPERATION_ABORTED:
+            raise BrokenPipeError("the native worker request pipe was closed while sending")
+        if error != 0:
+            raise OSError(f"native worker request write failed with Windows error {error}")
+        if written != len(payload):
+            raise OSError(f"native worker request write sent {written} of {len(payload)} bytes")
+
+else:
+
+    def _write_request(connection: Connection, payload: bytes, deadline: float) -> None:
+        """Write one framed request to a POSIX socket pair, bounded by ``deadline``."""
+        framed = struct.pack("!i", len(payload)) + payload
+        descriptor = connection.fileno()
+        os.set_blocking(descriptor, False)
+        sent = 0
+        try:
+            while sent < len(framed):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError
+                _, writable, _ = select.select([], [descriptor], [], remaining)
+                if not writable:
+                    raise TimeoutError
+                try:
+                    sent += os.write(descriptor, framed[sent:])
+                except BlockingIOError:
+                    continue
+        finally:
+            with contextlib.suppress(OSError):
+                os.set_blocking(descriptor, True)
+
+
 class _NativeWorker:
     """One helper process, lazily started and reused, one request at a time."""
 
@@ -357,6 +442,24 @@ class _NativeWorker:
             Path(self._diagnostic_path).unlink(missing_ok=True)
             self._diagnostic_path = None
 
+    def _require_running(self, operation: str) -> tuple[Connection, BaseProcess]:
+        """Return the helper this call must use, or say plainly that there is none.
+
+        Every caller reaches this immediately after :meth:`_start` returned
+        without raising, so a missing helper is a bug in this module rather
+        than a runtime condition. It is still checked rather than asserted:
+        an assertion carries no message, and it disappears entirely under
+        ``python -O``, which would let the caller go on to use ``None`` as a
+        connection.
+        """
+        connection, process = self._connection, self._process
+        if connection is None or process is None:
+            raise PstrainWorkerError(
+                f"no native worker is running for {operation} even though one was "
+                "just started; the helper was reclaimed between starting and using it"
+            )
+        return connection, process
+
     def _start(self) -> None:
         self._discard()
         fd, path = tempfile.mkstemp(prefix="pstrain-native-", suffix=".log")
@@ -381,7 +484,11 @@ class _NativeWorker:
                     child.close()
                 self._diagnostic_path = None
                 Path(path).unlink(missing_ok=True)
-        assert parent is not None and child is not None
+        if parent is None or child is None:
+            raise PstrainWorkerError(
+                "the native worker process started without a request pipe; "
+                "no request can be sent to it"
+            )
         child.close()
         self._process, self._connection = process, parent
         ready = wait([parent, process.sentinel], timeout=_START_TIMEOUT)
@@ -444,35 +551,53 @@ class _NativeWorker:
         deadline = time.monotonic() + _REQUEST_TIMEOUT
         if self._process is None or not self._process.is_alive():
             self._start()
-        assert self._connection is not None and self._process is not None
+        self._require_running(label)
         self._request_id = request_id
         self._truncate_diagnostic()
         try:
             self._send_request(request, deadline)
+        except TimeoutError:
+            # Before the broader OSError arm below, which would otherwise catch
+            # this: TimeoutError is an OSError. A timeout is not a death and
+            # must not be retried -- the deadline it exhausted is the same one
+            # the retry would carry, so the second send can only fail at once,
+            # after killing a wedged helper whose diagnostic is the evidence and
+            # spawning an innocent replacement to report the timeout against.
+            self._raise_timeout(label)
         except (BrokenPipeError, EOFError, OSError):
             # The helper died between requests; respawn and send once more.
             self._discard()
             self._start()
-            assert self._connection is not None and self._process is not None
+            self._require_running(label)
             try:
                 self._send_request(request, deadline)
             except TimeoutError:
                 self._raise_timeout(label)
-            except (BrokenPipeError, EOFError, OSError):
-                # The fresh helper died during the retried send; give up loudly
-                # rather than leaving a connection holding a partial frame.
-                self._discard()
+            except (BrokenPipeError, EOFError, OSError) as exc:
+                # A fresh helper failed the same send. Do not discard first:
+                # discarding reaps the exit status and deletes the diagnostic
+                # file, so classification would have nothing left to read. If
+                # the helper is in fact alive, the fault is in this process's
+                # transport, not in the helper, and saying "the worker died"
+                # would send the reader hunting for a crash that never was.
+                if self._process is not None and self._process.is_alive():
+                    diagnostic = self._tail().strip()
+                    self._discard()
+                    detail = f": {diagnostic}" if diagnostic else ""
+                    raise PstrainWorkerError(
+                        f"cannot send the {label} request to a running native worker: "
+                        f"{exc!r}{detail}"
+                    ) from exc
                 self._raise_death(label, inputs, eof=True)
-        except TimeoutError:
-            self._raise_timeout(label)
 
+        connection, process = self._require_running(label)
         remaining = max(0.0, deadline - time.monotonic())
-        ready = wait([self._connection, self._process.sentinel], timeout=remaining)
+        ready = wait([connection, process.sentinel], timeout=remaining)
         if not ready:
             self._raise_timeout(label)
-        if self._connection in ready:
+        if connection in ready:
             try:
-                message = self._connection.recv()
+                message = connection.recv()
             except EOFError:
                 return self._raise_death(label, inputs, eof=True)
             kind, response_id, payload = message
@@ -500,31 +625,18 @@ class _NativeWorker:
 
     def _send_request(self, payload: bytes, deadline: float) -> None:
         """Send one bounded request without allowing a full pipe to hang."""
-        assert self._connection is not None
-        framed = struct.pack("!i", len(payload)) + payload
-        descriptor = self._connection.fileno()
-        os.set_blocking(descriptor, False)
-        sent = 0
-        try:
-            while sent < len(framed):
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise TimeoutError
-                _, writable, _ = select.select([], [descriptor], [], remaining)
-                if not writable:
-                    raise TimeoutError
-                try:
-                    sent += os.write(descriptor, framed[sent:])
-                except BlockingIOError:
-                    continue
-        finally:
-            with contextlib.suppress(OSError):
-                os.set_blocking(descriptor, True)
+        connection = self._connection
+        if connection is None:
+            raise PstrainWorkerError(
+                "native worker connection is closed; the request was never sent"
+            )
+        _write_request(connection, payload, deadline)
 
     def _raise_timeout(self, operation: str) -> NoReturn:
-        assert self._process is not None
-        self._process.kill()
-        self._process.join()
+        process = self._process
+        if process is not None:
+            process.kill()
+            process.join()
         diagnostic = self._tail()
         self._discard()
         raise PstrainWorkerError(
@@ -543,9 +655,21 @@ class _NativeWorker:
         return _diagnostic_tail(self._diagnostic_path or "")
 
     def _raise_death(self, operation: str, inputs: tuple[str, ...], *, eof: bool) -> NoReturn:
-        assert self._process is not None
-        self._process.join(timeout=1)
-        returncode = self._process.exitcode
+        process = self._process
+        if process is None:
+            # Nothing left to classify: the helper and its diagnostic file were
+            # already reclaimed. Say so rather than reporting a death we did
+            # not observe.
+            diagnostic = self._tail()
+            self._discard()
+            raise PstrainWorkerProtocolError(
+                operation,
+                inputs,
+                diagnostic
+                or "the native worker was discarded before its outcome could be classified",
+            )
+        process.join(timeout=1)
+        returncode = process.exitcode
         diagnostic = self._tail()
         self._discard()
         if returncode is not None and returncode < 0:

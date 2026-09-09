@@ -8,12 +8,16 @@ as a typed exception with this interpreter still standing.
 from __future__ import annotations
 
 import contextlib
+import errno
+import multiprocessing
 import os
 import pickle
 import re
 import signal
 import socket
+import sys
 import tempfile
+import time
 from collections.abc import Iterator
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -320,6 +324,42 @@ def test_wedged_worker_send_times_out_and_next_call_respawns(
             os.kill(old_pid, signal.SIGCONT)
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="exercises the Windows request write")
+def test_windows_write_request_gives_up_at_the_deadline_on_a_full_pipe() -> None:
+    """A Windows request write to a peer that never reads must end at the deadline.
+
+    The test above is the POSIX version of this one, and it cannot run here:
+    it wedges the helper with ``SIGSTOP``, which Windows does not have. So on
+    Windows nothing else executes ``_write_request``'s deadline at all, and the
+    one property that could not be settled by reading the code is whether the
+    reap after a cancel -- ``GetOverlappedResult(True)`` -- can itself block.
+    That is why the elapsed time is asserted and not merely the exception type:
+    a reap that waits forever raises exactly the same ``TimeoutError``, just
+    much later.
+
+    A ``multiprocessing`` duplex pipe is enough to produce the condition. It is
+    a named pipe with an 8192-byte buffer on each side, so a payload larger
+    than that cannot complete while nothing is reading, and the write is left
+    pending. No helper process and no C library are involved.
+    """
+    reader, writer = multiprocessing.Pipe()
+    timeout = 0.5
+    try:
+        payload = b"x" * (8192 * 8)
+        started = time.monotonic()
+        with pytest.raises(TimeoutError):
+            native_worker._write_request(writer, payload, started + timeout)
+        elapsed = time.monotonic() - started
+    finally:
+        writer.close()
+        reader.close()
+
+    # Below the deadline would mean the write never actually waited on the full
+    # pipe; far above it would mean the wait or the reap after cancelling ran
+    # unbounded, which is the failure this transport exists to prevent.
+    assert timeout * 0.8 <= elapsed < timeout + 10.0
+
+
 @requires_c_library
 def test_shutdown_reaps_the_worker_and_its_diagnostic_file(tmp_path: Path) -> None:
     phones = _phone_list(tmp_path)
@@ -414,3 +454,40 @@ def test_the_exit_finalizer_is_registered_once_per_process(
     monkeypatch.setattr(native_worker.os, "getpid", lambda: forked)
     native_worker.close_helper_before_children_are_joined()
     assert registered == [10, 10]
+
+
+@requires_c_library
+def test_a_send_failure_names_the_transport_and_not_a_worker_death(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A request write that fails in this process must say so, and keep its cause.
+
+    Observed on Windows: the first request write raised ``OSError: [Errno 9]
+    Bad file descriptor`` before anything reached the helper, the respawned
+    helper failed the retried write identically, and the retry handler
+    discarded the worker and then tripped a bare ``assert self._process is not
+    None``. What reached the caller was an ``AssertionError`` with no message,
+    about a process that had never been the problem -- and under ``python -O``
+    that assertion would have vanished and let the code run on past a
+    discarded worker. The failing write is reproduced here directly; nothing
+    about the handling depends on why the write failed.
+    """
+    failure = OSError(errno.EBADF, "Bad file descriptor")
+
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise failure
+
+    monkeypatch.setattr(native_worker, "_write_request", refuse)
+    phones = _phone_list(tmp_path)
+
+    worker = native_worker._NativeWorker()
+    try:
+        with pytest.raises(native_worker.PstrainWorkerError) as raised:
+            worker.call("mdef_gen_ci", (str(phones), str(tmp_path / "out.mdef"), 3), (str(phones),))
+    finally:
+        worker._discard()
+
+    message = str(raised.value)
+    assert "cannot send the mdef_gen_ci request" in message
+    assert "Bad file descriptor" in message
+    assert raised.value.__cause__ is failure

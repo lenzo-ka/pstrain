@@ -97,6 +97,7 @@ jobs:
             tests/test_features.py::TestFEParams `
             tests/test_features.py::TestReadWriteSphinxMfc `
             tests/test_features.py::TestReadWav `
+            tests/test_native_worker.py::test_windows_write_request_gives_up_at_the_deadline_on_a_full_pipe `
             tests/test_bw_sharding.py `
             tests/test_dtree.py `
             tests/test_e2e_training.py `

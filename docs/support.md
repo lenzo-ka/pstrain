@@ -3,90 +3,88 @@
 ## Platforms
 
 pstrain supports macOS, Linux, and Windows. CI builds wheels on all three
-platforms, and release builds publish those wheels to PyPI. On Windows, CI
-builds the native library and command-line programs with both MSVC and clang-cl,
-then runs a Windows-compatible subset of the Python tests against an MSVC build
-on Python 3.13. The full Python test suite is run on macOS and Linux; Windows CI
-does not currently claim that broader coverage.
+platforms, and release builds publish those wheels to PyPI.
 
-### Measured Windows Python coverage
+Windows support does not extend to training. Running any stage of the training
+pipeline on Windows raises `RuntimeError: pipeline provenance locking requires
+the POSIX fcntl module; pipeline execution is unavailable on this platform`,
+because provenance replacement locks its critical section with `fcntl.flock`
+and Windows has no `fcntl`. What does work there is the package itself, the
+native library and command-line programs, and the native worker that carries
+requests to them. Training a model requires macOS or Linux.
 
-The Windows Python 3.13 job explicitly requests 146 test cases. Six POSIX
-resource-accounting modules skip during collection, leaving 140 collected
-items. The measured result is 71 passing cases and 75 honest skips:
+On Windows, CI builds the native library and command-line programs with both
+MSVC and clang-cl, then runs a Windows-compatible subset of the Python tests
+against an MSVC build on Python 3.13. The full Python test suite is run on
+macOS and Linux; Windows CI does not currently claim that broader coverage.
 
-- 41 passing cases cover `tests/test_paths.py`, the Windows executable lookup
-  case in `tests/test_commands.py`, `tests/test_cffi_abi.py`,
-  `tests/test_lib_structure.py`, the selected load/logmath/feature cases in
-  `tests/test_pstrainc.py`, and the selected parameter, MFC, and WAV cases in
-  `tests/test_features.py`.
-- `tests/test_numeric_harness.py` runs and passes
-  `test_bw_discrete_contract_negative_control_rejects_dropped_identity`.
-- `tests/test_pipeline_tasks.py` runs and passes the target-registry default;
-  native-library identity and fingerprint cases; recursive audio-fileid case;
-  named, unknown, and shipped-profile configuration cases; multipron,
-  final-silence, failed-alignment, untied-inventory, and transcript-inventory
-  configuration cases; BW default/floor/schedule/variance-policy cases; and
-  `test_bw_config_requires_explicit_normalization_policies` (29 cases total).
-- Six whole modules remain skipped because POSIX training resource accounting
-  uses `resource`: `test_bw_sharding.py`, `test_dtree.py`,
-  `test_e2e_training.py`, `test_feat_params.py`,
-  `test_train_convergence.py`, and `test_train_retry.py`.
-- No Windows case is currently skipped for POSIX provenance locking. The
-  provenance-lock markers remain accurate on a non-Windows platform without
-  `fcntl`, but on Windows native-worker transport is encountered first.
-- 69 cases skip because native-worker request transport is unavailable on
-  Windows. In `tests/test_numeric_harness.py` that is every case except the
-  discrete-contract negative control (33 cases). In
-  `tests/test_pipeline_tasks.py` it is the following 36 cases:
-  `test_pipeline_builds_without_error`,
-  `test_all_registered_targets_have_producers`,
-  `test_every_target_in_TARGETS_is_registered`,
-  `test_can_plan_each_ci_and_cd_target`,
-  `test_cd_8g_plan_includes_full_chain`,
-  `test_fanout_tasks_share_parallel_group`,
-  `test_extract_task_forwards_lifter`,
-  `test_extract_task_forwards_every_recorded_waveform_field`,
-  `test_extract_task_forwards_preemphasis_alpha`,
+### Windows Python coverage
+
+This has been measured. The Windows Python 3.13 job requested 146 test units
+and reported 101 passed, 45 skipped. Those 45 are the 39 cases and the six
+module-level collection skips below, and 101 plus 45 is the job's 146, so the
+breakdown here and the CI summary line describe the same run.
+
+Six POSIX resource-accounting modules skip during collection, leaving 140
+collected items. Of those 140, 39 skip and 101 pass:
+
+- Six whole modules skip because POSIX training resource accounting uses
+  `resource`: `test_bw_sharding.py`, `test_dtree.py`, `test_e2e_training.py`,
+  `test_feat_params.py`, `test_train_convergence.py`, and
+  `test_train_retry.py`.
+- 39 cases skip because pipeline provenance replacement locks its critical
+  section with `fcntl.flock`, which Windows does not have. In
+  `tests/test_numeric_harness.py` that is every case built on the
+  `flat_project` or `full_project` fixtures, since creating either one runs a
+  pipeline (30 cases). In `tests/test_pipeline_tasks.py` it is
   `test_meaningful_feature_config_change_rebuilds_features`,
   `test_reverting_feature_config_rebuilds_features`,
   `test_irrelevant_config_edit_does_not_rebuild_features`,
   `test_model_and_package_copy_build_provenance`,
-  `test_stage_fingerprints_cover_only_effective_relevant_values`,
-  `test_skip_state_change_invalidates_training_fingerprint`,
-  `test_project_sharding_policy_changes_training_provenance`,
-  `test_training_fingerprint_excludes_config_source_metadata`,
-  `test_training_fingerprint_payload_composition_is_pinned`, both parameter
-  cases of
-  `test_training_provenance_declares_requested_and_effective_bw_shard_count`,
-  `test_exclusion_schedule_config_and_provenance_are_verbatim`,
-  `test_exclusion_schedule_does_not_change_decode_eval_inputs`,
-  `test_provenance_rejects_non_finite_config`,
-  `test_nested_and_flat_audio_fanout_uses_relative_fileids`,
-  `test_empty_audio_directory_fails_during_pipeline_construction`,
-  `test_missing_audio_directory_fails_during_pipeline_construction`,
-  `test_split_task_produces_fileid_files`,
   `test_split_runs_end_to_end_and_partitions`,
   `test_lm_target_succeeds_on_setup_project_layout`,
   `test_editing_persistent_split_revalidates_and_changes_membership`,
-  `test_tree_building_is_fanned_out`,
-  `test_model_tasks_depend_on_split_outputs`,
-  `test_resolved_untied_inventory_appears_in_provenance`,
-  `test_linear_default_untied_stage_builds_occurrence_inventory`,
   `test_configured_bw_parameters_reach_training_call`, and
   `test_configured_untied_schedule_and_variance_reach_training_call`.
+- The remaining 101 cases pass: everything selected from `tests/test_paths.py`,
+  `tests/test_commands.py`, `tests/test_cffi_abi.py`,
+  `tests/test_lib_structure.py`, `tests/test_pstrainc.py` and
+  `tests/test_features.py`; all of `tests/test_pipeline_tasks.py` outside the
+  nine provenance-lock cases above; and the four cases in
+  `tests/test_numeric_harness.py` that do not build a pipeline fixture.
 
-The observed native-worker failure is in request transport, not process spawn
-or child start-up. The spawned child reports ready, then the parent gets
-`OSError: [Errno 9] Bad file descriptor` while applying `os.set_blocking()` to
-the Windows pipe handle before sending the first request. The retry does the
-same. No child diagnostic is produced because the failure occurs in the parent.
-The retry path then discards the worker and its diagnostic file before calling
-`_raise_death()`, whose bare `assert self._process is not None` masks the
-original transport error. That assertion is also a known diagnostic defect:
-under `python -O` it disappears and execution continues past an already
-discarded process. Fixing Windows native-worker transport and that production
-assertion are separate work from the support measurement recorded here.
+No case is skipped any longer for native-worker request transport, but that
+buys less than the count suggests, so it is worth stating what it does buy.
+Sixty-nine cases carried the transport skip. Thirty-nine of them now skip for
+the provenance lock instead, and thirty run. Twenty-seven of those thirty never
+reach the native worker at all: they build and inspect pipeline plans, or check
+provenance and fingerprint payloads (the one that executes a task,
+`test_linear_default_untied_stage_builds_occurrence_inventory`, reaches the C
+library in this process rather than through the worker). The three that
+genuinely drive the worker are the
+`test_m4_real_utterances_reach_shared_final_state` cases, whose per-utterance
+feature payload is larger than the pipe buffer and so takes the pending-write
+path rather than completing at once. One further case,
+`tests/test_native_worker.py::test_windows_write_request_gives_up_at_the_deadline_on_a_full_pipe`,
+has since been added to the Windows selection to cover the request deadline
+directly; the job now requests 147 units, and that case is not part of the
+measurement above.
+
+The transport skip existed because the transport did not work on Windows at
+all: the spawned child reported ready, and the parent then failed before
+sending its first request with `OSError: [Errno 9] Bad file descriptor`, raised
+by `os.set_blocking()` on the connection handle. On Windows a
+`multiprocessing` duplex pipe is an overlapped, message-mode named pipe and
+`Connection.fileno()` returns a Win32 `HANDLE`, which `os.set_blocking`,
+`select.select` and `os.write` all reject: they take a C-runtime file
+descriptor or a socket. The request write is now expressed in the terms each
+platform actually offers -- a non-blocking descriptor and `select` on POSIX, a
+bounded wait on an overlapped completion event on Windows -- and the
+deadline that a full pipe must not outlive is preserved on both.
+
+What that fix moved is where Windows stops, not whether it stops. The wall is
+now `fcntl`, one layer past the transport, and no amount of further work on
+the request pipe reaches it.
 
 ## Dependencies
 
