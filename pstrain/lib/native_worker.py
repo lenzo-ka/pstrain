@@ -26,6 +26,7 @@ import multiprocessing.util
 import os
 import select
 import struct
+import sys
 import tempfile
 import threading
 import time
@@ -320,6 +321,90 @@ def _worker_main(connection: Connection, state: _WorkerState) -> None:
     os.close(original_stdout_fd)
 
 
+# One request write, bounded by a deadline, in the terms of the transport that
+# ``multiprocessing`` actually hands us.
+#
+# ``Connection.send_bytes`` is the obvious call and it is the wrong one: it
+# waits for the peer to drain the pipe with no bound at all, so a helper that
+# is alive but not reading -- stopped, wedged in native code, or simply slower
+# than the request deadline -- parks the owning process forever.  What follows
+# is ``Connection.send_bytes`` with the wait bounded, written twice because the
+# duplex pipe is a different object on each platform and the two mechanisms do
+# not translate into one another:
+#
+#   POSIX: ``multiprocessing.Pipe(duplex=True)`` is a ``socketpair``.  The
+#   framing is a big-endian ``!i`` length header followed by the payload, and a
+#   deadline is expressed by putting the descriptor in non-blocking mode and
+#   waiting for writability with ``select``.
+#
+#   Windows: ``multiprocessing.Pipe(duplex=True)`` is an overlapped, message
+#   mode named pipe.  There is no length header -- the message boundary is the
+#   frame, and the peer's ``recv`` returns exactly the bytes given to one
+#   ``WriteFile`` -- and a deadline is expressed by waiting on the overlapped
+#   completion event for a bounded time, then cancelling.  ``os.set_blocking``,
+#   ``select.select`` and ``os.write`` all take a C-runtime file descriptor or
+#   a socket; ``Connection.fileno()`` there returns a Win32 ``HANDLE``, which
+#   is why applying any of them raised ``OSError: [Errno 9] Bad file
+#   descriptor`` before the first request was ever sent.
+if sys.platform == "win32":
+
+    def _write_request(connection: Connection, payload: bytes, deadline: float) -> None:
+        """Write one request message to a Windows named pipe, bounded by ``deadline``."""
+        # Private, but it is the same module ``multiprocessing.connection``
+        # itself uses for this pipe; without it there is no pipe to write to.
+        import _winapi
+
+        overlapped, error = _winapi.WriteFile(connection.fileno(), payload, True)
+        try:
+            if error == _winapi.ERROR_IO_PENDING:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError
+                waited = _winapi.WaitForMultipleObjects(
+                    [overlapped.event], False, int(remaining * 1000)
+                )
+                if waited == _winapi.WAIT_TIMEOUT:
+                    raise TimeoutError
+        except BaseException:
+            overlapped.cancel()
+            raise
+        finally:
+            # Always reap the operation before the buffer goes out of scope,
+            # cancelled or not; ``GetOverlappedResult(True)`` waits for the
+            # cancellation to land.
+            written, error = overlapped.GetOverlappedResult(True)
+        if error == _winapi.ERROR_OPERATION_ABORTED:
+            raise BrokenPipeError("the native worker request pipe was closed while sending")
+        if error != 0:
+            raise OSError(f"native worker request write failed with Windows error {error}")
+        if written != len(payload):
+            raise OSError(f"native worker request write sent {written} of {len(payload)} bytes")
+
+else:
+
+    def _write_request(connection: Connection, payload: bytes, deadline: float) -> None:
+        """Write one framed request to a POSIX socket pair, bounded by ``deadline``."""
+        framed = struct.pack("!i", len(payload)) + payload
+        descriptor = connection.fileno()
+        os.set_blocking(descriptor, False)
+        sent = 0
+        try:
+            while sent < len(framed):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError
+                _, writable, _ = select.select([], [descriptor], [], remaining)
+                if not writable:
+                    raise TimeoutError
+                try:
+                    sent += os.write(descriptor, framed[sent:])
+                except BlockingIOError:
+                    continue
+        finally:
+            with contextlib.suppress(OSError):
+                os.set_blocking(descriptor, True)
+
+
 class _NativeWorker:
     """One helper process, lazily started and reused, one request at a time."""
 
@@ -501,25 +586,7 @@ class _NativeWorker:
     def _send_request(self, payload: bytes, deadline: float) -> None:
         """Send one bounded request without allowing a full pipe to hang."""
         assert self._connection is not None
-        framed = struct.pack("!i", len(payload)) + payload
-        descriptor = self._connection.fileno()
-        os.set_blocking(descriptor, False)
-        sent = 0
-        try:
-            while sent < len(framed):
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise TimeoutError
-                _, writable, _ = select.select([], [descriptor], [], remaining)
-                if not writable:
-                    raise TimeoutError
-                try:
-                    sent += os.write(descriptor, framed[sent:])
-                except BlockingIOError:
-                    continue
-        finally:
-            with contextlib.suppress(OSError):
-                os.set_blocking(descriptor, True)
+        _write_request(self._connection, payload, deadline)
 
     def _raise_timeout(self, operation: str) -> NoReturn:
         assert self._process is not None
