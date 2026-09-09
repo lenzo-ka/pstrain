@@ -556,6 +556,14 @@ class _NativeWorker:
         self._truncate_diagnostic()
         try:
             self._send_request(request, deadline)
+        except TimeoutError:
+            # Before the broader OSError arm below, which would otherwise catch
+            # this: TimeoutError is an OSError. A timeout is not a death and
+            # must not be retried -- the deadline it exhausted is the same one
+            # the retry would carry, so the second send can only fail at once,
+            # after killing a wedged helper whose diagnostic is the evidence and
+            # spawning an innocent replacement to report the timeout against.
+            self._raise_timeout(label)
         except (BrokenPipeError, EOFError, OSError):
             # The helper died between requests; respawn and send once more.
             self._discard()
@@ -581,8 +589,6 @@ class _NativeWorker:
                         f"{exc!r}{detail}"
                     ) from exc
                 self._raise_death(label, inputs, eof=True)
-        except TimeoutError:
-            self._raise_timeout(label)
 
         connection, process = self._require_running(label)
         remaining = max(0.0, deadline - time.monotonic())
