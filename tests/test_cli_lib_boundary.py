@@ -36,6 +36,9 @@ SPEC.loader.exec_module(boundary)
         ("from ..lib import a", "pstrain.cli", {"pstrain.lib.a"}),
         ("from .. import lib", "pstrain.cli", {"pstrain.lib"}),
         ("from pstrain import lib", "pstrain.cli", {"pstrain.lib"}),
+        ("import pstrain\npstrain.lib", "pstrain.cli", {"pstrain.lib"}),
+        ("import pstrain as package\npackage.lib.bw", "pstrain.cli", {"pstrain.lib"}),
+        ("pstrain.lib", "pstrain.cli", set()),
         (
             'import importlib\nimportlib.import_module("pstrain.lib.paths")',
             "pstrain.cli",
@@ -114,6 +117,21 @@ def test_dynamic_import_bindings_do_not_leak_across_files(tmp_path: Path) -> Non
     (cli_dir / "unbound.py").write_text('il.import_module("pstrain.lib.paths")\n', encoding="utf-8")
 
     assert boundary.find_imports(cli_dir, tmp_path) == set()
+
+
+def test_static_scan_catches_cached_library_attribute_after_root_import() -> None:
+    library = importlib.import_module("pstrain.lib")
+    source = "import pstrain as package\nassert package.lib is expected\n"
+    assert boundary.discover_edges(source, "pstrain.cli") == {"pstrain.lib"}
+
+    filename = ROOT / "pstrain" / "cli" / "runtime_import_order_probe.py"
+    namespace = {
+        "__name__": "pstrain.cli.runtime_import_order_probe",
+        "__package__": "pstrain.cli",
+        "expected": library,
+    }
+    # There is no lib import request here for the runtime wrappers to observe.
+    exec(compile(source, filename.as_posix(), "exec"), namespace)
 
 
 @pytest.mark.parametrize(

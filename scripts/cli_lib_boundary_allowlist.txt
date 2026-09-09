@@ -1,2 +1,2 @@
-# Static early warning only; the pytest runtime guard enforces executed import constructions.
+# Static early warning; pytest observes supported imports with carried CLI provenance.
 # pstrain.cli must access pstrain.lib through pstrain.api. No exceptions are allowlisted.
