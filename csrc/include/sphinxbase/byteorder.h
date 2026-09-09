@@ -50,6 +50,9 @@
  * 2026-09-05: Use unsigned byte-swap intermediates after UBSan reported a
  * signed shift at s3io.c:701 while reading a big-endian v8_seg header.
  *
+ * 2026-09-09: Swap float storage through memcpy rather than through an
+ * integer lvalue.  See the comment above SWAP_FLOAT32.
+ *
  * $Log: byteorder.h,v $
  * Revision 1.8  2005/09/01 21:09:54  dhdfu
  * Really, actually, truly consolidate byteswapping operations into
@@ -64,6 +67,10 @@
 #ifndef __S2_BYTEORDER_H__
 #define __S2_BYTEORDER_H__	1
 
+#include <string.h>
+
+#include <sphinxbase/prim_type.h>
+
 /* Unsigned intermediates keep shifts defined for every input bit pattern. */
 /* Macro to byteswap an int16 variable.  x = ptr to variable */
 #define SWAP_INT16(x)	*(x) = (uint16)((((uint32)*(x) & 0x00ffU) << 8) | \
@@ -75,14 +82,65 @@
 					 (((uint32)*(x) & 0x00ff0000U) >> 8) | \
 					 (((uint32)*(x) & 0xff000000U) >> 24))
 
+/*
+ * The float swaps used to reach their storage through an integer lvalue
+ * -- SWAP_INT32((int32 *) x) -- which reads and writes a float object as
+ * though its effective type were int32.  C leaves that undefined, and
+ * nothing in this build turns strict aliasing off, so an optimizer is
+ * entitled to assume the integer store cannot change any float the
+ * caller later reads, and to reorder or drop accesses accordingly.
+ *
+ * Copy the bytes into a local integer instead, swap them there, and copy
+ * them back.  memcpy between two local objects is defined however the
+ * compiler chooses to implement it, and it is the form every compiler
+ * folds back into a plain load, byte reverse, and store: on the
+ * compilers this project builds with, the emitted code for both the
+ * scalar swap and the per-frame loops in feat.c and sphinx_fe.c is the
+ * same as the punning version produced, vectorization included.
+ *
+ * The intermediate is copied back into a float local rather than written
+ * straight to *x, because keeping the outer accesses float-typed is what
+ * lets the vectorizer disambiguate the loops; a memcpy directly onto *x
+ * costs the vectorization.
+ *
+ * A union member would also be defined type punning in C, but not in
+ * C++, and this header is installed.
+ *
+ * These now take what their names always said they took: SWAP_FLOAT32
+ * wants a float32 *, SWAP_FLOAT64 a float64 *.  The punning version
+ * accepted any 4-byte pointer, and also lost the argument parentheses,
+ * so SWAP_FLOAT32(p + i) expanded to (int32 *) p + i and only worked
+ * because int32 and float32 are the same width.
+ */
+
 /* Macro to byteswap a float32 variable.  x = ptr to variable */
-#define SWAP_FLOAT32(x)	SWAP_INT32((int32 *) x)
+#define SWAP_FLOAT32(x)							\
+    do {								\
+	float32 _swap_value_ = *(x);					\
+	uint32 _swap_bits_;						\
+	memcpy(&_swap_bits_, &_swap_value_, sizeof(_swap_bits_));	\
+	SWAP_INT32(&_swap_bits_);					\
+	memcpy(&_swap_value_, &_swap_bits_, sizeof(_swap_bits_));	\
+	*(x) = _swap_value_;						\
+    } while (0)
 
 /* Macro to byteswap a float64 variable.  x = ptr to variable */
-#define SWAP_FLOAT64(x)	{ uint32 *low = (uint32 *) (x), *high = (uint32 *) (x) + 1,\
-			      temp;\
-			  SWAP_INT32(low);  SWAP_INT32(high);\
-			  temp = *low; *low = *high; *high = temp;}
+#define SWAP_FLOAT64(x)							\
+    do {								\
+	float64 _swap_value_ = *(x);					\
+	uint32 _swap_low_, _swap_high_;					\
+	memcpy(&_swap_low_, (char *)&_swap_value_,			\
+	       sizeof(_swap_low_));					\
+	memcpy(&_swap_high_, (char *)&_swap_value_ + sizeof(_swap_low_),\
+	       sizeof(_swap_high_));					\
+	SWAP_INT32(&_swap_low_);					\
+	SWAP_INT32(&_swap_high_);					\
+	memcpy((char *)&_swap_value_, &_swap_high_,			\
+	       sizeof(_swap_high_));					\
+	memcpy((char *)&_swap_value_ + sizeof(_swap_high_),		\
+	       &_swap_low_, sizeof(_swap_low_));			\
+	*(x) = _swap_value_;						\
+    } while (0)
 
 #ifdef WORDS_BIGENDIAN
 #define SWAP_BE_64(x)
