@@ -17,6 +17,12 @@ use a temporary `.part` file and an atomic rename, so a failed transfer cannot
 replace a good cached archive. Corpus data and extraction products are not
 committed.
 
+The download runs in a short-lived child process, and the fetcher opens no
+connection in the process that calls it. On macOS the first connection a
+process opens installs atfork handlers that stop it from ever spawning the
+native worker, so a program that fetched a corpus in its own process would die
+later, during training, with nothing to point back at the download.
+
 ## CMU US KAL Diphone
 
 KAL contains 1,349 US English nonsense-word recordings designed for uniform
