@@ -82,6 +82,8 @@ dist/
 /data/
 /notebooks/_work/
 /notebooks/arctic_tutorial_work/
+/pstrain/data/notebooks/_work/
+/pstrain/data/notebooks/arctic_tutorial_work/
 benchmarks/timit/data/
 benchmarks/timit/pilot/
 
