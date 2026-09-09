@@ -7,6 +7,7 @@ import dataclasses
 import importlib.util
 import inspect
 import multiprocessing
+import os
 import pickle
 import pkgutil
 import re
@@ -495,21 +496,28 @@ def test_runtime_guard_enforces_a_command_line_file_executed_without_registratio
     genuine command-line code with no live module identity to authenticate
     against, which is the same loss of provenance as a removed or replaced
     entry.
+
+    The probe has to be a real file under the command-line directory, so its
+    name carries the xdist worker (or the process id when the session is not
+    distributed). A shared name let one runner's cleanup unlink the file
+    between another's ``spec_from_file_location`` and ``exec_module``.
     """
     importlib.import_module("pstrain.lib.bw")
-    name = "pstrain.cli.runtime_loader_probe"
-    filename = ROOT / "pstrain" / "cli" / "runtime_loader_probe.py"
-    filename.write_text(_COMPUTED_IMPORT_SOURCE, encoding="utf-8")
+    worker = os.environ.get("PYTEST_XDIST_WORKER") or f"pid{os.getpid()}"
+    stem = f"runtime_loader_probe_{worker}"
+    name = f"pstrain.cli.{stem}"
+    filename = ROOT / "pstrain" / "cli" / f"{stem}.py"
     try:
+        filename.write_text(_COMPUTED_IMPORT_SOURCE, encoding="utf-8")
         spec = importlib.util.spec_from_file_location(name, filename)
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         assert name not in sys.modules
         spec.loader.exec_module(module)
-        _assert_refused_without_api(module.reach_lib, "pstrain/cli/runtime_loader_probe.py:5")
+        _assert_refused_without_api(module.reach_lib, f"pstrain/cli/{stem}.py:5")
     finally:
         filename.unlink(missing_ok=True)
-        for cached in (filename.parent / "__pycache__").glob(f"{filename.stem}.*.pyc"):
+        for cached in (filename.parent / "__pycache__").glob(f"{stem}.*.pyc"):
             cached.unlink(missing_ok=True)
 
 
