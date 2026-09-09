@@ -1026,6 +1026,119 @@ def test_runtime_guard_accepts_a_dispatch_submitted_by_the_command_line(
         assert _dispatch_outcome(lambda: call(dispatcher)) == []
 
 
+def test_runtime_guard_enforces_command_line_code_compiled_outside_the_checkout() -> None:
+    """Real command-line code can have a ``co_filename`` outside the checkout.
+
+    A zipapp, a frozen bundle, or any loader that compiles from something other
+    than a file under the checkout gives a genuine ``pstrain.cli`` module a
+    source location the frozen directory does not contain. Its live
+    ``sys.modules`` entry is entirely ordinary. Such a frame used to be no kind
+    of origin at all, so the rule did not apply to its stack and its library
+    imports were allowed without being examined. It is now a candidate origin
+    on the strength of the module identity alone.
+    """
+    importlib.import_module(_TARGET)
+    with _anchored_module(
+        "pstrain.cli.runtime_bundled_probe",
+        ROOT / "boundary_bundled_probe.py",
+        _COMPUTED_IMPORT_SOURCE,
+    ) as cli:
+        _assert_refused_without_api(cli.reach_lib, "boundary_bundled_probe.py:5")
+
+
+def test_runtime_guard_accepts_an_api_route_from_code_compiled_outside_the_checkout() -> None:
+    """The new candidate origin discriminates by route, not by where code lives."""
+    with (
+        _anchored_module(
+            "pstrain.api.runtime_bundled_control_probe",
+            ROOT / "pstrain" / "api" / "runtime_bundled_control_probe.py",
+            _COMPUTED_IMPORT_SOURCE,
+        ) as api,
+        _anchored_module(
+            "pstrain.cli.runtime_bundled_control_probe",
+            ROOT / "boundary_bundled_control_probe.py",
+            "def call(reach_lib):\n    return reach_lib('pstrain.lib.bw')\n",
+        ) as cli,
+    ):
+        cli.call(api.reach_lib)
+
+
+_CANDIDATE_OUTER_SOURCE = "def outer(inner, reach_lib):\n    return inner(reach_lib)\n"
+_CANDIDATE_INNER_SOURCE = "def inner(reach_lib):\n    return reach_lib('pstrain.lib.bw')\n"
+
+# Each candidate carries exactly one half of command-line ownership: a live
+# module identity, or a source location under the frozen directory.
+_CANDIDATES = {
+    "registered": (
+        "pstrain.cli.runtime_candidate_probe",
+        ROOT / "boundary_candidate_probe.py",
+        "boundary_candidate_probe.py",
+    ),
+    "located": (
+        "boundary_candidate_probe",
+        ROOT / "pstrain" / "cli" / "boundary_candidate_probe.py",
+        "pstrain/cli/boundary_candidate_probe.py",
+    ),
+}
+
+
+@contextlib.contextmanager
+def _candidate_frame(kind: str, source: str, attribute: str) -> Iterator[Callable]:
+    """Yield a callable whose frame carries one half of command-line ownership."""
+    name, filename, _ = _CANDIDATES[kind]
+    if kind == "registered":
+        with _anchored_module(name, filename, source) as module:
+            yield getattr(module, attribute)
+        return
+    yield _neutral_namespace(filename, source, module_name=name)[attribute]  # type: ignore[misc]
+
+
+@pytest.mark.parametrize(
+    ("outer_kind", "inner_kind"),
+    [("registered", "located"), ("located", "registered")],
+    ids=["registered-outermost", "source-located-outermost"],
+)
+def test_runtime_guard_keeps_the_outermost_command_line_candidate(
+    outer_kind: str, inner_kind: str
+) -> None:
+    """The two candidate kinds compete on position, not on which kind they are.
+
+    One frame is a registered ``pstrain.cli`` module compiled outside the
+    checkout; the other is compiled under the command-line directory with no
+    live entry. Each carries one half of ownership, so each is a candidate
+    origin, and the walk keeps whichever is further out. The nearer candidate
+    then stays in the segment and interrupts it, exactly as it would if a fully
+    owned command-line frame lay beyond it.
+
+    Both orders must be refused, and each must name the *inner* frame as the
+    interruption and the *outer* frame as the origin. Keeping the nearer
+    candidate instead would drop the outer frames from the segment, and a
+    verdict would then depend on which half of ownership each frame happened to
+    keep.
+    """
+    importlib.import_module(_TARGET)
+    inner_name, _, inner_location = _CANDIDATES[inner_kind]
+    _, _, outer_location = _CANDIDATES[outer_kind]
+    with (
+        _anchored_module(
+            "pstrain.api.runtime_candidate_probe",
+            ROOT / "pstrain" / "api" / "runtime_candidate_probe.py",
+            _COMPUTED_IMPORT_SOURCE,
+        ) as api,
+        _candidate_frame(inner_kind, _CANDIDATE_INNER_SOURCE, "inner") as inner,
+        _candidate_frame(outer_kind, _CANDIDATE_OUTER_SOURCE, "outer") as outer,
+        pytest.raises(
+            cli_lib_boundary_guard.CliLibBoundaryViolation,
+            match=(
+                rf"non-boundary frame {re.escape(inner_name)} at "
+                rf"{re.escape(inner_location)}:2 interrupts the route "
+                rf"\(CLI origin {re.escape(outer_location)}:2\)"
+            ),
+        ),
+    ):
+        outer(inner, api.reach_lib)
+
+
 def test_runtime_guard_rejects_first_import_from_preloaded_library_function(
     tmp_path: Path,
 ) -> None:

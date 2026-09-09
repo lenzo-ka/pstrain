@@ -21,16 +21,18 @@ frame either: a frame that merely claims a ``pstrain.cli`` name is an ordinary
 neutral frame, so it does not end the stack walk and cannot hide the frames
 beyond it.
 
-Because that live entry is mutable, genuine command-line code can run with it
-missing or replaced, and then nothing on the stack authenticates as the command
-line. Having no origin would switch enforcement off rather than on, so the walk
-also keeps a frame compiled under the frozen command-line directory as a
-fallback origin. An authenticated origin always wins; the fallback is consulted
-only where the walk would otherwise have ended with no origin at all. Where
-several frames carry such a source location the outermost one is kept, so the
-segment always spans every frame between the import and the furthest command-
-line source location on the stack. A forged ``co_filename`` can therefore only
-lengthen that segment, never cut it short.
+Ordinary command-line code can hold just one of those two halves. The live entry
+can be missing or rebound while the same function keeps running, and a real
+command-line file executed through a loader is never registered; equally, a
+zipapp, a frozen bundle or an unusual loader gives a genuine ``pstrain.cli``
+module a ``co_filename`` that is not a path under the checkout. Having no origin
+at all switches the check off rather than on -- there is no rule to apply, so
+the import is simply allowed -- so a frame with either half is kept as a
+fallback origin. A frame with both always wins. Where several frames are
+candidates the outermost is kept, so the segment spans every frame between the
+import and the furthest candidate; since a candidate is itself a non-boundary
+frame, moving the origin outwards can only lengthen the segment and tighten the
+verdict.
 
 Only two kinds of infrastructure are transparent, both held by identity. The
 import machinery is recognized by module-dictionary identity. A short list of
@@ -243,15 +245,13 @@ def _compiled_under(frame: FrameType, package: str) -> bool:
     return True
 
 
-def _anchored_package(frame: FrameType | None) -> str | None:
-    """Return the package that provably owns ``frame``, if any.
+def _registered_package(frame: FrameType | None) -> str | None:
+    """Return the anchored package whose live module owns ``frame``'s globals.
 
-    Ownership is not a name. ``__name__`` is an ordinary writable string, so a
-    module that merely calls itself ``pstrain.api.something`` -- or
-    ``pstrain.cli.something`` -- proves nothing. A frame counts as owned only
-    when the live ``sys.modules`` entry for that name owns this exact globals
-    mapping and the frame's code was compiled from a file under the directory
-    frozen for that package at installation.
+    This is the module-identity half of ownership on its own. ``__name__`` is an
+    ordinary writable string, so the name alone means nothing; the live
+    ``sys.modules`` entry under that name has to be the module whose dictionary
+    this frame is running in.
     """
     if frame is None:
         return None
@@ -263,6 +263,21 @@ def _anchored_package(frame: FrameType | None) -> str | None:
         return None
     module = sys.modules.get(name)
     if module is None or getattr(module, "__dict__", None) is not frame.f_globals:
+        return None
+    return package
+
+
+def _anchored_package(frame: FrameType | None) -> str | None:
+    """Return the package that owns ``frame`` by both identity and location.
+
+    A frame counts as owned only when the live ``sys.modules`` entry for its
+    ``__name__`` owns this exact globals mapping *and* the frame's code was
+    compiled from a file under the directory frozen for that package at
+    installation. The location half is what lets the guard talk about a
+    checkout rather than about whatever a name currently happens to mean.
+    """
+    package = _registered_package(frame)
+    if package is None:
         return None
     return package if _compiled_under(frame, package) else None
 
@@ -319,37 +334,59 @@ def _run_dispatched(
     return function(*args, **kwargs)
 
 
+def _is_origin_candidate(frame: FrameType) -> bool:
+    """Report whether ``frame`` looks like command-line code without proving it.
+
+    Full ownership needs both halves: the live ``sys.modules`` entry for the
+    frame's ``__name__`` and a source location under the frozen command-line
+    directory. Ordinary command-line code has both, but ordinary command-line
+    code can also lose either one without ceasing to be the command line.
+
+    The entry can be missing or rebound while the very same function keeps
+    running, and a real command-line file executed through a loader is never
+    registered at all. The source location can be absent too: a zipapp, a frozen
+    bundle or a loader that compiles from something other than a file under the
+    checkout all produce genuine ``pstrain.cli`` modules whose ``co_filename``
+    is not a path under that directory.
+
+    Either half alone makes the frame a candidate origin. That matters because
+    the alternative is not a weaker check but no check: a stack with no origin
+    at all has no rule to apply, so its library imports were simply allowed.
+    """
+    return _registered_package(frame) == _CLI_PACKAGE or _compiled_under(frame, _CLI_PACKAGE)
+
+
 def _stack_route() -> tuple[tuple[FrameType, ...], _DispatchProvenance] | None:
-    """Return frames between this operation and its physical or carried CLI origin.
+    """Return frames between this operation and its owned or candidate CLI origin.
 
-    A command-line frame is authenticated from its live ``sys.modules`` entry,
-    and that entry is ordinary mutable process state. Genuine command-line code
-    can therefore be running with no entry under its name, or with the name
-    bound to some other object, and then no frame on the stack authenticates as
-    the command line. Yielding no origin in that case switched enforcement off
-    rather than on: with no origin there is no rule to apply and the import was
-    simply allowed.
+    A frame that is owned as command-line code by both halves ends the walk. It
+    is established exactly as an API or library frame is, and a frame that only
+    claims a ``pstrain.cli`` name -- with no live entry and no source location --
+    is an ordinary neutral frame that stays in the segment while the walk
+    continues past it to whatever really dispatched the call.
 
-    So the walk also remembers a frame whose code was compiled from a file under
-    the frozen command-line directory, together with the segment collected up to
-    it, and falls back to that source location when the walk finds no
-    authenticated origin. A source location is not authentication --
-    ``co_filename`` is chosen by whoever compiled the code -- and it is not used
-    as such. It is consulted only after the walk has run to the end without an
-    authenticated origin, which is exactly the set of stacks that previously
-    returned ``None`` and were allowed unconditionally.
+    Failing that, the walk falls back to a candidate origin: a frame carrying
+    just one of the two halves, together with the segment collected up to it.
+    Owned origins always win, and the fallback is consulted only after the walk
+    has run to the end without finding one -- exactly the set of stacks that
+    used to yield no origin and be allowed unconditionally.
 
-    Where several frames carry such a source location, the walk keeps the
-    outermost one. Keeping the innermost was a way to make enforcement *more*
-    permissive by forging a ``co_filename``: an inner candidate's segment stops
-    short of every frame beyond it, so a forged frame placed just below the API
-    could discard the neutral frames that interrupt the route and the genuine
-    command-line frame that follows them, turning a refusal into an acceptance.
-    Keeping the outermost candidate leaves those intervening frames in the
-    segment, where an inner candidate is judged as the ordinary neutral frame it
-    is -- exactly as it already is when an authenticated command-line frame lies
-    further out. A forged source location can then only lengthen the segment, so
-    it can make the check stricter or leave it unchanged, never weaker.
+    Where several frames are candidates the walk keeps the outermost, so the
+    segment spans every frame between the import and the furthest candidate on
+    the stack. Keeping the innermost made the verdict depend on which
+    command-line frames happened to keep their registration or their source
+    location: an inner candidate's segment stops short of every frame beyond it,
+    so it could discard the neutral frames that interrupt the route along with
+    the outer command-line frame that follows them, and the same import was
+    refused or allowed according to that accident.
+
+    Keeping the outermost cannot go the other way. Every candidate is a
+    non-boundary frame -- ``pstrain.cli`` is not ``pstrain.api`` or
+    ``pstrain.lib``, and the three frozen directories are disjoint -- and a
+    candidate is appended to the segment before the walk moves past it. So a
+    segment that reaches a further-out candidate contains the nearer one, and is
+    interrupted there. Moving the origin outwards can turn an acceptance into a
+    refusal, never a refusal into an acceptance.
     """
     frames: list[FrameType] = []
     fallback: tuple[tuple[FrameType, ...], FrameType] | None = None
@@ -362,13 +399,9 @@ def _stack_route() -> tuple[tuple[FrameType, ...], _DispatchProvenance] | None:
         if _is_transparent_frame(frame):
             frame = frame.f_back
             continue
-        # A command-line frame ends the walk, so it is authenticated exactly as
-        # an API or library frame is. A frame that merely claims the name is an
-        # ordinary neutral frame: it stays in the segment and the walk continues
-        # past it to whatever really dispatched the call.
         if _anchored_package(frame) == _CLI_PACKAGE:
             return tuple(frames), _DispatchProvenance(_location(frame), _RouteState.CLEAN)
-        if _compiled_under(frame, _CLI_PACKAGE):
+        if _is_origin_candidate(frame):
             # Overwrite rather than keep the first: the walk runs inwards to
             # outwards, so the last candidate seen is the outermost one.
             fallback = (tuple(frames), frame)
