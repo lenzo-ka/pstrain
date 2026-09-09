@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Enforce the closed boundary between pstrain.cli and pstrain.lib.
+"""Provide a static early warning for the pstrain.cli-to-pstrain.lib boundary.
 
 No direct imports are permitted; the empty allowlist makes this boundary
 zero-tolerance.
@@ -8,11 +8,13 @@ The scanner fully covers ordinary ``import`` and ``from ... import`` statements
 that target ``pstrain.lib``, including relative imports. Dynamic-import
 detection is defense-in-depth for common ``importlib`` spellings: it is
 best-effort over statically resolvable importlib bindings with string-literal
-targets. Reflective access (for example, ``getattr(importlib,
+targets. Imports written as ``from pstrain import lib`` are also covered.
+Reflective access (for example, ``getattr(importlib,
 "import_module")``), data flow through assignments or function returns (for
 example, ``f = importlib; f.import_module(...)``), and non-literal or computed
 import targets are intentionally outside this static analysis's scope. Those
-forms rely on code review rather than a gate failure.
+forms, transitive imports, and other runtime constructions are enforced only
+when executed by the pytest session's runtime guard.
 """
 
 from __future__ import annotations
@@ -31,6 +33,8 @@ def _lib_module(module: str | None) -> bool:
 
 
 def _from_import_edges(module: str, names: list[ast.alias]) -> set[str]:
+    if module == "pstrain":
+        return {"pstrain.lib" for alias in names if alias.name == "lib"}
     if module == "pstrain.lib":
         return {f"{module}.{alias.name}" for alias in names}
     return {module} if _lib_module(module) else set()
@@ -97,7 +101,7 @@ def discover_edges(source: str, package: str, filename: str = "<unknown>") -> se
                     candidate = f"{module}.{alias.name}" if module else alias.name
                     if _lib_module(candidate):
                         imports.add(candidate)
-            elif _lib_module(module):
+            elif module == "pstrain" or _lib_module(module):
                 imports.update(_from_import_edges(module, node.names))
         elif isinstance(node, ast.Import):
             imports.update(alias.name for alias in node.names if _lib_module(alias.name))

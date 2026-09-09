@@ -30,6 +30,7 @@ SPEC.loader.exec_module(boundary)
         ("from ..lib.x import a", "pstrain.cli", {"pstrain.lib.x"}),
         ("from ..lib import a", "pstrain.cli", {"pstrain.lib.a"}),
         ("from .. import lib", "pstrain.cli", {"pstrain.lib"}),
+        ("from pstrain import lib", "pstrain.cli", {"pstrain.lib"}),
         (
             'import importlib\nimportlib.import_module("pstrain.lib.paths")',
             "pstrain.cli",
