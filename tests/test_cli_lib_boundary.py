@@ -320,6 +320,20 @@ def test_runtime_guard_anchors_every_role_to_the_checkout() -> None:
     }
 
 
+def test_runtime_guard_refuses_a_second_installation_under_another_root(tmp_path: Path) -> None:
+    """One trust anchor: a second root must fail loudly rather than be ignored.
+
+    Repeated installation under the root already frozen stays a no-op. Under a
+    different root it once kept the old anchor silently, which would have
+    enforced the boundary of one checkout while the session ran another.
+    """
+    cli_lib_boundary_guard.install(ROOT)
+    with pytest.raises(AssertionError, match="already anchored to"):
+        cli_lib_boundary_guard.install(tmp_path)
+    cli_lib_boundary_guard.assert_installed()
+    assert cli_lib_boundary_guard.anchored_directories()["pstrain.cli"] == ROOT / "pstrain" / "cli"
+
+
 _REACH_LIB_SOURCE = (
     'import importlib\n\n\ndef reach_lib():\n    return importlib.import_module("pstrain.lib.bw")\n'
 )

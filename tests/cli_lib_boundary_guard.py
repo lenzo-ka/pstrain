@@ -528,13 +528,23 @@ def _resolve_trusted_code() -> None:
 
 
 def install(project_root: Path) -> None:
-    """Install the process-wide import and dispatch wrappers once."""
+    """Install the process-wide import and dispatch wrappers once.
+
+    Every role the rule reasons about is anchored to this one checkout root, so
+    a second installation naming a different root is a configuration error. It
+    used to be ignored in favor of the root already frozen, which would have
+    enforced the boundary of one checkout while the session ran another.
+    """
     global _ORIGINAL_IMPORT, _ORIGINAL_IMPORT_MODULE
     global _ORIGINAL_THREAD_START, _ORIGINAL_THREAD_SUBMIT, _PROJECT_ROOT
+    resolved_root = project_root.resolve()
     if _ORIGINAL_IMPORT is not None:
+        assert resolved_root == _PROJECT_ROOT, (
+            f"CLI-to-library guard is already anchored to {_PROJECT_ROOT}, not to {resolved_root}"
+        )
         assert_installed()
         return
-    _PROJECT_ROOT = project_root.resolve()
+    _PROJECT_ROOT = resolved_root
     _OBSERVED_ROUTES.clear()
     _ESCAPED_VIOLATIONS.clear()
     _resolve_package_directories(_PROJECT_ROOT)

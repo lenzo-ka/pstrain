@@ -204,3 +204,8 @@ after each test call and again before rollback. Replacing a wrapper is therefore
 a test failure rather than a silent gap in later enforcement. Deliberately
 replacing and restoring a wrapper entirely inside one test operation remains
 outside what a periodic lifecycle assertion can observe.
+
+The whole rule now rests on the one checkout root frozen at installation, so
+installing a second time under a different root fails loudly. It was previously
+ignored in favor of the root already frozen, which would have enforced the
+boundary of one checkout while the session ran another.
