@@ -52,20 +52,30 @@ With no origin there is no rule to apply, so the import was allowed: the
 absence of provenance switched enforcement off rather than on. A computed
 import target evades the static scan as well, so nothing else caught it.
 
-The stack walk therefore also remembers the innermost frame whose code was
-compiled from a file under the frozen command-line directory, together with the
-segment collected up to that frame, and falls back to that source location when
-the walk finds no authenticated origin. A source location is not
+The stack walk therefore also remembers a frame whose code was compiled from a
+file under the frozen command-line directory, together with the segment
+collected up to that frame, and falls back to that source location when the
+walk finds no authenticated origin. A source location is not
 authentication — `co_filename` is chosen by whoever compiled the code — and it
 is not used as one: an authenticated origin always wins, and the fallback is
 consulted only after the walk has run to the end without finding one. That is
 exactly the set of stacks that previously yielded no origin and were allowed
-unconditionally. Recording a fallback never ends the walk early and changes no
-other branch, so it can only add a route to check where none was checked
-before; it cannot truncate a real route or silence a refusal. The same holds
-for a forged `co_filename` under that directory: manufacturing a fallback
-origin only causes a route to be checked that would otherwise have been
-ignored.
+unconditionally.
+
+Where several frames carry such a source location, the walk keeps the outermost
+one. Keeping the innermost was itself a way to make enforcement *more*
+permissive by forging a `co_filename`. An inner candidate's segment stops short
+of every frame beyond it, so a generated frame placed just below the public API
+could name itself into the command-line directory, become the nearest
+candidate, and discard both the neutral frames that interrupt the route and the
+genuine command-line frame that follows them — and the import refused without
+that forgery was allowed with it. Keeping the outermost candidate leaves the
+intervening frames in the segment, where an inner candidate is judged as the
+ordinary neutral frame it is. That is exactly how such a frame is already
+judged when an authenticated command-line frame lies further out, so the
+verdict no longer depends on which command-line frames happened to keep their
+registration. A forged source location can then only lengthen the segment, so
+it can make the check stricter or leave it unchanged, never weaker.
 
 Only two kinds of infrastructure are transparent, and both are held by identity
 rather than by module name. The import machinery is recognized by
@@ -133,8 +143,9 @@ Its allowlist is empty.
 
 The runtime check rejects supported name-based `pstrain.lib` import requests
 executed with a CLI origin — one carried from a dispatch, one authenticated on
-the stack, or, failing both, one taken from a frame's source location under the
-frozen command-line directory — unless a continuous API/library stack segment
+the stack, or, failing both, one taken from the source location of the
+outermost frame on the stack compiled under the frozen command-line
+directory — unless a continuous API/library stack segment
 establishes their route. Every frame of that segment, and an authenticated
 origin, are established the same way: by module identity plus a source location
 under a package directory frozen from the checkout root at installation. The
@@ -156,15 +167,19 @@ Neither check observes or resolves all Python behavior. In particular:
   reachable — but this is a residual forgery the runtime rule does not detect,
   and it is the mechanism the guard's own tests use to build genuine-shaped
   frames;
-- command-line code that has neither a live `sys.modules` entry owning its
-  frame's globals nor a source location under the frozen command-line directory
-  is not recognized as a command-line origin, and the runtime rule does not
-  apply to its imports at all. Ordinary command-line code satisfies at least one
-  of the two, and the fallback origin covers the case where only the live module
-  identity is missing or has been replaced. But the two together are the whole
-  of what the runtime rule can see, and where neither holds the check is not
-  merely weaker — it is absent, and a `pstrain.lib` import made on such a stack
-  is allowed without being examined;
+- a command-line origin always requires a source location under the frozen
+  command-line directory. A live `sys.modules` entry owning the frame's globals
+  never supplies origin coverage by itself: it authenticates a source location
+  the frame already has, and it stands in for nothing when that source location
+  is absent. So a module registered under a real `pstrain.cli` name, whose live
+  entry does own its frame's globals, is still not a command-line origin when
+  its code was compiled outside that directory — and neither is code with
+  neither half. In both cases the runtime rule does not apply to that stack's
+  imports at all: the check is not merely weaker there, it is absent, and a
+  `pstrain.lib` import made on such a stack is allowed without being examined.
+  Ordinary command-line code is compiled under the directory, and the fallback
+  origin covers the remaining case, where only the live module identity is
+  missing or has been replaced;
 - `getattr`, assignment data flow, function returns, generated code, custom
   loaders, private importlib entry points, and import callables captured before
   installation remain outside one or both checks;
