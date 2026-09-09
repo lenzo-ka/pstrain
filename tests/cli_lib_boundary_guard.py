@@ -24,10 +24,13 @@ beyond it.
 Because that live entry is mutable, genuine command-line code can run with it
 missing or replaced, and then nothing on the stack authenticates as the command
 line. Having no origin would switch enforcement off rather than on, so the walk
-also keeps the innermost frame compiled under the frozen command-line directory
-as a fallback origin. An authenticated origin always wins; the fallback is
-consulted only where the walk would otherwise have ended with no origin at all,
-so it can only add a route to check, never truncate or silence one.
+also keeps a frame compiled under the frozen command-line directory as a
+fallback origin. An authenticated origin always wins; the fallback is consulted
+only where the walk would otherwise have ended with no origin at all. Where
+several frames carry such a source location the outermost one is kept, so the
+segment always spans every frame between the import and the furthest command-
+line source location on the stack. A forged ``co_filename`` can therefore only
+lengthen that segment, never cut it short.
 
 Only two kinds of infrastructure are transparent, both held by identity. The
 import machinery is recognized by module-dictionary identity. A short list of
@@ -287,17 +290,26 @@ def _stack_route() -> tuple[tuple[FrameType, ...], _DispatchProvenance] | None:
     rather than on: with no origin there is no rule to apply and the import was
     simply allowed.
 
-    So the walk also remembers the innermost frame whose code was compiled from
-    a file under the frozen command-line directory, together with the segment
-    collected up to it, and falls back to that source location when the walk
-    finds no authenticated origin. A source location is not authentication --
+    So the walk also remembers a frame whose code was compiled from a file under
+    the frozen command-line directory, together with the segment collected up to
+    it, and falls back to that source location when the walk finds no
+    authenticated origin. A source location is not authentication --
     ``co_filename`` is chosen by whoever compiled the code -- and it is not used
     as such. It is consulted only after the walk has run to the end without an
     authenticated origin, which is exactly the set of stacks that previously
-    returned ``None`` and were allowed unconditionally. Recording it never ends
-    the walk early and changes no other branch, so an authenticated origin
-    further out still wins, and a fallback can only add a route to check where
-    none was checked before -- never truncate or silence one.
+    returned ``None`` and were allowed unconditionally.
+
+    Where several frames carry such a source location, the walk keeps the
+    outermost one. Keeping the innermost was a way to make enforcement *more*
+    permissive by forging a ``co_filename``: an inner candidate's segment stops
+    short of every frame beyond it, so a forged frame placed just below the API
+    could discard the neutral frames that interrupt the route and the genuine
+    command-line frame that follows them, turning a refusal into an acceptance.
+    Keeping the outermost candidate leaves those intervening frames in the
+    segment, where an inner candidate is judged as the ordinary neutral frame it
+    is -- exactly as it already is when an authenticated command-line frame lies
+    further out. A forged source location can then only lengthen the segment, so
+    it can make the check stricter or leave it unchanged, never weaker.
     """
     frames: list[FrameType] = []
     fallback: tuple[tuple[FrameType, ...], FrameType] | None = None
@@ -316,7 +328,9 @@ def _stack_route() -> tuple[tuple[FrameType, ...], _DispatchProvenance] | None:
         # past it to whatever really dispatched the call.
         if _anchored_package(frame) == _CLI_PACKAGE:
             return tuple(frames), _DispatchProvenance(_location(frame), False)
-        if fallback is None and _compiled_under(frame, _CLI_PACKAGE):
+        if _compiled_under(frame, _CLI_PACKAGE):
+            # Overwrite rather than keep the first: the walk runs inwards to
+            # outwards, so the last candidate seen is the outermost one.
             fallback = (tuple(frames), frame)
         frames.append(frame)
         frame = frame.f_back

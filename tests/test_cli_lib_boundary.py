@@ -535,6 +535,75 @@ def test_runtime_guard_accepts_an_api_route_from_unregistered_command_line_code(
         call(api.reach_lib)
 
 
+_FORWARDING_BRIDGE_SOURCE = "def bridge(importer, argument):\n    return importer(argument)\n"
+_GENERATED_SOURCE = "def generated(importer):\n    return importer()\n"
+_CLI_DISPATCH_SOURCE = "def call():\n    return bridge(generated, reach_lib)\n"
+
+
+@pytest.mark.parametrize(
+    ("generated_filename", "generated_location"),
+    [
+        (ROOT / "boundary_generated_probe.py", "boundary_generated_probe.py"),
+        (
+            ROOT / "pstrain" / "cli" / "boundary_generated_probe.py",
+            "pstrain/cli/boundary_generated_probe.py",
+        ),
+    ],
+    ids=["outside-cli-directory", "inside-cli-directory"],
+)
+def test_runtime_guard_refuses_a_nearer_source_located_frame(
+    generated_filename: Path, generated_location: str
+) -> None:
+    """A forged source location must not truncate a genuine outer one.
+
+    The fallback origin is a source location, and ``co_filename`` is chosen by
+    whoever compiled the code. Keeping the innermost such frame therefore handed
+    forged code a way to make enforcement *more* permissive than it is for
+    honest code: a generated frame sitting just below the public API named
+    itself into the command-line directory, became the nearest candidate, and
+    its segment stopped short of both the neutral bridge and the genuine
+    command-line frame beyond it -- so the very same import was allowed.
+
+    These two stacks differ in exactly one thing, the generated frame's
+    ``co_filename``. Both must be refused, both must name that generated frame
+    as the interrupting frame, and both must name the real command-line frame as
+    the origin.
+    """
+    importlib.import_module("pstrain.lib.bw")
+    generated = _neutral_namespace(
+        generated_filename, _GENERATED_SOURCE, module_name="boundary_generated_probe"
+    )["generated"]
+    bridge = _neutral_namespace(ROOT / "boundary_bridge_probe.py", _FORWARDING_BRIDGE_SOURCE)[
+        "bridge"
+    ]
+    name = "pstrain.cli.runtime_generated_probe"
+    with _anchored_module(
+        "pstrain.api.runtime_generated_probe",
+        ROOT / "pstrain" / "api" / "runtime_generated_probe.py",
+        _REACH_LIB_SOURCE,
+    ) as api:
+        with _anchored_module(
+            name,
+            ROOT / "pstrain" / "cli" / "runtime_generated_probe.py",
+            _CLI_DISPATCH_SOURCE,
+            bridge=bridge,
+            generated=generated,
+            reach_lib=api.reach_lib,
+        ) as cli:
+            call = cli.call
+        assert name not in sys.modules
+        with pytest.raises(
+            cli_lib_boundary_guard.CliLibBoundaryViolation,
+            match=(
+                r"pstrain\.lib\.bw imported at pstrain/api/runtime_generated_probe\.py:5; "
+                r"non-boundary frame boundary_generated_probe at "
+                rf"{re.escape(generated_location)}:2 interrupts the route "
+                r"\(CLI origin pstrain/cli/runtime_generated_probe\.py:2\)"
+            ),
+        ):
+            call()
+
+
 _RECV_SOURCE = "def receive(connection):\n    return connection.recv()\n"
 _PICKLE_SOURCE = "def serialize(value):\n    return ForkingPickler.dumps(value)\n"
 
