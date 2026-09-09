@@ -695,6 +695,28 @@ def test_public_api_forwarders_keep_their_library_signatures() -> None:
     )
 
 
+def test_public_api_forwarders_publish_their_library_documentation() -> None:
+    """A forwarder exists for the guard; the published reference must not pay for it.
+
+    ``automodule`` renders every name in a module's ``__all__``, so replacing a
+    re-export with a forwarder would otherwise replace the library's parameter
+    documentation with a one-line note about call frames.
+    """
+    forwarders = _api_forwarders()
+    assert forwarders, "no public API forwarders were discovered"
+
+    undocumented = {
+        name: (wrapper.__doc__, target.__doc__)
+        for name, wrapper, target in forwarders
+        if target.__doc__ and wrapper.__doc__ != target.__doc__
+    }
+
+    assert not undocumented, "\n".join(
+        f"{name} publishes {wrapper!r} instead of its library documentation {target!r}"
+        for name, (wrapper, target) in sorted(undocumented.items())
+    )
+
+
 def test_public_pipeline_forwarders_keep_their_library_signatures() -> None:
     api_pipeline = importlib.import_module("pstrain.api.pipeline")
     lib_pipeline = importlib.import_module("pstrain.lib.pipeline")

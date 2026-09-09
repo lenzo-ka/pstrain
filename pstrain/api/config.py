@@ -40,6 +40,13 @@ def list_profiles(project_dir: Path) -> list[dict[str, Any]]:
     return _list_profiles(project_dir)
 
 
+# These forwarders exist to put an API call frame on the stack. That is an
+# implementation requirement and must not cost the published reference the
+# documentation each re-exported name carried before.
+resolve_config.__doc__ = _resolve_config.__doc__ or resolve_config.__doc__
+list_profiles.__doc__ = _list_profiles.__doc__ or list_profiles.__doc__
+
+
 __all__ = [
     "CURRENT_CONFIG_VERSION",
     "generate_markdown_docs",

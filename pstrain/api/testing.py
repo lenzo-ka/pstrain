@@ -54,6 +54,15 @@ def test_model(
     )
 
 
+# These forwarders exist to put an API call frame on the stack. That is an
+# implementation requirement and must not cost the published reference the
+# documentation each re-exported name carried before.
+check_pocketsphinx.__doc__ = _check_pocketsphinx.__doc__ or check_pocketsphinx.__doc__
+create_report.__doc__ = _create_report.__doc__ or create_report.__doc__
+load_transcripts.__doc__ = _load_transcripts.__doc__ or load_transcripts.__doc__
+test_model.__doc__ = _test_model.__doc__ or test_model.__doc__
+
+
 __all__ = [
     "check_pocketsphinx",
     "create_report",

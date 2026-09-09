@@ -35,6 +35,12 @@ def build_pipeline(ctx: PipelineContext) -> Pipeline:
     return _build_pipeline(ctx)
 
 
+# These forwarders exist to put an API call frame on the stack. That is an
+# implementation requirement and must not cost the published reference the
+# documentation each re-exported name carried before.
+build_pipeline.__doc__ = _build_pipeline.__doc__ or build_pipeline.__doc__
+
+
 def run_pipeline(
     pipeline: Pipeline,
     target: str | Path,

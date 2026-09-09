@@ -98,6 +98,12 @@ def validate_file_type(
     return _validate_file_type(path, expected, deep)
 
 
+# These forwarders exist to put an API call frame on the stack. That is an
+# implementation requirement and must not cost the published reference the
+# documentation each re-exported name carried before.
+validate_file_type.__doc__ = _validate_file_type.__doc__ or validate_file_type.__doc__
+
+
 __all__: list[str] = [
     # Project setup
     "setup_project",

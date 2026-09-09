@@ -58,6 +58,12 @@ def run_build_lm(
     return _run_build_lm(train_transcripts, output_path, max_order, smoothing)
 
 
+# These forwarders exist to put an API call frame on the stack. That is an
+# implementation requirement and must not cost the published reference the
+# documentation each re-exported name carried before.
+run_build_lm.__doc__ = _run_build_lm.__doc__ or run_build_lm.__doc__
+
+
 # =============================================================================
 # Feature extraction
 # =============================================================================
