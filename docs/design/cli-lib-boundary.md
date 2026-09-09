@@ -33,6 +33,13 @@ CLI provenance is copied into direct `threading.Thread` targets and
 against that carried origin; executor infrastructure is outside the validated
 segment. This closes the ordinary thread-dispatch loss of Python call frames.
 
+Detecting a violation on a worker thread does not by itself fail the run. A
+`ThreadPoolExecutor` submission re-raises through its future, but a bare
+`threading.Thread` prints the exception and discards it, which pytest reports
+only as a warning. Violations raised off the main thread are therefore recorded
+as well, and the test lifecycle fails on any record still outstanding after a
+test or at session end.
+
 The pull-request workflow runs pytest on every pull request. Code changes use
 the normal three-leg PR matrix; a documentation-only change still runs the
 Ubuntu/Python 3.11 leg.

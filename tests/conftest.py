@@ -217,11 +217,13 @@ def pytest_runtest_call(item: pytest.Item) -> Any:
         yield
     finally:
         cli_lib_boundary_guard.assert_installed()
+        cli_lib_boundary_guard.assert_no_escaped_violations()
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:
     _restore_pool_constructor_guards()
     cli_lib_boundary_guard.restore()
+    cli_lib_boundary_guard.assert_no_escaped_violations()
 
 
 def pytest_terminal_summary(terminalreporter: Any) -> None:

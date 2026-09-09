@@ -11,7 +11,8 @@ multiprocessing infrastructure is transparent. This rejects callbacks resumed
 below an API frame and library functions reached without one. CLI provenance
 is copied into direct ``threading.Thread`` targets and ``ThreadPoolExecutor``
 submissions so a worker cannot lose the origin merely by losing the submitting
-stack.
+stack. A violation raised on a worker thread is also recorded, because a bare
+``threading.Thread`` prints and discards it instead of failing the session.
 
 This is not a complete architectural proof. The runtime observation covers
 only supported name-based imports executed in the pytest process after
@@ -45,6 +46,7 @@ _ORIGINAL_THREAD_START: _Callable | None = None
 _ORIGINAL_THREAD_SUBMIT: _Callable | None = None
 _PROJECT_ROOT: Path | None = None
 _OBSERVED_ROUTES: Counter[str] = Counter()
+_ESCAPED_VIOLATIONS: list[str] = []
 
 
 class CliLibBoundaryViolation(BaseException):
@@ -184,11 +186,16 @@ def _check_targets(targets: Iterable[str]) -> None:
         else:
             module = _frame_module(blocker) or "<unknown>"
             reason = f"non-boundary frame {module} at {_location(blocker)} interrupts the route"
-        raise CliLibBoundaryViolation(
+        message = (
             "CLI-to-library boundary violation: "
             f"{target} imported at {importer}; {reason} "
             f"(CLI origin {provenance.cli_origin})"
         )
+        if threading.current_thread() is not threading.main_thread():
+            # Nothing re-raises an exception that escapes a worker thread, so
+            # record it for the lifecycle check that runs on the main thread.
+            _ESCAPED_VIOLATIONS.append(message)
+        raise CliLibBoundaryViolation(message)
     _OBSERVED_ROUTES[f"{target} via continuous pstrain.api route at {importer}"] += 1
 
 
@@ -282,6 +289,28 @@ def assert_installed() -> None:
         raise AssertionError(f"CLI-to-library guard lost ownership of: {', '.join(missing)}")
 
 
+def drain_escaped_violations() -> list[str]:
+    """Return and forget violations raised outside the main thread."""
+    escaped = list(_ESCAPED_VIOLATIONS)
+    _ESCAPED_VIOLATIONS.clear()
+    return escaped
+
+
+def assert_no_escaped_violations() -> None:
+    """Fail for a violation that only reached a worker thread's exception hook.
+
+    A ``ThreadPoolExecutor`` submission re-raises through its future, but a bare
+    ``threading.Thread`` discards the exception after printing it. Without this
+    check the runtime rule would detect such a route and still report success.
+    """
+    escaped = drain_escaped_violations()
+    if escaped:
+        raise AssertionError(
+            "CLI-to-library boundary violations reached only a worker thread:\n  "
+            + "\n  ".join(escaped)
+        )
+
+
 def install(project_root: Path) -> None:
     """Install the process-wide import and dispatch wrappers once."""
     global _ORIGINAL_IMPORT, _ORIGINAL_IMPORT_MODULE
@@ -291,6 +320,7 @@ def install(project_root: Path) -> None:
         return
     _PROJECT_ROOT = project_root.resolve()
     _OBSERVED_ROUTES.clear()
+    _ESCAPED_VIOLATIONS.clear()
     _ORIGINAL_IMPORT = builtins.__import__
     _ORIGINAL_IMPORT_MODULE = importlib.import_module
     _ORIGINAL_THREAD_START = threading.Thread.start

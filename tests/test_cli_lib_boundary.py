@@ -296,6 +296,81 @@ def test_runtime_guard_rejects_executor_dispatch_from_neutral_helper() -> None:
             match="non-boundary frame boundary_executor_probe",
         ):
             exec(compile("submit(executor)\n", cli_filename.as_posix(), "exec"), cli_namespace)
+    # The future re-raised it here, and the worker-thread record is now spent.
+    assert cli_lib_boundary_guard.drain_escaped_violations()
+
+
+def _thread_probe_namespace(module_name: str, filename: Path) -> dict[str, object]:
+    """Build a module that imports the library from a thread target and from ``run``."""
+    namespace: dict[str, object] = {"__name__": module_name, "importlib": importlib}
+    if "." in module_name:
+        namespace["__package__"] = module_name.rsplit(".", 1)[0]
+    exec(
+        compile(
+            "import threading\n"
+            "def work():\n"
+            '    importlib.import_module("pstrain.lib.bw")\n'
+            "class Worker(threading.Thread):\n"
+            "    def run(self):\n"
+            '        importlib.import_module("pstrain.lib.bw")\n',
+            filename.as_posix(),
+            "exec",
+        ),
+        namespace,
+    )
+    return namespace
+
+
+def _run_thread_from_cli(source: str, **names: object) -> None:
+    cli_filename = ROOT / "pstrain" / "cli" / "runtime_thread_probe.py"
+    namespace: dict[str, object] = {
+        "__name__": "pstrain.cli.runtime_thread_probe",
+        "__package__": "pstrain.cli",
+        "threading": threading,
+        **names,
+    }
+    exec(compile(source, cli_filename.as_posix(), "exec"), namespace)
+
+
+@pytest.mark.parametrize(
+    ("source", "argument"),
+    [
+        ("thread = threading.Thread(target=work)\nthread.start()\nthread.join()\n", "work"),
+        ("thread = Worker()\nthread.start()\nthread.join()\n", "Worker"),
+    ],
+    ids=["thread-target", "run-override"],
+)
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+def test_runtime_guard_rejects_thread_dispatch_from_a_neutral_module(
+    source: str, argument: str
+) -> None:
+    probe = _thread_probe_namespace("boundary_thread_probe", ROOT / "boundary_thread_probe.py")
+
+    # A bare thread prints and discards the violation, so the caller sees nothing.
+    _run_thread_from_cli(source, **{argument: probe[argument]})
+
+    with pytest.raises(AssertionError, match="non-boundary frame boundary_thread_probe"):
+        cli_lib_boundary_guard.assert_no_escaped_violations()
+
+
+@pytest.mark.parametrize(
+    ("source", "argument"),
+    [
+        ("thread = threading.Thread(target=work)\nthread.start()\nthread.join()\n", "work"),
+        ("thread = Worker()\nthread.start()\nthread.join()\n", "Worker"),
+    ],
+    ids=["thread-target", "run-override"],
+)
+def test_runtime_guard_accepts_thread_dispatch_through_the_public_api(
+    source: str, argument: str
+) -> None:
+    probe = _thread_probe_namespace(
+        "pstrain.api.runtime_thread_probe", ROOT / "pstrain" / "api" / "runtime_thread_probe.py"
+    )
+
+    _run_thread_from_cli(source, **{argument: probe[argument]})
+
+    cli_lib_boundary_guard.assert_no_escaped_violations()
 
 
 def test_runtime_guard_rejects_first_import_from_preloaded_library_function(
