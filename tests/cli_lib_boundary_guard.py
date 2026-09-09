@@ -6,13 +6,27 @@ even when ``sys.modules`` already contains the target.
 
 For an executed ``pstrain.lib`` import with CLI provenance, the application
 stack segment from import to CLI must stay inside ``pstrain.api`` and
-``pstrain.lib`` and must contain an API frame. Narrowly identified import and
-multiprocessing infrastructure is transparent. This rejects callbacks resumed
-below an API frame and library functions reached without one. CLI provenance
-is copied into direct ``threading.Thread`` targets and ``ThreadPoolExecutor``
-submissions so a worker cannot lose the origin merely by losing the submitting
-stack. A violation raised on a worker thread is also recorded, because a bare
-``threading.Thread`` prints and discards it instead of failing the session.
+``pstrain.lib`` and must contain an API frame. Membership is established, not
+inferred: a frame belongs to a boundary package only when the live
+``sys.modules`` entry for its ``__name__`` owns that frame's globals and its
+code was compiled from a file inside the package's real directory. A writable
+``__name__`` alone proves nothing.
+
+Only two kinds of infrastructure are transparent, both held by identity. The
+import machinery is recognized by module-dictionary identity. A short list of
+exact multiprocessing code objects covers serialization: pickling re-imports
+the defining module of an object its caller already chose, so it is transparent
+when an authenticated boundary frame invoked it, while unpickling takes its
+target from the incoming bytes and is transparent only inside ``pstrain.lib``,
+where the import it triggers crosses no boundary. Every other frame, the rest
+of ``multiprocessing`` included, stays in the segment. This rejects callbacks
+resumed below an API frame and library functions reached without one.
+
+CLI provenance is copied into direct ``threading.Thread`` targets and
+``ThreadPoolExecutor`` submissions so a worker cannot lose the origin merely by
+losing the submitting stack. A violation raised on a worker thread is also
+recorded, because a bare ``threading.Thread`` prints and discards it instead of
+failing the session.
 
 This is not a complete architectural proof. The runtime observation covers
 only supported name-based imports executed in the pytest process after
@@ -35,7 +49,7 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from types import FrameType
+from types import CodeType, FrameType
 from typing import Any
 
 _Callable = Callable[..., Any]
@@ -47,6 +61,30 @@ _ORIGINAL_THREAD_SUBMIT: _Callable | None = None
 _PROJECT_ROOT: Path | None = None
 _OBSERVED_ROUTES: Counter[str] = Counter()
 _ESCAPED_VIOLATIONS: list[str] = []
+
+_BOUNDARY_PACKAGES = ("pstrain.api", "pstrain.lib")
+_PACKAGE_DIRECTORIES: dict[str, Path] = {}
+
+# Import machinery implements the wrapped operation itself. Membership is by
+# module-dictionary identity, not by name, so a module cannot join by writing
+# its own ``__name__``.
+_IMPORT_MACHINERY: tuple[Mapping[str, object], ...] = ()
+
+# Multiprocessing frames that hand an object the caller already chose to a
+# pickler, and the one frame that unpickles a reply. Both are held as exact
+# code objects resolved at installation; every other multiprocessing frame is
+# an ordinary segment blocker.
+_PICKLING_SPECS: tuple[tuple[str, str | None, str], ...] = (
+    ("multiprocessing.reduction", "ForkingPickler", "dumps"),
+    ("multiprocessing.reduction", None, "dump"),
+    ("multiprocessing.connection", "_ConnectionBase", "send"),
+    ("multiprocessing.queues", "Queue", "_feed"),
+)
+_UNPICKLING_SPECS: tuple[tuple[str, str | None, str], ...] = (
+    ("multiprocessing.connection", "_ConnectionBase", "recv"),
+)
+_PICKLING_CODE: frozenset[CodeType] = frozenset()
+_UNPICKLING_CODE: frozenset[CodeType] = frozenset()
 
 
 class CliLibBoundaryViolation(BaseException):
@@ -97,20 +135,84 @@ def _location(frame: FrameType) -> str:
     return f"{path}:{frame.f_lineno}"
 
 
-def _is_transparent_frame(module: str) -> bool:
-    """Identify infrastructure that does not choose the imported target.
+def _package_directory(package: str) -> Path | None:
+    """Return the real on-disk directory of an imported boundary package."""
+    cached = _PACKAGE_DIRECTORIES.get(package)
+    if cached is not None:
+        return cached
+    locations = getattr(sys.modules.get(package), "__path__", None)
+    if not locations:
+        return None
+    try:
+        directory = Path(next(iter(locations))).resolve()
+    except OSError:
+        return None
+    _PACKAGE_DIRECTORIES[package] = directory
+    return directory
 
-    Import bootstrap frames merely implement the wrapped operation. The
-    multiprocessing package also re-imports a function's defining module while
-    pickling a process target chosen by an already validated library frame.
-    All other neutral frames remain part of the segment so callbacks cannot
-    launder CLI provenance.
+
+def _boundary_package(frame: FrameType | None) -> str | None:
+    """Return the boundary package that provably owns ``frame``, if any.
+
+    Ownership is not a name. ``__name__`` is an ordinary writable string, so a
+    module that merely calls itself ``pstrain.api.something`` proves nothing. A
+    frame counts as boundary code only when the live ``sys.modules`` entry for
+    that name owns this exact globals mapping and the frame's code was compiled
+    from a file inside the package's real directory.
     """
-    return (
-        module == __name__
-        or module.startswith("importlib._bootstrap")
-        or _is_package(module, "multiprocessing")
-    )
+    if frame is None:
+        return None
+    name = frame.f_globals.get("__name__")
+    if not isinstance(name, str):
+        return None
+    package = next((known for known in _BOUNDARY_PACKAGES if _is_package(name, known)), None)
+    if package is None:
+        return None
+    module = sys.modules.get(name)
+    if module is None or getattr(module, "__dict__", None) is not frame.f_globals:
+        return None
+    directory = _package_directory(package)
+    if directory is None:
+        return None
+    try:
+        Path(frame.f_code.co_filename).resolve().relative_to(directory)
+    except (OSError, ValueError):
+        return None
+    return package
+
+
+def _serialization_caller(frame: FrameType) -> FrameType | None:
+    """Return the first frame outside a run of trusted serialization frames."""
+    caller = frame.f_back
+    while caller is not None and caller.f_code in _PICKLING_CODE:
+        caller = caller.f_back
+    return caller
+
+
+def _is_transparent_frame(frame: FrameType) -> bool:
+    """Identify infrastructure that cannot itself choose the imported target.
+
+    This guard's own frames and the import machinery merely implement the
+    wrapped operation; both are recognized by module-dictionary identity.
+
+    Serialization is different in each direction. Pickling re-imports the
+    defining module of an object the caller already chose, so it is transparent
+    when an authenticated boundary frame invoked it. Unpickling takes its target
+    from the incoming bytes, so it can never establish a boundary crossing; it
+    is transparent only inside ``pstrain.lib``, where the import it triggers is
+    library-to-library and crosses nothing. Every other frame, multiprocessing
+    included, stays in the segment so callbacks cannot launder CLI provenance.
+    """
+    if any(frame.f_globals is machinery for machinery in _IMPORT_MACHINERY):
+        return True
+    if frame.f_globals is globals():
+        return True
+    code = frame.f_code
+    if code in _PICKLING_CODE:
+        return _boundary_package(_serialization_caller(frame)) is not None
+    if code in _UNPICKLING_CODE:
+        return _boundary_package(_serialization_caller(frame)) == "pstrain.lib"
+    return False
 
 
 def _run_dispatched(
@@ -134,10 +236,10 @@ def _stack_route() -> tuple[tuple[FrameType, ...], _DispatchProvenance] | None:
             provenance = frame.f_locals.get("provenance")
             assert isinstance(provenance, _DispatchProvenance)
             return tuple(frames), provenance
-        module = _frame_module(frame)
-        if _is_transparent_frame(module):
+        if _is_transparent_frame(frame):
             frame = frame.f_back
             continue
+        module = _frame_module(frame)
         if _is_package(module, "pstrain.cli"):
             return tuple(frames), _DispatchProvenance(_location(frame), False)
         frames.append(frame)
@@ -151,10 +253,10 @@ def _segment_state(
     api_reached = inherited_api
     blocker: FrameType | None = None
     for frame in frames:
-        module = _frame_module(frame)
-        if _is_package(module, "pstrain.api"):
+        package = _boundary_package(frame)
+        if package == "pstrain.api":
             api_reached = True
-        elif not _is_package(module, "pstrain.lib"):
+        elif package is None:
             blocker = frame
             break
     return api_reached and blocker is None, blocker
@@ -311,6 +413,41 @@ def assert_no_escaped_violations() -> None:
         )
 
 
+def _resolve_code(module_name: str, owner: str | None, attribute: str) -> CodeType:
+    """Resolve one trusted serialization entry point to its exact code object."""
+    module = importlib.import_module(module_name)
+    holder: Any = module if owner is None else getattr(module, owner)
+    function = getattr(holder, attribute)
+    # Unwrap classmethod and bound-method descriptors to reach the raw function.
+    function = getattr(function, "__func__", function)
+    code = function.__code__
+    assert isinstance(code, CodeType)
+    return code
+
+
+def _resolve_trusted_code() -> None:
+    """Resolve trusted infrastructure identities before the wrappers go in.
+
+    A rename in a future CPython makes this fail loudly at installation rather
+    than silently widening or narrowing what the guard trusts.
+    """
+    global _IMPORT_MACHINERY, _PICKLING_CODE, _UNPICKLING_CODE
+    _IMPORT_MACHINERY = tuple(
+        module.__dict__
+        for module in (
+            sys.modules.get("importlib._bootstrap"),
+            sys.modules.get("importlib._bootstrap_external"),
+        )
+        if module is not None
+    )
+    assert len(_IMPORT_MACHINERY) == 2, "import bootstrap modules are not loaded"
+    _PICKLING_CODE = frozenset(_resolve_code(*spec) for spec in _PICKLING_SPECS)
+    _UNPICKLING_CODE = frozenset(_resolve_code(*spec) for spec in _UNPICKLING_SPECS)
+    assert len(_PICKLING_CODE) == len(_PICKLING_SPECS)
+    assert len(_UNPICKLING_CODE) == len(_UNPICKLING_SPECS)
+    assert not (_PICKLING_CODE & _UNPICKLING_CODE)
+
+
 def install(project_root: Path) -> None:
     """Install the process-wide import and dispatch wrappers once."""
     global _ORIGINAL_IMPORT, _ORIGINAL_IMPORT_MODULE
@@ -321,6 +458,8 @@ def install(project_root: Path) -> None:
     _PROJECT_ROOT = project_root.resolve()
     _OBSERVED_ROUTES.clear()
     _ESCAPED_VIOLATIONS.clear()
+    _PACKAGE_DIRECTORIES.clear()
+    _resolve_trusted_code()
     _ORIGINAL_IMPORT = builtins.__import__
     _ORIGINAL_IMPORT_MODULE = importlib.import_module
     _ORIGINAL_THREAD_START = threading.Thread.start
@@ -352,6 +491,7 @@ def restore() -> None:
         _ORIGINAL_THREAD_START = None
         _ORIGINAL_THREAD_SUBMIT = None
         _PROJECT_ROOT = None
+        _PACKAGE_DIRECTORIES.clear()
 
 
 def observed_routes() -> Counter[str]:

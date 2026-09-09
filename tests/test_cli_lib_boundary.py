@@ -2,14 +2,17 @@
 
 import builtins
 import concurrent.futures
+import contextlib
 import importlib.util
 import inspect
+import multiprocessing
+import pickle
 import pkgutil
 import re
 import subprocess
 import sys
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import ModuleType
 
@@ -188,27 +191,227 @@ def test_runtime_guard_rejects_cli_lib_import_constructions(
         exec(compile(source, filename.as_posix(), "exec"), namespace)
 
 
-def test_runtime_guard_accepts_continuous_api_route_from_cli() -> None:
-    api_filename = ROOT / "pstrain" / "api" / "runtime_boundary_probe.py"
-    api_namespace = {
-        "__name__": "pstrain.api.runtime_boundary_probe",
-        "__package__": "pstrain.api",
+@contextlib.contextmanager
+def _boundary_module(
+    name: str, filename: Path, source: str, **names: object
+) -> Iterator[ModuleType]:
+    """Register a module the guard can authenticate as boundary code.
+
+    The guard resolves ownership through ``sys.modules`` and the module's source
+    location, so a probe that only sets ``__name__`` no longer counts. Tests that
+    assert an accepted route must therefore build a real module object.
+    """
+    package = ".".join(name.split(".")[:2])
+    # A real submodule frame always has its parent package loaded, and the guard
+    # resolves the package directory through it.
+    importlib.import_module(package)
+    module = ModuleType(name)
+    module.__file__ = filename.as_posix()
+    if "." in name:
+        module.__package__ = name.rsplit(".", 1)[0]
+    module.__dict__.update(names)
+    exec(compile(source, filename.as_posix(), "exec"), module.__dict__)
+    previous = sys.modules.get(name)
+    sys.modules[name] = module
+    try:
+        yield module
+    finally:
+        if previous is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = previous
+
+
+def _run_from_cli(source: str, filename: Path, **names: object) -> dict[str, object]:
+    namespace: dict[str, object] = {
+        "__name__": f"pstrain.cli.{filename.stem}",
+        "__package__": "pstrain.cli",
+        **names,
     }
+    exec(compile(source, filename.as_posix(), "exec"), namespace)
+    return namespace
+
+
+def test_runtime_guard_accepts_continuous_api_route_from_cli() -> None:
+    with _boundary_module(
+        "pstrain.api.runtime_boundary_probe",
+        ROOT / "pstrain" / "api" / "runtime_boundary_probe.py",
+        "def import_through_api():\n    import pstrain.lib.bw\n",
+    ) as api:
+        _run_from_cli(
+            "import_through_api()\n",
+            ROOT / "pstrain" / "cli" / "runtime_boundary_probe.py",
+            import_through_api=api.import_through_api,
+        )
+
+
+def test_runtime_guard_rejects_a_module_that_only_claims_an_api_name() -> None:
+    """A neutral module setting ``__name__`` is not the module it names."""
+    importlib.import_module("pstrain.lib.bw")
+    spoofed = "pstrain.api.not_a_real_module"
+    assert spoofed not in sys.modules
+    namespace = {"__name__": spoofed, "importlib": importlib}
     exec(
         compile(
-            "def import_through_api():\n    import pstrain.lib.bw\n",
-            api_filename.as_posix(),
+            'def reach_lib():\n    return importlib.import_module("pstrain.lib.bw")\n',
+            (ROOT / "boundary_spoof_probe.py").as_posix(),
             "exec",
         ),
-        api_namespace,
+        namespace,
     )
-    filename = ROOT / "pstrain" / "cli" / "runtime_boundary_probe.py"
+
+    with pytest.raises(
+        cli_lib_boundary_guard.CliLibBoundaryViolation,
+        match=rf"non-boundary frame {re.escape(spoofed)} at boundary_spoof_probe\.py:2",
+    ):
+        _run_from_cli(
+            "reach_lib()\n",
+            ROOT / "pstrain" / "cli" / "runtime_spoof_probe.py",
+            reach_lib=namespace["reach_lib"],
+        )
+
+
+def test_runtime_guard_rejects_an_api_named_module_defined_outside_the_package() -> None:
+    """Registration is not enough; the frame's source must be in the package."""
+    importlib.import_module("pstrain.lib.bw")
+    with (
+        _boundary_module(
+            "pstrain.api.runtime_outside_probe",
+            ROOT / "boundary_outside_probe.py",
+            'def reach_lib():\n    return importlib.import_module("pstrain.lib.bw")\n',
+            importlib=importlib,
+        ) as impostor,
+        pytest.raises(
+            cli_lib_boundary_guard.CliLibBoundaryViolation,
+            match=r"non-boundary frame pstrain\.api\.runtime_outside_probe at "
+            r"boundary_outside_probe\.py:2",
+        ),
+    ):
+        _run_from_cli(
+            "reach_lib()\n",
+            ROOT / "pstrain" / "cli" / "runtime_outside_probe.py",
+            reach_lib=impostor.reach_lib,
+        )
+
+
+_RECV_SOURCE = "def receive(connection):\n    return connection.recv()\n"
+_PICKLE_SOURCE = "def serialize(value):\n    return ForkingPickler.dumps(value)\n"
+
+
+def _pipe_naming_a_library_class() -> object:
+    """Return a read end holding a protocol-0 pickle that names a library class."""
+    reader, writer = multiprocessing.Pipe(duplex=False)
+    writer.send_bytes(b"cpstrain.lib.bw\nBWConfig\n.")
+    return reader
+
+
+def test_runtime_guard_rejects_deserialization_choosing_the_import_below_the_api() -> None:
+    """Incoming bytes, not the API, choose this target, so no route is established."""
+    importlib.import_module("pstrain.lib.bw")
+    with (
+        _boundary_module(
+            "pstrain.api.runtime_recv_probe",
+            ROOT / "pstrain" / "api" / "runtime_recv_probe.py",
+            _RECV_SOURCE,
+        ) as api,
+        pytest.raises(
+            cli_lib_boundary_guard.CliLibBoundaryViolation,
+            match=r"non-boundary frame multiprocessing\.connection",
+        ),
+    ):
+        _run_from_cli(
+            "receive(connection)\n",
+            ROOT / "pstrain" / "cli" / "runtime_recv_probe.py",
+            receive=api.receive,
+            connection=_pipe_naming_a_library_class(),
+        )
+
+
+def test_runtime_guard_accepts_deserialization_inside_the_library() -> None:
+    """A library frame unpickling a reply imports library code and crosses nothing."""
+    importlib.import_module("pstrain.lib.bw")
+    with (
+        _boundary_module(
+            "pstrain.lib.runtime_recv_probe",
+            ROOT / "pstrain" / "lib" / "runtime_recv_probe.py",
+            _RECV_SOURCE,
+        ) as library,
+        _boundary_module(
+            "pstrain.api.runtime_recv_route_probe",
+            ROOT / "pstrain" / "api" / "runtime_recv_route_probe.py",
+            "def receive_through_api(receive, connection):\n    return receive(connection)\n",
+        ) as api,
+    ):
+        namespace = _run_from_cli(
+            "obtained = receive_through_api(receive, connection)\n",
+            ROOT / "pstrain" / "cli" / "runtime_recv_route_probe.py",
+            receive_through_api=api.receive_through_api,
+            receive=library.receive,
+            connection=_pipe_naming_a_library_class(),
+        )
+    assert namespace["obtained"].__module__ == "pstrain.lib.bw"
+
+
+def test_runtime_guard_accepts_target_pickling_from_the_library() -> None:
+    """Pickling re-imports the module of an object the library frame chose."""
+    library_bw = importlib.import_module("pstrain.lib.bw")
+    with (
+        _boundary_module(
+            "pstrain.lib.runtime_pickle_probe",
+            ROOT / "pstrain" / "lib" / "runtime_pickle_probe.py",
+            _PICKLE_SOURCE,
+            ForkingPickler=multiprocessing.reduction.ForkingPickler,
+        ) as library,
+        _boundary_module(
+            "pstrain.api.runtime_pickle_probe",
+            ROOT / "pstrain" / "api" / "runtime_pickle_probe.py",
+            "def serialize_through_api(serialize, value):\n    return serialize(value)\n",
+        ) as api,
+    ):
+        namespace = _run_from_cli(
+            "payload = serialize_through_api(serialize, value)\n",
+            ROOT / "pstrain" / "cli" / "runtime_pickle_probe.py",
+            serialize_through_api=api.serialize_through_api,
+            serialize=library.serialize,
+            value=library_bw.BWConfig,
+        )
+    assert pickle.loads(bytes(namespace["payload"])) is library_bw.BWConfig
+
+
+def test_runtime_guard_rejects_target_pickling_from_a_neutral_module() -> None:
+    """Serialization is trusted by identity of its caller, not of the pickler.
+
+    The refused import surfaces as ``PicklingError``: the C pickler discards the
+    failure from ``__import__`` and raises its own. The boundary crossing is
+    still refused, but the violation type does not survive that conversion.
+    """
+    library_bw = importlib.import_module("pstrain.lib.bw")
     namespace = {
-        "__name__": "pstrain.cli.runtime_boundary_probe",
-        "__package__": "pstrain.cli",
-        "import_through_api": api_namespace["import_through_api"],
+        "__name__": "boundary_pickle_probe",
+        "ForkingPickler": multiprocessing.reduction.ForkingPickler,
     }
-    exec(compile("import_through_api()\n", filename.as_posix(), "exec"), namespace)
+    exec(
+        compile(_PICKLE_SOURCE, (ROOT / "boundary_pickle_probe.py").as_posix(), "exec"),
+        namespace,
+    )
+    with (
+        _boundary_module(
+            "pstrain.api.runtime_neutral_pickle_probe",
+            ROOT / "pstrain" / "api" / "runtime_neutral_pickle_probe.py",
+            "def serialize_through_api(serialize, value):\n    return serialize(value)\n",
+        ) as api,
+        pytest.raises(
+            pickle.PicklingError,
+            match=r"import of module 'pstrain\.lib\.bw' failed",
+        ),
+    ):
+        _run_from_cli(
+            "serialize_through_api(serialize, value)\n",
+            ROOT / "pstrain" / "cli" / "runtime_neutral_pickle_probe.py",
+            serialize_through_api=api.serialize_through_api,
+            serialize=namespace["serialize"],
+            value=library_bw.BWConfig,
+        )
 
 
 def test_runtime_guard_rejects_api_callback_laundering() -> None:
@@ -304,24 +507,22 @@ def test_runtime_guard_rejects_executor_dispatch_from_neutral_helper() -> None:
     assert cli_lib_boundary_guard.drain_escaped_violations()
 
 
+_THREAD_PROBE_SOURCE = (
+    "import threading\n"
+    "def work():\n"
+    '    importlib.import_module("pstrain.lib.bw")\n'
+    "class Worker(threading.Thread):\n"
+    "    def run(self):\n"
+    '        importlib.import_module("pstrain.lib.bw")\n'
+)
+
+
 def _thread_probe_namespace(module_name: str, filename: Path) -> dict[str, object]:
     """Build a module that imports the library from a thread target and from ``run``."""
     namespace: dict[str, object] = {"__name__": module_name, "importlib": importlib}
     if "." in module_name:
         namespace["__package__"] = module_name.rsplit(".", 1)[0]
-    exec(
-        compile(
-            "import threading\n"
-            "def work():\n"
-            '    importlib.import_module("pstrain.lib.bw")\n'
-            "class Worker(threading.Thread):\n"
-            "    def run(self):\n"
-            '        importlib.import_module("pstrain.lib.bw")\n',
-            filename.as_posix(),
-            "exec",
-        ),
-        namespace,
-    )
+    exec(compile(_THREAD_PROBE_SOURCE, filename.as_posix(), "exec"), namespace)
     return namespace
 
 
@@ -368,11 +569,13 @@ def test_runtime_guard_rejects_thread_dispatch_from_a_neutral_module(
 def test_runtime_guard_accepts_thread_dispatch_through_the_public_api(
     source: str, argument: str
 ) -> None:
-    probe = _thread_probe_namespace(
-        "pstrain.api.runtime_thread_probe", ROOT / "pstrain" / "api" / "runtime_thread_probe.py"
-    )
-
-    _run_thread_from_cli(source, **{argument: probe[argument]})
+    with _boundary_module(
+        "pstrain.api.runtime_thread_probe",
+        ROOT / "pstrain" / "api" / "runtime_thread_probe.py",
+        _THREAD_PROBE_SOURCE,
+        importlib=importlib,
+    ) as probe:
+        _run_thread_from_cli(source, **{argument: getattr(probe, argument)})
 
     cli_lib_boundary_guard.assert_no_escaped_violations()
 
