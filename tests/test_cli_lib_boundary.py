@@ -1,6 +1,7 @@
 """Tests for the CLI-to-lib boundary ratchet."""
 
 import importlib.util
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -107,6 +108,74 @@ def test_dynamic_import_bindings_do_not_leak_across_files(tmp_path: Path) -> Non
     (cli_dir / "unbound.py").write_text('il.import_module("pstrain.lib.paths")\n', encoding="utf-8")
 
     assert boundary.find_imports(cli_dir, tmp_path) == set()
+
+
+@pytest.mark.parametrize(
+    ("source", "transitive_source", "target", "import_location"),
+    [
+        (
+            "from pstrain import lib\nlib.bw\n",
+            None,
+            "pstrain.lib",
+            "pstrain/cli/runtime_boundary_probe.py:1",
+        ),
+        (
+            'import importlib\nname = "bw"\nimportlib.import_module("pstrain.lib." + name)\n',
+            None,
+            "pstrain.lib.bw",
+            "pstrain/cli/runtime_boundary_probe.py:3",
+        ),
+        (
+            "import boundary_transitive_probe\n",
+            "import pstrain.lib.bw\n",
+            "pstrain.lib.bw",
+            "boundary_transitive_probe.py:1",
+        ),
+    ],
+    ids=["package-attribute", "computed-name", "transitive-import"],
+)
+def test_runtime_guard_rejects_cli_lib_import_constructions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+    transitive_source: str | None,
+    target: str,
+    import_location: str,
+) -> None:
+    # Preload the target to prove sys.modules caching does not bypass the guard.
+    importlib.import_module(target)
+    if transitive_source is not None:
+        (tmp_path / "boundary_transitive_probe.py").write_text(transitive_source, encoding="utf-8")
+        monkeypatch.syspath_prepend(tmp_path)
+
+    filename = ROOT / "pstrain" / "cli" / "runtime_boundary_probe.py"
+    namespace = {"__name__": "pstrain.cli.runtime_boundary_probe", "__package__": "pstrain.cli"}
+    with pytest.raises(
+        AssertionError,
+        match=(
+            rf"CLI-to-library boundary violation: {re.escape(target)} imported at "
+            rf".*{re.escape(import_location)} "
+        ),
+    ):
+        exec(compile(source, filename.as_posix(), "exec"), namespace)
+
+
+def test_runtime_guard_accepts_api_route_from_cli() -> None:
+    def import_through_api() -> None:
+        filename = ROOT / "pstrain" / "api" / "runtime_boundary_probe.py"
+        namespace = {
+            "__name__": "pstrain.api.runtime_boundary_probe",
+            "__package__": "pstrain.api",
+        }
+        exec(compile("import pstrain.lib.bw\n", filename.as_posix(), "exec"), namespace)
+
+    filename = ROOT / "pstrain" / "cli" / "runtime_boundary_probe.py"
+    namespace = {
+        "__name__": "pstrain.cli.runtime_boundary_probe",
+        "__package__": "pstrain.cli",
+        "import_through_api": import_through_api,
+    }
+    exec(compile("import_through_api()\n", filename.as_posix(), "exec"), namespace)
 
 
 @pytest.mark.parametrize(
