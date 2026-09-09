@@ -115,3 +115,52 @@ def test_packaged_notebook_runs_without_a_checkout() -> None:
     document = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
 
     assert _checkout_dependency_violations(document) == []
+
+
+NETWORK_MODULES = frozenset(
+    {"urllib", "http", "socket", "requests", "httpx", "ssl", "ftplib", "telnetlib"}
+)
+NETWORK_CALLS = frozenset({"urlopen", "urlretrieve", "getaddrinfo", "create_connection", "socket"})
+
+
+def _in_process_network(document: dict[str, Any]) -> list[str]:
+    """Report notebook code that would open a connection in the kernel itself.
+
+    The tutorial must not do its own networking. On macOS an in-process HTTPS
+    connection poisons a later native-worker spawn, which is how the corpus
+    download once killed a reader's first run: the crash lands several cells
+    later, nowhere near its cause. Every fetch belongs in a child process, and
+    the library already provides one for each thing the notebook needs.
+    """
+    import ast
+
+    findings: list[str] = []
+    for index, cell in enumerate(document["cells"]):
+        if cell.get("cell_type") != "code":
+            continue
+        source = "".join(cell["source"])
+        if source.lstrip().startswith("%") or "\n%" in source:
+            continue
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:  # a cell that cannot parse is another test's problem
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.split(".")[0] in NETWORK_MODULES:
+                        findings.append(f"cell {index}: imports {alias.name}")
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                if node.module.split(".")[0] in NETWORK_MODULES:
+                    findings.append(f"cell {index}: imports from {node.module}")
+            elif isinstance(node, ast.Call):
+                target = node.func
+                name = getattr(target, "attr", None) or getattr(target, "id", None)
+                if name in NETWORK_CALLS:
+                    findings.append(f"cell {index}: calls {name}()")
+    return findings
+
+
+def test_notebook_opens_no_connection_in_the_kernel() -> None:
+    document = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
+    assert _in_process_network(document) == []
