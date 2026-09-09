@@ -6,11 +6,20 @@ even when ``sys.modules`` already contains the target.
 
 For an executed ``pstrain.lib`` import with CLI provenance, the application
 stack segment from import to CLI must stay inside ``pstrain.api`` and
-``pstrain.lib`` and must contain an API frame. Membership is established, not
-inferred: a frame belongs to a boundary package only when the live
+``pstrain.lib`` and must contain an API frame.
+
+Every role the guard reasons about -- command line, public API, library -- is
+established the same way, and from something the code being judged cannot
+rewrite. The three package directories are derived eagerly at installation from
+the verified checkout root and are then fixed for the session; the guard never
+consults a package's ``__path__`` afterwards, because ``__path__`` is an
+ordinary mutable list. A frame belongs to a package only when the live
 ``sys.modules`` entry for its ``__name__`` owns that frame's globals and its
-code was compiled from a file inside the package's real directory. A writable
-``__name__`` alone proves nothing.
+code was compiled from a file under that frozen directory. A writable
+``__name__`` alone proves nothing, and it proves nothing for a command-line
+frame either: a frame that merely claims a ``pstrain.cli`` name is an ordinary
+neutral frame, so it does not end the stack walk and cannot hide the frames
+beyond it.
 
 Only two kinds of infrastructure are transparent, both held by identity. The
 import machinery is recognized by module-dictionary identity. A short list of
@@ -42,7 +51,7 @@ import builtins
 import concurrent.futures
 import contextlib
 import functools
-import importlib
+import importlib.util
 import sys
 import threading
 from collections import Counter
@@ -62,7 +71,12 @@ _PROJECT_ROOT: Path | None = None
 _OBSERVED_ROUTES: Counter[str] = Counter()
 _ESCAPED_VIOLATIONS: list[str] = []
 
+_CLI_PACKAGE = "pstrain.cli"
 _BOUNDARY_PACKAGES = ("pstrain.api", "pstrain.lib")
+# Every role is anchored the same way, the command line included.
+_ANCHORED_PACKAGES = (_CLI_PACKAGE, *_BOUNDARY_PACKAGES)
+# Frozen at installation from the checkout root. Never refreshed from a live
+# ``__path__``, which the code under judgement can rewrite.
 _PACKAGE_DIRECTORIES: dict[str, Path] = {}
 
 # Import machinery implements the wrapped operation itself. Membership is by
@@ -135,43 +149,59 @@ def _location(frame: FrameType) -> str:
     return f"{path}:{frame.f_lineno}"
 
 
-def _package_directory(package: str) -> Path | None:
-    """Return the real on-disk directory of an imported boundary package."""
-    cached = _PACKAGE_DIRECTORIES.get(package)
-    if cached is not None:
-        return cached
-    locations = getattr(sys.modules.get(package), "__path__", None)
-    if not locations:
-        return None
-    try:
-        directory = Path(next(iter(locations))).resolve()
-    except OSError:
-        return None
-    _PACKAGE_DIRECTORIES[package] = directory
-    return directory
+def _resolve_package_directories(project_root: Path) -> None:
+    """Anchor every role to a directory derived from the verified checkout root.
+
+    The directories come from the project root, never from a package's
+    ``__path__``. ``__path__`` is an ordinary mutable list, so resolving the
+    anchor lazily let the code being judged point it at a directory of its own
+    before the first check and then authenticate from there. Deriving the
+    anchors eagerly, once, removes that move.
+
+    Each package is also resolved through the import system here and asserted to
+    land on the derived directory. That runs before any wrapper is installed and
+    before any test module is imported, so it reads a ``__path__`` nothing under
+    judgement has had a chance to touch. An interpreter that would import a
+    different ``pstrain`` therefore fails loudly at installation instead of
+    quietly authenticating the wrong tree.
+    """
+    _PACKAGE_DIRECTORIES.clear()
+    for package in _ANCHORED_PACKAGES:
+        directory = project_root.joinpath(*package.split(".")).resolve()
+        assert (directory / "__init__.py").is_file(), (
+            f"{package} is not a package of the checkout at {project_root}"
+        )
+        spec = importlib.util.find_spec(package)
+        assert spec is not None, f"{package} does not resolve to an importable package"
+        locations = [Path(entry).resolve() for entry in (spec.submodule_search_locations or ())]
+        assert locations == [directory], (
+            f"{package} resolves to {locations}, not to the checkout directory {directory}"
+        )
+        _PACKAGE_DIRECTORIES[package] = directory
 
 
-def _boundary_package(frame: FrameType | None) -> str | None:
-    """Return the boundary package that provably owns ``frame``, if any.
+def _anchored_package(frame: FrameType | None) -> str | None:
+    """Return the package that provably owns ``frame``, if any.
 
     Ownership is not a name. ``__name__`` is an ordinary writable string, so a
-    module that merely calls itself ``pstrain.api.something`` proves nothing. A
-    frame counts as boundary code only when the live ``sys.modules`` entry for
-    that name owns this exact globals mapping and the frame's code was compiled
-    from a file inside the package's real directory.
+    module that merely calls itself ``pstrain.api.something`` -- or
+    ``pstrain.cli.something`` -- proves nothing. A frame counts as owned only
+    when the live ``sys.modules`` entry for that name owns this exact globals
+    mapping and the frame's code was compiled from a file under the directory
+    frozen for that package at installation.
     """
     if frame is None:
         return None
     name = frame.f_globals.get("__name__")
     if not isinstance(name, str):
         return None
-    package = next((known for known in _BOUNDARY_PACKAGES if _is_package(name, known)), None)
+    package = next((known for known in _ANCHORED_PACKAGES if _is_package(name, known)), None)
     if package is None:
         return None
     module = sys.modules.get(name)
     if module is None or getattr(module, "__dict__", None) is not frame.f_globals:
         return None
-    directory = _package_directory(package)
+    directory = _PACKAGE_DIRECTORIES.get(package)
     if directory is None:
         return None
     try:
@@ -179,6 +209,12 @@ def _boundary_package(frame: FrameType | None) -> str | None:
     except (OSError, ValueError):
         return None
     return package
+
+
+def _boundary_package(frame: FrameType | None) -> str | None:
+    """Return the ``pstrain.api`` or ``pstrain.lib`` package that owns ``frame``."""
+    package = _anchored_package(frame)
+    return package if package in _BOUNDARY_PACKAGES else None
 
 
 def _serialization_caller(frame: FrameType) -> FrameType | None:
@@ -239,8 +275,11 @@ def _stack_route() -> tuple[tuple[FrameType, ...], _DispatchProvenance] | None:
         if _is_transparent_frame(frame):
             frame = frame.f_back
             continue
-        module = _frame_module(frame)
-        if _is_package(module, "pstrain.cli"):
+        # A command-line frame ends the walk, so it is authenticated exactly as
+        # an API or library frame is. A frame that merely claims the name is an
+        # ordinary neutral frame: it stays in the segment and the walk continues
+        # past it to whatever really dispatched the call.
+        if _anchored_package(frame) == _CLI_PACKAGE:
             return tuple(frames), _DispatchProvenance(_location(frame), False)
         frames.append(frame)
         frame = frame.f_back
@@ -458,7 +497,7 @@ def install(project_root: Path) -> None:
     _PROJECT_ROOT = project_root.resolve()
     _OBSERVED_ROUTES.clear()
     _ESCAPED_VIOLATIONS.clear()
-    _PACKAGE_DIRECTORIES.clear()
+    _resolve_package_directories(_PROJECT_ROOT)
     _resolve_trusted_code()
     _ORIGINAL_IMPORT = builtins.__import__
     _ORIGINAL_IMPORT_MODULE = importlib.import_module
@@ -497,3 +536,8 @@ def restore() -> None:
 def observed_routes() -> Counter[str]:
     """Return a copy of continuous API routes observed from CLI origins."""
     return _OBSERVED_ROUTES.copy()
+
+
+def anchored_directories() -> dict[str, Path]:
+    """Return a copy of the directory frozen for each role at installation."""
+    return dict(_PACKAGE_DIRECTORIES)

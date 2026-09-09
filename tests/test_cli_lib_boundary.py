@@ -180,8 +180,6 @@ def test_runtime_guard_rejects_cli_lib_import_constructions(
         (tmp_path / "boundary_transitive_probe.py").write_text(transitive_source, encoding="utf-8")
         monkeypatch.syspath_prepend(tmp_path)
 
-    filename = ROOT / "pstrain" / "cli" / "runtime_boundary_probe.py"
-    namespace = {"__name__": "pstrain.cli.runtime_boundary_probe", "__package__": "pstrain.cli"}
     with pytest.raises(
         cli_lib_boundary_guard.CliLibBoundaryViolation,
         match=(
@@ -189,27 +187,28 @@ def test_runtime_guard_rejects_cli_lib_import_constructions(
             rf".*{re.escape(import_location)}; "
         ),
     ):
-        exec(compile(source, filename.as_posix(), "exec"), namespace)
+        _run_from_cli(source, ROOT / "pstrain" / "cli" / "runtime_boundary_probe.py")
 
 
 @contextlib.contextmanager
-def _boundary_module(
+def _anchored_module(
     name: str, filename: Path, source: str, **names: object
 ) -> Iterator[ModuleType]:
-    """Register a module the guard can authenticate as boundary code.
+    """Register a module the guard can authenticate as code of its package.
 
-    The guard resolves ownership through ``sys.modules`` and the module's source
-    location, so a probe that only sets ``__name__`` no longer counts. Tests that
-    assert an accepted route must therefore build a real module object.
+    The guard establishes every role it reasons about -- command line, public
+    API, library -- the same way: the live ``sys.modules`` entry for the frame's
+    ``__name__`` must own that frame's globals, and the frame's code must come
+    from a file under the directory frozen for that package at installation. A
+    probe that only sets ``__name__`` is therefore an ordinary neutral frame, so
+    a test that needs a genuine frame of any of the three roles must build a
+    real module object under the real directory.
     """
     package = ".".join(name.split(".")[:2])
-    # A real submodule frame always has its parent package loaded, and the guard
-    # resolves the package directory through it.
-    importlib.import_module(package)
+    assert package in {"pstrain.api", "pstrain.cli", "pstrain.lib"}
     module = ModuleType(name)
     module.__file__ = filename.as_posix()
-    if "." in name:
-        module.__package__ = name.rsplit(".", 1)[0]
+    module.__package__ = name.rsplit(".", 1)[0]
     module.__dict__.update(names)
     exec(compile(source, filename.as_posix(), "exec"), module.__dict__)
     previous = sys.modules.get(name)
@@ -223,18 +222,35 @@ def _boundary_module(
             sys.modules[name] = previous
 
 
-def _run_from_cli(source: str, filename: Path, **names: object) -> dict[str, object]:
-    namespace: dict[str, object] = {
-        "__name__": f"pstrain.cli.{filename.stem}",
-        "__package__": "pstrain.cli",
-        **names,
-    }
+@contextlib.contextmanager
+def _cli_module(filename: Path, **names: object) -> Iterator[ModuleType]:
+    """Register a genuine command-line module for ``filename``."""
+    with _anchored_module(f"pstrain.cli.{filename.stem}", filename, "", **names) as module:
+        yield module
+
+
+def _neutral_namespace(
+    filename: Path, source: str, *, module_name: str | None = None, **names: object
+) -> dict[str, object]:
+    """Build a namespace the guard cannot authenticate as any package's code.
+
+    ``module_name`` sets the ``__name__`` the namespace claims. Nothing is
+    registered under it, so whatever it claims, the namespace is neutral.
+    """
+    namespace: dict[str, object] = {"__name__": module_name or filename.stem, **names}
     exec(compile(source, filename.as_posix(), "exec"), namespace)
     return namespace
 
 
+def _run_from_cli(source: str, filename: Path, **names: object) -> dict[str, object]:
+    """Execute ``source`` in a genuine command-line frame and return its namespace."""
+    with _cli_module(filename, **names) as module:
+        exec(compile(source, filename.as_posix(), "exec"), module.__dict__)
+        return dict(module.__dict__)
+
+
 def test_runtime_guard_accepts_continuous_api_route_from_cli() -> None:
-    with _boundary_module(
+    with _anchored_module(
         "pstrain.api.runtime_boundary_probe",
         ROOT / "pstrain" / "api" / "runtime_boundary_probe.py",
         "def import_through_api():\n    import pstrain.lib.bw\n",
@@ -276,7 +292,7 @@ def test_runtime_guard_rejects_an_api_named_module_defined_outside_the_package()
     """Registration is not enough; the frame's source must be in the package."""
     importlib.import_module("pstrain.lib.bw")
     with (
-        _boundary_module(
+        _anchored_module(
             "pstrain.api.runtime_outside_probe",
             ROOT / "boundary_outside_probe.py",
             'def reach_lib():\n    return importlib.import_module("pstrain.lib.bw")\n',
@@ -295,6 +311,118 @@ def test_runtime_guard_rejects_an_api_named_module_defined_outside_the_package()
         )
 
 
+def test_runtime_guard_anchors_every_role_to_the_checkout() -> None:
+    """The roles are anchored to the checkout, not to a live ``__path__``."""
+    assert cli_lib_boundary_guard.anchored_directories() == {
+        "pstrain.cli": ROOT / "pstrain" / "cli",
+        "pstrain.api": ROOT / "pstrain" / "api",
+        "pstrain.lib": ROOT / "pstrain" / "lib",
+    }
+
+
+_REACH_LIB_SOURCE = (
+    'import importlib\n\n\ndef reach_lib():\n    return importlib.import_module("pstrain.lib.bw")\n'
+)
+
+
+def test_runtime_guard_ignores_a_rewritten_package_path(tmp_path: Path) -> None:
+    """A package's ``__path__`` is mutable, so the anchor cannot be read from it.
+
+    Pointing ``pstrain.api.__path__`` at a directory of the caller's own and
+    loading a real module from there once made that module authenticate as
+    public API code: the module owned its own globals and its source lay under
+    the anchor it had just moved. The anchors now come from the checkout root at
+    installation, so the rewrite changes nothing in either direction -- the
+    outside module is refused, and genuine API code is still accepted while the
+    rewritten ``__path__`` is in place.
+    """
+    importlib.import_module("pstrain.lib.bw")
+    api = importlib.import_module("pstrain.api")
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    shadow_file = outside / "shadow.py"
+    shadow_file.write_text(_REACH_LIB_SOURCE, encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("pstrain.api.shadow", shadow_file)
+    assert spec is not None and spec.loader is not None
+    shadow = importlib.util.module_from_spec(spec)
+
+    original_path = list(api.__path__)
+    api.__path__ = [str(outside)]
+    sys.modules["pstrain.api.shadow"] = shadow
+    try:
+        spec.loader.exec_module(shadow)
+        with pytest.raises(
+            cli_lib_boundary_guard.CliLibBoundaryViolation,
+            match=r"non-boundary frame pstrain\.api\.shadow at .*shadow\.py:5",
+        ):
+            _run_from_cli(
+                "reach_lib()\n",
+                ROOT / "pstrain" / "cli" / "runtime_shadow_probe.py",
+                reach_lib=shadow.reach_lib,
+            )
+
+        with _anchored_module(
+            "pstrain.api.runtime_shadow_control_probe",
+            ROOT / "pstrain" / "api" / "runtime_shadow_control_probe.py",
+            "def import_through_api():\n    import pstrain.lib.bw\n",
+        ) as control:
+            _run_from_cli(
+                "import_through_api()\n",
+                ROOT / "pstrain" / "cli" / "runtime_shadow_control_probe.py",
+                import_through_api=control.import_through_api,
+            )
+    finally:
+        sys.modules.pop("pstrain.api.shadow", None)
+        api.__path__ = original_path
+
+
+_BRIDGE_SOURCE = "def bridge(importer):\n    return importer()\n"
+
+
+@pytest.mark.parametrize(
+    "claimed_name",
+    ["boundary_neutral", "pstrain.cli.impostor"],
+    ids=["neutral-name", "claimed-cli-name"],
+)
+def test_runtime_guard_treats_a_claimed_cli_name_as_a_neutral_frame(claimed_name: str) -> None:
+    """Claiming a command-line name must not make the guard more permissive.
+
+    Genuine command-line code calls this bridge, which calls an authenticated
+    API importer. The bridge belongs to no package, so the segment is
+    interrupted and the import is refused. A merely-claimed ``pstrain.cli`` name
+    once ended the stack walk instead, which hid both the bridge and the real
+    command-line frame beyond it and turned that refusal into an acceptance.
+    Only ``__name__`` differs between these two cases, so both must be refused
+    and both must name the real command-line frame as the origin.
+    """
+    importlib.import_module("pstrain.lib.bw")
+    assert claimed_name not in sys.modules
+    bridge = _neutral_namespace(
+        ROOT / "boundary_bridge_probe.py", _BRIDGE_SOURCE, module_name=claimed_name
+    )
+    with (
+        _anchored_module(
+            "pstrain.api.runtime_bridge_probe",
+            ROOT / "pstrain" / "api" / "runtime_bridge_probe.py",
+            _REACH_LIB_SOURCE,
+        ) as api,
+        pytest.raises(
+            cli_lib_boundary_guard.CliLibBoundaryViolation,
+            match=(
+                rf"non-boundary frame {re.escape(claimed_name)} at boundary_bridge_probe\.py:2 "
+                r"interrupts the route "
+                r"\(CLI origin pstrain/cli/runtime_bridge_probe\.py:1\)"
+            ),
+        ),
+    ):
+        _run_from_cli(
+            "bridge(reach_lib)\n",
+            ROOT / "pstrain" / "cli" / "runtime_bridge_probe.py",
+            bridge=bridge["bridge"],
+            reach_lib=api.reach_lib,
+        )
+
+
 _RECV_SOURCE = "def receive(connection):\n    return connection.recv()\n"
 _PICKLE_SOURCE = "def serialize(value):\n    return ForkingPickler.dumps(value)\n"
 
@@ -310,7 +438,7 @@ def test_runtime_guard_rejects_deserialization_choosing_the_import_below_the_api
     """Incoming bytes, not the API, choose this target, so no route is established."""
     importlib.import_module("pstrain.lib.bw")
     with (
-        _boundary_module(
+        _anchored_module(
             "pstrain.api.runtime_recv_probe",
             ROOT / "pstrain" / "api" / "runtime_recv_probe.py",
             _RECV_SOURCE,
@@ -332,12 +460,12 @@ def test_runtime_guard_accepts_deserialization_inside_the_library() -> None:
     """A library frame unpickling a reply imports library code and crosses nothing."""
     importlib.import_module("pstrain.lib.bw")
     with (
-        _boundary_module(
+        _anchored_module(
             "pstrain.lib.runtime_recv_probe",
             ROOT / "pstrain" / "lib" / "runtime_recv_probe.py",
             _RECV_SOURCE,
         ) as library,
-        _boundary_module(
+        _anchored_module(
             "pstrain.api.runtime_recv_route_probe",
             ROOT / "pstrain" / "api" / "runtime_recv_route_probe.py",
             "def receive_through_api(receive, connection):\n    return receive(connection)\n",
@@ -357,13 +485,13 @@ def test_runtime_guard_accepts_target_pickling_from_the_library() -> None:
     """Pickling re-imports the module of an object the library frame chose."""
     library_bw = importlib.import_module("pstrain.lib.bw")
     with (
-        _boundary_module(
+        _anchored_module(
             "pstrain.lib.runtime_pickle_probe",
             ROOT / "pstrain" / "lib" / "runtime_pickle_probe.py",
             _PICKLE_SOURCE,
             ForkingPickler=multiprocessing.reduction.ForkingPickler,
         ) as library,
-        _boundary_module(
+        _anchored_module(
             "pstrain.api.runtime_pickle_probe",
             ROOT / "pstrain" / "api" / "runtime_pickle_probe.py",
             "def serialize_through_api(serialize, value):\n    return serialize(value)\n",
@@ -396,7 +524,7 @@ def test_runtime_guard_rejects_target_pickling_from_a_neutral_module() -> None:
         namespace,
     )
     with (
-        _boundary_module(
+        _anchored_module(
             "pstrain.api.runtime_neutral_pickle_probe",
             ROOT / "pstrain" / "api" / "runtime_neutral_pickle_probe.py",
             "def serialize_through_api(serialize, value):\n    return serialize(value)\n",
@@ -416,94 +544,76 @@ def test_runtime_guard_rejects_target_pickling_from_a_neutral_module() -> None:
 
 
 def test_runtime_guard_rejects_api_callback_laundering() -> None:
-    callback_filename = ROOT / "boundary_callback_probe.py"
-    callback_namespace = {"__name__": "boundary_callback_probe", "importlib": importlib}
-    exec(
-        compile(
-            'def callback():\n    importlib.import_module("pstrain.lib.bw")\n',
-            callback_filename.as_posix(),
-            "exec",
+    neutral = _neutral_namespace(
+        ROOT / "boundary_callback_probe.py",
+        'def callback():\n    importlib.import_module("pstrain.lib.bw")\n',
+        importlib=importlib,
+    )
+    with (
+        _anchored_module(
+            "pstrain.api.runtime_callback_probe",
+            ROOT / "pstrain" / "api" / "runtime_callback_probe.py",
+            "def invoke(callback):\n    callback()\n",
+        ) as api,
+        pytest.raises(
+            cli_lib_boundary_guard.CliLibBoundaryViolation,
+            match="non-boundary frame boundary_callback_probe",
         ),
-        callback_namespace,
-    )
-    api_filename = ROOT / "pstrain" / "api" / "runtime_callback_probe.py"
-    api_namespace = {"__name__": "pstrain.api.runtime_callback_probe"}
-    exec(
-        compile("def invoke(callback):\n    callback()\n", api_filename.as_posix(), "exec"),
-        api_namespace,
-    )
-    cli_filename = ROOT / "pstrain" / "cli" / "runtime_callback_probe.py"
-    cli_namespace = {
-        "__name__": "pstrain.cli.runtime_callback_probe",
-        "callback": callback_namespace["callback"],
-        "invoke": api_namespace["invoke"],
-    }
-
-    with pytest.raises(
-        cli_lib_boundary_guard.CliLibBoundaryViolation,
-        match="non-boundary frame boundary_callback_probe",
     ):
-        exec(compile("invoke(callback)\n", cli_filename.as_posix(), "exec"), cli_namespace)
+        _run_from_cli(
+            "invoke(callback)\n",
+            ROOT / "pstrain" / "cli" / "runtime_callback_probe.py",
+            invoke=api.invoke,
+            callback=neutral["callback"],
+        )
 
 
 def test_runtime_guard_rejects_generator_resumed_by_api() -> None:
-    generator_filename = ROOT / "boundary_generator_probe.py"
-    generator_namespace = {"__name__": "boundary_generator_probe", "importlib": importlib}
-    exec(
-        compile(
-            'def values():\n    importlib.import_module("pstrain.lib.bw")\n    yield 1\n',
-            generator_filename.as_posix(),
-            "exec",
+    neutral = _neutral_namespace(
+        ROOT / "boundary_generator_probe.py",
+        'def values():\n    importlib.import_module("pstrain.lib.bw")\n    yield 1\n',
+        importlib=importlib,
+    )
+    with (
+        _anchored_module(
+            "pstrain.api.runtime_generator_probe",
+            ROOT / "pstrain" / "api" / "runtime_generator_probe.py",
+            "def consume(values):\n    return list(values)\n",
+        ) as api,
+        pytest.raises(
+            cli_lib_boundary_guard.CliLibBoundaryViolation,
+            match="non-boundary frame boundary_generator_probe",
         ),
-        generator_namespace,
-    )
-    api_filename = ROOT / "pstrain" / "api" / "runtime_generator_probe.py"
-    api_namespace = {"__name__": "pstrain.api.runtime_generator_probe"}
-    exec(
-        compile("def consume(values):\n    return list(values)\n", api_filename.as_posix(), "exec"),
-        api_namespace,
-    )
-    cli_filename = ROOT / "pstrain" / "cli" / "runtime_generator_probe.py"
-    cli_namespace = {
-        "__name__": "pstrain.cli.runtime_generator_probe",
-        "consume": api_namespace["consume"],
-        "values": generator_namespace["values"],
-    }
-
-    with pytest.raises(
-        cli_lib_boundary_guard.CliLibBoundaryViolation,
-        match="non-boundary frame boundary_generator_probe",
     ):
-        exec(compile("consume(values())\n", cli_filename.as_posix(), "exec"), cli_namespace)
+        _run_from_cli(
+            "consume(values())\n",
+            ROOT / "pstrain" / "cli" / "runtime_generator_probe.py",
+            consume=api.consume,
+            values=neutral["values"],
+        )
 
 
 def test_runtime_guard_rejects_executor_dispatch_from_neutral_helper() -> None:
-    helper_filename = ROOT / "boundary_executor_probe.py"
-    helper_namespace = {"__name__": "boundary_executor_probe", "importlib": importlib}
-    exec(
-        compile(
-            "def import_lib():\n"
-            '    return importlib.import_module("pstrain.lib.bw")\n'
-            "def submit(executor):\n"
-            "    return executor.submit(import_lib).result()\n",
-            helper_filename.as_posix(),
-            "exec",
-        ),
-        helper_namespace,
+    neutral = _neutral_namespace(
+        ROOT / "boundary_executor_probe.py",
+        "def import_lib():\n"
+        '    return importlib.import_module("pstrain.lib.bw")\n'
+        "def submit(executor):\n"
+        "    return executor.submit(import_lib).result()\n",
+        importlib=importlib,
     )
-    cli_filename = ROOT / "pstrain" / "cli" / "runtime_executor_probe.py"
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         executor.submit(lambda: None).result()  # Ensure the worker predates CLI provenance.
-        cli_namespace = {
-            "__name__": "pstrain.cli.runtime_executor_probe",
-            "executor": executor,
-            "submit": helper_namespace["submit"],
-        }
         with pytest.raises(
             cli_lib_boundary_guard.CliLibBoundaryViolation,
             match="non-boundary frame boundary_executor_probe",
         ):
-            exec(compile("submit(executor)\n", cli_filename.as_posix(), "exec"), cli_namespace)
+            _run_from_cli(
+                "submit(executor)\n",
+                ROOT / "pstrain" / "cli" / "runtime_executor_probe.py",
+                submit=neutral["submit"],
+                executor=executor,
+            )
     # The future re-raised it here, and the worker-thread record is now spent.
     assert cli_lib_boundary_guard.drain_escaped_violations()
 
@@ -518,24 +628,13 @@ _THREAD_PROBE_SOURCE = (
 )
 
 
-def _thread_probe_namespace(module_name: str, filename: Path) -> dict[str, object]:
-    """Build a module that imports the library from a thread target and from ``run``."""
-    namespace: dict[str, object] = {"__name__": module_name, "importlib": importlib}
-    if "." in module_name:
-        namespace["__package__"] = module_name.rsplit(".", 1)[0]
-    exec(compile(_THREAD_PROBE_SOURCE, filename.as_posix(), "exec"), namespace)
-    return namespace
-
-
 def _run_thread_from_cli(source: str, **names: object) -> None:
-    cli_filename = ROOT / "pstrain" / "cli" / "runtime_thread_probe.py"
-    namespace: dict[str, object] = {
-        "__name__": "pstrain.cli.runtime_thread_probe",
-        "__package__": "pstrain.cli",
-        "threading": threading,
+    _run_from_cli(
+        source,
+        ROOT / "pstrain" / "cli" / "runtime_thread_probe.py",
+        threading=threading,
         **names,
-    }
-    exec(compile(source, cli_filename.as_posix(), "exec"), namespace)
+    )
 
 
 @pytest.mark.parametrize(
@@ -550,7 +649,9 @@ def _run_thread_from_cli(source: str, **names: object) -> None:
 def test_runtime_guard_rejects_thread_dispatch_from_a_neutral_module(
     source: str, argument: str
 ) -> None:
-    probe = _thread_probe_namespace("boundary_thread_probe", ROOT / "boundary_thread_probe.py")
+    probe = _neutral_namespace(
+        ROOT / "boundary_thread_probe.py", _THREAD_PROBE_SOURCE, importlib=importlib
+    )
 
     # A bare thread prints and discards the violation, so the caller sees nothing.
     _run_thread_from_cli(source, **{argument: probe[argument]})
@@ -570,7 +671,7 @@ def test_runtime_guard_rejects_thread_dispatch_from_a_neutral_module(
 def test_runtime_guard_accepts_thread_dispatch_through_the_public_api(
     source: str, argument: str
 ) -> None:
-    with _boundary_module(
+    with _anchored_module(
         "pstrain.api.runtime_thread_probe",
         ROOT / "pstrain" / "api" / "runtime_thread_probe.py",
         _THREAD_PROBE_SOURCE,
@@ -590,26 +691,18 @@ def test_runtime_guard_rejects_first_import_from_preloaded_library_function(
     feature_type = filetypes.FileType.FEATURES
     feature_path = tmp_path / "preloaded.mfc"
     feature_path.write_bytes((1).to_bytes(4, "little", signed=True) + b"\0" * 4)
-    cli_filename = ROOT / "pstrain" / "cli" / "runtime_preloaded_probe.py"
-    cli_namespace = {
-        "__name__": "pstrain.cli.runtime_preloaded_probe",
-        "feature_path": feature_path,
-        "feature_type": feature_type,
-        "validate_file_type": validate_file_type,
-    }
 
     with pytest.raises(
         cli_lib_boundary_guard.CliLibBoundaryViolation,
         match=r"pstrain\.lib\.features imported at pstrain/lib/filetypes\.py:299; "
         r"no pstrain\.api frame",
     ):
-        exec(
-            compile(
-                "validate_file_type(feature_path, feature_type, deep=True)\n",
-                cli_filename.as_posix(),
-                "exec",
-            ),
-            cli_namespace,
+        _run_from_cli(
+            "validate_file_type(feature_path, feature_type, deep=True)\n",
+            ROOT / "pstrain" / "cli" / "runtime_preloaded_probe.py",
+            feature_path=feature_path,
+            feature_type=feature_type,
+            validate_file_type=validate_file_type,
         )
 
 
@@ -617,23 +710,15 @@ def test_runtime_guard_accepts_lazy_import_through_public_api(tmp_path: Path) ->
     api = importlib.import_module("pstrain.api")
     feature_path = tmp_path / "public.mfc"
     feature_path.write_bytes((1).to_bytes(4, "little", signed=True) + b"\0" * 4)
-    cli_filename = ROOT / "pstrain" / "cli" / "runtime_public_probe.py"
-    cli_namespace = {
-        "__name__": "pstrain.cli.runtime_public_probe",
-        "feature_path": feature_path,
-        "feature_type": api.FileType.FEATURES,
-        "validate_file_type": api.validate_file_type,
-    }
 
-    exec(
-        compile(
-            "result = validate_file_type(feature_path, feature_type, deep=True)\n",
-            cli_filename.as_posix(),
-            "exec",
-        ),
-        cli_namespace,
+    namespace = _run_from_cli(
+        "result = validate_file_type(feature_path, feature_type, deep=True)\n",
+        ROOT / "pstrain" / "cli" / "runtime_public_probe.py",
+        feature_path=feature_path,
+        feature_type=api.FileType.FEATURES,
+        validate_file_type=api.validate_file_type,
     )
-    assert cli_namespace["result"] == (
+    assert namespace["result"] == (
         False,
         "Failed to load: Cannot determine veclen for 1 floats",
     )

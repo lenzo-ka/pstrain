@@ -18,12 +18,29 @@ When such a request targets `pstrain.lib` and has CLI provenance, every
 application frame between the CLI and import must be in `pstrain.api` or
 `pstrain.lib`, and the segment must contain an API frame.
 
-Membership in those packages is established, not inferred from a name. A frame
-belongs to a boundary package only when the live `sys.modules` entry for its
-`__name__` owns that frame's globals and its code was compiled from a file
-inside the package's real directory. `__name__` is an ordinary writable string,
-so a module that merely calls itself `pstrain.api.something` is not boundary
-code and cannot establish a route.
+Every role the rule reasons about — command line, public API, library — is
+established the same way, and from something the code being judged cannot
+rewrite. The directory of each of the three packages is derived at installation
+from the checkout root the test session already trusts, and is then fixed for
+the session. The guard never reads a package's `__path__` afterwards, because
+`__path__` is an ordinary mutable list: code that could rewrite it before the
+first check could move the anchor under files of its own and authenticate from
+there. Installation resolves each package through the import system once, before
+any wrapper is in place and before any test module is imported, and fails loudly
+if it does not land on the derived directory, so an interpreter that would
+import a different `pstrain` cannot quietly authenticate the wrong tree.
+
+A frame belongs to a package only when the live `sys.modules` entry for its
+`__name__` owns that frame's globals and its code was compiled from a file under
+that frozen directory. `__name__` is an ordinary writable string, so a module
+that merely calls itself `pstrain.api.something` is not boundary code and cannot
+establish a route. The same holds for the command line, and there it matters in
+the permissive direction: a command-line frame is what ends the stack walk, so a
+frame that merely claimed a `pstrain.cli` name would end the walk early and hide
+both itself and the real command-line frame beyond it, turning a refused import
+into an allowed one. An unauthenticated frame claiming such a name is therefore
+an ordinary neutral frame: it stays in the segment, and the walk continues past
+it to whatever really dispatched the call.
 
 Only two kinds of infrastructure are transparent, and both are held by identity
 rather than by module name. The import machinery is recognized by
@@ -91,16 +108,27 @@ Its allowlist is empty.
 
 The runtime check rejects supported name-based `pstrain.lib` import requests
 executed with a visible or carried CLI origin unless a continuous API/library
-stack segment, whose frames are authenticated by module identity and source
-location, establishes their route. The static check additionally rejects
-the source constructions described above, including unexecuted paths and a
-directly imported alias touching an already-loaded `pstrain.lib` attribute.
+stack segment establishes their route. The CLI origin and every frame of that
+segment are authenticated the same way: by module identity plus a source
+location under a package directory frozen from the checkout root at
+installation. The static check additionally rejects the source constructions
+described above, including unexecuted paths and a directly imported alias
+touching an already-loaded `pstrain.lib` attribute.
 
 Neither check observes or resolves all Python behavior. In particular:
 
 - a module object can be taken from `sys.modules`, retained before guard
   installation, returned by arbitrary code, or reached through an alias that
   the static scan does not trace;
+- a frame is authenticated from the live `sys.modules` entry for its name plus
+  a source location under the frozen directory. Code that both writes
+  `sys.modules` under a real package name and compiles itself with a
+  `co_filename` inside that package's directory can therefore still present
+  itself as code of that package. Both halves are required, neither is
+  something ordinary command-line code does, and the anchor itself is no longer
+  reachable — but this is a residual forgery the runtime rule does not detect,
+  and it is the mechanism the guard's own tests use to build genuine-shaped
+  frames;
 - `getattr`, assignment data flow, function returns, generated code, custom
   loaders, private importlib entry points, and import callables captured before
   installation remain outside one or both checks;
