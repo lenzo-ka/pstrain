@@ -104,6 +104,34 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         run: python scripts/check_fp_contract.py build
 
+      # The steps above build at -O0, where the compiler applies none of the
+      # assumptions the standard grants it.  A test guarding an
+      # optimizer-visible property -- strict aliasing above all -- cannot
+      # witness that property at -O0: it passes on code that would break at
+      # -O2.  Release is -O3 with strict aliasing on, which is what
+      # `make build-c` builds locally and what ships, so it is the
+      # configuration those guards exist for.  Reusing this runner rather
+      # than adding a matrix leg keeps the two required check names this
+      # branch is protected on, and costs no extra runner.
+      - name: Configure (optimized)
+        if: needs.changes.outputs.code == 'true'
+        run: >-
+          cmake -S . -B build-release
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_CLI=ON
+
+      - name: Build (optimized)
+        if: needs.changes.outputs.code == 'true'
+        run: cmake --build build-release
+
+      - name: Test (optimized)
+        if: needs.changes.outputs.code == 'true'
+        run: ctest --test-dir build-release --output-on-failure --no-tests=error
+
+      - name: Verify emitted floating-point contraction policy (optimized)
+        if: needs.changes.outputs.code == 'true'
+        run: python scripts/check_fp_contract.py build-release
+
   # Linux-only sanitizer coverage. AppleClang is excluded because ASan hangs
   # before main on macOS in this project.
   c-tests-sanitizers:
