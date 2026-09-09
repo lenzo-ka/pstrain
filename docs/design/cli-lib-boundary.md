@@ -141,9 +141,14 @@ Neither check observes or resolves all Python behavior. In particular:
   serialization code objects are omitted from the stack segment; they are not
   treated as application code. A rename in a future CPython makes installation
   fail rather than quietly changing what is trusted;
-- unpickling inside `pstrain.lib` is transparent, so a library frame that
-  deserializes untrusted input can import library modules its source never
-  names. The rule constrains routes from the command line into the library, not
+- exactly one unpickling code object is transparent — the enumerated
+  `multiprocessing.connection._ConnectionBase.recv` — and only when it is
+  reached directly from an authenticated `pstrain.lib` frame. A library frame
+  that receives on such a connection can therefore import library modules its
+  own source never names, because the incoming bytes choose them. Nothing wider
+  is conceded: `pickle.loads`, every other deserialization path, and that same
+  code object reached from anywhere else all remain ordinary segment frames. The
+  rule constrains routes from the command line into the library, not
   library-to-library imports;
 - an explicit `except BaseException` can intercept the runtime violation, and
   so can C code that discards the failed import and raises its own error: a
