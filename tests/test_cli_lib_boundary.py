@@ -875,6 +875,157 @@ def test_runtime_guard_accepts_thread_dispatch_through_the_public_api(
     cli_lib_boundary_guard.assert_no_escaped_violations()
 
 
+_TARGET = "pstrain.lib.bw"
+
+_NEUTRAL_DISPATCH_SOURCE = (
+    "def submit(executor, function, target):\n"
+    "    return executor.submit(function, target).result()\n"
+    "\n"
+    "\n"
+    "def spawn(threading, function, target):\n"
+    "    thread = threading.Thread(target=function, args=(target,))\n"
+    "    thread.start()\n"
+    "    thread.join()\n"
+)
+
+# Each command-line source dispatches from its own frame, so nothing of the
+# test's own belongs to the submitting stack the guard inspects.
+_CLI_DISPATCH_SOURCES = {
+    "executor": {
+        "direct": "def call(dispatcher):\n    return dispatcher.submit(reach_lib, TARGET).result()\n",
+        "helper": "def call(dispatcher):\n    return submit(dispatcher, reach_lib, TARGET)\n",
+    },
+    "thread": {
+        "direct": (
+            "def call(dispatcher):\n"
+            "    thread = dispatcher.Thread(target=reach_lib, args=(TARGET,))\n"
+            "    thread.start()\n"
+            "    thread.join()\n"
+        ),
+        "helper": "def call(dispatcher):\n    return spawn(dispatcher, reach_lib, TARGET)\n",
+    },
+}
+
+
+@contextlib.contextmanager
+def _dispatcher(kind: str) -> Iterator[object]:
+    """Yield the object the command-line probe dispatches through."""
+    if kind == "thread":
+        yield threading
+        return
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        executor.submit(lambda: None).result()  # Ensure the worker predates CLI provenance.
+        yield executor
+
+
+@contextlib.contextmanager
+def _dispatching_cli(source: str, *, registered: bool, **names: object) -> Iterator[Callable]:
+    """Yield a command-line ``call``, with or without a live module identity."""
+    name = "pstrain.cli.runtime_dispatch_probe"
+    filename = ROOT / "pstrain" / "cli" / "runtime_dispatch_probe.py"
+    with _anchored_module(name, filename, source, TARGET=_TARGET, **names) as module:
+        if registered:
+            yield module.call
+            return
+        call = module.call
+    assert name not in sys.modules
+    yield call
+
+
+def _dispatch_outcome(run: Callable[[], object]) -> list[str]:
+    """Return the boundary violations ``run`` produced, however they surfaced.
+
+    A ``ThreadPoolExecutor`` submission re-raises through its future; a bare
+    ``threading.Thread`` only leaves the recorded copy behind. Both are drained
+    here so the two dispatch paths can be asserted the same way.
+    """
+    try:
+        run()
+    except cli_lib_boundary_guard.CliLibBoundaryViolation as error:
+        cli_lib_boundary_guard.drain_escaped_violations()
+        return [str(error)]
+    return cli_lib_boundary_guard.drain_escaped_violations()
+
+
+@pytest.mark.parametrize("registered", [True, False], ids=["registered-cli", "source-located-cli"])
+@pytest.mark.parametrize("kind", ["executor", "thread"], ids=["executor", "thread"])
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+def test_runtime_guard_refuses_a_dispatch_whose_route_was_already_interrupted(
+    kind: str, registered: bool
+) -> None:
+    """An interruption that has already happened cannot be healed by a worker.
+
+    The command line calls a neutral helper, and the helper dispatches an
+    authenticated public API callable. The helper interrupts the route before
+    anything is submitted, so the worker inherits a broken route -- yet the
+    worker's own stack is command line to API to library and looks perfect.
+
+    While the carried state was one ``api_reached_continuously`` boolean, "not
+    through an API frame yet" and "already interrupted" were both ``False``, and
+    the worker-side API frame turned the second into an established route. Every
+    combination here was allowed: both dispatch paths, and a command-line origin
+    both authenticated and taken from a source location.
+    """
+    importlib.import_module(_TARGET)
+    helper = _neutral_namespace(ROOT / "boundary_dispatch_probe.py", _NEUTRAL_DISPATCH_SOURCE)
+    with (
+        _anchored_module(
+            "pstrain.api.runtime_dispatch_probe",
+            ROOT / "pstrain" / "api" / "runtime_dispatch_probe.py",
+            _COMPUTED_IMPORT_SOURCE,
+        ) as api,
+        _dispatching_cli(
+            _CLI_DISPATCH_SOURCES[kind]["helper"],
+            registered=registered,
+            reach_lib=api.reach_lib,
+            submit=helper["submit"],
+            spawn=helper["spawn"],
+        ) as call,
+        _dispatcher(kind) as dispatcher,
+    ):
+        violations = _dispatch_outcome(lambda: call(dispatcher))
+
+    assert violations, "a worker-side API frame healed an already-interrupted route"
+    assert re.search(
+        r"pstrain\.lib\.bw imported at pstrain/api/runtime_dispatch_probe\.py:5; "
+        r"non-boundary frame boundary_dispatch_probe at boundary_dispatch_probe\.py:\d+ "
+        r"interrupted the route before this dispatch "
+        r"\(CLI origin pstrain/cli/runtime_dispatch_probe\.py:2\)",
+        violations[0],
+    ), violations[0]
+
+
+@pytest.mark.parametrize("registered", [True, False], ids=["registered-cli", "source-located-cli"])
+@pytest.mark.parametrize("kind", ["executor", "thread"], ids=["executor", "thread"])
+def test_runtime_guard_accepts_a_dispatch_submitted_by_the_command_line(
+    kind: str, registered: bool
+) -> None:
+    """Refusing the interrupted dispatch must not refuse the clean one.
+
+    This differs from the interrupted case in one thing: the command line
+    dispatches the same authenticated API callable itself instead of asking a
+    neutral helper to. Nothing has broken the route, so the worker's API frame
+    establishes it and the import is allowed. The value of the guard is that it
+    tells these two apart, so both directions are asserted for both dispatch
+    paths and for both kinds of command-line origin.
+    """
+    importlib.import_module(_TARGET)
+    with (
+        _anchored_module(
+            "pstrain.api.runtime_dispatch_probe",
+            ROOT / "pstrain" / "api" / "runtime_dispatch_probe.py",
+            _COMPUTED_IMPORT_SOURCE,
+        ) as api,
+        _dispatching_cli(
+            _CLI_DISPATCH_SOURCES[kind]["direct"],
+            registered=registered,
+            reach_lib=api.reach_lib,
+        ) as call,
+        _dispatcher(kind) as dispatcher,
+    ):
+        assert _dispatch_outcome(lambda: call(dispatcher)) == []
+
+
 def test_runtime_guard_rejects_first_import_from_preloaded_library_function(
     tmp_path: Path,
 ) -> None:

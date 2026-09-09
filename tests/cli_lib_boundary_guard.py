@@ -44,9 +44,13 @@ resumed below an API frame and library functions reached without one.
 
 CLI provenance is copied into direct ``threading.Thread`` targets and
 ``ThreadPoolExecutor`` submissions so a worker cannot lose the origin merely by
-losing the submitting stack. A violation raised on a worker thread is also
-recorded, because a bare ``threading.Thread`` prints and discards it instead of
-failing the session.
+losing the submitting stack. What is carried is three-valued, not two: the route
+so far is clean but has not reached an API frame, established through one, or
+interrupted. An interruption is permanent, which is what stops a worker-side API
+frame from establishing a route that a neutral frame had already broken before
+the work was dispatched. A violation raised on a worker thread is also recorded,
+because a bare ``threading.Thread`` prints and discards it instead of failing
+the session.
 
 This is not a complete architectural proof. The runtime observation covers
 only supported name-based imports executed in the pytest process after
@@ -61,6 +65,7 @@ from __future__ import annotations
 import builtins
 import concurrent.futures
 import contextlib
+import enum
 import functools
 import importlib.util
 import sys
@@ -116,10 +121,45 @@ class CliLibBoundaryViolation(BaseException):
     """Escape ordinary application exception handlers and fail the test session."""
 
 
+class _RouteState(enum.Enum):
+    """How far the route from the command line had got at a given point.
+
+    Three states, not two. A route that has not yet reached a ``pstrain.api``
+    frame and a route that a non-boundary frame has already broken are both
+    "not yet acceptable", but they are not the same thing: the first may still
+    become acceptable when an API frame appears, and the second may not. While
+    the carried state was a single ``api_reached_continuously`` boolean the two
+    shared its ``False``, so a worker-side API frame turned an interruption that
+    had already happened into an established route.
+
+    Two booleans -- reached and a sticky interrupted flag -- would also record
+    the distinction, but they admit a fourth combination that means nothing, and
+    every reader would have to remember to consult the second before trusting
+    the first. Reading one field and not the other is precisely the defect. One
+    three-valued field has no invalid combination and no reader can spell the
+    check without naming which of the three states it means.
+    """
+
+    #: No non-boundary frame so far, and no ``pstrain.api`` frame yet either.
+    CLEAN = "clean"
+    #: A ``pstrain.api`` frame established the route and nothing has broken it.
+    THROUGH_API = "through-api"
+    #: A non-boundary frame broke the route. Permanent: nothing later heals it.
+    INTERRUPTED = "interrupted"
+
+
 @dataclass(frozen=True)
 class _DispatchProvenance:
+    """A CLI origin and the state of its route, carried across a dispatch."""
+
     cli_origin: str
-    api_reached_continuously: bool
+    route: _RouteState
+    #: What broke the route, for the message. Set exactly when ``route`` is
+    #: ``INTERRUPTED``, since an interruption is always attributable.
+    interruption: str | None = None
+
+    def __post_init__(self) -> None:
+        assert (self.interruption is not None) == (self.route is _RouteState.INTERRUPTED)
 
 
 def _is_package(module: str, package: str) -> bool:
@@ -327,7 +367,7 @@ def _stack_route() -> tuple[tuple[FrameType, ...], _DispatchProvenance] | None:
         # ordinary neutral frame: it stays in the segment and the walk continues
         # past it to whatever really dispatched the call.
         if _anchored_package(frame) == _CLI_PACKAGE:
-            return tuple(frames), _DispatchProvenance(_location(frame), False)
+            return tuple(frames), _DispatchProvenance(_location(frame), _RouteState.CLEAN)
         if _compiled_under(frame, _CLI_PACKAGE):
             # Overwrite rather than keep the first: the walk runs inwards to
             # outwards, so the last candidate seen is the outermost one.
@@ -336,23 +376,37 @@ def _stack_route() -> tuple[tuple[FrameType, ...], _DispatchProvenance] | None:
         frame = frame.f_back
     if fallback is not None:
         segment, origin = fallback
-        return segment, _DispatchProvenance(_location(origin), False)
+        return segment, _DispatchProvenance(_location(origin), _RouteState.CLEAN)
     return None
 
 
+def _describe_blocker(frame: FrameType) -> str:
+    module = _frame_module(frame) or "<unknown>"
+    return f"non-boundary frame {module} at {_location(frame)}"
+
+
 def _segment_state(
-    frames: Iterable[FrameType], inherited_api: bool
-) -> tuple[bool, FrameType | None]:
-    api_reached = inherited_api
-    blocker: FrameType | None = None
+    frames: Iterable[FrameType], inherited: _RouteState
+) -> tuple[_RouteState, FrameType | None]:
+    """Advance a route state over ``frames`` and name the frame that broke it.
+
+    An interruption is permanent. Once a non-boundary frame has broken the
+    route, no later frame -- on this stack or on the stack of a worker the work
+    was dispatched to -- can establish it again, so an inherited ``INTERRUPTED``
+    short-circuits rather than being re-derived from the frames now visible.
+    Without that, a worker-side API frame healed an interruption that had
+    already happened on the submitting stack.
+    """
+    if inherited is _RouteState.INTERRUPTED:
+        return _RouteState.INTERRUPTED, None
+    state = inherited
     for frame in frames:
         package = _boundary_package(frame)
         if package == "pstrain.api":
-            api_reached = True
+            state = _RouteState.THROUGH_API
         elif package is None:
-            blocker = frame
-            break
-    return api_reached and blocker is None, blocker
+            return _RouteState.INTERRUPTED, frame
+    return state, None
 
 
 def _capture_dispatch_provenance() -> _DispatchProvenance | None:
@@ -360,8 +414,11 @@ def _capture_dispatch_provenance() -> _DispatchProvenance | None:
     if route is None:
         return None
     frames, origin = route
-    continuous, _ = _segment_state(frames, origin.api_reached_continuously)
-    return _DispatchProvenance(origin.cli_origin, continuous)
+    state, blocker = _segment_state(frames, origin.route)
+    if state is not _RouteState.INTERRUPTED:
+        return _DispatchProvenance(origin.cli_origin, state)
+    interruption = _describe_blocker(blocker) if blocker is not None else origin.interruption
+    return _DispatchProvenance(origin.cli_origin, state, interruption)
 
 
 def _check_targets(targets: Iterable[str]) -> None:
@@ -372,15 +429,16 @@ def _check_targets(targets: Iterable[str]) -> None:
     if route is None:
         return
     frames, provenance = route
-    continuous, blocker = _segment_state(frames, provenance.api_reached_continuously)
+    state, blocker = _segment_state(frames, provenance.route)
     target = targets[0]
     importer = _location(frames[0]) if frames else provenance.cli_origin
-    if not continuous:
-        if blocker is None:
-            reason = "no pstrain.api frame establishes the route"
+    if state is not _RouteState.THROUGH_API:
+        if blocker is not None:
+            reason = f"{_describe_blocker(blocker)} interrupts the route"
+        elif provenance.interruption is not None:
+            reason = f"{provenance.interruption} interrupted the route before this dispatch"
         else:
-            module = _frame_module(blocker) or "<unknown>"
-            reason = f"non-boundary frame {module} at {_location(blocker)} interrupts the route"
+            reason = "no pstrain.api frame establishes the route"
         message = (
             "CLI-to-library boundary violation: "
             f"{target} imported at {importer}; {reason} "
