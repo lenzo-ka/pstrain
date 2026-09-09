@@ -2,7 +2,11 @@
 
 Every WER result records decode coverage as decoded utterances over its
 evaluation-set denominator. Missing audio and decode failures remain visible as
-coverage shortfalls but never block record production or the WER comparison.
+coverage shortfalls, and never block the WER comparison, whose paired delta
+requires identical utterance sets and is therefore sound under a shortfall. A
+live cell may not be pinned with one: its absolute WER is summed over the
+decoded rows alone, so a shortfall would otherwise publish a headline rate over
+a denominator the cell's own coverage fields contradict.
 """
 
 from __future__ import annotations
@@ -1330,6 +1334,21 @@ def _validate_cell(cell: Any, label: str, *, recorded: bool, mode: str | None = 
         or cell["decoded"] > cell["decode_denominator"]
     ):
         raise RuntimeError(f"benchmark record has impossible counts in result cell: {label}")
+    if recorded and mode == "on" and cell["decoded"] < cell["decode_denominator"]:
+        # A cell's absolute WER is the sum of its per-utterance rows over the words
+        # those rows contain, and the rows are the decoded subset. A live cell that
+        # decoded less than its denominator therefore publishes a headline rate over
+        # a denominator its own coverage fields contradict, and a comparison against
+        # a record carrying the same shortfall reports no difference at all. The
+        # paired delta stays sound under a shortfall because it requires identical
+        # utterance sets, so only the absolute rate is gated, and only where it is
+        # pinned: the retired cells were measured on a path that no longer exists
+        # and their coverage is a fact about the past.
+        raise RuntimeError(
+            f"benchmark record pins a live absolute WER over an incomplete decode: {label}: "
+            f"{cell['decoded']:,}/{cell['decode_denominator']:,} decoded. Resolve the "
+            "shortfall and re-measure; a live cell may not be pinned without full coverage."
+        )
     if not isinstance(cell["known_skips"], list) or any(
         not isinstance(item, dict)
         or not all(
