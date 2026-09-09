@@ -1,28 +1,34 @@
 """Runtime observations for the CLI-to-library import boundary.
 
-The guard wraps Python's two supported name-based import entry points for the
-pytest session. Unlike a meta-path finder or audit hook, these entry points run
-even when ``sys.modules`` already contains the target.
+A development-time architecture check. It runs only in the pytest session --
+``tests/conftest.py`` installs it, nothing in the shipped package imports it,
+and ``tests`` is not in the wheel -- so it never sees a user's process. What it
+is for is catching an accidental crossing while the code is being written: the
+command line reaching ``pstrain.lib`` without going through ``pstrain.api``.
+It makes no attempt to withstand a contributor determined to get around it,
+and does not need to, since that contributor can edit this file.
+
+The guard wraps Python's two supported name-based import entry points. Unlike a
+meta-path finder or audit hook, these run even when ``sys.modules`` already
+contains the target.
 
 For an executed ``pstrain.lib`` import with CLI provenance, the application
 stack segment from import to CLI must stay inside ``pstrain.api`` and
 ``pstrain.lib`` and must contain an API frame.
 
 Every role the guard reasons about -- command line, public API, library -- is
-established the same way, and from something the code being judged cannot
-rewrite. The three package directories are derived eagerly at installation from
-the verified checkout root and are then fixed for the session; the guard never
-consults a package's ``__path__`` afterwards, because ``__path__`` is an
-ordinary mutable list. A frame belongs to a package only when the live
-``sys.modules`` entry for its ``__name__`` owns that frame's globals and its
-code was compiled from a file under that frozen directory. A writable
-``__name__`` alone proves nothing, and it proves nothing for a command-line
-frame either: a frame that merely claims a ``pstrain.cli`` name is an ordinary
-neutral frame, so it does not end the stack walk and cannot hide the frames
-beyond it.
+established the same way. The three package directories are derived at
+installation from the checkout root the session already trusts and are then
+fixed; the guard does not consult a package's ``__path__`` afterwards, since
+that is an ordinary mutable list a test can legitimately rearrange. A frame
+belongs to a package when the live ``sys.modules`` entry for its ``__name__``
+owns that frame's globals and its code was compiled from a file under that
+frozen directory. A frame that only claims a ``pstrain.cli`` name, with neither
+half, is an ordinary neutral frame: it does not end the stack walk and cannot
+hide the frames beyond it.
 
-Ordinary command-line code can hold just one of those two halves. The live entry
-can be missing or rebound while the same function keeps running, and a real
+Ordinary command-line code can hold just one of those halves. The live entry can
+be missing or rebound while the same function keeps running, and a real
 command-line file executed through a loader is never registered; equally, a
 zipapp, a frozen bundle or an unusual loader gives a genuine ``pstrain.cli``
 module a ``co_filename`` that is not a path under the checkout. Having no origin
@@ -34,32 +40,32 @@ import and the furthest candidate; since a candidate is itself a non-boundary
 frame, moving the origin outwards can only lengthen the segment and tighten the
 verdict.
 
+A route's state is three-valued, not two: clean but not yet through an API
+frame, established through one, or interrupted. An interruption is permanent,
+which is what stops a worker-side API frame from healing a route that a neutral
+frame had already broken before the work was dispatched.
+
 Only two kinds of infrastructure are transparent, both held by identity. The
 import machinery is recognized by module-dictionary identity. A short list of
 exact multiprocessing code objects covers serialization: pickling re-imports
 the defining module of an object its caller already chose, so it is transparent
-when an authenticated boundary frame invoked it, while unpickling takes its
-target from the incoming bytes and is transparent only inside ``pstrain.lib``,
-where the import it triggers crosses no boundary. Every other frame, the rest
-of ``multiprocessing`` included, stays in the segment. This rejects callbacks
+when a boundary frame invoked it, while unpickling takes its target from the
+incoming bytes and is transparent only inside ``pstrain.lib``, where the import
+it triggers crosses no boundary. Every other frame, the rest of
+``multiprocessing`` included, stays in the segment. This rejects callbacks
 resumed below an API frame and library functions reached without one.
 
 CLI provenance is copied into direct ``threading.Thread`` targets and
 ``ThreadPoolExecutor`` submissions so a worker cannot lose the origin merely by
-losing the submitting stack. What is carried is three-valued, not two: the route
-so far is clean but has not reached an API frame, established through one, or
-interrupted. An interruption is permanent, which is what stops a worker-side API
-frame from establishing a route that a neutral frame had already broken before
-the work was dispatched. A violation raised on a worker thread is also recorded,
-because a bare ``threading.Thread`` prints and discards it instead of failing
-the session.
+losing the submitting stack. A violation raised on a worker thread is also
+recorded, because a bare ``threading.Thread`` prints and discards it instead of
+failing the session.
 
-This is not a complete architectural proof. The runtime observation covers
-only supported name-based imports executed in the pytest process after
-installation. The companion AST scan covers ordinary CLI imports and access
-through a directly imported ``pstrain`` alias, including paths tests do not
-execute. Their remaining limits are documented in
-``docs/design/cli-lib-boundary.md``.
+This is not a complete architectural proof. The runtime observation covers only
+supported name-based imports executed in the pytest process after installation.
+The companion AST scan covers ordinary CLI imports and access through a directly
+imported ``pstrain`` alias, including paths tests do not execute. Their
+remaining limits are documented in ``docs/design/cli-lib-boundary.md``.
 """
 
 from __future__ import annotations
