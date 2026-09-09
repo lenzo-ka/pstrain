@@ -3,11 +3,15 @@
 import builtins
 import concurrent.futures
 import importlib.util
+import inspect
+import pkgutil
 import re
 import subprocess
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -428,6 +432,77 @@ def test_runtime_guard_accepts_lazy_import_through_public_api(tmp_path: Path) ->
     assert cli_namespace["result"] == (
         False,
         "Failed to load: Cannot determine veclen for 1 floats",
+    )
+
+
+def _public_api_modules() -> list[ModuleType]:
+    package = importlib.import_module("pstrain.api")
+    modules = [package]
+    for info in pkgutil.walk_packages(package.__path__, prefix=f"{package.__name__}."):
+        if any(part.startswith("_") for part in info.name.split(".")):
+            continue
+        modules.append(importlib.import_module(info.name))
+    return modules
+
+
+def _parameter_shape(function: Callable[..., object]) -> list[tuple[str, object, object]]:
+    """Return the parameters that callers depend on, ignoring annotations."""
+    return [
+        (parameter.name, parameter.kind, parameter.default)
+        for parameter in inspect.signature(function).parameters.values()
+    ]
+
+
+def _api_forwarders() -> list[tuple[str, Callable[..., object], Callable[..., object]]]:
+    """Find public API functions written to put an API frame before a library call.
+
+    The runtime rule needs an API frame, not merely an API name, so the public
+    API cannot reach the command line's lazily importing work through a bare
+    re-export. Each such name is a function that forwards to a private alias of
+    the library callable it fronts.
+    """
+    forwarders: list[tuple[str, Callable[..., object], Callable[..., object]]] = []
+    for module in _public_api_modules():
+        for name in getattr(module, "__all__", ()):
+            wrapper = getattr(module, name, None)
+            target = getattr(module, f"_{name}", None)
+            if (
+                inspect.isfunction(wrapper)
+                and wrapper.__module__ == module.__name__
+                and callable(target)
+            ):
+                forwarders.append((f"{module.__name__}.{name}", wrapper, target))
+    return forwarders
+
+
+def test_public_api_forwarders_keep_their_library_signatures() -> None:
+    forwarders = _api_forwarders()
+    assert forwarders, "no public API forwarders were discovered"
+
+    drifted = {
+        name: (_parameter_shape(wrapper), _parameter_shape(target))
+        for name, wrapper, target in forwarders
+        if _parameter_shape(wrapper) != _parameter_shape(target)
+    }
+
+    assert not drifted, "\n".join(
+        f"{name} forwards {wrapper} but its target takes {target}"
+        for name, (wrapper, target) in sorted(drifted.items())
+    )
+
+
+def test_public_pipeline_forwarders_keep_their_library_signatures() -> None:
+    api_pipeline = importlib.import_module("pstrain.api.pipeline")
+    lib_pipeline = importlib.import_module("pstrain.lib.pipeline")
+
+    run_pipeline = _parameter_shape(api_pipeline.run_pipeline)
+    pipeline_run = _parameter_shape(lib_pipeline.Pipeline.run)
+    assert run_pipeline[0][0] == "pipeline"
+    assert pipeline_run[0][0] == "self"
+    assert run_pipeline[1:] == pipeline_run[1:]
+
+    assert _parameter_shape(api_pipeline.PipelineContext.from_config) == _parameter_shape(
+        lib_pipeline.PipelineContext.from_config
     )
 
 

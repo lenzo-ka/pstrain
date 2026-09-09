@@ -24,6 +24,13 @@ API function that calls a neutral callback or resumes a neutral generator. It
 also rejects a lazy library import made by a library function that CLI code
 obtained without an API frame on the call path.
 
+The rule needs an API frame, not merely an API name, so `pstrain.api` forwards
+through concrete functions wherever the command line reaches work that imports
+lazily. A bare re-export leaves nothing on the stack and its callers would be
+refused. Each forwarder's parameters are pinned to the library callable it
+fronts, so the published signature cannot drift from the implementation behind
+it.
+
 Violations use a dedicated `BaseException` subclass so an application's broad
 `except Exception` handler cannot turn a failed boundary check into an ordinary
 fallback result.
