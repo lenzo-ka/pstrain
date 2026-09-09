@@ -22,10 +22,16 @@ the preserved upstream oracle, historically attributed to stock SphinxTrain;
 see its [provenance limits](https://github.com/lenzo-ka/pstrain/blob/main/docs/benchmarks/oracle-provenance.md).
 The arms share one matched decode path but are **NOT COMPARABLE** for
 implementation attribution because the oracle's producing lineage is unknown.
-On SLT-55, pstrain's favorable point estimate is 139 errors (27.0955% WER)
-versus 144 (28.0702%) for that oracle, with 23 of 55
-per-utterance error rows differing; the 95% paired confidence interval spans
-zero, so this is not a statistically significant difference. The
+The two cells carry different weight. The 3,395-utterance set is cross-speaker,
+so it measures what the model does on voices it was not trained on: there
+pstrain records 22,703 errors (75.7221% WER) against 22,638 (75.5053%) for that
+oracle — behind by 0.2168 percentage points, a margin the data cannot separate
+from zero (95% paired interval [-0.2414, +0.6713]). SLT-55 is a
+same-speaker held-out cell of 55 utterances; there pstrain is ahead, 139 errors
+(27.0955% WER) against 144 (28.0702%), with 23 of 55 per-utterance error rows
+differing, but its interval of [-3.6965, +1.6575] is consistent with anything
+from a 3.7-point gain to a 1.7-point regression and so settles little on its
+own. The larger cross-speaker set is where the evidence is. The
 [benchmark pin](https://github.com/lenzo-ka/pstrain/blob/main/docs/benchmarks/arctic-pin.md) and its
 [machine-readable record](https://github.com/lenzo-ka/pstrain/blob/main/evidence/arctic-pin/record.json) preserve the
 evidence and measurement conditions. Run `make verified` for the repository's
