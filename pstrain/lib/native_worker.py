@@ -442,6 +442,24 @@ class _NativeWorker:
             Path(self._diagnostic_path).unlink(missing_ok=True)
             self._diagnostic_path = None
 
+    def _require_running(self, operation: str) -> tuple[Connection, BaseProcess]:
+        """Return the helper this call must use, or say plainly that there is none.
+
+        Every caller reaches this immediately after :meth:`_start` returned
+        without raising, so a missing helper is a bug in this module rather
+        than a runtime condition. It is still checked rather than asserted:
+        an assertion carries no message, and it disappears entirely under
+        ``python -O``, which would let the caller go on to use ``None`` as a
+        connection.
+        """
+        connection, process = self._connection, self._process
+        if connection is None or process is None:
+            raise PstrainWorkerError(
+                f"no native worker is running for {operation} even though one was "
+                "just started; the helper was reclaimed between starting and using it"
+            )
+        return connection, process
+
     def _start(self) -> None:
         self._discard()
         fd, path = tempfile.mkstemp(prefix="pstrain-native-", suffix=".log")
@@ -466,7 +484,11 @@ class _NativeWorker:
                     child.close()
                 self._diagnostic_path = None
                 Path(path).unlink(missing_ok=True)
-        assert parent is not None and child is not None
+        if parent is None or child is None:
+            raise PstrainWorkerError(
+                "the native worker process started without a request pipe; "
+                "no request can be sent to it"
+            )
         child.close()
         self._process, self._connection = process, parent
         ready = wait([parent, process.sentinel], timeout=_START_TIMEOUT)
@@ -529,7 +551,7 @@ class _NativeWorker:
         deadline = time.monotonic() + _REQUEST_TIMEOUT
         if self._process is None or not self._process.is_alive():
             self._start()
-        assert self._connection is not None and self._process is not None
+        self._require_running(label)
         self._request_id = request_id
         self._truncate_diagnostic()
         try:
@@ -538,26 +560,38 @@ class _NativeWorker:
             # The helper died between requests; respawn and send once more.
             self._discard()
             self._start()
-            assert self._connection is not None and self._process is not None
+            self._require_running(label)
             try:
                 self._send_request(request, deadline)
             except TimeoutError:
                 self._raise_timeout(label)
-            except (BrokenPipeError, EOFError, OSError):
-                # The fresh helper died during the retried send; give up loudly
-                # rather than leaving a connection holding a partial frame.
-                self._discard()
+            except (BrokenPipeError, EOFError, OSError) as exc:
+                # A fresh helper failed the same send. Do not discard first:
+                # discarding reaps the exit status and deletes the diagnostic
+                # file, so classification would have nothing left to read. If
+                # the helper is in fact alive, the fault is in this process's
+                # transport, not in the helper, and saying "the worker died"
+                # would send the reader hunting for a crash that never was.
+                if self._process is not None and self._process.is_alive():
+                    diagnostic = self._tail().strip()
+                    self._discard()
+                    detail = f": {diagnostic}" if diagnostic else ""
+                    raise PstrainWorkerError(
+                        f"cannot send the {label} request to a running native worker: "
+                        f"{exc!r}{detail}"
+                    ) from exc
                 self._raise_death(label, inputs, eof=True)
         except TimeoutError:
             self._raise_timeout(label)
 
+        connection, process = self._require_running(label)
         remaining = max(0.0, deadline - time.monotonic())
-        ready = wait([self._connection, self._process.sentinel], timeout=remaining)
+        ready = wait([connection, process.sentinel], timeout=remaining)
         if not ready:
             self._raise_timeout(label)
-        if self._connection in ready:
+        if connection in ready:
             try:
-                message = self._connection.recv()
+                message = connection.recv()
             except EOFError:
                 return self._raise_death(label, inputs, eof=True)
             kind, response_id, payload = message
@@ -585,13 +619,18 @@ class _NativeWorker:
 
     def _send_request(self, payload: bytes, deadline: float) -> None:
         """Send one bounded request without allowing a full pipe to hang."""
-        assert self._connection is not None
-        _write_request(self._connection, payload, deadline)
+        connection = self._connection
+        if connection is None:
+            raise PstrainWorkerError(
+                "native worker connection is closed; the request was never sent"
+            )
+        _write_request(connection, payload, deadline)
 
     def _raise_timeout(self, operation: str) -> NoReturn:
-        assert self._process is not None
-        self._process.kill()
-        self._process.join()
+        process = self._process
+        if process is not None:
+            process.kill()
+            process.join()
         diagnostic = self._tail()
         self._discard()
         raise PstrainWorkerError(
@@ -610,9 +649,21 @@ class _NativeWorker:
         return _diagnostic_tail(self._diagnostic_path or "")
 
     def _raise_death(self, operation: str, inputs: tuple[str, ...], *, eof: bool) -> NoReturn:
-        assert self._process is not None
-        self._process.join(timeout=1)
-        returncode = self._process.exitcode
+        process = self._process
+        if process is None:
+            # Nothing left to classify: the helper and its diagnostic file were
+            # already reclaimed. Say so rather than reporting a death we did
+            # not observe.
+            diagnostic = self._tail()
+            self._discard()
+            raise PstrainWorkerProtocolError(
+                operation,
+                inputs,
+                diagnostic
+                or "the native worker was discarded before its outcome could be classified",
+            )
+        process.join(timeout=1)
+        returncode = process.exitcode
         diagnostic = self._tail()
         self._discard()
         if returncode is not None and returncode < 0:

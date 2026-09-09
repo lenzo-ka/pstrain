@@ -8,6 +8,7 @@ as a typed exception with this interpreter still standing.
 from __future__ import annotations
 
 import contextlib
+import errno
 import os
 import pickle
 import re
@@ -414,3 +415,40 @@ def test_the_exit_finalizer_is_registered_once_per_process(
     monkeypatch.setattr(native_worker.os, "getpid", lambda: forked)
     native_worker.close_helper_before_children_are_joined()
     assert registered == [10, 10]
+
+
+@requires_c_library
+def test_a_send_failure_names_the_transport_and_not_a_worker_death(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A request write that fails in this process must say so, and keep its cause.
+
+    Observed on Windows: the first request write raised ``OSError: [Errno 9]
+    Bad file descriptor`` before anything reached the helper, the respawned
+    helper failed the retried write identically, and the retry handler
+    discarded the worker and then tripped a bare ``assert self._process is not
+    None``. What reached the caller was an ``AssertionError`` with no message,
+    about a process that had never been the problem -- and under ``python -O``
+    that assertion would have vanished and let the code run on past a
+    discarded worker. The failing write is reproduced here directly; nothing
+    about the handling depends on why the write failed.
+    """
+    failure = OSError(errno.EBADF, "Bad file descriptor")
+
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise failure
+
+    monkeypatch.setattr(native_worker, "_write_request", refuse)
+    phones = _phone_list(tmp_path)
+
+    worker = native_worker._NativeWorker()
+    try:
+        with pytest.raises(native_worker.PstrainWorkerError) as raised:
+            worker.call("mdef_gen_ci", (str(phones), str(tmp_path / "out.mdef"), 3), (str(phones),))
+    finally:
+        worker._discard()
+
+    message = str(raised.value)
+    assert "cannot send the mdef_gen_ci request" in message
+    assert "Bad file descriptor" in message
+    assert raised.value.__cause__ is failure
