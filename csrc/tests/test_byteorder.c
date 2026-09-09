@@ -1,4 +1,7 @@
-/* Exercise byte swaps directly and through the v8_seg array reader. */
+/*
+ * Exercise byte swaps directly, through the model-file reader and writer in
+ * bio.c, and through the array readers in s3io.c.
+ */
 
 #include <stdint.h>
 #include <stdio.h>
@@ -6,6 +9,7 @@
 #include <string.h>
 
 #include <s3/s3io.h>
+#include <sphinxbase/bio.h>
 #include <sphinxbase/byteorder.h>
 
 #define CHECK(cond, msg)                                                    \
@@ -218,6 +222,258 @@ check_float_swaps(const char *dir)
     return 0;
 }
 
+/*
+ * The checksum bio.c accumulates, restated here from its definition rather
+ * than borrowed from the implementation: rotate the running sum left by the
+ * element width's share of 32 bits and add the element's value in host byte
+ * order.  Every S3 model file carries one of these, so the numbers below
+ * pin what a reader elsewhere has to reproduce.
+ */
+static uint32
+expected_chksum32(const void *buf, size_t n_el)
+{
+    const unsigned char *p = (const unsigned char *)buf;
+    uint32 sum = 0;
+    size_t i;
+
+    for (i = 0; i < n_el; ++i, p += 4) {
+        uint32 v;
+
+        memcpy(&v, p, sizeof(v));
+        sum = (sum << 20 | sum >> 12) + v;
+    }
+    return sum;
+}
+
+static uint32
+expected_chksum16(const void *buf, size_t n_el)
+{
+    const unsigned char *p = (const unsigned char *)buf;
+    uint32 sum = 0;
+    size_t i;
+
+    for (i = 0; i < n_el; ++i, p += 2) {
+        uint16 v;
+
+        memcpy(&v, p, sizeof(v));
+        sum = (sum << 10 | sum >> 22) + v;
+    }
+    return sum;
+}
+
+/*
+ * bio_fread() and bio_fwrite() carry the byte swap and the checksum for every
+ * binary model file the project reads or writes -- means, variances, mixture
+ * weights, transition matrices, senones.  Both reach the caller's buffer
+ * through a void *, and the buffer is usually float storage: an array here,
+ * and in interp.c the address of a declared float32 local.  Drive them the
+ * way those callers do, on storage whose declared type is float, and read the
+ * result back through float lvalues.
+ */
+static int
+check_bio_float_io(const char *dir)
+{
+    enum { N32 = sizeof(float32_asymmetric) / 4 };
+    char path[1024];
+    float32 values[N32];
+    float32 original[N32];
+    float32 back[N32];
+    float32 scalar, scalar_back;
+    unsigned char written[N32 * 4];
+    const unsigned char *host;
+    uint32 write_sum = 0, read_sum = 0;
+    FILE *fh;
+    size_t i, j;
+
+    CHECK(snprintf(path, sizeof(path), "%s/byteorder.bio", dir) > 0,
+          "format bio path");
+
+    /* Float storage filled by fread, exactly as a model reader fills it. */
+    CHECK(load_raw(path, float32_asymmetric, sizeof(float32_asymmetric),
+                   values) == 0, "load asymmetric patterns for bio");
+    for (i = 0; i < N32; ++i)
+        original[i] = values[i];
+    host = (const unsigned char *)values;
+
+    fh = fopen(path, "wb");
+    CHECK(fh != NULL, "open bio output");
+    CHECK(bio_fwrite(values, 4, N32, fh, 1, &write_sum) == N32,
+          "bio_fwrite float array with swapping");
+    CHECK(fclose(fh) == 0, "close bio output");
+
+    /* The caller's array must come back unchanged: bio_fwrite swaps a copy. */
+    for (i = 0; i < N32; ++i)
+        CHECK(values[i] == original[i],
+              "bio_fwrite must leave the caller's floats alone");
+
+    /* What landed on disk is the byte-reversed image of that array. */
+    fh = fopen(path, "rb");
+    CHECK(fh != NULL, "reopen bio output");
+    CHECK(fread(written, 1, sizeof(written), fh) == sizeof(written),
+          "read back the bio image");
+    CHECK(fclose(fh) == 0, "close bio image");
+    for (i = 0; i < N32; ++i)
+        for (j = 0; j < 4; ++j)
+            CHECK(written[i * 4 + j] == host[i * 4 + (3 - j)],
+                  "bio_fwrite reverses every byte of every float");
+
+    /* And reading it back with the same swap restores the float values. */
+    fh = fopen(path, "rb");
+    CHECK(fh != NULL, "reopen bio input");
+    CHECK(bio_fread(back, 4, N32, fh, 1, &read_sum) == N32,
+          "bio_fread float array with swapping");
+    CHECK(fclose(fh) == 0, "close bio input");
+    for (i = 0; i < N32; ++i)
+        CHECK(back[i] == original[i],
+              "a float read after bio_fread must see the original value");
+
+    /*
+     * The checksum is written into the file and verified on the next read,
+     * so it has to mean the same thing on both sides and has to keep meaning
+     * what it has always meant.
+     */
+    CHECK(write_sum == read_sum, "bio_fwrite and bio_fread agree on the sum");
+    CHECK(write_sum == expected_chksum32(original, N32),
+          "the 4-byte checksum keeps its defined value");
+    CHECK(write_sum != 0, "the checksum is not vacuously zero");
+
+    /* interp.c's shape: a declared float32 scalar, by address. */
+    scalar = original[2];
+    write_sum = read_sum = 0;
+    fh = fopen(path, "wb");
+    CHECK(fh != NULL, "open bio scalar output");
+    CHECK(bio_fwrite(&scalar, sizeof(float32), 1, fh, 1, &write_sum) == 1,
+          "bio_fwrite a declared float32 scalar");
+    CHECK(fclose(fh) == 0, "close bio scalar output");
+    CHECK(scalar == original[2], "bio_fwrite leaves the scalar alone");
+    fh = fopen(path, "rb");
+    CHECK(fh != NULL, "open bio scalar input");
+    CHECK(bio_fread(&scalar_back, sizeof(float32), 1, fh, 1, &read_sum) == 1,
+          "bio_fread into a declared float32 scalar");
+    CHECK(fclose(fh) == 0, "close bio scalar input");
+    CHECK(scalar_back == scalar, "the scalar survives the swapped round trip");
+    CHECK(write_sum == read_sum, "the scalar checksums agree");
+
+    /* The 2-byte width, which the same two loops also serve. */
+    {
+        static const unsigned char raw16[] = {
+            0x00, 0x01, 0xff, 0xfe, 0x12, 0x34, 0x80, 0x01,
+            0x7f, 0xff, 0xaa, 0x55
+        };
+        enum { N16 = sizeof(raw16) / 2 };
+        int16 in16[N16], out16[N16];
+        unsigned char image16[sizeof(raw16)];
+        const unsigned char *host16;
+
+        CHECK(load_raw(path, raw16, sizeof(raw16), in16) == 0,
+              "load int16 patterns");
+        host16 = (const unsigned char *)in16;
+        write_sum = read_sum = 0;
+        fh = fopen(path, "wb");
+        CHECK(fh != NULL, "open bio int16 output");
+        CHECK(bio_fwrite(in16, 2, N16, fh, 1, &write_sum) == N16,
+              "bio_fwrite int16 array with swapping");
+        CHECK(fclose(fh) == 0, "close bio int16 output");
+        fh = fopen(path, "rb");
+        CHECK(fh != NULL, "reopen bio int16 image");
+        CHECK(fread(image16, 1, sizeof(image16), fh) == sizeof(image16),
+              "read back the int16 image");
+        CHECK(fclose(fh) == 0, "close bio int16 image");
+        for (i = 0; i < N16; ++i)
+            for (j = 0; j < 2; ++j)
+                CHECK(image16[i * 2 + j] == host16[i * 2 + (1 - j)],
+                      "bio_fwrite reverses both bytes of every int16");
+        fh = fopen(path, "rb");
+        CHECK(fh != NULL, "reopen bio int16 input");
+        CHECK(bio_fread(out16, 2, N16, fh, 1, &read_sum) == N16,
+              "bio_fread int16 array with swapping");
+        CHECK(fclose(fh) == 0, "close bio int16 input");
+        CHECK(memcmp(in16, out16, sizeof(in16)) == 0,
+              "the int16 array survives the swapped round trip");
+        CHECK(write_sum == read_sum, "the int16 checksums agree");
+        CHECK(write_sum == expected_chksum16(in16, N16),
+              "the 2-byte checksum keeps its defined value");
+    }
+
+    /* The 1-byte width takes no swap, but does take a checksum. */
+    {
+        static const unsigned char raw8[] = { 0, 1, 127, 128, 255, 42, 7, 200 };
+        unsigned char out8[sizeof(raw8)];
+        uint32 sum8 = 0, expect8 = 0;
+
+        for (i = 0; i < sizeof(raw8); ++i)
+            expect8 = (expect8 << 5 | expect8 >> 27) + raw8[i];
+        write_sum = read_sum = 0;
+        fh = fopen(path, "wb");
+        CHECK(fh != NULL, "open bio int8 output");
+        CHECK(bio_fwrite(raw8, 1, sizeof(raw8), fh, 1, &write_sum)
+              == (int32)sizeof(raw8), "bio_fwrite bytes with swapping");
+        CHECK(fclose(fh) == 0, "close bio int8 output");
+        fh = fopen(path, "rb");
+        CHECK(fh != NULL, "open bio int8 input");
+        CHECK(bio_fread(out8, 1, sizeof(out8), fh, 1, &read_sum)
+              == (int32)sizeof(out8), "bio_fread bytes with swapping");
+        CHECK(fclose(fh) == 0, "close bio int8 input");
+        CHECK(memcmp(raw8, out8, sizeof(raw8)) == 0,
+              "a 1-byte element is never swapped");
+        CHECK(write_sum == read_sum && write_sum == expect8,
+              "the 1-byte checksum keeps its defined value");
+        (void)sum8;
+    }
+
+    CHECK(remove(path) == 0, "remove bio scratch file");
+    return 0;
+}
+
+/*
+ * s3io.c's areadfloat() reads a float array whose byte order disagrees with
+ * the host and swaps it in place, then hands it to a caller that reads it as
+ * floats.  awritefloat() writes exactly such a file, so the pair is its own
+ * fixture.
+ */
+static int
+check_s3io_float_arrays(const char *dir)
+{
+    enum { N = sizeof(float32_asymmetric) / 4 };
+    char path[1024];
+    float values[N];
+    float original[N];
+    float *readback = NULL;
+    float *part = NULL;
+    int length = 0;
+    size_t i;
+
+    CHECK(snprintf(path, sizeof(path), "%s/byteorder.s3io", dir) > 0,
+          "format s3io path");
+    CHECK(load_raw(path, float32_asymmetric, sizeof(float32_asymmetric),
+                   values) == 0, "load asymmetric patterns for s3io");
+    for (i = 0; i < N; ++i)
+        original[i] = values[i];
+
+    CHECK(awritefloat(path, values, N) == N, "awritefloat the array");
+    for (i = 0; i < N; ++i)
+        CHECK(values[i] == original[i],
+              "awritefloat swaps out and back, leaving the floats unchanged");
+
+    CHECK(areadfloat(path, &readback, &length) == N, "areadfloat the array");
+    CHECK(length == (int)N, "areadfloat preserves the count");
+    for (i = 0; i < N; ++i)
+        CHECK(readback[i] == original[i],
+              "a float read after areadfloat must see the original value");
+    free(readback);
+
+    CHECK(areadfloat_part(path, 1, (int)N - 1, &part, &length) == (int)N - 1,
+          "areadfloat_part the tail of the array");
+    CHECK(length == (int)N - 1, "areadfloat_part preserves the count");
+    for (i = 0; i + 1 < N; ++i)
+        CHECK(part[i] == original[i + 1],
+              "a float read after areadfloat_part must see the original value");
+    free(part);
+
+    CHECK(remove(path) == 0, "remove s3io scratch file");
+    return 0;
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -285,7 +541,12 @@ main(int argc, char *argv[])
 
     if (check_float_swaps(argv[1]) != 0)
         return 1;
+    if (check_bio_float_io(argv[1]) != 0)
+        return 1;
+    if (check_s3io_float_arrays(argv[1]) != 0)
+        return 1;
 
-    printf("PASS: byte swaps preserve integer, float, and v8_seg bits\n");
+    printf("PASS: byte swaps and model-file checksums preserve integer, "
+           "float, and v8_seg bits\n");
     return 0;
 }
