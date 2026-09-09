@@ -206,6 +206,17 @@ def pytest_configure(config: pytest.Config) -> None:
             "Build it first (e.g. 'make build-c') or unset PSTRAIN_REQUIRE_CLIB."
         )
     _install_pool_constructor_guards()
+    cli_lib_boundary_guard.assert_installed()
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_call(item: pytest.Item) -> Any:
+    """Keep tests from silently displacing a session-wide boundary wrapper."""
+    cli_lib_boundary_guard.assert_installed()
+    try:
+        yield
+    finally:
+        cli_lib_boundary_guard.assert_installed()
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:
@@ -218,8 +229,16 @@ def pytest_terminal_summary(terminalreporter: Any) -> None:
     for location, count in sorted(_OBSERVED_PRODUCTION_POOLS.items()):
         terminalreporter.write_line(f"{location}: {count}")
     terminalreporter.write_sep("=", "observed CLI-to-library import routes")
-    for route, count in sorted(cli_lib_boundary_guard.observed_routes().items()):
-        terminalreporter.write_line(f"{route}: {count}")
+    if getattr(terminalreporter.config.option, "numprocesses", None):
+        terminalreporter.write_line(
+            "xdist workers enforce the guard independently; route observations are not aggregated"
+        )
+    else:
+        routes = cli_lib_boundary_guard.observed_routes()
+        if not routes:
+            terminalreporter.write_line("no CLI-routed library imports observed in this process")
+        for route, count in sorted(routes.items()):
+            terminalreporter.write_line(f"{route}: {count}")
 
 
 # =============================================================================

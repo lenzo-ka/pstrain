@@ -33,6 +33,7 @@ from pstrain.api.pipeline import (
     PipelineContext,
     UnknownTargetError,
     build_pipeline,
+    run_pipeline,
 )
 from pstrain.cli.base import Command, CommandContext, CommandResult
 
@@ -603,7 +604,8 @@ class TrainCommand(Command):
             pipeline = build_pipeline(pipeline_ctx)
             output_context = redirect_stdout(sys.stderr) if ctx.json_output else nullcontext()
             with output_context:
-                rc = pipeline.run(
+                rc = run_pipeline(
+                    pipeline,
                     ctx.args.target,
                     force=ctx.args.force,
                     jobs=ctx.args.jobs,

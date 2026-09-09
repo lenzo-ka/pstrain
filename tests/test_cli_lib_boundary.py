@@ -1,12 +1,17 @@
 """Tests for the CLI-to-lib boundary ratchet."""
 
+import builtins
+import concurrent.futures
 import importlib.util
 import re
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
+
+from tests import cli_lib_boundary_guard
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location(
@@ -152,31 +157,210 @@ def test_runtime_guard_rejects_cli_lib_import_constructions(
     filename = ROOT / "pstrain" / "cli" / "runtime_boundary_probe.py"
     namespace = {"__name__": "pstrain.cli.runtime_boundary_probe", "__package__": "pstrain.cli"}
     with pytest.raises(
-        AssertionError,
+        cli_lib_boundary_guard.CliLibBoundaryViolation,
         match=(
             rf"CLI-to-library boundary violation: {re.escape(target)} imported at "
-            rf".*{re.escape(import_location)} "
+            rf".*{re.escape(import_location)}; "
         ),
     ):
         exec(compile(source, filename.as_posix(), "exec"), namespace)
 
 
-def test_runtime_guard_accepts_api_route_from_cli() -> None:
-    def import_through_api() -> None:
-        filename = ROOT / "pstrain" / "api" / "runtime_boundary_probe.py"
-        namespace = {
-            "__name__": "pstrain.api.runtime_boundary_probe",
-            "__package__": "pstrain.api",
-        }
-        exec(compile("import pstrain.lib.bw\n", filename.as_posix(), "exec"), namespace)
-
+def test_runtime_guard_accepts_continuous_api_route_from_cli() -> None:
+    api_filename = ROOT / "pstrain" / "api" / "runtime_boundary_probe.py"
+    api_namespace = {
+        "__name__": "pstrain.api.runtime_boundary_probe",
+        "__package__": "pstrain.api",
+    }
+    exec(
+        compile(
+            "def import_through_api():\n    import pstrain.lib.bw\n",
+            api_filename.as_posix(),
+            "exec",
+        ),
+        api_namespace,
+    )
     filename = ROOT / "pstrain" / "cli" / "runtime_boundary_probe.py"
     namespace = {
         "__name__": "pstrain.cli.runtime_boundary_probe",
         "__package__": "pstrain.cli",
-        "import_through_api": import_through_api,
+        "import_through_api": api_namespace["import_through_api"],
     }
     exec(compile("import_through_api()\n", filename.as_posix(), "exec"), namespace)
+
+
+def test_runtime_guard_rejects_api_callback_laundering() -> None:
+    callback_filename = ROOT / "boundary_callback_probe.py"
+    callback_namespace = {"__name__": "boundary_callback_probe", "importlib": importlib}
+    exec(
+        compile(
+            'def callback():\n    importlib.import_module("pstrain.lib.bw")\n',
+            callback_filename.as_posix(),
+            "exec",
+        ),
+        callback_namespace,
+    )
+    api_filename = ROOT / "pstrain" / "api" / "runtime_callback_probe.py"
+    api_namespace = {"__name__": "pstrain.api.runtime_callback_probe"}
+    exec(
+        compile("def invoke(callback):\n    callback()\n", api_filename.as_posix(), "exec"),
+        api_namespace,
+    )
+    cli_filename = ROOT / "pstrain" / "cli" / "runtime_callback_probe.py"
+    cli_namespace = {
+        "__name__": "pstrain.cli.runtime_callback_probe",
+        "callback": callback_namespace["callback"],
+        "invoke": api_namespace["invoke"],
+    }
+
+    with pytest.raises(
+        cli_lib_boundary_guard.CliLibBoundaryViolation,
+        match="non-boundary frame boundary_callback_probe",
+    ):
+        exec(compile("invoke(callback)\n", cli_filename.as_posix(), "exec"), cli_namespace)
+
+
+def test_runtime_guard_rejects_generator_resumed_by_api() -> None:
+    generator_filename = ROOT / "boundary_generator_probe.py"
+    generator_namespace = {"__name__": "boundary_generator_probe", "importlib": importlib}
+    exec(
+        compile(
+            'def values():\n    importlib.import_module("pstrain.lib.bw")\n    yield 1\n',
+            generator_filename.as_posix(),
+            "exec",
+        ),
+        generator_namespace,
+    )
+    api_filename = ROOT / "pstrain" / "api" / "runtime_generator_probe.py"
+    api_namespace = {"__name__": "pstrain.api.runtime_generator_probe"}
+    exec(
+        compile("def consume(values):\n    return list(values)\n", api_filename.as_posix(), "exec"),
+        api_namespace,
+    )
+    cli_filename = ROOT / "pstrain" / "cli" / "runtime_generator_probe.py"
+    cli_namespace = {
+        "__name__": "pstrain.cli.runtime_generator_probe",
+        "consume": api_namespace["consume"],
+        "values": generator_namespace["values"],
+    }
+
+    with pytest.raises(
+        cli_lib_boundary_guard.CliLibBoundaryViolation,
+        match="non-boundary frame boundary_generator_probe",
+    ):
+        exec(compile("consume(values())\n", cli_filename.as_posix(), "exec"), cli_namespace)
+
+
+def test_runtime_guard_rejects_executor_dispatch_from_neutral_helper() -> None:
+    helper_filename = ROOT / "boundary_executor_probe.py"
+    helper_namespace = {"__name__": "boundary_executor_probe", "importlib": importlib}
+    exec(
+        compile(
+            "def import_lib():\n"
+            '    return importlib.import_module("pstrain.lib.bw")\n'
+            "def submit(executor):\n"
+            "    return executor.submit(import_lib).result()\n",
+            helper_filename.as_posix(),
+            "exec",
+        ),
+        helper_namespace,
+    )
+    cli_filename = ROOT / "pstrain" / "cli" / "runtime_executor_probe.py"
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        executor.submit(lambda: None).result()  # Ensure the worker predates CLI provenance.
+        cli_namespace = {
+            "__name__": "pstrain.cli.runtime_executor_probe",
+            "executor": executor,
+            "submit": helper_namespace["submit"],
+        }
+        with pytest.raises(
+            cli_lib_boundary_guard.CliLibBoundaryViolation,
+            match="non-boundary frame boundary_executor_probe",
+        ):
+            exec(compile("submit(executor)\n", cli_filename.as_posix(), "exec"), cli_namespace)
+
+
+def test_runtime_guard_rejects_first_import_from_preloaded_library_function(
+    tmp_path: Path,
+) -> None:
+    importlib.import_module("pstrain.lib.filetypes")
+    filetypes = sys.modules["pstrain.lib.filetypes"]
+    validate_file_type = filetypes.validate_file_type
+    feature_type = filetypes.FileType.FEATURES
+    feature_path = tmp_path / "preloaded.mfc"
+    feature_path.write_bytes((1).to_bytes(4, "little", signed=True) + b"\0" * 4)
+    cli_filename = ROOT / "pstrain" / "cli" / "runtime_preloaded_probe.py"
+    cli_namespace = {
+        "__name__": "pstrain.cli.runtime_preloaded_probe",
+        "feature_path": feature_path,
+        "feature_type": feature_type,
+        "validate_file_type": validate_file_type,
+    }
+
+    with pytest.raises(
+        cli_lib_boundary_guard.CliLibBoundaryViolation,
+        match=r"pstrain\.lib\.features imported at pstrain/lib/filetypes\.py:299; "
+        r"no pstrain\.api frame",
+    ):
+        exec(
+            compile(
+                "validate_file_type(feature_path, feature_type, deep=True)\n",
+                cli_filename.as_posix(),
+                "exec",
+            ),
+            cli_namespace,
+        )
+
+
+def test_runtime_guard_accepts_lazy_import_through_public_api(tmp_path: Path) -> None:
+    api = importlib.import_module("pstrain.api")
+    feature_path = tmp_path / "public.mfc"
+    feature_path.write_bytes((1).to_bytes(4, "little", signed=True) + b"\0" * 4)
+    cli_filename = ROOT / "pstrain" / "cli" / "runtime_public_probe.py"
+    cli_namespace = {
+        "__name__": "pstrain.cli.runtime_public_probe",
+        "feature_path": feature_path,
+        "feature_type": api.FileType.FEATURES,
+        "validate_file_type": api.validate_file_type,
+    }
+
+    exec(
+        compile(
+            "result = validate_file_type(feature_path, feature_type, deep=True)\n",
+            cli_filename.as_posix(),
+            "exec",
+        ),
+        cli_namespace,
+    )
+    assert cli_namespace["result"] == (
+        False,
+        "Failed to load: Cannot determine veclen for 1 floats",
+    )
+
+
+@pytest.mark.parametrize(
+    ("owner", "attribute", "label"),
+    [
+        (builtins, "__import__", "builtins.__import__"),
+        (importlib, "import_module", "importlib.import_module"),
+        (threading.Thread, "start", "threading.Thread.start"),
+        (
+            concurrent.futures.ThreadPoolExecutor,
+            "submit",
+            "ThreadPoolExecutor.submit",
+        ),
+    ],
+)
+def test_runtime_guard_detects_lost_wrapper_ownership(
+    owner: object, attribute: str, label: str
+) -> None:
+    wrapper = getattr(owner, attribute)
+    setattr(owner, attribute, lambda *args, **kwargs: None)
+    try:
+        with pytest.raises(AssertionError, match=re.escape(label)):
+            cli_lib_boundary_guard.assert_installed()
+    finally:
+        setattr(owner, attribute, wrapper)
 
 
 @pytest.mark.parametrize(
