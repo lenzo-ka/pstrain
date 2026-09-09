@@ -42,6 +42,31 @@ into an allowed one. An unauthenticated frame claiming such a name is therefore
 an ordinary neutral frame: it stays in the segment, and the walk continues past
 it to whatever really dispatched the call.
 
+Requiring a live `sys.modules` entry also matters in the other direction. That
+entry is ordinary mutable process state, so genuine command-line code can be
+running with no entry under its name, or with the name bound to some other
+object — deleted, rebound, or a real command-line file executed through a
+loader and never registered. No frame then authenticates as the command line,
+and a stack with no recognized command-line frame yielded no origin at all.
+With no origin there is no rule to apply, so the import was allowed: the
+absence of provenance switched enforcement off rather than on. A computed
+import target evades the static scan as well, so nothing else caught it.
+
+The stack walk therefore also remembers the innermost frame whose code was
+compiled from a file under the frozen command-line directory, together with the
+segment collected up to that frame, and falls back to that source location when
+the walk finds no authenticated origin. A source location is not
+authentication — `co_filename` is chosen by whoever compiled the code — and it
+is not used as one: an authenticated origin always wins, and the fallback is
+consulted only after the walk has run to the end without finding one. That is
+exactly the set of stacks that previously yielded no origin and were allowed
+unconditionally. Recording a fallback never ends the walk early and changes no
+other branch, so it can only add a route to check where none was checked
+before; it cannot truncate a real route or silence a refusal. The same holds
+for a forged `co_filename` under that directory: manufacturing a fallback
+origin only causes a route to be checked that would otherwise have been
+ignored.
+
 Only two kinds of infrastructure are transparent, and both are held by identity
 rather than by module name. The import machinery is recognized by
 module-dictionary identity. A short list of exact `multiprocessing` code
@@ -107,11 +132,13 @@ Its allowlist is empty.
 ## Exact combined guarantee and limits
 
 The runtime check rejects supported name-based `pstrain.lib` import requests
-executed with a visible or carried CLI origin unless a continuous API/library
-stack segment establishes their route. The CLI origin and every frame of that
-segment are authenticated the same way: by module identity plus a source
-location under a package directory frozen from the checkout root at
-installation. The static check additionally rejects the source constructions
+executed with a CLI origin — one carried from a dispatch, one authenticated on
+the stack, or, failing both, one taken from a frame's source location under the
+frozen command-line directory — unless a continuous API/library stack segment
+establishes their route. Every frame of that segment, and an authenticated
+origin, are established the same way: by module identity plus a source location
+under a package directory frozen from the checkout root at installation. The
+static check additionally rejects the source constructions
 described above, including unexecuted paths and a directly imported alias
 touching an already-loaded `pstrain.lib` attribute.
 
@@ -129,6 +156,15 @@ Neither check observes or resolves all Python behavior. In particular:
   reachable — but this is a residual forgery the runtime rule does not detect,
   and it is the mechanism the guard's own tests use to build genuine-shaped
   frames;
+- command-line code that has neither a live `sys.modules` entry owning its
+  frame's globals nor a source location under the frozen command-line directory
+  is not recognized as a command-line origin, and the runtime rule does not
+  apply to its imports at all. Ordinary command-line code satisfies at least one
+  of the two, and the fallback origin covers the case where only the live module
+  identity is missing or has been replaced. But the two together are the whole
+  of what the runtime rule can see, and where neither holds the check is not
+  merely weaker — it is absent, and a `pstrain.lib` import made on such a stack
+  is allowed without being examined;
 - `getattr`, assignment data flow, function returns, generated code, custom
   loaders, private importlib entry points, and import callables captured before
   installation remain outside one or both checks;

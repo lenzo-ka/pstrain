@@ -21,6 +21,14 @@ frame either: a frame that merely claims a ``pstrain.cli`` name is an ordinary
 neutral frame, so it does not end the stack walk and cannot hide the frames
 beyond it.
 
+Because that live entry is mutable, genuine command-line code can run with it
+missing or replaced, and then nothing on the stack authenticates as the command
+line. Having no origin would switch enforcement off rather than on, so the walk
+also keeps the innermost frame compiled under the frozen command-line directory
+as a fallback origin. An authenticated origin always wins; the fallback is
+consulted only where the walk would otherwise have ended with no origin at all,
+so it can only add a route to check, never truncate or silence one.
+
 Only two kinds of infrastructure are transparent, both held by identity. The
 import machinery is recognized by module-dictionary identity. A short list of
 exact multiprocessing code objects covers serialization: pickling re-imports
@@ -180,6 +188,18 @@ def _resolve_package_directories(project_root: Path) -> None:
         _PACKAGE_DIRECTORIES[package] = directory
 
 
+def _compiled_under(frame: FrameType, package: str) -> bool:
+    """Report whether ``frame``'s code was compiled from ``package``'s frozen directory."""
+    directory = _PACKAGE_DIRECTORIES.get(package)
+    if directory is None:
+        return False
+    try:
+        Path(frame.f_code.co_filename).resolve().relative_to(directory)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
 def _anchored_package(frame: FrameType | None) -> str | None:
     """Return the package that provably owns ``frame``, if any.
 
@@ -201,14 +221,7 @@ def _anchored_package(frame: FrameType | None) -> str | None:
     module = sys.modules.get(name)
     if module is None or getattr(module, "__dict__", None) is not frame.f_globals:
         return None
-    directory = _PACKAGE_DIRECTORIES.get(package)
-    if directory is None:
-        return None
-    try:
-        Path(frame.f_code.co_filename).resolve().relative_to(directory)
-    except (OSError, ValueError):
-        return None
-    return package
+    return package if _compiled_under(frame, package) else None
 
 
 def _boundary_package(frame: FrameType | None) -> str | None:
@@ -264,8 +277,30 @@ def _run_dispatched(
 
 
 def _stack_route() -> tuple[tuple[FrameType, ...], _DispatchProvenance] | None:
-    """Return frames between this operation and its physical or carried CLI origin."""
+    """Return frames between this operation and its physical or carried CLI origin.
+
+    A command-line frame is authenticated from its live ``sys.modules`` entry,
+    and that entry is ordinary mutable process state. Genuine command-line code
+    can therefore be running with no entry under its name, or with the name
+    bound to some other object, and then no frame on the stack authenticates as
+    the command line. Yielding no origin in that case switched enforcement off
+    rather than on: with no origin there is no rule to apply and the import was
+    simply allowed.
+
+    So the walk also remembers the innermost frame whose code was compiled from
+    a file under the frozen command-line directory, together with the segment
+    collected up to it, and falls back to that source location when the walk
+    finds no authenticated origin. A source location is not authentication --
+    ``co_filename`` is chosen by whoever compiled the code -- and it is not used
+    as such. It is consulted only after the walk has run to the end without an
+    authenticated origin, which is exactly the set of stacks that previously
+    returned ``None`` and were allowed unconditionally. Recording it never ends
+    the walk early and changes no other branch, so an authenticated origin
+    further out still wins, and a fallback can only add a route to check where
+    none was checked before -- never truncate or silence one.
+    """
     frames: list[FrameType] = []
+    fallback: tuple[tuple[FrameType, ...], FrameType] | None = None
     frame = sys._getframe(1)
     while frame is not None:
         if frame.f_code is _run_dispatched.__code__:
@@ -281,8 +316,13 @@ def _stack_route() -> tuple[tuple[FrameType, ...], _DispatchProvenance] | None:
         # past it to whatever really dispatched the call.
         if _anchored_package(frame) == _CLI_PACKAGE:
             return tuple(frames), _DispatchProvenance(_location(frame), False)
+        if fallback is None and _compiled_under(frame, _CLI_PACKAGE):
+            fallback = (tuple(frames), frame)
         frames.append(frame)
         frame = frame.f_back
+    if fallback is not None:
+        segment, origin = fallback
+        return segment, _DispatchProvenance(_location(origin), False)
     return None
 
 

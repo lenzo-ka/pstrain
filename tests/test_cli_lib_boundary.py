@@ -423,6 +423,104 @@ def test_runtime_guard_treats_a_claimed_cli_name_as_a_neutral_frame(claimed_name
         )
 
 
+_COMPUTED_IMPORT_SOURCE = (
+    "import importlib\n\n\ndef reach_lib(target):\n    return importlib.import_module(target)\n"
+)
+_NO_API_FRAME = "no pstrain.api frame establishes the route"
+
+
+def _assert_refused_without_api(reach_lib: Callable[[str], object], origin: str) -> None:
+    with pytest.raises(
+        cli_lib_boundary_guard.CliLibBoundaryViolation,
+        match=rf"{re.escape(_NO_API_FRAME)} \(CLI origin {re.escape(origin)}\)",
+    ):
+        reach_lib("pstrain.lib.bw")
+
+
+@pytest.mark.parametrize(
+    "lose_identity",
+    [
+        lambda name: sys.modules.pop(name),
+        lambda name: sys.modules.__setitem__(name, ModuleType(name)),
+    ],
+    ids=["entry-removed", "entry-replaced"],
+)
+def test_runtime_guard_enforces_command_line_code_that_lost_its_registration(
+    lose_identity: Callable[[str], object],
+) -> None:
+    """Losing a live module identity must not switch enforcement off.
+
+    A frame is authenticated from the live ``sys.modules`` entry for its
+    ``__name__``. That entry is ordinary mutable process state, so genuine
+    command-line code can lose it -- deleted, or replaced by another object --
+    while the very same function object keeps running. Authentication then
+    fails, and a stack with no recognized command-line frame once yielded no
+    origin at all. With no origin there was no rule to apply, so the import was
+    allowed: absence of provenance switched enforcement off rather than on. A
+    computed target evades the static scan too, so nothing else caught it.
+
+    The source location under the frozen command-line directory is now kept as
+    a fallback origin, so the same call is refused either way.
+    """
+    importlib.import_module("pstrain.lib.bw")
+    name = "pstrain.cli.runtime_identity_probe"
+    filename = ROOT / "pstrain" / "cli" / "runtime_identity_probe.py"
+    origin = "pstrain/cli/runtime_identity_probe.py:5"
+    with _anchored_module(name, filename, _COMPUTED_IMPORT_SOURCE) as cli:
+        reach_lib = cli.reach_lib
+        _assert_refused_without_api(reach_lib, origin)
+        lose_identity(name)
+        assert getattr(sys.modules.get(name), "reach_lib", None) is not reach_lib
+        _assert_refused_without_api(reach_lib, origin)
+
+
+def test_runtime_guard_enforces_a_command_line_file_executed_without_registration() -> None:
+    """A real command-line file run through a loader is never registered at all.
+
+    ``exec_module`` on a module that was never placed in ``sys.modules`` gives
+    genuine command-line code with no live module identity to authenticate
+    against, which is the same loss of provenance as a removed or replaced
+    entry.
+    """
+    importlib.import_module("pstrain.lib.bw")
+    name = "pstrain.cli.runtime_loader_probe"
+    filename = ROOT / "pstrain" / "cli" / "runtime_loader_probe.py"
+    filename.write_text(_COMPUTED_IMPORT_SOURCE, encoding="utf-8")
+    try:
+        spec = importlib.util.spec_from_file_location(name, filename)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        assert name not in sys.modules
+        spec.loader.exec_module(module)
+        _assert_refused_without_api(module.reach_lib, "pstrain/cli/runtime_loader_probe.py:5")
+    finally:
+        filename.unlink(missing_ok=True)
+        for cached in (filename.parent / "__pycache__").glob(f"{filename.stem}.*.pyc"):
+            cached.unlink(missing_ok=True)
+
+
+def test_runtime_guard_accepts_an_api_route_from_unregistered_command_line_code() -> None:
+    """The fallback origin restores the rule; it does not refuse everything.
+
+    Command-line code that has lost its registration is still accepted when it
+    reaches the library through a genuine public API frame, so the fallback
+    discriminates by route rather than by the loss of identity.
+    """
+    name = "pstrain.cli.runtime_identity_control_probe"
+    filename = ROOT / "pstrain" / "cli" / "runtime_identity_control_probe.py"
+    with _anchored_module(
+        "pstrain.api.runtime_identity_control_probe",
+        ROOT / "pstrain" / "api" / "runtime_identity_control_probe.py",
+        _COMPUTED_IMPORT_SOURCE,
+    ) as api:
+        with _anchored_module(
+            name, filename, "def call(reach_lib):\n    return reach_lib('pstrain.lib.bw')\n"
+        ) as cli:
+            call = cli.call
+        assert name not in sys.modules
+        call(api.reach_lib)
+
+
 _RECV_SOURCE = "def receive(connection):\n    return connection.recv()\n"
 _PICKLE_SOURCE = "def serialize(value):\n    return ForkingPickler.dumps(value)\n"
 
