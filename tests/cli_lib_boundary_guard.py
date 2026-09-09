@@ -41,9 +41,11 @@ frame, moving the origin outwards can only lengthen the segment and tighten the
 verdict.
 
 A route's state is three-valued, not two: clean but not yet through an API
-frame, established through one, or interrupted. An interruption is permanent,
-which is what stops a worker-side API frame from healing a route that a neutral
-frame had already broken before the work was dispatched.
+frame, established through one, or interrupted. An interruption is permanent for
+the route carrying it, which is what stops a worker-side API frame from healing a
+route that a neutral frame had already broken before the work was dispatched. A
+worker frame owned as command-line code still ends the walk and starts a new
+route; nothing weaker supersedes a carried one.
 
 Only two kinds of infrastructure are transparent, both held by identity. The
 import machinery is recognized by module-dictionary identity. A short list of
@@ -152,7 +154,8 @@ class _RouteState(enum.Enum):
     CLEAN = "clean"
     #: A ``pstrain.api`` frame established the route and nothing has broken it.
     THROUGH_API = "through-api"
-    #: A non-boundary frame broke the route. Permanent: nothing later heals it.
+    #: A non-boundary frame broke the route. Nothing in this route heals it;
+    #: only a frame that ends the walk outright starts a different one.
     INTERRUPTED = "interrupted"
 
 
@@ -429,12 +432,17 @@ def _segment_state(
 ) -> tuple[_RouteState, FrameType | None]:
     """Advance a route state over ``frames`` and name the frame that broke it.
 
-    An interruption is permanent. Once a non-boundary frame has broken the
-    route, no later frame -- on this stack or on the stack of a worker the work
-    was dispatched to -- can establish it again, so an inherited ``INTERRUPTED``
-    short-circuits rather than being re-derived from the frames now visible.
-    Without that, a worker-side API frame healed an interruption that had
-    already happened on the submitting stack.
+    An interruption is permanent for the route carrying it. Once a non-boundary
+    frame has broken it, no frame of the segment -- on this stack or on the
+    stack of a worker the work was dispatched to -- establishes it again, so an
+    inherited ``INTERRUPTED`` short-circuits rather than being re-derived from
+    the frames now visible. Without that, a worker-side API frame healed an
+    interruption that had already happened on the submitting stack.
+
+    A worker frame owned as command-line code is not a counterexample. It ends
+    the stack walk where it stands, so it never reaches this function as an
+    inherited state at all: it supersedes the carried origin with a new route
+    that starts clean, exactly as it would on the submitting stack.
     """
     if inherited is _RouteState.INTERRUPTED:
         return _RouteState.INTERRUPTED, None

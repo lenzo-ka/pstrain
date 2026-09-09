@@ -102,8 +102,18 @@ segment.
 
 What is carried is three-valued, not two: the route so far is clean but has not
 reached an API frame, or established through one, or interrupted. An
-interruption is permanent — no frame on a worker's stack can establish a route
-that a non-boundary frame has already broken.
+interruption is permanent within the route that carries it — no API frame on a
+worker's stack can re-establish a route that a non-boundary frame has already
+broken.
+
+Permanence is not absolute, and should not be read that way. A worker frame
+holding both halves of command-line ownership ends the stack walk where it
+stands, so it supersedes the carried origin instead of continuing it, and the
+segment inside it is judged on its own from a clean start. That is not an escape
+from the carried state: it takes a genuine command-line frame running on the
+worker's own stack, which is a new route by any reading, and it is exactly what
+the submitting stack does with the same frame. Nothing weaker — a candidate
+origin, an API frame, a helper — supersedes anything.
 
 The distinction is the whole point. While the carried state was a single
 "reached an API frame continuously" boolean, "not through an API frame yet" and
@@ -208,6 +218,13 @@ What ordinary code can do that neither check sees:
 - `getattr`, assignment data flow, function returns, generated code, custom
   loaders, private importlib entry points, and import callables captured before
   installation remain outside one or both checks;
+- only two callables are wrapped, `builtins.__import__` and
+  `importlib.import_module`. Native or extension code that reaches the import
+  machinery by another route — `PyImport_ImportModule` and its relatives called
+  from C, or an extension module importing during its own initialization —
+  never passes through either one, so the import happens and nothing observes
+  it. "Supported name-based imports" is about which callable the import goes
+  through, not about how the module name is spelled;
 - runtime observations cover only paths executed in the pytest process after
   installation. Spawned processes and subprocesses install no guard, so a
   crossing that happens only in a child is not observed;
@@ -235,6 +252,18 @@ What ordinary code can do that neither check sees:
 - re-exported classes and previously handed-off objects do not record that they
   were obtained from the public API. A later import is allowed only when its
   executed stack independently satisfies the rule.
+
+The check errs toward refusing in one known shape. A command-line module
+recognized only by its module identity — one loaded from a zip or a custom
+loader — that calls a second command-line module recognized only by its source
+location, which then reaches the library through the public API, is refused: the
+outermost rule takes the first module as the origin and leaves the second in the
+segment, where it is a non-boundary frame and interrupts the route. The route is
+a genuine API route, so the refusal is wrong on its merits. Producing it takes
+two differently loaded, partially recognized command-line modules in one stack,
+which this repository does not do, and a development-time check that fails
+closed here costs a contributor a message to read rather than a missed crossing.
+The rule is not relaxed to allow it.
 
 Two mechanical properties are worth stating plainly, because they are easy to
 assume away. A frame is recognized as command-line code by module identity or by
