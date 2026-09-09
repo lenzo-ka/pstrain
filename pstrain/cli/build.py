@@ -19,9 +19,9 @@ from pathlib import Path
 
 from pstrain.api.pipeline import (
     TARGETS,
-    PipelineContext,
     UnknownTargetError,
     build_pipeline,
+    create_pipeline_context,
     run_pipeline,
 )
 from pstrain.cli.base import Command, CommandContext, CommandResult
@@ -135,7 +135,7 @@ everything, even if up to date.
 
         project_dir = ctx.project_dir
         try:
-            pipeline_ctx = PipelineContext.from_config(
+            pipeline_ctx = create_pipeline_context(
                 project_dir,
                 experiment=ctx.args.experiment,
                 config_name=ctx.args.config_name,

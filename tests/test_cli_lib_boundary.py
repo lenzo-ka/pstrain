@@ -3,6 +3,7 @@
 import builtins
 import concurrent.futures
 import contextlib
+import dataclasses
 import importlib.util
 import inspect
 import multiprocessing
@@ -704,9 +705,55 @@ def test_public_pipeline_forwarders_keep_their_library_signatures() -> None:
     assert pipeline_run[0][0] == "self"
     assert run_pipeline[1:] == pipeline_run[1:]
 
-    assert _parameter_shape(api_pipeline.PipelineContext.from_config) == _parameter_shape(
+    # ``from_config`` is a classmethod, so its bound signature drops ``cls``.
+    assert _parameter_shape(api_pipeline.create_pipeline_context) == _parameter_shape(
         lib_pipeline.PipelineContext.from_config
     )
+
+
+def test_public_pipeline_context_is_the_library_class() -> None:
+    """The public name must stay the same object the library exports.
+
+    A subclass would give the command line an API construction frame at the cost
+    of the identity, equality, ``isinstance`` and pickle relationships callers
+    already rely on. The API factory supplies that frame instead.
+    """
+    api_pipeline = importlib.import_module("pstrain.api.pipeline")
+    lib_pipeline = importlib.import_module("pstrain.lib.pipeline")
+    package = importlib.import_module("pstrain.api")
+
+    assert api_pipeline.PipelineContext is lib_pipeline.PipelineContext
+    assert api_pipeline.PipelineContext is lib_pipeline.context.PipelineContext
+    assert getattr(package, "PipelineContext", api_pipeline.PipelineContext) is (
+        lib_pipeline.PipelineContext
+    )
+
+
+def test_public_pipeline_context_keeps_its_value_relationships(tmp_path: Path) -> None:
+    api_pipeline = importlib.import_module("pstrain.api.pipeline")
+    lib_pipeline = importlib.import_module("pstrain.lib.pipeline")
+
+    public = api_pipeline.PipelineContext(project_dir=tmp_path)
+    library = lib_pipeline.PipelineContext(project_dir=tmp_path)
+
+    assert public == library
+    assert isinstance(library, api_pipeline.PipelineContext)
+    assert isinstance(public, lib_pipeline.PipelineContext)
+    assert dataclasses.fields(public) == dataclasses.fields(library)
+
+    restored = pickle.loads(pickle.dumps(public))
+    assert type(restored) is lib_pipeline.PipelineContext
+    assert restored == library
+
+
+def test_create_pipeline_context_returns_the_library_class(tmp_path: Path) -> None:
+    api_pipeline = importlib.import_module("pstrain.api.pipeline")
+    lib_pipeline = importlib.import_module("pstrain.lib.pipeline")
+
+    context = api_pipeline.create_pipeline_context(tmp_path)
+
+    assert type(context) is lib_pipeline.PipelineContext
+    assert context == lib_pipeline.PipelineContext.from_config(tmp_path)
 
 
 @pytest.mark.parametrize(

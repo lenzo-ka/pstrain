@@ -44,9 +44,16 @@ on the call path.
 The rule needs an API frame, not merely an API name, so `pstrain.api` forwards
 through concrete functions wherever the command line reaches work that imports
 lazily. A bare re-export leaves nothing on the stack and its callers would be
-refused. Each forwarder's parameters are pinned to the library callable it
-fronts, so the published signature cannot drift from the implementation behind
-it.
+refused. The forwarders are additions to the public surface, never
+replacements for what it already promised: each one's parameters are pinned to
+the library callable it fronts, so the published signature cannot drift from
+the implementation behind it. A public class is not subclassed to obtain a
+frame, because that
+would cost the identity, equality, `isinstance` and pickle relationships
+callers already rely on. Where the command line needs an API frame to build a
+re-exported class, the API adds a factory instead —
+`create_pipeline_context` for `PipelineContext` — and the public class stays
+the same object the library exports.
 
 Violations use a dedicated `BaseException` subclass so an application's broad
 `except Exception` handler cannot turn a failed boundary check into an ordinary
