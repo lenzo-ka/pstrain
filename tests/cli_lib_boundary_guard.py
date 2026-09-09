@@ -4,12 +4,14 @@ The guard wraps Python's two supported name-based import entry points for the
 pytest session. Unlike a meta-path finder or audit hook, these entry points run
 even when ``sys.modules`` already contains the target.
 
-For an executed ``pstrain.lib`` import with CLI provenance, the complete stack
-segment from import to CLI must stay inside ``pstrain.api`` and ``pstrain.lib``
-and must contain an API frame. This rejects callbacks resumed below an API
-frame and library functions reached without one. CLI provenance is copied into
-direct ``threading.Thread`` targets and ``ThreadPoolExecutor`` submissions so a
-worker cannot lose the origin merely by losing the submitting stack.
+For an executed ``pstrain.lib`` import with CLI provenance, the application
+stack segment from import to CLI must stay inside ``pstrain.api`` and
+``pstrain.lib`` and must contain an API frame. Narrowly identified import and
+multiprocessing infrastructure is transparent. This rejects callbacks resumed
+below an API frame and library functions reached without one. CLI provenance
+is copied into direct ``threading.Thread`` targets and ``ThreadPoolExecutor``
+submissions so a worker cannot lose the origin merely by losing the submitting
+stack.
 
 This is not a complete architectural proof. The runtime observation covers
 only supported name-based imports executed in the pytest process after
