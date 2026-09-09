@@ -26,6 +26,7 @@ pstrain is an acoustic model training toolkit.
    design/parity-and-deviations
    design/config-unification
    design/one-command-training
+   design/cli-lib-boundary
    design/native-boundary
    design/pipeline-runner
    design/training-pipeline
