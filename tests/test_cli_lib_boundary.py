@@ -498,13 +498,17 @@ def test_runtime_guard_enforces_a_command_line_file_executed_without_registratio
     entry.
 
     The probe has to be a real file under the command-line directory, so its
-    name carries the xdist worker (or the process id when the session is not
-    distributed). A shared name let one runner's cleanup unlink the file
-    between another's ``spec_from_file_location`` and ``exec_module``.
+    name carries both the xdist worker and the process id. A shared name let one
+    runner's cleanup unlink the file between another's
+    ``spec_from_file_location`` and ``exec_module``. The worker id alone is not
+    enough to prevent that: two independent pytest sessions over the same
+    checkout each number their workers from ``gw0``, so both would claim the
+    same file. The process id distinguishes them, and keeping the worker id as
+    well keeps the name readable when a session does collide.
     """
     importlib.import_module("pstrain.lib.bw")
-    worker = os.environ.get("PYTEST_XDIST_WORKER") or f"pid{os.getpid()}"
-    stem = f"runtime_loader_probe_{worker}"
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    stem = f"runtime_loader_probe_{worker}_{os.getpid()}"
     name = f"pstrain.cli.{stem}"
     filename = ROOT / "pstrain" / "cli" / f"{stem}.py"
     try:
