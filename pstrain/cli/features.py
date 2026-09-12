@@ -8,7 +8,12 @@ from __future__ import annotations
 
 import argparse
 
-from pstrain.api.pipeline import PipelineContext, UnknownTargetError, build_pipeline
+from pstrain.api.pipeline import (
+    UnknownTargetError,
+    build_pipeline,
+    create_pipeline_context,
+    run_pipeline,
+)
 from pstrain.cli.base import CommandContext, CommandResult, ProjectCommand
 
 
@@ -43,7 +48,7 @@ class FeaturesCommand(ProjectCommand):
 
     def execute(self, ctx: CommandContext) -> CommandResult:
         try:
-            pipeline_ctx = PipelineContext.from_config(
+            pipeline_ctx = create_pipeline_context(
                 ctx.project_dir,
                 experiment=ctx.experiment,
                 config_name=ctx.args.config_name,
@@ -64,7 +69,8 @@ class FeaturesCommand(ProjectCommand):
         except ValueError as exc:
             return CommandResult.fail(str(exc))
         try:
-            rc = pipeline.run(
+            rc = run_pipeline(
+                pipeline,
                 "features",
                 dry_run=ctx.dry_run,
                 force=ctx.args.force,

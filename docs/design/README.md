@@ -13,6 +13,8 @@ while making decisions; the current source of truth is the code in
   configuration systems.
 * [`one-command-training.md`](one-command-training.md) — the shipped `pstrain
   train` workflow from prepared prompts, WAVs, and a dictionary.
+* [`cli-lib-boundary.md`](cli-lib-boundary.md) — the development-time checks
+  that the command line reaches training code through the public API.
 * [`native-boundary.md`](native-boundary.md) — the boundary between
   Python and the vendored C library: which operations run inside a
   contained helper process, which are still unguarded, and how native

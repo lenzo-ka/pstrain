@@ -27,6 +27,8 @@ Example::
     )
 """
 
+from pathlib import Path
+
 from pstrain.api.config import resolve_config
 from pstrain.api.dictionary import CMUDictSource, default_cmudict_cache, fetch_cmudict
 from pstrain.api.lm import build_lm, build_lm_from_file
@@ -79,13 +81,29 @@ from pstrain.lib import (
     print_stats,
     # Project setup
     setup_project,
-    validate_file_type,
     validate_project,
 )
+from pstrain.lib import validate_file_type as _validate_file_type
 from pstrain.lib.dictionary import CMUDict, strip_dictionary_stress, strip_stress
 from pstrain.lib.features import extract_features
 from pstrain.lib.flat import init_flat_model
 from pstrain.lib.validate import ValidationReport
+
+
+def validate_file_type(
+    path: Path,
+    expected: FileType,
+    deep: bool = False,
+) -> tuple[bool, str]:
+    """Validate a file through a concrete public-API call frame."""
+    return _validate_file_type(path, expected, deep)
+
+
+# These forwarders exist to put an API call frame on the stack. That is an
+# implementation requirement and must not cost the published reference the
+# documentation each re-exported name carried before.
+validate_file_type.__doc__ = _validate_file_type.__doc__ or validate_file_type.__doc__
+
 
 __all__: list[str] = [
     # Project setup

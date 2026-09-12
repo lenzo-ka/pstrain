@@ -1,1 +1,2 @@
-# The boundary is fully enforced: pstrain.cli must access pstrain.lib through pstrain.api.
+# Static early warning; pytest observes supported imports with carried CLI provenance.
+# pstrain.cli must access pstrain.lib through pstrain.api. No exceptions are allowlisted.

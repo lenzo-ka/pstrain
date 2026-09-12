@@ -30,9 +30,10 @@ from pstrain.api.pipeline import (
     DEFAULT_CONFIGS,
     DEFAULT_TARGET,
     TARGETS,
-    PipelineContext,
     UnknownTargetError,
     build_pipeline,
+    create_pipeline_context,
+    run_pipeline,
 )
 from pstrain.cli.base import Command, CommandContext, CommandResult
 
@@ -519,7 +520,7 @@ class TrainCommand(Command):
                         link_audio=True,
                     )
                 try:
-                    plan_ctx = PipelineContext.from_config(
+                    plan_ctx = create_pipeline_context(
                         plan_project,
                         experiment=ctx.args.experiment,
                         config_name=ctx.args.profile,
@@ -582,7 +583,7 @@ class TrainCommand(Command):
         validation_path, oov_path = write_validation_reports(project_dir, report)
 
         try:
-            pipeline_ctx = PipelineContext.from_config(
+            pipeline_ctx = create_pipeline_context(
                 project_dir,
                 experiment=ctx.args.experiment,
                 config_name=ctx.args.profile,
@@ -603,7 +604,8 @@ class TrainCommand(Command):
             pipeline = build_pipeline(pipeline_ctx)
             output_context = redirect_stdout(sys.stderr) if ctx.json_output else nullcontext()
             with output_context:
-                rc = pipeline.run(
+                rc = run_pipeline(
+                    pipeline,
                     ctx.args.target,
                     force=ctx.args.force,
                     jobs=ctx.args.jobs,
