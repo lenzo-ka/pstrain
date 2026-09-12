@@ -294,3 +294,45 @@ The direct `run_bw_training` API also accepts `variance_floor_reference` and
 mapping; matching dimensions alone cannot establish state identity. The initial
 input is validated but not rewritten before the first scoring pass: the floor
 applies to completed updates. Other pipeline training stages remain unchanged.
+
+## Explicit checkpoint recovery
+
+When iteration checkpoints are enabled, `pstrain checkpoints MODEL_DIR` lists the
+retained updates. Update N contains the parameters produced by pass N; those
+parameters are evaluated by pass N+1. The last saved update normally remains
+unevaluated. A convergence decision or a successful save alone is not evidence
+that the saved update passed an alignment health check.
+
+New pass telemetry binds the evaluated native scoring files (`mdef`, means,
+variances, mixture weights, and transitions) to their existing BW fingerprint.
+A separate per-file snapshot includes density counts, which identify the retained
+generation but are not part of native scoring identity. The report marks a
+checkpoint evaluated-healthy only when that snapshot matches and its evaluation
+processed utterances and frames, had finite likelihood statistics, and stayed
+within the configured skip limit. This is an alignment/statistics check, not a
+recognition-quality guarantee or a monotonic likelihood rule. Older telemetry
+without these bindings is reported-unverified; missing evaluation is unevaluated.
+Modified checkpoint bytes produce an evidence-mismatch. A failed save may follow
+a healthy input evaluation, so the stop decision is not used as a health proxy.
+
+Use `pstrain checkpoints MODEL_DIR --restore N --dry-run` to inspect a selected
+restoration, then omit `--dry-run` to perform it. `--json` supplies structured
+output. Selection is always explicit, including for unevaluated or unverified
+snapshots; the tool never picks an older model automatically. Stop concurrent
+training and readers before restoration. The selected checkpoint must have the
+same state mapping as the destination. Its raw parameters and counts are copied
+without normalization; absent checkpoint counts remove destination counts.
+
+The current model, counts, telemetry, and success metadata are first retained in
+`MODEL_DIR/recovery-history/`. Completion markers, model provenance, and any
+cached `sendump` are invalidated before publishing the selected parameters.
+Caught write failures and interruptions restore the previous parameter/count
+set, but leave success metadata invalidated. This keeps an interrupted recovery
+from presenting a model as a completed pipeline stage. Original checkpoints and
+training diagnostics are retained. A restored model is an explicit recovery
+artifact, not newly successful training; a pipeline build must revalidate its
+stage. Publication does not support concurrent readers or promise recovery from
+process death.
+
+Training still retries the scheduled utterances on each pass. This tool adds no
+automatic rollback, final scoring pass, exclusion policy, or model selection rule.

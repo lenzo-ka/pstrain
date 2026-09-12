@@ -36,8 +36,14 @@ if TYPE_CHECKING:
 
 from pstrain.lib import native_worker
 from pstrain.lib.bw import BW_CEPSTRAL_LENGTH, HMM, BWConfig, BWResult, BWTrainer
+from pstrain.lib.checkpoints import evaluation_health, model_snapshot
 from pstrain.lib.features import read_sphinx_mfc
-from pstrain.lib.model import MODEL_FILES_REQUIRED, MODEL_PARAMETER_FILES, staged_model_update
+from pstrain.lib.model import (
+    MODEL_FILES_REQUIRED,
+    MODEL_PARAMETER_FILES,
+    fingerprint_model,
+    staged_model_update,
+)
 from pstrain.lib.steps.variance import VarianceFloor, load_variance_floor
 from pstrain.lib.transcription import parse_transcription_file
 from pstrain.lib.validate import validate_files_exist
@@ -158,7 +164,7 @@ def _sha256_files(paths: list[Path]) -> str:
 
 
 def _fingerprint_model(model_dir: Path) -> str:
-    return _sha256_files([model_dir / name for name in MODEL_FILES_REQUIRED])
+    return fingerprint_model(model_dir)
 
 
 def _fingerprint_config(config: BWConfig) -> str:
@@ -317,12 +323,22 @@ def _write_telemetry(
     output_dir: Path, rows: list[dict[str, object]], *, schema_version: int = 1
 ) -> None:
     """Atomically retain the completed BW passes without affecting training."""
+
+    def json_safe(value: object) -> object:
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
+        if isinstance(value, dict):
+            return {key: json_safe(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [json_safe(item) for item in value]
+        return value
+
     destination = output_dir / _TELEMETRY_FILENAME
     temporary = destination.with_name(f".{destination.name}.tmp-{os.getpid()}-{uuid.uuid4().hex}")
     try:
         temporary.write_text(
             json.dumps(
-                {"schema_version": schema_version, "passes": rows},
+                json_safe({"schema_version": schema_version, "passes": rows}),
                 indent=2,
                 sort_keys=True,
                 allow_nan=False,
@@ -921,6 +937,9 @@ def run_bw_training(
                 "Using stage policy: %s-pass variance for iteration 1",
                 2 if first_pass_2passvar else 1,
             )
+        evaluated_fingerprint = _fingerprint_model(current_model)
+        evaluated_snapshot = model_snapshot(current_model)
+
         # Create trainer for this iteration
         trainer = BWTrainer(
             mdef_path=current_model / "mdef",
@@ -1158,14 +1177,62 @@ def run_bw_training(
                 terminal_skips.append({"utterance": fileid, "reason": "exception"})
 
         total_skipped += skipped
-        _account_and_enforce_skips(
-            iteration=iteration,
-            skipped=skipped,
-            input_utts=len(fileids),
-            max_skip_fraction=max_skip_fraction,
-            skipped_by_pass=skipped_by_pass,
-            omitted_passes=omitted_passes,
-        )
+        # Bind evidence to the input, not the update produced by this pass.
+        stats = merged_stats or trainer.get_stats()
+        health = {
+            "model_fingerprint": evaluated_fingerprint,
+            "snapshot": evaluated_snapshot,
+            "max_skip_fraction": max_skip_fraction,
+            "total_utts": stats.total_utts,
+            "nonfinite_statistics": not (
+                math.isfinite(stats.total_log_lik) and math.isfinite(stats.avg_log_prob)
+            ),
+            "healthy": evaluation_health(
+                total_log_lik=stats.total_log_lik,
+                average=stats.avg_log_prob,
+                frames=stats.total_frames,
+                utterances=stats.total_utts,
+                processed=processed + retried,
+                skipped=skipped,
+                inputs=len(fileids),
+                max_skip_fraction=max_skip_fraction,
+            ),
+        }
+        try:
+            _account_and_enforce_skips(
+                iteration=iteration,
+                skipped=skipped,
+                input_utts=len(fileids),
+                max_skip_fraction=max_skip_fraction,
+                skipped_by_pass=skipped_by_pass,
+                omitted_passes=omitted_passes,
+            )
+            if processed + retried == 0:
+                _report_skip_summary(omitted_passes)
+                raise RuntimeError("No utterances processed successfully")
+        except RuntimeError as error:
+            telemetry_rows.append(
+                {
+                    "pass": iteration,
+                    "total_log_likelihood": stats.total_log_lik,
+                    "total_frames": stats.total_frames,
+                    "per_frame_log_likelihood": stats.avg_log_prob,
+                    "signed_convergence_delta": None,
+                    "stop_decision": "failed",
+                    "error": str(error),
+                    "input_model_evaluation": health,
+                    "accounting": {
+                        "input_utts": len(fileids),
+                        "processed_utts": processed,
+                        "retried_utts": retried,
+                        "skipped_utts": skipped,
+                        "terminal_skips": terminal_skips,
+                        "skip_reasons": skip_reasons,
+                    },
+                }
+            )
+            _write_telemetry(output_dir, telemetry_rows, schema_version=2)
+            raise
         if not skipped:
             logger.info(
                 "Iteration %d processed %d utterances with zero skips",
@@ -1173,12 +1240,7 @@ def run_bw_training(
                 processed + retried,
             )
 
-        if processed + retried == 0:
-            _report_skip_summary(omitted_passes)
-            raise RuntimeError("No utterances processed successfully")
-
-        # Get statistics BEFORE normalization (normalize resets stats)
-        stats = merged_stats or trainer.get_stats()
+        # Statistics were captured before normalization (which resets them).
         last_frames = stats.total_frames
         last_utts = stats.total_utts
         logger.info(
@@ -1222,6 +1284,7 @@ def run_bw_training(
         )
         telemetry_row: dict[str, object] = {
             "pass": iteration,
+            "input_model_evaluation": health,
             "total_log_likelihood": stats.total_log_lik,
             "total_frames": stats.total_frames,
             "per_frame_log_likelihood": stats.avg_log_prob,
