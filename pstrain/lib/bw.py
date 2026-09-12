@@ -20,6 +20,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# The native BW front end currently fixes this feature contract. The feature
+# vector concatenates cepstra, deltas, and double deltas.
+BW_FEATURE_TYPE = "1s_c_d_dd"
+BW_CEPSTRAL_LENGTH = 13
+BW_FEATURE_LENGTH = 3 * BW_CEPSTRAL_LENGTH
+
 __all__ = ["BWConfig", "BWResult", "HMM", "BWTrainer"]
 
 
