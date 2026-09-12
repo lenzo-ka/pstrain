@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import struct
+import subprocess
+import sys
 import tempfile
+import textwrap
 import wave
 from pathlib import Path
 from typing import Any
@@ -137,6 +140,72 @@ class TestFeatureExtractor:
             # Features should be finite
             assert np.all(np.isfinite(features))
 
+    def test_frame_capacity_follows_native_configuration(self) -> None:
+        """Higher frame rates finish and preserve complete and residual frames."""
+        root = Path(__file__).resolve().parent.parent
+        # Keep a buffer-capacity regression bounded even if it reintroduces the
+        # old zero-progress loop. Run the real helper branch in this subprocess
+        # so a timeout cannot leave another native helper orphaned.
+        code = textwrap.dedent("""
+            import numpy as np
+            from pstrain.lib import native_worker
+            from pstrain.lib.features import FeatureExtractor
+
+            native_worker._inside_worker = True
+            sample_rate = 16000
+            window_seconds = 0.025625
+            window_samples = int(sample_rate * window_seconds + 0.5)
+            for frame_rate in (80, 100, 200):
+                shift = int(sample_rate / frame_rate + 0.5)
+                with FeatureExtractor(frate=frame_rate, dither=False) as extractor:
+                    for sample_count in (0, 160, sample_rate):
+                        audio = np.zeros(sample_count, dtype=np.int16)
+                        features = extractor.process_audio(audio)
+                        complete_frames = max(0, (sample_count - window_samples) // shift + 1)
+                        if sample_count < window_samples:
+                            # The native VAD may suppress a short residual frame.
+                            assert features.shape[1] == 13
+                            assert 0 <= features.shape[0] <= int(sample_count > 0)
+                        else:
+                            assert features.shape == (complete_frames + 1, 13)
+                        assert np.isfinite(features).all()
+        """)
+        result = subprocess.run(
+            [sys.executable, str(root / "scripts/run_verified_tests.py"), "--exec", code],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_no_progress_raises_before_repeating_native_call(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pstrain.lib import native_worker
+
+        monkeypatch.setattr(native_worker, "in_worker", lambda: True)
+        with FeatureExtractor(dither=False) as extractor:
+            lib = extractor._lib
+
+            class StalledFrontEnd:
+                calls = 0
+
+                def __getattr__(self, name: str) -> Any:
+                    return getattr(lib, name)
+
+                def pstrain_cffi_fe_process_frames(self, *args: Any) -> int:
+                    if args[3] == extractor._ffi.NULL:
+                        return int(lib.pstrain_cffi_fe_process_frames(*args))
+                    self.calls += 1
+                    assert self.calls == 1, "repeated native call after no progress"
+                    args[4][0] = 0
+                    return 0
+
+            extractor._lib = StalledFrontEnd()
+            with pytest.raises(RuntimeError, match="no progress"):
+                extractor.process_audio(np.zeros(16000, dtype=np.int16))
+
     def test_config_property(self) -> None:
         """Test config property returns correct config."""
         cfg = FEParams(ncep=26)
@@ -215,33 +284,30 @@ class TestReadWriteSphinxMfc:
         finally:
             tmpfile.unlink(missing_ok=True)
 
-    def test_write_read_different_sizes(self) -> None:
-        """Test roundtrip with different frame counts and dimensions.
+    @pytest.mark.parametrize("n_cep", [13, 14, 26, 39])
+    @pytest.mark.parametrize("n_frames", [0, 1, 10, 13])
+    def test_write_read_different_sizes(self, tmp_path: Path, n_cep: int, n_frames: int) -> None:
+        """The supplied width preserves shape even when float counts are ambiguous."""
+        original = np.arange(n_frames * n_cep, dtype=np.float32).reshape(n_frames, n_cep)
+        path = tmp_path / "features.mfc"
+        _write_sphinx_mfc(path, original)
 
-        Note: read_sphinx_mfc infers veclen, so we use frame counts that
-        avoid ambiguity (e.g., 3 frames * 26 cep = 78, not divisible by 13).
-        """
-        # Use frame counts that give unambiguous total float counts
-        test_cases = [
-            (10, 13),  # 130 floats - divisible by 13, not 26 or 39
-            (10, 26),  # 260 floats - divisible by 13 and 26, prefer 26
-            (10, 39),  # 390 floats - divisible by 13, 26, 39, prefer 39
-            (100, 13),
-        ]
-        for n_frames, n_cep in test_cases:
-            original = np.random.randn(n_frames, n_cep).astype(np.float32)
+        result = read_sphinx_mfc(path, veclen=n_cep)
 
-            with tempfile.NamedTemporaryFile(suffix=".mfc", delete=False) as f:
-                tmpfile = Path(f.name)
+        assert result.shape == original.shape
+        assert np.array_equal(result, original)
 
-            try:
-                _write_sphinx_mfc(tmpfile, original)
-                result = read_sphinx_mfc(tmpfile)
-                # Just verify data integrity, shape may differ due to veclen inference
-                assert result.size == original.size
-                assert np.allclose(original.ravel(), result.ravel())
-            finally:
-                tmpfile.unlink(missing_ok=True)
+    def test_default_width_is_canonical_and_not_inferred(self, tmp_path: Path) -> None:
+        path = tmp_path / "features.mfc"
+        _write_sphinx_mfc(path, np.zeros((1, 14), dtype=np.float32))
+
+        with pytest.raises(ValueError, match="veclen=13"):
+            read_sphinx_mfc(path)
+
+    @pytest.mark.parametrize("veclen", [0, -1, True, 1.5])
+    def test_invalid_width(self, tmp_path: Path, veclen: Any) -> None:
+        with pytest.raises(ValueError, match="positive integer"):
+            read_sphinx_mfc(tmp_path / "features.mfc", veclen=veclen)
 
 
 class TestExtractFeatures:
@@ -281,10 +347,8 @@ class TestExtractFeatures:
         try:
             # Use ncep parameter (features.py FeatureConfig uses ncep, not num_ceps)
             n_frames = extract_features(sample_audio_path, out_path, ncep=26)
-            features = read_sphinx_mfc(out_path)
-            # Note: read_sphinx_mfc infers veclen, may reshape to (n*2, 13) instead of (n, 26)
-            # Just verify total data matches expected
-            assert features.size == n_frames * 26
+            features = read_sphinx_mfc(out_path, veclen=26)
+            assert features.shape == (n_frames, 26)
         finally:
             out_path.unlink(missing_ok=True)
 

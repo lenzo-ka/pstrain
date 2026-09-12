@@ -108,6 +108,7 @@ CONSUMERS: dict[str, tuple[str, str]] = {
     "training.retry_beam_factor": ("pipeline.training", "training"),
     "training.failed_alignment": ("pipeline.training", "training"),
     "training.bw_checkpoint_iterations": ("pipeline.training", "training"),
+    "training.split_variance_floor_fraction": ("pipeline.training", "training"),
     "training.arctic_a0302_zero_codebook_band": ("pipeline.training", "training"),
     "training.accept_arctic_a0587_known_skip": ("pipeline.training", "training"),
     "training.tree_state_weights": ("pipeline.training", "training"),
@@ -186,6 +187,7 @@ CONSUMER_TOUCHES: dict[str, str] = {
             "training.retry_beam_factor",
             "training.failed_alignment",
             "training.bw_checkpoint_iterations",
+            "training.split_variance_floor_fraction",
             "training.arctic_a0302_zero_codebook_band",
             "training.accept_arctic_a0587_known_skip",
             "training.tree_state_weights",
@@ -274,8 +276,7 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     return data
 
 
-def _field_constraints(field_path: str) -> dict[str, Any]:
-    schema = Profile.model_json_schema()
+def _field_constraints(field_path: str, schema: dict[str, Any]) -> dict[str, Any]:
     node: dict[str, Any] = schema
     for part in field_path.split("."):
         while "$ref" in node:
@@ -361,7 +362,12 @@ def _profile_documents(
         if definition.extends is None:
             expected = Profile().model_dump(mode="python")
             missing = sorted(
-                path for path, _ in _leaves(expected) if path not in dict(_leaves(body))
+                path
+                for path, _ in _leaves(expected)
+                if path not in dict(_leaves(body))
+                # This default-off addition must not invalidate existing complete
+                # version-1 profiles. Leave it absent so schema provenance applies.
+                and path != "training.split_variance_floor_fraction"
             )
             if missing:
                 raise ValueError(
@@ -422,6 +428,19 @@ def _overlay(
     if not path.exists():
         return {}, [], kind
     raw = _load_yaml(path)
+    if kind == "user":
+        from pstrain.lib.config.user import PstrainUserConfig
+
+        try:
+            user = PstrainUserConfig.from_document(raw, path)
+        except ValidationError as exc:
+            raise ValueError(f"invalid configuration layer {path}: {exc}") from exc
+        legacy = "config_version" not in raw
+        return (
+            user.semantic_overlay(),
+            [_warn_legacy(path, project_dir)] if legacy else [],
+            "legacy" if legacy else kind,
+        )
     if "config_version" not in raw:
         warning = [_warn_legacy(path, project_dir)]
         if not legacy_effective:
@@ -540,6 +559,7 @@ def resolve_config(
         raise ValueError(f"invalid resolved profile {profile_name!r}: {exc}") from exc
     values = profile.model_dump(mode="python")
     explanations: dict[str, FieldExplanation] = {}
+    schema = Profile.model_json_schema()
     for path, value in _leaves(values):
         if path not in CONSUMERS:
             raise ValueError(f"declared configuration field {path!r} has no runtime consumer")
@@ -552,7 +572,7 @@ def resolve_config(
             winner=history[-1],
             overridden=tuple(history[:-1]),
             default=history[0].value,
-            constraints=_field_constraints(path),
+            constraints=_field_constraints(path, schema),
             consumer=consumer,
             provenance_scope=scope,
         )

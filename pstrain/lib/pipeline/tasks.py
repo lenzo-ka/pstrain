@@ -293,6 +293,7 @@ def _make_flat_task(ctx: PipelineContext) -> Task:
             ctx.provenance_path("training"),
         ),
         outputs=tuple(ctx.model_files("flat")),
+        preflight=ctx.validate_training_features,
         description="Initialize flat (uniform) acoustic model",
     )
 
@@ -417,6 +418,7 @@ def _make_bw_train_task(
         name=name,
         fn=run,
         inputs=inputs,
+        optional_inputs=(ctx.filler_dict_path,),
         outputs=tuple(ctx.model_files(out_model)),
         description=description,
     )
@@ -439,6 +441,12 @@ def _make_split_and_train_task(
     src_dir = ctx.model_dir(src_model)
     split_dir = ctx.model_dir(f"{out_model}-split")
     out_dir = ctx.model_dir(out_model)
+    variance_floor_fraction = ctx.train.split_variance_floor_fraction
+    variance_floor_reference = (
+        ctx.model_dir(f"{out_model.split('-', 1)[0]}-1g") / "variances"
+        if variance_floor_fraction > 0
+        else None
+    )
 
     def run() -> None:
         from pstrain.lib.bw import BWConfig
@@ -490,6 +498,8 @@ def _make_split_and_train_task(
                 1 if ctx.train.accept_arctic_a0587_known_skip and out_model == "cd-2g" else None
             ),
             _output_note=output_note,
+            variance_floor_reference=variance_floor_reference,
+            variance_floor_fraction=variance_floor_fraction,
         )
         write_feat_params(out_dir / "feat.params", ctx.feat)
         _record_model_provenance(ctx, out_dir)
@@ -505,9 +515,11 @@ def _make_split_and_train_task(
             ctx.etc_dir / ".split.validated.json",
             dictionary,
             *feature_files,
+            *((variance_floor_reference,) if variance_floor_reference is not None else ()),
         ),
         outputs=tuple(ctx.model_files(out_model)),
         description=description,
+        optional_inputs=(ctx.filler_dict_path,),
     )
 
 
@@ -554,6 +566,7 @@ def _make_cd_untied_init_task(ctx: PipelineContext) -> Task:
             ctx.provenance_path("training"),
         ),
         outputs=tuple(ctx.model_files("cd-untied-init")),
+        optional_inputs=(ctx.filler_dict_path,),
         description="Initialize CD untied model from CI-1g",
     )
 
@@ -722,6 +735,7 @@ def _make_alltriphones_mdef_task(ctx: PipelineContext) -> Task:
         inputs=(phoneset, dictionary, ctx.provenance_path("training")),
         outputs=(out_path,),
         description="Generate alltriphones mdef from dictionary",
+        optional_inputs=(ctx.filler_dict_path,),
     )
 
 
@@ -818,6 +832,7 @@ def _make_package_task(
         name=name,
         fn=run,
         inputs=(*ctx.model_files(src_model), dictionary),
+        optional_inputs=(ctx.filler_dict_path,),
         outputs=outputs,
         description=f"Package {src_model} for distribution",
     )
@@ -887,6 +902,7 @@ def _make_test_task(ctx: PipelineContext, *, model: str) -> Task:
             dictionary,
         ),
         outputs=(report_path,),
+        optional_inputs=(ctx.filler_dict_path,),
         description=f"Test {model} and write WER report",
     )
 

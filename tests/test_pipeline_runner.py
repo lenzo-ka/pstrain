@@ -1737,3 +1737,91 @@ def test_a_failure_inside_a_collapsed_group_still_names_the_task(
         line.startswith("extract:bad\t1\t") and line.endswith("\tfailed")
         for line in output.splitlines()
     )
+
+
+def test_missing_required_external_input_fails_before_any_task(tmp_path: Path) -> None:
+    source = tmp_path / "required.dict"
+    upstream = tmp_path / "upstream"
+    output = tmp_path / "model"
+    pl = Pipeline()
+    pl.add(_make_touch_task("upstream", upstream))
+    task = _make_touch_task("model", output, inputs=(upstream, source))
+    pl.add(task)
+    pl.register_target("model", output)
+    # Even cached outputs and force cannot hide a deleted required source.
+    output.touch()
+    _mark_complete(task)
+    for force in (False, True):
+        with pytest.raises(FileNotFoundError, match="requires external input.*required.dict"):
+            pl.run("model", force=force)
+    assert not upstream.exists()
+
+
+def test_required_input_disappearing_after_plan_is_rejected(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.touch()
+    output = tmp_path / "out"
+    task = _make_touch_task("work", output, inputs=(source,))
+    pl = Pipeline()
+    pl.add(task)
+    pl.register_target("work", output)
+    entries = pl.plan("work")
+    source.unlink()
+    assert runner._execute(entries, jobs=1).rc == 1
+    assert not output.exists()
+
+
+def test_optional_input_add_edit_remove_invalidates_and_propagates(tmp_path: Path) -> None:
+    optional = tmp_path / "filler.dict"
+    output = tmp_path / "model"
+    package = tmp_path / "package"
+    pl = Pipeline()
+    pl.add(
+        Task(
+            "model",
+            functools.partial(_touch, output),
+            outputs=(output,),
+            optional_inputs=(optional,),
+        )
+    )
+    pl.add(_make_touch_task("package", package, inputs=(output,)))
+    pl.register_target("package", package)
+    assert pl.run("package") == 0
+    assert not any(entry.stale for entry in pl.plan("package"))
+    for content in ("<sil> SIL", "<noise> NOISE", None):
+        if content is None:
+            optional.unlink()
+        else:
+            optional.write_text(content)
+            # Exercise the ordinary mtime contract deterministically.
+            stamp = output.stat().st_mtime_ns + 1
+            os.utime(optional, ns=(stamp, stamp))
+        changed_plan = pl.plan("package")
+        assert all(entry.stale for entry in changed_plan)
+        assert all(not any(char.isspace() for char in entry.reason) for entry in changed_plan)
+        assert pl.run("package") == 0
+        assert not any(entry.stale for entry in pl.plan("package"))
+
+
+def test_preflight_rejects_before_dependencies_execute(tmp_path: Path) -> None:
+    dependency = tmp_path / "dependency"
+    output = tmp_path / "output"
+
+    def reject() -> None:
+        raise ValueError("unsupported configuration")
+
+    pl = Pipeline()
+    pl.add(_make_touch_task("dependency", dependency))
+    pl.add(
+        Task(
+            "output",
+            functools.partial(_touch, output),
+            inputs=(dependency,),
+            outputs=(output,),
+            preflight=reject,
+        )
+    )
+    pl.register_target("output", output)
+    with pytest.raises(ValueError, match="unsupported configuration"):
+        pl.run("output")
+    assert not dependency.exists()

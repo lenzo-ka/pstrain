@@ -265,7 +265,7 @@ pstrain_bw_init(const char *mdef_path,
     /* Larger topn evaluates more densities.  Upstream uses every density for
      * CI and CD-tied BW, and one density for CD-untied BW. */
     E_INFO("Reading Gaussians from %s and %s\n", means_path, vars_path);
-    if (mod_inv_read_gauden(ctx->inv, means_path, vars_path, 0.0001, ctx->topn, 0) != S3_SUCCESS) {
+    if (mod_inv_read_gauden(ctx->inv, means_path, vars_path, GAUDEN_EVAL_VAR_FLOOR, ctx->topn, 0) != S3_SUCCESS) {
         E_ERROR("Failed to read Gaussians\n");
         goto error;
     }
@@ -788,6 +788,13 @@ pstrain_bw_process_utt(pstrain_bw_context_t *ctx,
     if (!ctx || !features || n_frames == 0 || !phone_ids || n_phones == 0) {
         E_ERROR("Invalid arguments to pstrain_bw_process_utt\n");
         return -1;
+    }
+
+    for (f = 0; f < n_phones; ++f) {
+        if (phone_ids[f] >= acmod_set_n_acmod(ctx->mdef->acmod_set)) {
+            E_ERROR("Phone ID %u is outside the model inventory\n", phone_ids[f]);
+            return -1;
+        }
     }
 
     n_feat_stream = feat_dimension1(ctx->feat);

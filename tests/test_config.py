@@ -360,3 +360,63 @@ def test_legacy_warning_is_deduplicated_once_per_run(tmp_path: Path) -> None:
         resolve_config(tmp_path)
         resolve_config(tmp_path)
     assert len(caught) == 1
+
+
+def test_resolution_generates_schema_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    original = Profile.model_json_schema
+    calls = 0
+
+    def counted_schema() -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        return original()
+
+    monkeypatch.setattr(Profile, "model_json_schema", counted_schema)
+    resolved = resolve_config(tmp_path, user_config_path=tmp_path / "absent-user.yaml")
+    assert calls == 1
+    assert resolved.fields["features.ncep"].constraints == {"exclusiveMinimum": 0}
+    assert resolved.fields["training.failed_alignment"].constraints == {
+        "enum": ["recover", "abort", "omit"]
+    }
+
+
+@pytest.mark.parametrize("selector", [1, "1", "01", "+1", " 1 "])
+def test_exclusion_pass_selectors_are_normalized(selector: int | str) -> None:
+    config = TrainingConfig(exclusion_schedule={"cd-2g": {selector: ["example"]}})
+    assert config.exclusion_schedule == {"cd-2g": {1: ["example"]}}
+
+
+def test_ambiguous_exclusion_pass_selectors_are_rejected() -> None:
+    with pytest.raises(ValueError, match="duplicate pass selector"):
+        TrainingConfig(exclusion_schedule={"cd-2g": {1: ["first"], "01": ["second"]}})
+
+
+@pytest.mark.parametrize("selector", [True, 1.0, "0", "-1", "first"])
+def test_invalid_exclusion_selectors_are_rejected(selector: object) -> None:
+    with pytest.raises(ValueError):
+        TrainingConfig.model_validate({"exclusion_schedule": {"cd-2g": {selector: ["example"]}}})
+
+
+@pytest.mark.parametrize("remove_existing", [False, True])
+def test_existing_complete_profile_keeps_optional_variance_floor_default(
+    tmp_path: Path, remove_existing: bool
+) -> None:
+    profile = Profile().model_dump(mode="json")
+    del profile["training"]["split_variance_floor_fraction"]
+    if remove_existing:
+        del profile["training"]["skip_state"]
+    (tmp_path / "etc").mkdir()
+    config = tmp_path / "etc" / "configs.yaml"
+    config.write_text(yaml.safe_dump({"config_version": 1, "profiles": {"default": profile}}))
+    original = config.read_bytes()
+    if remove_existing:
+        with pytest.raises(ValueError, match="training.skip_state"):
+            resolve_config(tmp_path, user_config_path=tmp_path / "absent")
+    else:
+        resolved = resolve_config(tmp_path, user_config_path=tmp_path / "absent")
+        assert resolved.profile.training.split_variance_floor_fraction == 0.0
+        assert (
+            resolved.fields["training.split_variance_floor_fraction"].winner.source_kind
+            == "schema-default"
+        )
+    assert config.read_bytes() == original

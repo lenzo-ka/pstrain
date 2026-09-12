@@ -188,18 +188,18 @@ class TrainParams:
     n_senones: int = field(default_factory=lambda: Profile().training.n_senones)
     a_beam: float = field(default_factory=lambda: Profile().training.a_beam)
     b_beam: float = field(default_factory=lambda: Profile().training.b_beam)
-    # A7c matched the upstream signed absolute likelihood-delta decision,
-    # while measurements retained 0.001 rather than upstream's literal 0.1.
-    # CI and tied stages keep that controller and upstream's ten-pass cap.
+    # A7c initially matched the upstream signed likelihood-delta decision.
+    # The controller now excludes negative/nonfinite changes from convergence,
+    # while retaining 0.001 rather than upstream's 0.1 and the ten-pass cap.
     ci: TrainingSchedule = field(
         default_factory=lambda: TrainingSchedule(**Profile().training.ci.model_dump())
     )
     tied: TrainingSchedule = field(
         default_factory=lambda: TrainingSchedule(**Profile().training.tied.model_dump())
     )
-    # SphinxTrain scripts/30.cd_hmm_untied/norm_and_launchbw.pl uses the same
-    # converge-with-cap controller. The preserved SLT oracle ended at pass 6;
-    # cap this stage there so a stricter pstrain threshold cannot run to 10.
+    # SphinxTrain scripts/30.cd_hmm_untied/norm_and_launchbw.pl also caps passes,
+    # but permits negative changes to stop. Untied training uses its configured
+    # cap with the same nonregressing convergence predicate as CI and tied stages.
     untied: TrainingSchedule = field(
         default_factory=lambda: TrainingSchedule(**Profile().training.untied.model_dump())
     )
@@ -213,6 +213,9 @@ class TrainParams:
     )
     bw_checkpoint_iterations: bool = field(
         default_factory=lambda: Profile().training.bw_checkpoint_iterations
+    )
+    split_variance_floor_fraction: float = field(
+        default_factory=lambda: Profile().training.split_variance_floor_fraction
     )
     arctic_a0302_zero_codebook_band: tuple[int, int] | None = field(
         default_factory=lambda: Profile().training.arctic_a0302_zero_codebook_band
@@ -512,6 +515,18 @@ class PipelineContext:
             d / "provenance.json",
         ]
 
+    def validate_training_features(self) -> None:
+        """Reject unsupported native BW front ends before building dependencies."""
+        from pstrain.lib.bw import BW_CEPSTRAL_LENGTH, BW_FEATURE_TYPE
+
+        if self.feat.ncep != BW_CEPSTRAL_LENGTH or self.feat.feat_type != BW_FEATURE_TYPE:
+            raise ValueError(
+                "BW training requires "
+                f"features.ncep={BW_CEPSTRAL_LENGTH} and features.feat_type={BW_FEATURE_TYPE!r}; "
+                f"got ncep={self.feat.ncep}, feat_type={self.feat.feat_type!r}. "
+                "Other feature configurations are supported for standalone feature extraction."
+            )
+
     def provenance_payload(self, stage: str) -> dict[str, Any]:
         """Canonical effective configuration governing a pipeline stage."""
         payload: dict[str, Any] = {
@@ -627,8 +642,13 @@ class PipelineContext:
     @property
     def filler_dict(self) -> Path | None:
         """Optional filler dictionary; None if not present."""
-        p = self.shared_dir / "filler.dict"
+        p = self.filler_dict_path
         return p if p.exists() else None
+
+    @property
+    def filler_dict_path(self) -> Path:
+        """Stable optional dependency path, including when the file is absent."""
+        return self.shared_dir / "filler.dict"
 
     @property
     def all_transcription(self) -> Path:

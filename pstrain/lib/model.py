@@ -19,12 +19,68 @@ from __future__ import annotations
 
 import math
 import re
+import shutil
+import tempfile
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 # Required while constructing and updating a model during training/BW.
 MODEL_FILES_REQUIRED = ["mdef", "means", "variances", "mixture_weights", "transition_matrices"]
+MODEL_PARAMETER_FILES = tuple(MODEL_FILES_REQUIRED[1:])
+
+
+@contextmanager
+def staged_model_update(model_dir: Path, filenames: tuple[str, ...]) -> Iterator[Path]:
+    """Stage a complete file set and restore originals on publication failure.
+
+    The caller writes and validates the candidate inside the yielded directory.
+    Concurrent access and process death during publication require external
+    coordination; this is not an atomic directory snapshot. Catchable failures
+    restore the captured files, retaining backups if recovery itself fails.
+    """
+    model_dir.mkdir(parents=True, exist_ok=True)
+    for name in filenames:
+        if (model_dir / name).is_dir():
+            raise RuntimeError(f"Cannot save model parameter over directory: {model_dir / name}")
+    staging = Path(tempfile.mkdtemp(prefix=".hmm-save-", dir=model_dir))
+    discard_staging = True
+    originals: set[str] = set()
+    try:
+        yield staging
+        backup = staging / "backup"
+        backup.mkdir()
+        for name in filenames:
+            if not (staging / name).is_file():
+                raise RuntimeError(f"Missing staged model parameter: {staging / name}")
+            destination = model_dir / name
+            if destination.exists() or destination.is_symlink():
+                shutil.copy2(destination, backup / name, follow_symlinks=False)
+                originals.add(name)
+        try:
+            for name in filenames:
+                (staging / name).replace(model_dir / name)
+        except BaseException:
+            # A replacement may have succeeded before an error reaches Python.
+            # Restore the complete captured set, including uncertain operations.
+            try:
+                for name in reversed(filenames):
+                    if name in originals:
+                        (backup / name).replace(model_dir / name)
+                    else:
+                        (model_dir / name).unlink(missing_ok=True)
+            except BaseException as recovery_error:
+                discard_staging = False
+                raise RuntimeError(
+                    f"Model save rollback failed; original parameters retained in {backup}"
+                ) from recovery_error
+            raise
+    finally:
+        if discard_staging:
+            shutil.rmtree(staging)
+
 
 # A complete model consumed for decoding, alignment, packaging, or deployment
 # additionally requires the training-time front-end record.

@@ -206,9 +206,20 @@ class FeatureExtractor:
         audio = np.ascontiguousarray(audio, dtype=np.int16)
         n_samples = len(audio)
 
-        # Estimate number of output frames (10ms frame shift typical)
-        frame_shift = self._config.samprate // 100  # ~10ms
-        max_frames = (n_samples // frame_shift) + 10  # buffer
+        self._lib.pstrain_cffi_fe_start_stream(self._fe)
+        self._lib.pstrain_cffi_fe_start_utt(self._fe)
+
+        # Ask the front end for its capacity bound: frame rate, window size,
+        # and native sample rounding determine it. fe_end_utt emits at most
+        # one additional residual frame (sphinxbase/fe.h).
+        nsamp = self._ffi.new("size_t*", n_samples)
+        nframes = self._ffi.new("int32*")
+        self._lib.pstrain_cffi_fe_process_frames(
+            self._fe, self._ffi.NULL, nsamp, self._ffi.NULL, nframes, self._ffi.NULL
+        )
+        if nframes[0] < 0:
+            raise RuntimeError("Front end returned a negative frame capacity")
+        max_frames = nframes[0] + 1
 
         # Allocate output buffer
         feat_buf = np.zeros((max_frames, self._veclen), dtype=np.float32)
@@ -216,26 +227,22 @@ class FeatureExtractor:
         # Create pointers
         audio_ptr = self._ffi.cast("int16*", self._ffi.from_buffer(audio))
         audio_ptr_ptr = self._ffi.new("int16 const**", audio_ptr)
-        nsamp = self._ffi.new("size_t*", n_samples)
 
         # Allocate frame pointers for fe_process_frames
         feat_ptrs = self._ffi.new("float32*[]", max_frames)
         for i in range(max_frames):
             feat_ptrs[i] = self._ffi.cast("float32*", self._ffi.from_buffer(feat_buf[i]))
 
-        nframes = self._ffi.new("int32*", max_frames)
-
-        # Start utterance
-        self._lib.pstrain_cffi_fe_start_stream(self._fe)
-        self._lib.pstrain_cffi_fe_start_utt(self._fe)
-
         # Process all samples
         total_frames = 0
         while nsamp[0] > 0:
             nframes[0] = max_frames - total_frames
+            samples_remaining = nsamp[0]
             self._lib.pstrain_cffi_fe_process_frames(
                 self._fe, audio_ptr_ptr, nsamp, feat_ptrs + total_frames, nframes, self._ffi.NULL
             )
+            if nsamp[0] == samples_remaining and nframes[0] == 0:
+                raise RuntimeError("Front end made no progress while processing audio")
             total_frames += nframes[0]
 
         # End utterance - get any remaining frames
@@ -377,15 +384,21 @@ def _write_sphinx_mfc(features: npt.NDArray[np.float32], path: Path) -> None:
         features.astype(np.float32).tofile(f)
 
 
-def read_sphinx_mfc(path: Path) -> npt.NDArray[np.float32]:
+def read_sphinx_mfc(path: Path, *, veclen: int = FEParams.ncep) -> npt.NDArray[np.float32]:
     """Read features from Sphinx .mfc format.
 
     Args:
         path: Path to .mfc file
+        veclen: Coefficients per frame, taken from the producing front end.
+            Defaults to the canonical 13-coefficient front end. MFC headers
+            record only the total float count, so width cannot be inferred.
 
     Returns:
         Feature array of shape (n_frames, veclen)
     """
+    if not isinstance(veclen, int) or isinstance(veclen, bool) or veclen <= 0:
+        raise ValueError("veclen must be a positive integer")
+
     with path.open("rb") as f:
         # Read header
         n_floats = struct.unpack("<i", f.read(4))[0]
@@ -395,10 +408,6 @@ def read_sphinx_mfc(path: Path) -> npt.NDArray[np.float32]:
     if len(data) != n_floats:
         raise ValueError(f"Expected {n_floats} floats, got {len(data)}")
 
-    # Infer veclen (typically 13 for MFCCs)
-    # Try common values
-    for veclen in [13, 26, 39]:
-        if n_floats % veclen == 0:
-            return data.reshape(-1, veclen)
-
-    raise ValueError(f"Cannot determine veclen for {n_floats} floats")
+    if n_floats % veclen:
+        raise ValueError(f"Expected a multiple of veclen={veclen} floats, got {n_floats}")
+    return data.reshape(-1, veclen)

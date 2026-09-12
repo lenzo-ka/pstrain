@@ -14,13 +14,30 @@ from typing import TYPE_CHECKING, Literal, Self
 import numpy as np
 
 from pstrain.lib import _pstrainc, native_worker
+from pstrain.lib.model import MODEL_PARAMETER_FILES, staged_model_update
 
 if TYPE_CHECKING:
     import numpy.typing as npt
 
 logger = logging.getLogger(__name__)
 
+# The native BW front end currently fixes this feature contract. The feature
+# vector concatenates cepstra, deltas, and double deltas.
+BW_FEATURE_TYPE = "1s_c_d_dd"
+BW_CEPSTRAL_LENGTH = 13
+BW_FEATURE_LENGTH = 3 * BW_CEPSTRAL_LENGTH
+
 __all__ = ["BWConfig", "BWResult", "HMM", "BWTrainer"]
+
+
+def _feature_matrix(values: npt.NDArray[np.float32], width: int) -> npt.NDArray[np.float32]:
+    """Validate the shape before exposing a buffer to the fixed native stride."""
+    values = np.asarray(values)
+    if values.ndim != 2 or values.shape[1] != width:
+        raise ValueError(f"Expected feature shape (n_frames, {width}), got {values.shape}")
+    if values.shape[0] == 0:
+        raise ValueError("At least one feature frame is required")
+    return np.ascontiguousarray(values, dtype=np.float32)
 
 
 @dataclass
@@ -116,35 +133,32 @@ class HMM:
         )
         if n_feat_stream != 1:
             raise ValueError("HMM.load currently requires a single mixture-weight stream")
-        mixw_counts = mixw_raw.reshape(n_mixw, n_density_mw)
-        mixw_sums = mixw_counts.sum(axis=-1, keepdims=True)
-        mixw = np.divide(
-            mixw_counts,
-            mixw_sums,
-            out=np.zeros_like(mixw_counts),
-            where=mixw_sums != 0,
-        )
-
-        tmat_counts, n_tmat, n_state = _pstrainc.read_tmat(str(model_dir / "transition_matrices"))
-        tmat_sums = tmat_counts.sum(axis=-1, keepdims=True)
-        tmat = np.divide(
-            tmat_counts,
-            tmat_sums,
-            out=np.zeros_like(tmat_counts),
-            where=tmat_sums != 0,
-        )
+        mixw = mixw_raw.reshape(n_mixw, n_density_mw)
+        # The probability readers own normalization; transition storage omits
+        # the exit-state row and remains rectangular in the loaded HMM.
+        tmat, _, _ = _pstrainc.read_tmat(str(model_dir / "transition_matrices"))
 
         return cls(means, variances, mixw, tmat)
 
     def save(self, model_dir: Path) -> None:
-        """Save model to directory using CFFI."""
-        model_dir = Path(model_dir)
-        model_dir.mkdir(parents=True, exist_ok=True)
+        """Save a complete parameter set, checking every native write.
 
-        _pstrainc.write_gau(str(model_dir / "means"), self.means)
-        _pstrainc.write_gau(str(model_dir / "variances"), self.variances)
-        _pstrainc.write_mixw(str(model_dir / "mixture_weights"), self.mixw)
-        _pstrainc.write_tmat(str(model_dir / "transition_matrices"), self.tmat)
+        Writes are staged before any destination parameter is replaced. A
+        replacement error restores the old files. Concurrent readers/writers
+        and process death during the replacements require external coordination;
+        this is not an atomic directory snapshot.
+        """
+        model_dir = Path(model_dir)
+        parameters = (
+            ("means", _pstrainc.write_gau, self.means),
+            ("variances", _pstrainc.write_gau, self.variances),
+            ("mixture_weights", _pstrainc.write_mixw, self.mixw),
+            ("transition_matrices", _pstrainc.write_tmat, self.tmat),
+        )
+        with staged_model_update(model_dir, MODEL_PARAMETER_FILES) as staging:
+            for name, writer, values in parameters:
+                if writer(str(staging / name), values) != 0:
+                    raise RuntimeError(f"Failed to write model parameter: {model_dir / name}")
 
 
 class BWTrainer:
@@ -282,13 +296,11 @@ class BWTrainer:
         """
         if not self._dict_set:
             raise RuntimeError("Dictionary not set. Call set_dict() first.")
+        features = _feature_matrix(features, BW_FEATURE_LENGTH)
         if hasattr(self, "_proxy"):
             return bool(self._proxy.call("process_utterance_text", features, transcript))
 
         n_frames = features.shape[0]
-
-        # Ensure contiguous array
-        features = np.ascontiguousarray(features, dtype=np.float32)
 
         ret = self._lib.pstrain_bw_process_utt_text(
             self._ctx,
@@ -321,6 +333,7 @@ class BWTrainer:
         """
         if not self._dict_set:
             raise RuntimeError("Dictionary not set. Call set_dict() first.")
+        mfcc = _feature_matrix(mfcc, BW_CEPSTRAL_LENGTH)
         if hasattr(self, "_proxy"):
             result = bool(
                 self._proxy.call("process_utterance_mfcc", mfcc, transcript, utterance_id)
@@ -329,13 +342,6 @@ class BWTrainer:
             return result
 
         n_frames = mfcc.shape[0]
-
-        # Validate dimensions
-        if mfcc.shape[1] != 13:
-            raise ValueError(f"Expected 13-dim MFCCs, got {mfcc.shape[1]}")
-
-        # Ensure contiguous array
-        mfcc = np.ascontiguousarray(mfcc, dtype=np.float32)
 
         ret = self._lib.pstrain_bw_process_utt_mfcc(
             self._ctx,
@@ -383,14 +389,21 @@ class BWTrainer:
         Returns:
             True on success
         """
+        features = _feature_matrix(features, BW_FEATURE_LENGTH)
+        phone_ids = np.asarray(phone_ids)
+        if (
+            phone_ids.ndim != 1
+            or phone_ids.size == 0
+            or not np.issubdtype(phone_ids.dtype, np.integer)
+            or np.any(phone_ids < 0)
+            or np.any(phone_ids > np.iinfo(np.uint32).max)
+        ):
+            raise ValueError("Phone IDs must be a nonempty one-dimensional array of uint32 IDs")
+        phone_ids = np.ascontiguousarray(phone_ids, dtype=np.uint32)
         if hasattr(self, "_proxy"):
             return bool(self._proxy.call("process_utterance", features, phone_ids))
         n_frames = features.shape[0]
         n_phones = len(phone_ids)
-
-        # Ensure contiguous arrays
-        features = np.ascontiguousarray(features, dtype=np.float32)
-        phone_ids = np.ascontiguousarray(phone_ids, dtype=np.uint32)
 
         ret = self._lib.pstrain_bw_process_utt(
             self._ctx,
