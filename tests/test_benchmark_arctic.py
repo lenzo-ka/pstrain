@@ -101,6 +101,34 @@ def test_network_and_benchmark_children_use_safe_launch_shape(
         assert kwargs["check"] is True
 
 
+def test_archive_fetch_reports_what_the_network_helper_said(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A caller sees the helper's own failure, not the status it exited with."""
+    stderr = b"Traceback (most recent call last):\nRuntimeError: HEAD failed: no route\n"
+
+    def failing_run(command: list[str], **kwargs: object) -> None:
+        assert kwargs["stderr"] is subprocess.PIPE
+        raise subprocess.CalledProcessError(1, command, stderr=stderr)
+
+    monkeypatch.setattr("pstrain.benchmarks.arctic.subprocess.run", failing_run)
+    with pytest.raises(RuntimeError, match="RuntimeError: HEAD failed: no route"):
+        fetch_archive(ARCHIVES[0], tmp_path)
+
+
+def test_archive_fetch_falls_back_to_the_helper_exit_status(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A helper that dies without saying anything still produces a report."""
+
+    def silent_run(command: list[str], **kwargs: object) -> None:
+        raise subprocess.CalledProcessError(-11, command, stderr=b"")
+
+    monkeypatch.setattr("pstrain.benchmarks.arctic.subprocess.run", silent_run)
+    with pytest.raises(RuntimeError, match="helper exited with status -11"):
+        fetch_archive(ARCHIVES[0], tmp_path)
+
+
 def test_committed_transcripts_are_normalized_and_complete() -> None:
     expected = {
         "pin-train.transcription": 1043,

@@ -65,23 +65,61 @@ in-process because each step depends on the previous one's output.
 
 ### Dry-run
 
-`--dry-run` prints the topologically-sorted plan with stale/up-to-date
-markers and never executes:
+`--dry-run` prints the topologically-sorted plan and never executes. The
+plan uses the same tab-separated shape as the run it predicts: two comment
+lines, a header row, then one row per stage.
 
 ```
 # Plan for target: cd-1g
-# 1108 task(s); 10 stale
-
-. [   1] extract:arctic_a0001  (up to date)
-. [   2] extract:arctic_a0002  (up to date)
+# 1263 task(s); 1263 stale
+index	stage	tasks	status	description
+1	provenance:split	1	unbuilt	Record effective split configuration
+2	split	1	upstream:provenance:split	Partition all.transcription into train/test fileids + transcripts
+3	provenance:features	1	unbuilt	Record effective features configuration
+4-1135	features	1132	unbuilt
+1136	provenance:training	1	unbuilt	Record effective training configuration
+1137	flat	1	upstream:split	Initialize flat (uniform) acoustic model
+1138	ci-1g	1	upstream:flat	Train CI-1g (1 Gaussian per state)
 ...
-* [1099] flat  (missing output: shared/models/flat/default/feat.params)
-* [1100] ci-1g  (missing output: shared/models/ci-1g/default/feat.params)
-...
-* [1108] cd-1g  (missing output: shared/models/cd-1g/default/feat.params)
-
-# Legend: * = will run, . = up to date
+1263	cd-1g	1	upstream:cd-1g-init	Train tied CD-1g model
 ```
+
+`index` is a position in the plan. A collapsed fan-out reports as one row
+carrying the range of positions it spans and the number of tasks in it, so
+a plan holding 1,132 per-utterance feature tasks still shows the shape of
+the build. `--verbose` lists every member instead.
+
+`status` on an ordinary row is the reason the planner recorded, verbatim.
+Every status is a single word with no whitespace in it, because the plan is
+TSV: a value with a space in it survives `cut -f` but breaks anything that
+splits on whitespace. The reasons the planner produces are:
+
+* `unbuilt` — a declared output does not exist. This is the normal state of
+  every stage in a fresh project, so it is not phrased as a fault.
+* `stale` — the outputs exist and have fallen behind their inputs. This is
+  staleness in the strict sense, and no other status is.
+* `incomplete` — the outputs exist, but the private marker that says the
+  task finished does not, so the outputs may be partial.
+* `unconditional` — the task declares no outputs, so there is nothing to
+  compare and it runs every time.
+* `unchanged` — nothing to do.
+* `forced` — `--force` was passed, so nothing on disk was consulted.
+* `upstream:<task>` — this stage is due only because something it depends
+  on is. The colon reads as a namespace separator, the way stage names such
+  as `provenance:split` already use it.
+
+A collapsed fan-out takes its status from what its members actually
+reported, so it preserves the same distinctions a per-member listing would.
+When every member agrees the group borrows their word, as the `features` row
+above does. When they disagree the group says it is mixed and carries the
+count in each state, as in `mixed: 3 unbuilt, 37 unchanged`. The known
+states are listed in a fixed order — `unbuilt`, `unconditional`,
+`incomplete`, `forced`, `stale`, `unchanged` — and anything else follows
+them sorted, so the same plan always prints the same row.
+
+There are no bullet markers and no continuation line for the description,
+so every row carries the same columns and a plan pastes as a TSV beside the
+progress rows it foretells.
 
 ## Why we built our own
 

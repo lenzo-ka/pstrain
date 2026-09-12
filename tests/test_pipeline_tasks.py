@@ -852,7 +852,7 @@ def test_editing_persistent_split_revalidates_and_changes_membership(tmp_path: P
     rerun = build_pipeline(PipelineContext.from_config(project))
     plan = rerun.plan("split")
     assert plan[-1].stale
-    assert plan[-1].reason == "missing completion marker"
+    assert plan[-1].reason == "incomplete"
     assert rerun.run("split") == 0
 
     assert {name: (etc / name).read_bytes() for name in before} == before
@@ -870,7 +870,7 @@ def test_editing_persistent_split_revalidates_and_changes_membership(tmp_path: P
     edited = build_pipeline(PipelineContext.from_config(project))
     edited_plan = edited.plan("split")
     assert edited_plan[-1].stale
-    assert edited_plan[-1].reason == "inputs not older than outputs"
+    assert edited_plan[-1].reason == "stale"
     assert edited.run("split") == 0
     assert (etc / "train.fileids").read_text().splitlines() == reordered_train
 

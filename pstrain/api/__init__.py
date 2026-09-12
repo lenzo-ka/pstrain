@@ -29,6 +29,7 @@ Example::
 
 from pstrain.api.config import resolve_config
 from pstrain.api.dictionary import CMUDictSource, default_cmudict_cache, fetch_cmudict
+from pstrain.api.lm import build_lm, build_lm_from_file
 from pstrain.api.packaging import package_model, validate_package_destination
 from pstrain.api.steps import (
     run_build_lm,
@@ -96,6 +97,9 @@ __all__: list[str] = [
     "FeatureConfig",
     "TrainingConfig",
     "resolve_config",
+    # Language models
+    "build_lm",
+    "build_lm_from_file",
     # Packaging
     "package_model",
     "validate_package_destination",

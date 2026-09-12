@@ -46,6 +46,8 @@ def test_cmudict_stress_helpers_are_in_public_api() -> None:
         "FeatureConfig",
         "TrainingConfig",
         "resolve_config",
+        "build_lm",
+        "build_lm_from_file",
         "package_model",
         "validate_package_destination",
         "TUTORIAL_FILENAME",

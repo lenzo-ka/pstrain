@@ -1001,8 +1001,23 @@ def fetch_archive(archive: Archive, cache: Path) -> Path:
     # pp8-segv-report-2026-08-11.md diagnosed a macOS 27 Network.framework atfork
     # crash: after any in-process HTTP connection, a raw fork child can segfault
     # before exec. Keep the harness network-clean and this helper posix_spawn-eligible.
-    _run_trusted_child(command)
+    # Capturing the helper's streams keeps it so: the pipes are file descriptors
+    # above 2, which is what posix_spawn eligibility turns on, and the CMUdict
+    # fetcher already runs its own network helper this way.
+    try:
+        _run_trusted_child(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(f"could not fetch {archive.url}: {_child_failure(exc)}") from exc
     return destination
+
+
+def _child_failure(exc: subprocess.CalledProcessError) -> str:
+    """Report what a captured helper said rather than the status it exited with."""
+    stream = exc.stderr if exc.stderr else exc.stdout
+    if isinstance(stream, bytes):
+        stream = stream.decode("utf-8", errors="replace")
+    lines = [line.strip() for line in (stream or "").splitlines() if line.strip()]
+    return lines[-1] if lines else f"helper exited with status {exc.returncode}"
 
 
 def _fetch_archive_in_helper(archive: Archive, cache: Path) -> Path:
