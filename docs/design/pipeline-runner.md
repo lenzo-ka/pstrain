@@ -216,3 +216,42 @@ its first iteration, matching the unconditional `-2passvar yes` in
   order.
 * `tests/test_pipeline_integration.py` — end-to-end training runs
   against a real audio corpus (CMU Arctic via `PSTRAIN_TEST_PROJECT`).
+
+
+## Experimental split variance regularization
+
+`training.split_variance_floor_fraction` defaults to `0.0`, which disables
+regularization and preserves the existing training path. A user-selected finite
+fraction greater than zero and at most one enables a lower bound on every saved
+variance coordinate in split training stages. This is an experimental coefficient,
+not a universal tuning recommendation. CI splits always use the CI one-Gaussian
+model as their reference; CD splits always use the CD one-Gaussian model. Later
+splits retain that same reference instead of ratcheting against their parent.
+
+For each codebook and feature coordinate, the lower bound is the selected fraction
+of its matching one-Gaussian reference variance, broadcast across all densities.
+Reference zeros contribute a zero bound; the mechanism does not invent observations
+or guarantee a positive variance for unobserved coordinates. Both reference and
+candidate values must be finite and nonnegative before applying the bound. The
+current native front end supports one stream of 39 features; incompatible shapes
+are rejected rather than reshaped.
+
+The reference is loaded once per split training run. Its variance file is an
+explicit task input when enabled, and the fraction participates in the existing
+training configuration fingerprint. As with other model inputs, file staleness
+uses modification times; changes that preserve those times are not independently
+detected by the runner. Each successful pass records the reference path, SHA-256,
+fraction, zero-bound count, and number of clamped coordinates in telemetry.
+
+Density counts are staged before normalization. Normalized candidate parameters
+are then regularized and published with those counts, with checked rollback on
+write failures or interruptions. Checkpoints and subsequent passes consume the published bounded
+variances, so the saved model carries the constraint without decoder support.
+This publication is not an atomic directory snapshot for concurrent readers and
+does not promise recovery after process death.
+
+The direct `run_bw_training` API also accepts `variance_floor_reference` and
+`variance_floor_fraction`. Callers must supply a reference with the same codebook
+mapping; matching dimensions alone cannot establish state identity. The initial
+input is validated but not rewritten before the first scoring pass: the floor
+applies to completed updates. Other pipeline training stages remain unchanged.

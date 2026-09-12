@@ -111,6 +111,22 @@ class TrainingConfig(StrictModel):
     ci: TrainingScheduleConfig = Field(default_factory=TrainingScheduleConfig)
     tied: TrainingScheduleConfig = Field(default_factory=TrainingScheduleConfig)
     untied: TrainingScheduleConfig = Field(default_factory=TrainingScheduleConfig)
+    split_variance_floor_fraction: Annotated[
+        float,
+        Field(
+            ge=0,
+            le=1,
+            allow_inf_nan=False,
+            strict=True,
+            description=(
+                "Experimental variance lower bound for split training stages, as a fraction "
+                "of each matching coordinate in the fixed CI-1g or CD-1g variance reference. "
+                "Zero disables regularization. The reference never advances with later splits; "
+                "zero reference coordinates contribute no positive floor. Select a nonzero "
+                "fraction explicitly after evaluation; no universal nonzero value is assumed"
+            ),
+        ),
+    ] = 0.0
     max_skip_fraction: Annotated[
         float, Field(ge=0, le=1, description="Maximum skipped-update fraction")
     ] = 0.05

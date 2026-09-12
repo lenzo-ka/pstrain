@@ -301,6 +301,7 @@ PIN_CONFIGS: dict[str, dict[str, Any]] = {
             "feat_type": "1s_c_d_dd",
         },
         "training": {
+            "split_variance_floor_fraction": 0.0,
             "n_state": 3,
             "skip_state": False,
             "n_senones": 200,
@@ -360,6 +361,7 @@ PIN_CONFIGS: dict[str, dict[str, Any]] = {
             "feat_type": "1s_c_d_dd",
         },
         "training": {
+            "split_variance_floor_fraction": 0.0,
             "n_state": 3,
             "skip_state": False,
             "n_senones": 200,

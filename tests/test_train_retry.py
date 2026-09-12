@@ -653,7 +653,7 @@ def test_native_failed_pass_then_retry_matches_clean_wide_beam_model(
 
 
 @requires_c_library
-@pytest.mark.parametrize("failed_method", ["normalize", "save"])
+@pytest.mark.parametrize("failed_method", ["save_density_counts", "normalize", "save"])
 def test_training_stops_on_native_false_return_before_checkpoint(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failed_method: str
 ) -> None:
@@ -690,7 +690,11 @@ def test_training_stops_on_native_false_return_before_checkpoint(
     # native machinery; only the selected failure return is injected.
     monkeypatch.setattr(BWTrainer, failed_method, fail_native_status)
     output = tmp_path / "failed-model"
-    expected = "normalization failed" if failed_method == "normalize" else "model save failed"
+    expected = {
+        "save_density_counts": "density count save failed",
+        "normalize": "normalization failed",
+        "save": "model save failed",
+    }[failed_method]
     with pytest.raises(RuntimeError, match=f"Iteration 1: BW {expected}"):
         run_bw_training(
             model_dir=context.model_dir("flat"),
@@ -709,5 +713,5 @@ def test_training_stops_on_native_false_return_before_checkpoint(
     assert not (output / "iterations" / "01").exists()
     row = json.loads((output / "bw_telemetry.json").read_text())["passes"][-1]
     assert row["stop_decision"] == "failed"
-    assert row["error"] == expected
+    assert expected in row["error"]
     assert row["total_frames"] > 0

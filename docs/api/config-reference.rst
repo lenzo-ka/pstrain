@@ -286,6 +286,11 @@ training
    :Default: ``False``
    :Description: Enable SphinxTrain's $CFG_SKIPSTATE topology, adding an arc from each eligible emitting state to the state two positions ahead so a phone can be realized with fewer frames than states. SphinxTrain writes raw 3/1/1 weights and normalizes them on read; pstrain writes the behaviorally equivalent normalized values
 
+``training.split_variance_floor_fraction``
+   :Type: ``float``
+   :Default: ``0.0``
+   :Description: Experimental variance lower bound for split training stages, as a fraction of each matching coordinate in the fixed CI-1g or CD-1g variance reference. Zero disables regularization. The reference never advances with later splits; zero reference coordinates contribute no positive floor. Select a nonzero fraction explicitly after evaluation; no universal nonzero value is assumed
+
 ``training.tied.convergence_ratio``
    :Type: ``float``
    :Default: ``0.001``

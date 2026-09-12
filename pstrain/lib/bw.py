@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import shutil
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Self
@@ -16,6 +14,7 @@ from typing import TYPE_CHECKING, Literal, Self
 import numpy as np
 
 from pstrain.lib import _pstrainc, native_worker
+from pstrain.lib.model import MODEL_PARAMETER_FILES, staged_model_update
 
 if TYPE_CHECKING:
     import numpy.typing as npt
@@ -150,53 +149,16 @@ class HMM:
         this is not an atomic directory snapshot.
         """
         model_dir = Path(model_dir)
-        model_dir.mkdir(parents=True, exist_ok=True)
         parameters = (
             ("means", _pstrainc.write_gau, self.means),
             ("variances", _pstrainc.write_gau, self.variances),
             ("mixture_weights", _pstrainc.write_mixw, self.mixw),
             ("transition_matrices", _pstrainc.write_tmat, self.tmat),
         )
-        for name, _, _ in parameters:
-            destination = model_dir / name
-            if destination.is_dir():
-                raise RuntimeError(f"Cannot save model parameter over directory: {destination}")
-
-        staging = Path(tempfile.mkdtemp(prefix=".hmm-save-", dir=model_dir))
-        discard_staging = True
-        originals: set[str] = set()
-        try:
-            backup = staging / "backup"
-            backup.mkdir()
+        with staged_model_update(model_dir, MODEL_PARAMETER_FILES) as staging:
             for name, writer, values in parameters:
                 if writer(str(staging / name), values) != 0:
                     raise RuntimeError(f"Failed to write model parameter: {model_dir / name}")
-                destination = model_dir / name
-                if destination.exists() or destination.is_symlink():
-                    shutil.copy2(destination, backup / name, follow_symlinks=False)
-                    originals.add(name)
-            try:
-                for name, _, _ in parameters:
-                    (staging / name).replace(model_dir / name)
-            except BaseException:
-                # A replacement can succeed before an interrupt/error reaches
-                # Python. Restore the captured set, including the uncertain
-                # operation, instead of trusting a post-call progress list.
-                try:
-                    for name, _, _ in reversed(parameters):
-                        if name in originals:
-                            (backup / name).replace(model_dir / name)
-                        else:
-                            (model_dir / name).unlink(missing_ok=True)
-                except BaseException as recovery_error:
-                    discard_staging = False
-                    raise RuntimeError(
-                        f"Model save rollback failed; original parameters retained in {backup}"
-                    ) from recovery_error
-                raise
-        finally:
-            if discard_staging:
-                shutil.rmtree(staging)
 
 
 class BWTrainer:

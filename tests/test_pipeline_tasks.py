@@ -523,6 +523,7 @@ def test_training_fingerprint_payload_composition_is_pinned(empty_project: Path)
             "training.question_quests_per_state",
             "training.retry_beam_factor",
             "training.skip_state",
+            "training.split_variance_floor_fraction",
             "training.tied.convergence_ratio",
             "training.tied.max_iterations",
             "training.tied.min_iterations",
@@ -1385,3 +1386,25 @@ def test_training_rejects_unsupported_features_before_extraction(
         pipeline.run("ci-1g")
     assert not ctx.features_dir.exists()
     assert not ctx.model_dir("flat").exists()
+
+
+@pytest.mark.parametrize(
+    "stage", ["ci-2g", "ci-4g", "ci-8g", "cd-2g", "cd-4g", "cd-8g", "cd-16g", "cd-32g"]
+)
+def test_split_variance_floor_keeps_family_one_gaussian_anchor(
+    empty_project: Path, stage: str
+) -> None:
+    base = PipelineContext.from_config(empty_project)
+    enabled = PipelineContext.from_config(
+        empty_project,
+        cli_overrides={"training": {"split_variance_floor_fraction": 0.2}},
+    )
+    assert enabled.train.split_variance_floor_fraction == 0.2
+    anchor = enabled.model_dir(stage.split("-", 1)[0] + "-1g") / "variances"
+    graph = build_pipeline(enabled)
+    task = graph.tasks()[stage]
+    assert anchor in task.inputs
+    assert any(anchor in item.task.outputs for item in graph.plan(stage))
+    if not stage.endswith("-2g"):
+        assert anchor not in build_pipeline(base).tasks()[stage].inputs
+    assert enabled.fingerprint_payload("training") != base.fingerprint_payload("training")

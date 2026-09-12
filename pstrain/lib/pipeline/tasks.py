@@ -441,6 +441,12 @@ def _make_split_and_train_task(
     src_dir = ctx.model_dir(src_model)
     split_dir = ctx.model_dir(f"{out_model}-split")
     out_dir = ctx.model_dir(out_model)
+    variance_floor_fraction = ctx.train.split_variance_floor_fraction
+    variance_floor_reference = (
+        ctx.model_dir(f"{out_model.split('-', 1)[0]}-1g") / "variances"
+        if variance_floor_fraction > 0
+        else None
+    )
 
     def run() -> None:
         from pstrain.lib.bw import BWConfig
@@ -492,6 +498,8 @@ def _make_split_and_train_task(
                 1 if ctx.train.accept_arctic_a0587_known_skip and out_model == "cd-2g" else None
             ),
             _output_note=output_note,
+            variance_floor_reference=variance_floor_reference,
+            variance_floor_fraction=variance_floor_fraction,
         )
         write_feat_params(out_dir / "feat.params", ctx.feat)
         _record_model_provenance(ctx, out_dir)
@@ -507,6 +515,7 @@ def _make_split_and_train_task(
             ctx.etc_dir / ".split.validated.json",
             dictionary,
             *feature_files,
+            *((variance_floor_reference,) if variance_floor_reference is not None else ()),
         ),
         outputs=tuple(ctx.model_files(out_model)),
         description=description,

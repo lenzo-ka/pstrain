@@ -214,6 +214,9 @@ class TrainParams:
     bw_checkpoint_iterations: bool = field(
         default_factory=lambda: Profile().training.bw_checkpoint_iterations
     )
+    split_variance_floor_fraction: float = field(
+        default_factory=lambda: Profile().training.split_variance_floor_fraction
+    )
     arctic_a0302_zero_codebook_band: tuple[int, int] | None = field(
         default_factory=lambda: Profile().training.arctic_a0302_zero_codebook_band
     )
