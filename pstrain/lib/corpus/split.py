@@ -87,19 +87,9 @@ def train_test_split(
     if not transcription_file.exists():
         raise FileNotFoundError(f"transcription file not found: {transcription_file}")
 
-    entries: list[tuple[str, str]] = []
-    for raw in transcription_file.read_text().splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-        parts = line.split(None, 1)
-        if len(parts) >= 2:
-            entries.append((parts[0], parts[1]))
-        else:
-            entries.append((parts[0], ""))
-
-    if not entries:
-        raise ValueError(f"no entries in {transcription_file}")
+    # Generated and supplied splits share the same utterance-identity contract:
+    # duplicate IDs must fail before any output or validation stamp is written.
+    entries = list(_read_transcription(transcription_file, transcription_file.name).items())
 
     rng = random.Random(seed)
     shuffled = entries.copy()
@@ -200,8 +190,9 @@ def validate_external_split(
     if overlap:
         raise ValueError(f"external split has train/test overlap: {_summarize(overlap)}")
     supplied = train_ids + test_ids
+    supplied_ids = set(supplied)
     unknown = [fileid for fileid in supplied if fileid not in source]
-    missing = [fileid for fileid in source if fileid not in set(supplied)]
+    missing = [fileid for fileid in source if fileid not in supplied_ids]
     if unknown or missing:
         details = []
         if unknown:
