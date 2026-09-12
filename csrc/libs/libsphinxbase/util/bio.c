@@ -258,29 +258,65 @@ error_out:
 }
 
 
+/*
+ * chksum_accum() and swap_buf() take a void * and an element size, so they
+ * cannot name the caller's type.  The buffer usually holds float32 -- means,
+ * variances, mixture weights and transition matrices all arrive here -- and
+ * sometimes it is a declared scalar rather than allocated storage, for
+ * instance the float32 local whose address interp.c passes to bio_fread().
+ * Reading or writing such an object through a uint16 * or uint32 * lvalue
+ * accesses it as a type its effective type is not, which C leaves undefined,
+ * and nothing in this build turns strict aliasing off.
+ *
+ * A character type may alias any object, so both functions reach the buffer
+ * through an unsigned char cursor.  swap_buf() reverses the bytes in place,
+ * which needs no intermediate at all.  chksum_accum() needs the element's
+ * value in host byte order, not its bytes, so it memcpy()s each element into
+ * a local of the accumulating type; memcpy() is a byte copy however the
+ * compiler implements it, and the local is genuinely a uint16 or a uint32.
+ *
+ * This also drops an alignment assumption the casts carried: nothing
+ * promises the caller's void * is aligned for uint32.
+ *
+ * Both forms were compared against the pointer-casting versions they replace,
+ * on Apple clang 17 at -O3.  The checksum loops compile to the identical
+ * rotate-and-accumulate sequence.  The 4-byte swap -- the one every model
+ * file goes through -- still vectorizes to rev32.16b on arm64 and pshufb on
+ * x86-64 at the same measured throughput.  The 2-byte swap keeps pshufb on
+ * x86-64 but picks ld2/st2 over rev16.16b on arm64, which halves its rate on
+ * cache-resident data; nothing in this project reads or writes a 2-byte
+ * element through bio_fread() or bio_fwrite(), and at the rate a model file
+ * arrives from disk the difference does not show.  Copying each element into
+ * a uint16 or uint32 local with memcpy was measured too and is worse: it
+ * vectorizes at neither width.
+ */
+
 static uint32
 chksum_accum(const void *buf, int32 el_sz, int32 n_el, uint32 sum)
 {
+    const unsigned char *p = (const unsigned char *) buf;
     int32 i;
-    uint8 *i8;
-    uint16 *i16;
-    uint32 *i32;
 
     switch (el_sz) {
     case 1:
-        i8 = (uint8 *) buf;
         for (i = 0; i < n_el; i++)
-            sum = (sum << 5 | sum >> 27) + i8[i];
+            sum = (sum << 5 | sum >> 27) + p[i];
         break;
     case 2:
-        i16 = (uint16 *) buf;
-        for (i = 0; i < n_el; i++)
-            sum = (sum << 10 | sum >> 22) + i16[i];
+        for (i = 0; i < n_el; i++, p += 2) {
+            uint16 v;
+
+            memcpy(&v, p, sizeof(v));
+            sum = (sum << 10 | sum >> 22) + v;
+        }
         break;
     case 4:
-        i32 = (uint32 *) buf;
-        for (i = 0; i < n_el; i++)
-            sum = (sum << 20 | sum >> 12) + i32[i];
+        for (i = 0; i < n_el; i++, p += 4) {
+            uint32 v;
+
+            memcpy(&v, p, sizeof(v));
+            sum = (sum << 20 | sum >> 12) + v;
+        }
         break;
     default:
         E_FATAL("Unsupported elemsize for checksum: %d\n", el_sz);
@@ -294,22 +330,31 @@ chksum_accum(const void *buf, int32 el_sz, int32 n_el, uint32 sum)
 static void
 swap_buf(void *buf, int32 el_sz, int32 n_el)
 {
+    unsigned char *p = (unsigned char *) buf;
     int32 i;
-    uint16 *buf16;
-    uint32 *buf32;
 
     switch (el_sz) {
     case 1:
         break;
     case 2:
-        buf16 = (uint16 *) buf;
-        for (i = 0; i < n_el; i++)
-            SWAP_INT16(buf16 + i);
+        for (i = 0; i < n_el; i++, p += 2) {
+            unsigned char t = p[0];
+
+            p[0] = p[1];
+            p[1] = t;
+        }
         break;
     case 4:
-        buf32 = (uint32 *) buf;
-        for (i = 0; i < n_el; i++)
-            SWAP_INT32(buf32 + i);
+        for (i = 0; i < n_el; i++, p += 4) {
+            unsigned char t;
+
+            t = p[0];
+            p[0] = p[3];
+            p[3] = t;
+            t = p[1];
+            p[1] = p[2];
+            p[2] = t;
+        }
         break;
     default:
         E_FATAL("Unsupported elemsize for byteswapping: %d\n", el_sz);
