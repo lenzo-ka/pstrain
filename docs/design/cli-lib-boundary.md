@@ -131,7 +131,11 @@ trusting the first. Reading one and not the other was the defect.
 Only two kinds of infrastructure are transparent, and both are held by identity
 rather than by module name. The import machinery is recognized by
 module-dictionary identity. A short list of exact `multiprocessing` code objects
-covers serialization, where the two directions are not equivalent. Pickling
+covers serialization, including the platform-specific spawn launch corridor
+that serializes the target already selected by a boundary caller. These are
+exact code identities, not a blanket exemption for `multiprocessing`; a neutral
+wrapper or callback still interrupts the route. The two serialization directions
+are not equivalent. Pickling
 re-imports the defining module of an object its caller already chose, so it is
 transparent when a boundary frame invoked it. Unpickling takes its target from
 the incoming bytes and so can never establish a crossing; it is transparent only
@@ -233,7 +237,7 @@ What ordinary code can do that neither check sees:
   override, a native thread, or a process pool. Work reaching a worker by any
   other route arrives with no origin and is not examined;
 - the import machinery and an enumerated set of `multiprocessing` serialization
-  code objects are omitted from the stack segment; they are not application
+  and spawn-launch code objects are omitted from the stack segment; they are not application
   code. A rename in a future CPython makes installation fail rather than quietly
   changing what is omitted;
 - exactly one unpickling code object is transparent — the enumerated

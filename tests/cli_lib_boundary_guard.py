@@ -49,7 +49,8 @@ route; nothing weaker supersedes a carried one.
 
 Only two kinds of infrastructure are transparent, both held by identity. The
 import machinery is recognized by module-dictionary identity. A short list of
-exact multiprocessing code objects covers serialization: pickling re-imports
+exact multiprocessing code objects covers serialization and spawn's target
+serialization corridor: pickling re-imports
 the defining module of an object its caller already chose, so it is transparent
 when a boundary frame invoked it, while unpickling takes its target from the
 incoming bytes and is transparent only inside ``pstrain.lib``, where the import
@@ -120,6 +121,22 @@ _PICKLING_SPECS: tuple[tuple[str, str | None, str], ...] = (
     ("multiprocessing.connection", "_ConnectionBase", "send"),
     ("multiprocessing.queues", "Queue", "_feed"),
 )
+# Spawn serializes the target already selected by the library, through these
+# exact standard-library launch frames. Keep the corridor identity-bound and
+# require its first outside caller to belong to the API/library; a neutral
+# callback or wrapper must still break the route.
+_PICKLING_SPECS += (
+    ("multiprocessing.process", "BaseProcess", "start"),
+    ("multiprocessing.context", "SpawnProcess", "_Popen"),
+)
+if sys.platform == "win32":
+    _PICKLING_SPECS += (("multiprocessing.popen_spawn_win32", "Popen", "__init__"),)
+else:
+    _PICKLING_SPECS += (
+        ("multiprocessing.popen_spawn_posix", "Popen", "__init__"),
+        ("multiprocessing.popen_fork", "Popen", "__init__"),
+        ("multiprocessing.popen_spawn_posix", "Popen", "_launch"),
+    )
 _UNPICKLING_SPECS: tuple[tuple[str, str | None, str], ...] = (
     ("multiprocessing.connection", "_ConnectionBase", "recv"),
 )

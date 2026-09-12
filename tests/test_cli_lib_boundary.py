@@ -1177,7 +1177,7 @@ def test_runtime_guard_accepts_lazy_import_through_public_api(tmp_path: Path) ->
     )
     assert namespace["result"] == (
         False,
-        "Failed to load: Cannot determine veclen for 1 floats",
+        "Failed to load: Expected a multiple of veclen=13 floats, got 1",
     )
 
 
@@ -1387,3 +1387,50 @@ def test_cli_lib_boundary_gate_passes() -> None:
 
 def test_cli_lib_boundary_allowlist_is_empty() -> None:
     assert boundary.read_allowlist() == set()
+
+
+@pytest.mark.parametrize("through_library", [False, True])
+def test_runtime_guard_checks_real_spawn_callers(through_library: bool) -> None:
+    """Exact spawn infrastructure is transparent only to an owned caller."""
+    native_worker = importlib.import_module("pstrain.lib.native_worker")
+    source = (
+        "def launch(context, target):\n"
+        "    process = context.Process(target=target)\n"
+        "    process.start()\n"
+        "    try:\n"
+        "        process.join(10)\n"
+        "        assert process.exitcode == 0\n"
+        "    finally:\n"
+        "        if process.is_alive():\n"
+        "            process.terminate()\n"
+        "            process.join(10)\n"
+        "        process.close()\n"
+    )
+    with (
+        _anchored_module(
+            "pstrain.lib.spawn_probe", ROOT / "pstrain" / "lib" / "spawn_probe.py", source
+        ) as launcher,
+        _anchored_module(
+            "pstrain.api.spawn_probe",
+            ROOT / "pstrain" / "api" / "spawn_probe.py",
+            "def launch_through_api(launch, context, target):\n    return launch(context, target)\n",
+        ) as api,
+    ):
+        expected = (
+            contextlib.nullcontext()
+            if through_library
+            else pytest.raises(pickle.PicklingError, match="pstrain.lib.native_worker")
+        )
+        with expected:
+            _run_from_cli(
+                "launch_through_api(launch, context, target)\n",
+                ROOT / "pstrain" / "cli" / "spawn_probe.py",
+                launch_through_api=api.launch_through_api,
+                launch=(
+                    launcher.launch
+                    if through_library
+                    else _neutral_namespace(ROOT / "spawn_probe.py", source)["launch"]
+                ),
+                context=multiprocessing.get_context("spawn"),
+                target=native_worker.in_worker,
+            )

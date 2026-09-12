@@ -533,7 +533,8 @@ class TrainCommand(Command):
                         redirect_stdout(sys.stderr) if ctx.json_output else nullcontext()
                     )
                     with output_context:
-                        plan.run(
+                        run_pipeline(
+                            plan,
                             ctx.args.target,
                             dry_run=True,
                             force=ctx.args.force,
