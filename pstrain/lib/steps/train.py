@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 
 from pstrain.lib import native_worker
 from pstrain.lib.bw import BW_CEPSTRAL_LENGTH, HMM, BWConfig, BWResult, BWTrainer
+from pstrain.lib.bw_pool import contained_bw_pool, watch_bw_parent
 from pstrain.lib.checkpoints import evaluation_health, model_snapshot
 from pstrain.lib.features import read_sphinx_mfc
 from pstrain.lib.model import (
@@ -62,6 +63,7 @@ _CHECKPOINT_FILES = (
 )
 _TELEMETRY_FILENAME = "bw_telemetry.json"
 _ACCUMULATOR_FILES = ("gauden_counts", "mixw_counts", "tmat_counts")
+_FALLBACK_ARTIFACT = "fallback_senones"
 _COPIED_TRAINING_OUTPUTS = ("mdef",)
 
 
@@ -190,6 +192,9 @@ class _ShardResult:
     accepted_exceptions: tuple[tuple[str, int, int, int], ...] = ()
     user_cpu_seconds: float | None = 0.0
     final_state_omissions: tuple[tuple[str, str], ...] = ()
+    worker_pid: int | None = None
+    worker_started: float | None = None
+    worker_finished: float | None = None
 
 
 def _write_shard_metadata(
@@ -200,8 +205,11 @@ def _write_shard_metadata(
     config_fingerprint: str,
     manifest_fingerprint: str,
     shapes: dict[str, list[int]],
+    multipron: bool = False,
 ) -> None:
     payload_files = [result.accum_dir / name for name in _ACCUMULATOR_FILES]
+    if multipron:
+        payload_files.append(result.accum_dir / _FALLBACK_ARTIFACT)
     metadata = {
         "schema_version": 1,
         "pass": iteration,
@@ -231,6 +239,7 @@ def _validate_shard_artifacts(
     config_fingerprint: str,
     manifest_fingerprint: str,
     shapes: dict[str, list[int]],
+    multipron: bool = False,
 ) -> list[dict[str, object]]:
     expected_ids = set(fileids)
     if len(expected_ids) != len(fileids):
@@ -258,6 +267,8 @@ def _validate_shard_artifacts(
             if row.get(key) != value:
                 raise RuntimeError(f"Incompatible BW shard {shard}: {key}")
         payload_files = [accum_dir / name for name in _ACCUMULATOR_FILES]
+        if multipron:
+            payload_files.append(accum_dir / _FALLBACK_ARTIFACT)
         if not all(path.is_file() for path in payload_files):
             raise RuntimeError(f"Missing accumulator payload for BW shard {shard}")
         if row.get("payload_sha256") != _sha256_files(payload_files):
@@ -576,14 +587,10 @@ def _ordered_shard_results(futures: Iterable[object]) -> list[_ShardResult]:
     return sorted(results, key=lambda result: result.shard)
 
 
-def _effective_bw_shard_count(n_shards: int, *, multipron: bool) -> int:
-    """Resolve the multipron fallback before a training pass starts."""
+def _effective_bw_shard_count(n_shards: int) -> int:
+    """Validate the requested number of independent BW accumulation shards."""
     if n_shards < 1:
         raise ValueError("n_shards must be at least 1")
-    if n_shards > 1 and multipron:
-        # fallback_senone is pass-wide mutable state, so multipron BW cannot
-        # safely shard utterances across independent trainers.
-        return 1
     return n_shards
 
 
@@ -670,6 +677,7 @@ def _initialize_bw_pool_worker() -> None:
     from pstrain.lib import native_worker
 
     native_worker._inside_worker = True
+    watch_bw_parent()
 
 
 def _run_bw_shard(
@@ -691,6 +699,7 @@ def _run_bw_shard(
     diagnostic_log: Path,
     reported_omissions: set[tuple[str, str]],
 ) -> _ShardResult:
+    worker_started = time.perf_counter()
     user_cpu_start = _user_cpu_seconds()
     trainer = BWTrainer(
         mdef_path=current_model / "mdef",
@@ -783,6 +792,9 @@ def _run_bw_shard(
         accepted_exceptions=tuple(accepted_exceptions),
         user_cpu_seconds=_cpu_delta(user_cpu_start, _user_cpu_seconds()),
         final_state_omissions=tuple(final_state_omissions),
+        worker_pid=os.getpid(),
+        worker_started=worker_started,
+        worker_finished=time.perf_counter(),
     )
 
 
@@ -834,6 +846,9 @@ def run_bw_training(
             below the threshold converges once ``min_iterations`` is satisfied.
             Negative or nonfinite deltas do not indicate convergence.
         min_iterations: Minimum number of completed iterations before convergence
+        n_shards: Number of contiguous manifest shards. Multiple workers merge
+            raw counts and multipron fallback activation before one normalization.
+            One worker never constructs a pool; multipron keeps its serial loop.
         config: BW training configuration, including the explicit variance
             policy retained after the stage-specific first iteration.
         max_skip_fraction: Fail when skipped utterances exceed this fraction.
@@ -866,13 +881,10 @@ def run_bw_training(
         FileNotFoundError: If required files are missing
         RuntimeError: If training fails
     """
-    requested_shards = n_shards
     variance_floor = load_variance_floor(
         variance_floor_reference, variance_floor_fraction, Path(model_dir) / "variances"
     )
-    n_shards = _effective_bw_shard_count(n_shards, multipron=multipron)
-    if requested_shards > 1 and multipron:
-        (_output_note or print)("bw-parallelism\tserial (multipron_training is on)")
+    n_shards = _effective_bw_shard_count(n_shards)
     model_dir = Path(model_dir)
     output_dir = Path(output_dir)
     features_dir = Path(features_dir)
@@ -978,7 +990,7 @@ def run_bw_training(
         if iteration_fileids:
             serial_diagnostic_log.parent.mkdir(parents=True, exist_ok=True)
             serial_diagnostic_log.write_bytes(_BW_COLUMN_HEADER)
-        if not multipron and not _in_process_reference:
+        if (not multipron or n_shards > 1) and not _in_process_reference:
             iteration_fileids = []
             pass_root = output_dir / ".bw-accum" / f"pass-{iteration:02d}"
             shutil.rmtree(pass_root, ignore_errors=True)
@@ -1007,13 +1019,20 @@ def run_bw_training(
                 )
                 for index, assigned in enumerate(partitions)
             ]
-            with ProcessPoolExecutor(
-                max_workers=n_shards,
-                mp_context=multiprocessing.get_context("spawn"),
-                initializer=_initialize_bw_pool_worker,
-            ) as pool:
-                futures = [pool.submit(_run_bw_shard, *argument) for argument in arguments]
-                shard_results = _ordered_shard_results(futures)
+            if n_shards == 1:
+                # Keep the legacy one-shard transport testable without a pool.
+                # BWTrainer supplies its usual native containment in this process.
+                shard_results = [_run_bw_shard(*arguments[0])]
+            else:
+                with contained_bw_pool(
+                    ProcessPoolExecutor(
+                        max_workers=n_shards,
+                        mp_context=multiprocessing.get_context("spawn"),
+                        initializer=_initialize_bw_pool_worker,
+                    )
+                ) as pool:
+                    futures = [pool.submit(_run_bw_shard, *argument) for argument in arguments]
+                    shard_results = _ordered_shard_results(futures)
             model_fingerprint = _fingerprint_model(current_model)
             config_fingerprint = _fingerprint_config(iter_config)
             manifest_fingerprint = _fingerprint_manifest(fileids)
@@ -1032,6 +1051,7 @@ def run_bw_training(
                     config_fingerprint=config_fingerprint,
                     manifest_fingerprint=manifest_fingerprint,
                     shapes=shapes,
+                    multipron=multipron,
                 )
             shard_metadata = _validate_shard_artifacts(
                 shard_dirs,
@@ -1041,6 +1061,7 @@ def run_bw_training(
                 config_fingerprint=config_fingerprint,
                 manifest_fingerprint=manifest_fingerprint,
                 shapes=shapes,
+                multipron=multipron,
             )
             trainer.restore_accumulators(shard_dirs)
             processed_ids = [item for result in shard_results for item in result.processed_ids]
@@ -1299,20 +1320,34 @@ def run_bw_training(
         pass_user_cpu = (
             self_cpu + children_cpu if self_cpu is not None and children_cpu is not None else None
         )
-        if not multipron and not _in_process_reference:
+        if n_shards > 1 and not _in_process_reference:
             shard_cpu = [result.user_cpu_seconds for result in shard_results]
             pass_user_cpu = (
                 sum(cpu for cpu in shard_cpu if cpu is not None)
                 if all(cpu is not None for cpu in shard_cpu)
                 else None
             )
+        elif getattr(trainer, "_proxy", None) is not None:
+            # Live contained-worker CPU is absent from RUSAGE_CHILDREN.
+            # Parent CPU alone would misrepresent the actual BW work.
+            pass_user_cpu = None
         telemetry_row["performance"] = {
             "wall_seconds": pass_wall,
             "user_cpu_seconds": pass_user_cpu,
             "parallelism_user_cpu_per_wall": (
                 pass_user_cpu / pass_wall if pass_user_cpu is not None and pass_wall else None
             ),
-            "workers": n_shards if not multipron and not _in_process_reference else 1,
+            "workers": n_shards if n_shards > 1 and not _in_process_reference else 1,
+            "worker_pids": (
+                [result.worker_pid for result in shard_results]
+                if n_shards > 1 and not _in_process_reference
+                else []
+            ),
+            "worker_intervals": (
+                [[result.worker_started, result.worker_finished] for result in shard_results]
+                if n_shards > 1 and not _in_process_reference
+                else []
+            ),
         }
         telemetry_row["accounting"] = {
             "input_utts": len(fileids),

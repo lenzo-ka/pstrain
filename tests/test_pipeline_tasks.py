@@ -578,7 +578,7 @@ def test_training_fingerprint_payload_composition_is_pinned(empty_project: Path)
 
 @pytest.mark.parametrize(
     ("multipron", "effective_shards"),
-    [(False, 3), (True, 1)],
+    [(False, 3), (True, 3)],
 )
 def test_training_provenance_declares_requested_and_effective_bw_shard_count(
     empty_project: Path, monkeypatch: pytest.MonkeyPatch, multipron: bool, effective_shards: int

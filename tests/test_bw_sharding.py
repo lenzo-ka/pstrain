@@ -67,43 +67,13 @@ def test_model_comparison_surfaces_effective_bw_shard_count(tmp_path: Path) -> N
     assert "provenance.json: DIFFER (text)" in result.summary()
 
 
-@contract_scope(
-    order=5,
-    kind="multipron-fallback",
-    requested_shards=(4,),
-    effective_shards=(1,),
-    reason=("fallback_senone",),
-)
-def test_multipron_multiple_shards_falls_back_loudly(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Gate multipron shard selection against pstrain's serial fallback.
-
-    REFERENCE: the declared pstrain ``fallback_senone`` policy, with no live
-    model, aligner, decoder, or scorer. AXIS: multipron disabled versus enabled
-    at four requested shards. SILENT ON: multipron model correctness, execution
-    after selection, architecture, arithmetic, and defects shared with serial.
-    """
-    from pstrain.lib.bw import BWConfig
-    from pstrain.lib.steps.train import run_bw_training
-
-    assert _effective_bw_shard_count(4, multipron=True) == 1
-    assert _effective_bw_shard_count(4, multipron=False) == 4
-    with pytest.raises(FileNotFoundError):
-        run_bw_training(
-            model_dir=tmp_path / "model",
-            output_dir=tmp_path / "output",
-            features_dir=tmp_path / "features",
-            train_fileids=tmp_path / "fileids",
-            transcription=tmp_path / "transcription",
-            dictionary=tmp_path / "dictionary",
-            first_pass_2passvar=False,
-            config=BWConfig(pass2var=False, unobserved_gaussian_policy="zero"),
-            n_shards=4,
-        )
-    assert capsys.readouterr().out.splitlines()[0] == (
-        "bw-parallelism\tserial (multipron_training is on)"
-    )
+@contract_scope(order=5, kind="multipron-sharding", requested_shards=(4,), effective_shards=(4,))
+def test_multipron_multiple_shards_preserves_requested_parallelism() -> None:
+    """Shard selection permits multipron; native integration gates its semantics."""
+    assert _effective_bw_shard_count(4) == 4
+    assert _effective_bw_shard_count(1) == 1
+    with pytest.raises(ValueError, match="at least 1"):
+        _effective_bw_shard_count(0)
 
 
 def test_partition_manifest_varies_boundaries_and_keeps_empty_shards() -> None:
@@ -199,10 +169,7 @@ def test_production_reducer_receives_shard_dirs_in_index_order(
         def __init__(self, **_kwargs: object) -> None:
             pass
 
-        def __enter__(self) -> ImmediatePool:
-            return self
-
-        def __exit__(self, *_args: object) -> None:
+        def shutdown(self, **_kwargs: object) -> None:
             pass
 
         def submit(self, _fn: object, *args: object) -> CompletedFuture:
@@ -258,9 +225,10 @@ def test_production_reducer_receives_shard_dirs_in_index_order(
     ]
 
 
-def _artifacts(root: Path) -> tuple[list[Path], dict[str, Any]]:
+def _artifacts(root: Path, *, multipron: bool = False) -> tuple[list[Path], dict[str, Any]]:
     common: dict[str, Any] = {
         "iteration": 2,
+        "multipron": multipron,
         "model_fingerprint": "model",
         "config_fingerprint": "config",
         "manifest_fingerprint": "manifest",
@@ -272,6 +240,8 @@ def _artifacts(root: Path) -> tuple[list[Path], dict[str, Any]]:
         directory.mkdir(parents=True)
         for filename in _ACCUMULATOR_FILES:
             (directory / filename).write_bytes(f"{shard}-{filename}".encode())
+        if multipron:
+            (directory / "fallback_senones").write_bytes(b"PSTRAIN_FALLBACK_SENONES_V1\n2\n\0\1")
         result = _ShardResult(
             shard=shard,
             assigned_ids=assigned,
@@ -394,3 +364,16 @@ def test_duplicate_manifest_identity_is_rejected(tmp_path: Path) -> None:
     directories, common = _artifacts(tmp_path)
     with pytest.raises(RuntimeError, match="duplicate utterance IDs"):
         _validate_shard_artifacts(directories, fileids=["a", "a"], **common)
+
+
+@pytest.mark.parametrize("remove", [False, True])
+def test_multipron_sidecar_is_required_and_authenticated(tmp_path: Path, remove: bool) -> None:
+    directories, common = _artifacts(tmp_path, multipron=True)
+    _validate(directories, common)
+    sidecar = directories[0] / "fallback_senones"
+    if remove:
+        sidecar.unlink()
+    else:
+        sidecar.write_bytes(sidecar.read_bytes()[:-1] + b"\0")
+    with pytest.raises(RuntimeError, match="Missing accumulator payload|payload digest mismatch"):
+        _validate(directories, common)

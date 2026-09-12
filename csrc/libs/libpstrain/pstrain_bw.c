@@ -1118,16 +1118,93 @@ pstrain_bw_normalize(pstrain_bw_context_t *ctx)
     return 0;
 }
 
+/* Raw sufficient statistics do not encode which zero-posterior CI fallback
+ * states occurred in successful graphs. Persist that pass-wide activation set
+ * separately; its union is consumed once, by the parent's normalization. */
+#define FALLBACK_ARTIFACT "fallback_senones"
+#define FALLBACK_FORMAT "PSTRAIN_FALLBACK_SENONES_V1\n"
+
+static char *
+fallback_artifact_path(const char *directory)
+{
+    size_t size = strlen(directory) + 1 + sizeof(FALLBACK_ARTIFACT);
+    char *path = ckd_malloc(size);
+    snprintf(path, size, "%s/%s", directory, FALLBACK_ARTIFACT);
+    return path;
+}
+
+static char *
+fallback_artifact_header(uint32 n_senone)
+{
+    int length = snprintf(NULL, 0, "%s%u\n", FALLBACK_FORMAT, n_senone);
+    char *header = ckd_malloc((size_t)length + 1);
+    snprintf(header, (size_t)length + 1, "%s%u\n", FALLBACK_FORMAT, n_senone);
+    return header;
+}
+
+static int
+write_fallback_artifact(pstrain_bw_context_t *ctx, const char *directory)
+{
+    char *path = fallback_artifact_path(directory);
+    char *header = fallback_artifact_header(ctx->mdef->n_tied_state);
+    FILE *file = fopen(path, "wb");
+    int ok = file != NULL;
+    if (file != NULL) {
+        ok = fwrite(header, 1, strlen(header), file) == strlen(header) &&
+             fwrite(ctx->fallback_senone, 1, ctx->mdef->n_tied_state, file) ==
+                 ctx->mdef->n_tied_state;
+        if (fclose(file) != 0) ok = 0;
+    }
+    if (!ok) E_ERROR("Could not write fallback activation artifact %s\n", path);
+    ckd_free(path);
+    ckd_free(header);
+    return ok ? 0 : -1;
+}
+
+static int
+union_fallback_artifact(pstrain_bw_context_t *ctx, const char *directory,
+                        char *activation_union)
+{
+    char *path = fallback_artifact_path(directory);
+    char *header = fallback_artifact_header(ctx->mdef->n_tied_state);
+    size_t header_size = strlen(header);
+    char *actual_header = ckd_malloc(header_size);
+    char *mask = ckd_malloc(ctx->mdef->n_tied_state);
+    FILE *file = fopen(path, "rb");
+    int ok = file != NULL;
+    uint32 i;
+    if (file != NULL) {
+        ok = fread(actual_header, 1, header_size, file) == header_size &&
+             memcmp(header, actual_header, header_size) == 0 &&
+             fread(mask, 1, ctx->mdef->n_tied_state, file) == ctx->mdef->n_tied_state &&
+             fgetc(file) == EOF && !ferror(file);
+        if (fclose(file) != 0) ok = 0;
+    }
+    for (i = 0; ok && i < ctx->mdef->n_tied_state; ++i)
+        if ((unsigned char)mask[i] > 1) ok = 0;
+    if (ok) {
+        for (i = 0; i < ctx->mdef->n_tied_state; ++i)
+            activation_union[i] |= mask[i];
+    }
+    else E_ERROR("Invalid or missing fallback activation artifact %s\n", path);
+    ckd_free(path);
+    ckd_free(header);
+    ckd_free(actual_header);
+    ckd_free(mask);
+    return ok ? 0 : -1;
+}
+
 int
 pstrain_bw_dump_accum(pstrain_bw_context_t *ctx, const char *accum_dir)
 {
-    if (ctx == NULL || accum_dir == NULL || ctx->multipron) {
-        E_ERROR("Accumulator artifacts require non-multipron BW training\n");
+    if (ctx == NULL || accum_dir == NULL) {
+        E_ERROR("Accumulator artifacts require a training context and directory\n");
         return -1;
     }
-    return accum_dump(accum_dir, ctx->inv, ctx->mixw_reest, ctx->tmat_reest,
-                      ctx->mean_reest, ctx->var_reest, ctx->pass2var, FALSE, FALSE)
-        == S3_SUCCESS ? 0 : -1;
+    if (accum_dump(accum_dir, ctx->inv, ctx->mixw_reest, ctx->tmat_reest,
+                   ctx->mean_reest, ctx->var_reest, ctx->pass2var, FALSE, FALSE) != S3_SUCCESS)
+        return -1;
+    return ctx->multipron ? write_fallback_artifact(ctx, accum_dir) : 0;
 }
 
 int
@@ -1137,11 +1214,23 @@ pstrain_bw_restore_accumdirs(pstrain_bw_context_t *ctx,
 {
     gauden_t *g;
     uint32 i;
-    if (ctx == NULL || accum_dirs == NULL || n_accum_dirs == 0 || ctx->multipron) {
-        E_ERROR("Accumulator merging requires non-multipron BW training\n");
+    char *activation_union = NULL;
+    if (ctx == NULL || accum_dirs == NULL || n_accum_dirs == 0) {
+        E_ERROR("Accumulator merging requires a training context and directories\n");
         return -1;
     }
     g = ctx->inv->gauden;
+    if (ctx->multipron) {
+        activation_union = ckd_calloc(ctx->mdef->n_tied_state, sizeof(*activation_union));
+        /* Validate every activation artifact before touching receiver counts. */
+        for (i = 0; i < n_accum_dirs; ++i) {
+            if (accum_dirs[i] == NULL ||
+                union_fallback_artifact(ctx, accum_dirs[i], activation_union) != 0) {
+                ckd_free(activation_union);
+                return -1;
+            }
+        }
+    }
     for (i = 0; i < n_accum_dirs; ++i) {
         uint32 n_mixw = ctx->inv->n_mixw, n_stream = ctx->inv->n_feat;
         uint32 n_density = ctx->inv->n_density;
@@ -1160,8 +1249,14 @@ pstrain_bw_restore_accumdirs(pstrain_bw_context_t *ctx,
              rdacc_den(accum_dirs[i], &g->macc, &g->vacc, &pass2var, &g->dnom,
                        &n_mgau, &n_gau_stream, &n_gau_density, &veclen) != S3_SUCCESS)) {
             E_ERROR("Could not merge BW accumulators from %s\n", accum_dirs[i]);
+            ckd_free(activation_union);
             return -1;
         }
+    }
+    if (activation_union != NULL) {
+        for (i = 0; i < ctx->mdef->n_tied_state; ++i)
+            ctx->fallback_senone[i] |= activation_union[i];
+        ckd_free(activation_union);
     }
     return 0;
 }

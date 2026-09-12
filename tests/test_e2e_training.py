@@ -350,13 +350,24 @@ def test_build_ci_1g_produces_finite_model(
     rc = build_pipeline(ctx).run("cd-untied", jobs=2)
     assert rc == 0, "pipeline run through cd-untied failed"
     output = capsys.readouterr().out
-    assert output.count("bw-parallelism\tserial (multipron_training is on)") == 1
+    assert "bw-parallelism\tserial (multipron_training is on)" not in output
     assert "bw-passes\tci-1g\t" in output
     assert "bw-passes\tcd-untied\t" in output
     assert not any(line.startswith(" ") and "converged=" in line for line in output.splitlines())
     execution = ctx.provenance_document("training")["execution"]
     assert execution["requested_jobs"] == 2
-    assert execution["bw_shard_count"] == 1
+    assert execution["bw_shard_count"] == 2
+    for stage in ("ci-1g", "cd-untied"):
+        passes = json.loads((ctx.model_dir(stage) / "bw_telemetry.json").read_text())["passes"]
+        assert passes
+        assert all(row["performance"]["workers"] == 2 for row in passes)
+        for row in passes:
+            # A ready worker may finish both tiny shards before its peer starts.
+            # These are per-shard executor PIDs, not guaranteed distinct workers;
+            # the longer numeric fixture separately proves actual overlap.
+            pids = row["performance"]["worker_pids"]
+            assert len(pids) == 2, row["performance"]
+            assert all(isinstance(pid, int) and pid > 0 and pid != os.getpid() for pid in pids)
 
     model_dir = ctx.model_dir("ci-1g")
     for name in ("mdef", "means", "variances", "mixture_weights", "transition_matrices"):
