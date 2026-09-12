@@ -14,6 +14,38 @@ pstrain descends from
 developers, researchers, institutions, and community members whose work made
 this project possible.
 
+## What pstrain does
+
+pstrain provides a training pipeline for:
+
+- acoustic feature extraction and corpus splitting;
+- flat initialization and Baum–Welch training;
+- context-independent and context-dependent models;
+- Gaussian splitting, decision-tree state tying, and model packaging;
+- forced alignment and PocketSphinx decoding with WER/CER evaluation; and
+- multiple-pronunciation training, where pronunciation variants participate as
+  parallel paths in each utterance's training graph.
+
+## Quickstart
+
+Start with the [terminal walkthrough](https://github.com/lenzo-ka/pstrain/blob/main/docs/getting-started.md):
+it covers Python and compiler prerequisites, an isolated installation, and a
+small training run using the included audio, followed by decoding and packaging.
+No Python programming or corpus download is needed for that example.
+
+Training requires **macOS or Linux and Python 3.11+**. Native Windows supports
+the package and native tools, but cannot run the training pipeline; see the
+[support policy](https://github.com/lenzo-ka/pstrain/blob/main/docs/support.md).
+
+The guide distinguishes building this checkout from installing a published
+release, and starts with the faster `ci-1g` model before the default `cd-8g`.
+
+## Benchmark pin
+
+The [ARCTIC benchmark pin](https://github.com/lenzo-ka/pstrain/blob/main/docs/benchmarks/arctic-pin.md) freezes the corpus,
+training modes, model identities, decoder, and per-utterance measurements used
+as the comparison baseline.
+
 pstrain rebuilds SphinxTrain with its C core vendored and its orchestration
 reimplemented. On the shared CMU Arctic benchmark, pstrain under its shipped
 defaults except for `split.test_count=0` (including multiple-pronunciation
@@ -40,99 +72,6 @@ measurement conditions against the current checkout and re-derives the recorded
 paired statistics from the stored per-utterance rows without re-decoding. The
 end-to-end pstrain-versus-baseline WER comparison is produced by the full
 `scripts/bench_arctic.py` benchmark run, not by `make verified`.
-
-## What pstrain does
-
-pstrain provides an in-process training pipeline for:
-
-- acoustic feature extraction and corpus splitting;
-- flat initialization and Baum–Welch training;
-- context-independent and context-dependent models;
-- Gaussian splitting, decision-tree state tying, and model packaging;
-- forced alignment and PocketSphinx decoding with WER/CER evaluation; and
-- multiple-pronunciation training, where pronunciation variants participate as
-  parallel paths in each utterance's training graph.
-
-pstrain supports macOS and Linux, and now Windows. See
-[support policy](https://github.com/lenzo-ka/pstrain/blob/main/docs/support.md) for details.
-
-## Quickstart
-
-### From PyPI
-
-```bash
-pip install pstrain
-```
-
-Train with your own audio, prompt list, pronunciation dictionary, phoneset, and
-filler dictionary:
-
-```bash
-pstrain train /tmp/pstrain-project \
-  --audio your-audio/ \
-  --prompts your-prompts.txt \
-  --dictionary your-dictionary.dict \
-  --phoneset your-phoneset.txt \
-  --filler-dict your-filler.dict \
-  -j 1
-```
-
-Prompt lists are assumed to be pre-normalized to match the lexicon.
-
-### From a checkout
-
-Clone the repository and install it in editable mode with the evaluation-metrics
-extra:
-
-```bash
-git clone https://github.com/lenzo-ka/pstrain.git
-cd pstrain
-python -m pip install -e ".[test]"
-```
-
-The checkout includes a small CMU ARCTIC fixture for a complete local run. Set
-up a project and train the default eight-Gaussian context-dependent model:
-
-```bash
-pstrain train /tmp/pstrain-demo \
-  --audio tests/fixtures/mini_arctic/wav \
-  --prompts tests/fixtures/mini_arctic/transcription.txt \
-  --dictionary tests/fixtures/mini_arctic/dictionary.dict \
-  --phoneset tests/fixtures/mini_arctic/phoneset.txt \
-  --filler-dict tests/fixtures/mini_arctic/filler.dict \
-  -j 1
-```
-
-The command stores separate typed training and decoder transcripts. Decode the
-held-out set with a language model built automatically from the training transcript—no
-transcript conversion is needed:
-
-```bash
-pstrain test cd-8g --project-dir /tmp/pstrain-demo
-```
-
-Package the trained model for distribution:
-
-```bash
-pstrain package cd-8g --project-dir /tmp/pstrain-demo
-```
-
-The automatically built language model leaks training vocabulary into decoding, so
-this WER is optimistic and is not comparable to the pinned Arctic benchmark results.
-
-For a project of your own, `pstrain train --help` describes the accepted audio,
-prompt, dictionary, phoneset, and configuration inputs. The lower-level
-`setup`, `validate`, and `build` commands remain available for decomposed workflows. The
-[getting-started guide](https://github.com/lenzo-ka/pstrain/blob/main/docs/getting-started.md) continues from project setup.
-
-The default `pstrain train` target is `cd-8g`. Use `--target ci-1g` when only
-the faster context-independent bootstrap model is wanted.
-
-## Benchmark pin
-
-The [ARCTIC benchmark pin](https://github.com/lenzo-ka/pstrain/blob/main/docs/benchmarks/arctic-pin.md) freezes the corpus,
-training modes, model identities, decoder, and per-utterance measurements used
-as the comparison baseline.
 
 ## Documentation
 
