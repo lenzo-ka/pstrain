@@ -360,3 +360,21 @@ def test_legacy_warning_is_deduplicated_once_per_run(tmp_path: Path) -> None:
         resolve_config(tmp_path)
         resolve_config(tmp_path)
     assert len(caught) == 1
+
+
+def test_resolution_generates_schema_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    original = Profile.model_json_schema
+    calls = 0
+
+    def counted_schema() -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        return original()
+
+    monkeypatch.setattr(Profile, "model_json_schema", counted_schema)
+    resolved = resolve_config(tmp_path, user_config_path=tmp_path / "absent-user.yaml")
+    assert calls == 1
+    assert resolved.fields["features.ncep"].constraints == {"exclusiveMinimum": 0}
+    assert resolved.fields["training.failed_alignment"].constraints == {
+        "enum": ["recover", "abort", "omit"]
+    }

@@ -274,8 +274,7 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     return data
 
 
-def _field_constraints(field_path: str) -> dict[str, Any]:
-    schema = Profile.model_json_schema()
+def _field_constraints(field_path: str, schema: dict[str, Any]) -> dict[str, Any]:
     node: dict[str, Any] = schema
     for part in field_path.split("."):
         while "$ref" in node:
@@ -540,6 +539,7 @@ def resolve_config(
         raise ValueError(f"invalid resolved profile {profile_name!r}: {exc}") from exc
     values = profile.model_dump(mode="python")
     explanations: dict[str, FieldExplanation] = {}
+    schema = Profile.model_json_schema()
     for path, value in _leaves(values):
         if path not in CONSUMERS:
             raise ValueError(f"declared configuration field {path!r} has no runtime consumer")
@@ -552,7 +552,7 @@ def resolve_config(
             winner=history[-1],
             overridden=tuple(history[:-1]),
             default=history[0].value,
-            constraints=_field_constraints(path),
+            constraints=_field_constraints(path, schema),
             consumer=consumer,
             provenance_scope=scope,
         )
