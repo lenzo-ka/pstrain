@@ -226,7 +226,7 @@ class TrainingConfig(StrictModel):
         ),
     ] = "transcript-reachable"
     exclusion_schedule: Annotated[
-        dict[str, dict[int | str, list[str]]],
+        dict[str, dict[Annotated[int, Field(strict=True)] | str, list[str]]],
         Field(description="Experimental stage/pass utterance exclusions"),
     ] = Field(default_factory=dict)
 
@@ -265,15 +265,21 @@ class TrainingConfig(StrictModel):
             "cd-16g",
             "cd-32g",
         }
+        normalized: dict[str, dict[int | str, list[str]]] = {}
         for stage, passes in value.items():
             if stage not in stages:
                 raise ValueError(f"unknown BW stage {stage!r}")
+            normalized[stage] = {}
             for selector, utterances in passes.items():
                 if selector != "*" and (isinstance(selector, bool) or int(selector) < 1):
                     raise ValueError("pass selectors must be positive integers or '*'")
                 if not all(utterances):
                     raise ValueError("utterance IDs must be non-empty")
-        return value
+                key = selector if selector == "*" else int(selector)
+                if key in normalized[stage]:
+                    raise ValueError(f"duplicate pass selector {selector!r} for {stage!r}")
+                normalized[stage][key] = utterances
+        return normalized
 
     @model_validator(mode="after")
     def validate_training(self) -> TrainingConfig:

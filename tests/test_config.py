@@ -378,3 +378,20 @@ def test_resolution_generates_schema_once(tmp_path: Path, monkeypatch: pytest.Mo
     assert resolved.fields["training.failed_alignment"].constraints == {
         "enum": ["recover", "abort", "omit"]
     }
+
+
+@pytest.mark.parametrize("selector", [1, "1", "01", "+1", " 1 "])
+def test_exclusion_pass_selectors_are_normalized(selector: int | str) -> None:
+    config = TrainingConfig(exclusion_schedule={"cd-2g": {selector: ["example"]}})
+    assert config.exclusion_schedule == {"cd-2g": {1: ["example"]}}
+
+
+def test_ambiguous_exclusion_pass_selectors_are_rejected() -> None:
+    with pytest.raises(ValueError, match="duplicate pass selector"):
+        TrainingConfig(exclusion_schedule={"cd-2g": {1: ["first"], "01": ["second"]}})
+
+
+@pytest.mark.parametrize("selector", [True, 1.0, "0", "-1", "first"])
+def test_invalid_exclusion_selectors_are_rejected(selector: object) -> None:
+    with pytest.raises(ValueError):
+        TrainingConfig.model_validate({"exclusion_schedule": {"cd-2g": {selector: ["example"]}}})
