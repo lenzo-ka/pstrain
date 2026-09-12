@@ -134,3 +134,42 @@ def test_hmm_save_rolls_back_replacement_error(
     with pytest.raises(OSError, match="injected"):
         model.save(tmp_path)
     assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == originals
+
+
+def test_gaussian_reader_preserves_variable_stream_lengths(tmp_path: Path) -> None:
+    ffi, lib = _pstrainc.get_ffi(), _pstrainc.get_lib()
+    n_codebooks, n_densities = 2, 2
+    widths = [2, 3]
+    root = ffi.new("float32***[]", n_codebooks)
+    streams = [ffi.new("float32**[]", len(widths)) for _ in range(n_codebooks)]
+    densities = [[ffi.new("float32*[]", n_densities) for _ in widths] for _ in range(n_codebooks)]
+    values = np.arange(n_codebooks * n_densities * sum(widths), dtype=np.float32)
+    expected = np.zeros((n_codebooks, len(widths), n_densities, max(widths)), dtype=np.float32)
+    offset = 0
+    for m in range(n_codebooks):
+        root[m] = streams[m]
+        for f, width in enumerate(widths):
+            streams[m][f] = densities[m][f]
+            for d in range(n_densities):
+                densities[m][f][d] = ffi.cast("float32 *", values.ctypes.data) + offset
+                expected[m, f, d, :width] = values[offset : offset + width]
+                offset += width
+    path = str(tmp_path / "gaussians")
+    assert (
+        lib.s3gau_write(
+            path.encode(), root, n_codebooks, len(widths), n_densities, ffi.new("uint32[]", widths)
+        )
+        == 0
+    )
+    result, actual_m, actual_f, actual_d, actual_widths = _pstrainc.read_gau(path)
+    assert (actual_m, actual_f, actual_d, actual_widths) == (
+        n_codebooks,
+        len(widths),
+        n_densities,
+        widths,
+    )
+    np.testing.assert_array_equal(result, expected)
+    # Exercise another native allocation after the reader freed its source;
+    # the first returned array must own its data independently.
+    _pstrainc.read_gau(path)
+    np.testing.assert_array_equal(result, expected)

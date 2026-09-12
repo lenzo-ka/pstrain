@@ -31,6 +31,16 @@ BW_FEATURE_LENGTH = 3 * BW_CEPSTRAL_LENGTH
 __all__ = ["BWConfig", "BWResult", "HMM", "BWTrainer"]
 
 
+def _feature_matrix(values: npt.NDArray[np.float32], width: int) -> npt.NDArray[np.float32]:
+    """Validate the shape before exposing a buffer to the fixed native stride."""
+    values = np.asarray(values)
+    if values.ndim != 2 or values.shape[1] != width:
+        raise ValueError(f"Expected feature shape (n_frames, {width}), got {values.shape}")
+    if values.shape[0] == 0:
+        raise ValueError("At least one feature frame is required")
+    return np.ascontiguousarray(values, dtype=np.float32)
+
+
 @dataclass
 class BWConfig:
     """Configuration for Baum-Welch training."""
@@ -323,13 +333,11 @@ class BWTrainer:
         """
         if not self._dict_set:
             raise RuntimeError("Dictionary not set. Call set_dict() first.")
+        features = _feature_matrix(features, BW_FEATURE_LENGTH)
         if hasattr(self, "_proxy"):
             return bool(self._proxy.call("process_utterance_text", features, transcript))
 
         n_frames = features.shape[0]
-
-        # Ensure contiguous array
-        features = np.ascontiguousarray(features, dtype=np.float32)
 
         ret = self._lib.pstrain_bw_process_utt_text(
             self._ctx,
@@ -362,6 +370,7 @@ class BWTrainer:
         """
         if not self._dict_set:
             raise RuntimeError("Dictionary not set. Call set_dict() first.")
+        mfcc = _feature_matrix(mfcc, BW_CEPSTRAL_LENGTH)
         if hasattr(self, "_proxy"):
             result = bool(
                 self._proxy.call("process_utterance_mfcc", mfcc, transcript, utterance_id)
@@ -370,13 +379,6 @@ class BWTrainer:
             return result
 
         n_frames = mfcc.shape[0]
-
-        # Validate dimensions
-        if mfcc.shape[1] != 13:
-            raise ValueError(f"Expected 13-dim MFCCs, got {mfcc.shape[1]}")
-
-        # Ensure contiguous array
-        mfcc = np.ascontiguousarray(mfcc, dtype=np.float32)
 
         ret = self._lib.pstrain_bw_process_utt_mfcc(
             self._ctx,
@@ -424,14 +426,21 @@ class BWTrainer:
         Returns:
             True on success
         """
+        features = _feature_matrix(features, BW_FEATURE_LENGTH)
+        phone_ids = np.asarray(phone_ids)
+        if (
+            phone_ids.ndim != 1
+            or phone_ids.size == 0
+            or not np.issubdtype(phone_ids.dtype, np.integer)
+            or np.any(phone_ids < 0)
+            or np.any(phone_ids > np.iinfo(np.uint32).max)
+        ):
+            raise ValueError("Phone IDs must be a nonempty one-dimensional array of uint32 IDs")
+        phone_ids = np.ascontiguousarray(phone_ids, dtype=np.uint32)
         if hasattr(self, "_proxy"):
             return bool(self._proxy.call("process_utterance", features, phone_ids))
         n_frames = features.shape[0]
         n_phones = len(phone_ids)
-
-        # Ensure contiguous arrays
-        features = np.ascontiguousarray(features, dtype=np.float32)
-        phone_ids = np.ascontiguousarray(phone_ids, dtype=np.uint32)
 
         ret = self._lib.pstrain_bw_process_utt(
             self._ctx,
