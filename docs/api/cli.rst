@@ -8,6 +8,7 @@ JSON output
 
 ``--json`` produces a single machine-readable result on standard output for:
 
+* ``checkpoints``
 * ``validate-project``
 * ``test``
 * ``info``

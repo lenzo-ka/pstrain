@@ -17,6 +17,7 @@ different from the one the native parser actually used.
 
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 import shutil
@@ -33,7 +34,9 @@ MODEL_PARAMETER_FILES = tuple(MODEL_FILES_REQUIRED[1:])
 
 
 @contextmanager
-def staged_model_update(model_dir: Path, filenames: tuple[str, ...]) -> Iterator[Path]:
+def staged_model_update(
+    model_dir: Path, filenames: tuple[str, ...], *, remove: tuple[str, ...] = ()
+) -> Iterator[Path]:
     """Stage a complete file set and restore originals on publication failure.
 
     The caller writes and validates the candidate inside the yielded directory.
@@ -41,8 +44,11 @@ def staged_model_update(model_dir: Path, filenames: tuple[str, ...]) -> Iterator
     coordination; this is not an atomic directory snapshot. Catchable failures
     restore the captured files, retaining backups if recovery itself fails.
     """
+    if set(filenames) & set(remove):
+        raise ValueError("Cannot publish and remove the same model file")
+    affected = filenames + remove
     model_dir.mkdir(parents=True, exist_ok=True)
-    for name in filenames:
+    for name in affected:
         if (model_dir / name).is_dir():
             raise RuntimeError(f"Cannot save model parameter over directory: {model_dir / name}")
     staging = Path(tempfile.mkdtemp(prefix=".hmm-save-", dir=model_dir))
@@ -52,8 +58,8 @@ def staged_model_update(model_dir: Path, filenames: tuple[str, ...]) -> Iterator
         yield staging
         backup = staging / "backup"
         backup.mkdir()
-        for name in filenames:
-            if not (staging / name).is_file():
+        for name in affected:
+            if name in filenames and not (staging / name).is_file():
                 raise RuntimeError(f"Missing staged model parameter: {staging / name}")
             destination = model_dir / name
             if destination.exists() or destination.is_symlink():
@@ -62,11 +68,13 @@ def staged_model_update(model_dir: Path, filenames: tuple[str, ...]) -> Iterator
         try:
             for name in filenames:
                 (staging / name).replace(model_dir / name)
+            for name in remove:
+                (model_dir / name).unlink(missing_ok=True)
         except BaseException:
             # A replacement may have succeeded before an error reaches Python.
             # Restore the complete captured set, including uncertain operations.
             try:
-                for name in reversed(filenames):
+                for name in reversed(affected):
                     if name in originals:
                         (backup / name).replace(model_dir / name)
                     else:
@@ -620,3 +628,20 @@ def create_model(model_type: str, config: str = "baseline") -> Model:
     """
     model_class = get_model_class(model_type)
     return model_class(config=config)
+
+
+def fingerprint_model(model_dir: Path) -> str:
+    """Hash the ordered native scoring files, preserving BW shard identity."""
+    digest = hashlib.sha256()
+    for name in MODEL_FILES_REQUIRED:
+        digest.update(name.encode())
+        with (model_dir / name).open("rb") as stream:
+            # file_digest can update an existing digest without changing the
+            # filename-prefixed identity used by persisted BW accumulators.
+            hashlib.file_digest(stream, lambda: digest)
+    return digest.hexdigest()
+
+
+def file_sha256(path: Path) -> str:
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()

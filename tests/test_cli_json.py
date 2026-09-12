@@ -248,6 +248,7 @@ def json_success_scenarios() -> dict[tuple[str, ...], ScenarioFactory]:
         ("validate-project",): _validate_success,
         ("test",): _model_test_success,
         ("info",): _info_success,
+        ("checkpoints",): _checkpoints_success,
         ("train",): _train_success,
         ("tutorial",): _tutorial_success,
         ("config", "explain"): _config_explain_success,
@@ -265,6 +266,7 @@ def json_failure_scenarios() -> dict[tuple[str, ...], ScenarioFactory]:
         ("validate-project",): _validate_failure,
         ("test",): _model_test_failure,
         ("info",): _info_failure,
+        ("checkpoints",): _checkpoints_failure,
         ("train",): _train_failure,
         ("tutorial",): _tutorial_failure,
         ("config", "explain"): _config_explain_failure,
@@ -643,3 +645,11 @@ def test_config_schema_rejects_conflicting_json_format(
         "status": "error",
         "message": "--json cannot be combined with a non-JSON --format",
     }
+
+
+def _checkpoints_success(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    return ["checkpoints", str(root)]
+
+
+def _checkpoints_failure(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    return ["checkpoints", str(root), "--restore", "1"]
