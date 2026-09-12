@@ -293,6 +293,7 @@ def _make_flat_task(ctx: PipelineContext) -> Task:
             ctx.provenance_path("training"),
         ),
         outputs=tuple(ctx.model_files("flat")),
+        preflight=ctx.validate_training_features,
         description="Initialize flat (uniform) acoustic model",
     )
 
@@ -417,6 +418,7 @@ def _make_bw_train_task(
         name=name,
         fn=run,
         inputs=inputs,
+        optional_inputs=(ctx.filler_dict_path,),
         outputs=tuple(ctx.model_files(out_model)),
         description=description,
     )
@@ -508,6 +510,7 @@ def _make_split_and_train_task(
         ),
         outputs=tuple(ctx.model_files(out_model)),
         description=description,
+        optional_inputs=(ctx.filler_dict_path,),
     )
 
 
@@ -554,6 +557,7 @@ def _make_cd_untied_init_task(ctx: PipelineContext) -> Task:
             ctx.provenance_path("training"),
         ),
         outputs=tuple(ctx.model_files("cd-untied-init")),
+        optional_inputs=(ctx.filler_dict_path,),
         description="Initialize CD untied model from CI-1g",
     )
 
@@ -722,6 +726,7 @@ def _make_alltriphones_mdef_task(ctx: PipelineContext) -> Task:
         inputs=(phoneset, dictionary, ctx.provenance_path("training")),
         outputs=(out_path,),
         description="Generate alltriphones mdef from dictionary",
+        optional_inputs=(ctx.filler_dict_path,),
     )
 
 
@@ -818,6 +823,7 @@ def _make_package_task(
         name=name,
         fn=run,
         inputs=(*ctx.model_files(src_model), dictionary),
+        optional_inputs=(ctx.filler_dict_path,),
         outputs=outputs,
         description=f"Package {src_model} for distribution",
     )
@@ -887,6 +893,7 @@ def _make_test_task(ctx: PipelineContext, *, model: str) -> Task:
             dictionary,
         ),
         outputs=(report_path,),
+        optional_inputs=(ctx.filler_dict_path,),
         description=f"Test {model} and write WER report",
     )
 

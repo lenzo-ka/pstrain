@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     import numpy.typing as npt
 
 from pstrain.lib import native_worker
-from pstrain.lib.bw import HMM, BWConfig, BWResult, BWTrainer
+from pstrain.lib.bw import BW_CEPSTRAL_LENGTH, HMM, BWConfig, BWResult, BWTrainer
 from pstrain.lib.features import read_sphinx_mfc
 from pstrain.lib.model import MODEL_FILES_REQUIRED
 from pstrain.lib.transcription import parse_transcription_file
@@ -666,8 +666,8 @@ def _run_bw_shard(
             skipped.append((fileid, "transcript_not_found"))
             continue
         try:
-            mfcc = read_sphinx_mfc(mfc_path)
-            if mfcc.shape[1] != 13:
+            mfcc = read_sphinx_mfc(mfc_path, veclen=BW_CEPSTRAL_LENGTH)
+            if mfcc.shape[1] != BW_CEPSTRAL_LENGTH:
                 skipped.append((fileid, "feature_dimension"))
                 continue
             with _redirect_bw_stdout(diagnostic_log):
@@ -1031,10 +1031,10 @@ def run_bw_training(
                 continue
 
             try:
-                # Load raw MFCC features (13-dim)
+                # Load raw MFCC features using the native BW front-end contract.
                 # C code handles CMN and delta computation via feat module
-                mfcc = read_sphinx_mfc(mfc_path)
-                if mfcc.shape[1] != 13:
+                mfcc = read_sphinx_mfc(mfc_path, veclen=BW_CEPSTRAL_LENGTH)
+                if mfcc.shape[1] != BW_CEPSTRAL_LENGTH:
                     logger.warning("Unexpected feature dimension %d for %s", mfcc.shape[1], fileid)
                     skipped += 1
                     skip_reasons["feature_dimension"] += 1

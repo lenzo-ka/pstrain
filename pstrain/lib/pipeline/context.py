@@ -512,6 +512,18 @@ class PipelineContext:
             d / "provenance.json",
         ]
 
+    def validate_training_features(self) -> None:
+        """Reject unsupported native BW front ends before building dependencies."""
+        from pstrain.lib.bw import BW_CEPSTRAL_LENGTH, BW_FEATURE_TYPE
+
+        if self.feat.ncep != BW_CEPSTRAL_LENGTH or self.feat.feat_type != BW_FEATURE_TYPE:
+            raise ValueError(
+                "BW training requires "
+                f"features.ncep={BW_CEPSTRAL_LENGTH} and features.feat_type={BW_FEATURE_TYPE!r}; "
+                f"got ncep={self.feat.ncep}, feat_type={self.feat.feat_type!r}. "
+                "Other feature configurations are supported for standalone feature extraction."
+            )
+
     def provenance_payload(self, stage: str) -> dict[str, Any]:
         """Canonical effective configuration governing a pipeline stage."""
         payload: dict[str, Any] = {
@@ -627,8 +639,13 @@ class PipelineContext:
     @property
     def filler_dict(self) -> Path | None:
         """Optional filler dictionary; None if not present."""
-        p = self.shared_dir / "filler.dict"
+        p = self.filler_dict_path
         return p if p.exists() else None
+
+    @property
+    def filler_dict_path(self) -> Path:
+        """Stable optional dependency path, including when the file is absent."""
+        return self.shared_dir / "filler.dict"
 
     @property
     def all_transcription(self) -> Path:

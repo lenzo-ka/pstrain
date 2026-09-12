@@ -15,7 +15,8 @@ pstrain/lib/pipeline/
 
 * **`Task`** — an immutable dataclass: `name`, `fn` (callable),
   `inputs: tuple[Path, ...]`, `outputs: tuple[Path, ...]`,
-  `parallel_group: str`, `description: str`.
+  `parallel_group: str`, `description: str`, optional file dependencies in
+  `optional_inputs`, and a lightweight configuration `preflight` callable.
 * **`Pipeline`** — registers tasks and resolves the DAG by matching
   one task's outputs against another's inputs. Plans, checks staleness,
   topologically sorts, and executes.
@@ -38,14 +39,27 @@ Tasks declare file paths. The pipeline indexes outputs and uses
 `inputs → outputs` matching to walk the graph (the same model
 Snakemake uses).
 
+Required external inputs must exist at plan time, including for cached targets.
+Missing generated inputs are scheduled through their producer. Optional inputs
+may be absent; their presence is recorded in the completion marker so adding or
+removing one invalidates its consumers. The training, model-definition,
+evaluation, and package tasks use this contract for `shared/filler.dict`.
+
+Preflight callables validate configuration before dependencies execute. The
+training graph requires the native BW front end: `features.ncep=13` and
+`features.feat_type=1s_c_d_dd`. Unsupported settings fail before extraction;
+the standalone `features` target retains the configurable extractor.
+
 ### Staleness
 
 A task is **stale** when any of:
 
 1. Any declared output is missing.
-2. The newest input mtime is strictly greater than the oldest output
+2. The completion marker is missing, or an optional input's presence differs
+   from its completion record.
+3. The newest input mtime is greater than or equal to the oldest output
    mtime.
-3. **Any upstream task is itself stale** (transitively). The planner
+4. **Any upstream task is itself stale** (transitively). The planner
    propagates staleness downstream because an upstream's pending
    re-run will produce outputs newer than this task's existing
    outputs.
