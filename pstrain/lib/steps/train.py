@@ -1238,15 +1238,25 @@ def run_bw_training(
         trainer.save_density_counts(output_dir / "gauden_counts")
 
         # Normalize accumulators (also resets stats for next iteration)
-        trainer.normalize()
+        if not trainer.normalize():
+            telemetry_row["stop_decision"] = "failed"
+            telemetry_row["error"] = "normalization failed"
+            _write_telemetry(output_dir, telemetry_rows, schema_version=2)
+            raise RuntimeError(
+                f"Iteration {iteration}: BW normalization failed for {current_model}"
+            )
 
         # Save model
-        trainer.save(
+        if not trainer.save(
             means_path=output_dir / "means",
             vars_path=output_dir / "variances",
             mixw_path=output_dir / "mixture_weights",
             tmat_path=output_dir / "transition_matrices",
-        )
+        ):
+            telemetry_row["stop_decision"] = "failed"
+            telemetry_row["error"] = "model save failed"
+            _write_telemetry(output_dir, telemetry_rows, schema_version=2)
+            raise RuntimeError(f"Iteration {iteration}: BW model save failed for {output_dir}")
         if checkpoints_enabled:
             _checkpoint_iteration(output_dir, iteration)
 
