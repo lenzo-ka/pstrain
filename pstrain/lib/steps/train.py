@@ -9,6 +9,7 @@ import ctypes
 import hashlib
 import json
 import logging
+import math
 import multiprocessing
 import os
 import shutil
@@ -357,8 +358,15 @@ def _has_converged(
     threshold: float,
     min_iterations: int,
 ) -> bool:
-    """Apply the upstream convergence decision after a non-initial iteration."""
-    return _convergence_delta(current, previous) <= threshold and iteration >= min_iterations
+    """Converge only on a finite, nonnegative improvement within the threshold."""
+    delta = _convergence_delta(current, previous)
+    return (
+        math.isfinite(current)
+        and math.isfinite(previous)
+        and math.isfinite(delta)
+        and 0 <= delta <= threshold
+        and iteration >= min_iterations
+    )
 
 
 def _process_with_final_state_retry(
@@ -774,8 +782,9 @@ def run_bw_training(
         n_iter: Maximum training iterations
         convergence_ratio: Signed per-frame likelihood delta threshold, using
             each pass's own frame count. A delta strictly greater than this
-            threshold continues training; otherwise training converges once
-            ``min_iterations`` is satisfied.
+            threshold continues training. A finite, nonnegative delta at or
+            below the threshold converges once ``min_iterations`` is satisfied.
+            Negative or nonfinite deltas do not indicate convergence.
         min_iterations: Minimum number of completed iterations before convergence
         config: BW training configuration, including the explicit variance
             policy retained after the stage-specific first iteration.
@@ -1269,8 +1278,8 @@ def run_bw_training(
                     "WARNING: negative convergence ratio at iteration %d; check BW inputs and logs",
                     iteration,
                 )
-            # SphinxTrain continues only for a strictly greater delta, and
-            # otherwise enforces CFG_MIN_ITERATIONS before declaring convergence.
+            # Keep the signed upstream delta and minimum-pass requirement, but
+            # do not mistake a likelihood regression for convergence.
             if _has_converged(
                 stats.avg_log_prob,
                 prev_likelihood,

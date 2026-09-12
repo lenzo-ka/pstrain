@@ -50,6 +50,12 @@ training graph requires the native BW front end: `features.ncep=13` and
 `features.feat_type=1s_c_d_dd`. Unsupported settings fail before extraction;
 the standalone `features` target retains the configurable extractor.
 
+BW convergence keeps the signed per-frame likelihood delta and configured
+minimum number of passes, but requires a finite increase between zero and the
+threshold, inclusive. A likelihood decrease no longer counts as convergence.
+Training continues within the existing pass cap; it still saves each completed
+pass and does not roll back to a previous model automatically.
+
 ### Staleness
 
 A task is **stale** when any of:
@@ -155,8 +161,9 @@ training:
   tied: {max_iterations: 10, min_iterations: 1, convergence_ratio: 0.001}
 ```
 
-All three use the SphinxTrain signed likelihood-delta decision and may stop
-before their ten-pass cap after `min_iterations`; upstream stage 30 is a
+All three retain the SphinxTrain signed likelihood-delta arithmetic, but only
+finite, nonnegative changes within the threshold can indicate convergence.
+They may stop before their ten-pass cap after `min_iterations`; upstream stage 30 is a
 converge-with-cap loop, not a fixed-count loop. The separately frozen Arctic
 benchmark pin runs the same ten-pass untied cap. All stages use the A7c-matched
 0.001 decision threshold by default.

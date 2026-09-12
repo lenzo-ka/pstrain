@@ -188,18 +188,18 @@ class TrainParams:
     n_senones: int = field(default_factory=lambda: Profile().training.n_senones)
     a_beam: float = field(default_factory=lambda: Profile().training.a_beam)
     b_beam: float = field(default_factory=lambda: Profile().training.b_beam)
-    # A7c matched the upstream signed absolute likelihood-delta decision,
-    # while measurements retained 0.001 rather than upstream's literal 0.1.
-    # CI and tied stages keep that controller and upstream's ten-pass cap.
+    # A7c initially matched the upstream signed likelihood-delta decision.
+    # The controller now excludes negative/nonfinite changes from convergence,
+    # while retaining 0.001 rather than upstream's 0.1 and the ten-pass cap.
     ci: TrainingSchedule = field(
         default_factory=lambda: TrainingSchedule(**Profile().training.ci.model_dump())
     )
     tied: TrainingSchedule = field(
         default_factory=lambda: TrainingSchedule(**Profile().training.tied.model_dump())
     )
-    # SphinxTrain scripts/30.cd_hmm_untied/norm_and_launchbw.pl uses the same
-    # converge-with-cap controller. The preserved SLT oracle ended at pass 6;
-    # cap this stage there so a stricter pstrain threshold cannot run to 10.
+    # SphinxTrain scripts/30.cd_hmm_untied/norm_and_launchbw.pl also caps passes,
+    # but permits negative changes to stop. Untied training uses its configured
+    # cap with the same nonregressing convergence predicate as CI and tied stages.
     untied: TrainingSchedule = field(
         default_factory=lambda: TrainingSchedule(**Profile().training.untied.model_dump())
     )

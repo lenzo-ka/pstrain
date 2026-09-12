@@ -70,8 +70,9 @@ class TrainingScheduleConfig(StrictModel):
         Field(
             gt=0,
             description=(
-                "Stop a stage once the per-frame log-likelihood improves by no more than "
-                "this many nats between passes. Despite the name -- kept because SphinxTrain's "
+                "Converge after min_iterations when the finite per-frame log-likelihood "
+                "increase is between zero and this many nats, inclusive. Negative or "
+                "nonfinite changes do not indicate convergence. Despite the name -- kept because SphinxTrain's "
                 "$CFG_CONVERGENCE_RATIO is the same signed per-frame delta -- this is an "
                 "absolute difference, not a ratio. At the default, corpora of Arctic's size "
                 "run all ten passes in every schedule, which is the more accurate outcome as "
