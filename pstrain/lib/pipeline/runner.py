@@ -9,10 +9,14 @@ Staleness model
 A task is stale if any of:
   * Any declared output is missing.
   * Its completion marker is missing.
+  * An optional input was added or removed since completion.
   * The newest input mtime is greater than or equal to the oldest output mtime.
 
 Completion markers make interrupted writes stale; mtimes retain the deliberately
 small file-path DAG model for ordinary dependencies.
+Missing required external inputs fail planning, even for cached targets;
+missing generated inputs are scheduled through their producer. Optional inputs
+may be absent, but their presence and modification still invalidate consumers.
 
 Execution model
 ---------------
@@ -27,6 +31,7 @@ Dry-run prints the plan with staleness markers and never executes.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import multiprocessing
 import os
@@ -103,6 +108,15 @@ class Task:
     # Use this for fan-outs (one task per fileid). Leave empty for the linear
     # training chain where ordering matters.
     parallel_group: str = ""
+    # Optional files still invalidate their consumers when added,
+    # changed, or removed. Their presence is recorded at task completion.
+    optional_inputs: tuple[Path, ...] = ()
+    # Cheap configuration validation happens before any dependency executes.
+    preflight: Callable[[], None] | None = None
+
+    @property
+    def dependencies(self) -> tuple[Path, ...]:
+        return self.inputs + self.optional_inputs
 
     @property
     def completion_marker(self) -> Path | None:
@@ -257,6 +271,18 @@ class Pipeline:
         ordered_names = self._toposort_for(target_path)
         plan: list[_PlanEntry] = []
 
+        for name in ordered_names:
+            task = self._tasks[name]
+            if task.preflight is not None:
+                task.preflight()
+            missing = [
+                Path(path)
+                for path in task.inputs
+                if Path(path) not in self._producer_by_output and not Path(path).exists()
+            ]
+            if missing:
+                raise FileNotFoundError(f"task {task.name!r} requires external input: {missing[0]}")
+
         # First pass: direct staleness from filesystem mtimes.
         entries_by_name: dict[str, _PlanEntry] = {}
         for name in ordered_names:
@@ -274,7 +300,7 @@ class Pipeline:
         for entry in plan:
             if entry.stale:
                 continue
-            for dep in entry.task.inputs:
+            for dep in entry.task.dependencies:
                 producer = self._producer_by_output.get(Path(dep))
                 if producer and entries_by_name[producer].stale:
                     entry.stale = True
@@ -386,7 +412,7 @@ class Pipeline:
                 raise RuntimeError(f"cycle detected in task graph: {cycle}")
             on_stack.add(producer)
             task = self._tasks[producer]
-            for dep in task.inputs:
+            for dep in task.dependencies:
                 visit(Path(dep))
             on_stack.discard(producer)
             visited.add(producer)
@@ -405,9 +431,18 @@ class Pipeline:
         marker = task.completion_marker
         if marker is not None and not marker.exists():
             return True, "missing completion marker"
+        if task.optional_inputs and marker is not None:
+            try:
+                recorded = json.loads(marker.read_text(encoding="utf-8"))
+            except (ValueError, OSError):
+                return True, "missing optional-input record"
+            if not isinstance(recorded, dict) or recorded.get(
+                "optional_inputs"
+            ) != _optional_input_presence(task):
+                return True, "optional input presence changed"
         out_mtimes = [p.stat().st_mtime_ns for p in outputs]
         oldest_out = min(out_mtimes)
-        existing_inputs = [Path(p) for p in task.inputs if Path(p).exists()]
+        existing_inputs = [Path(p) for p in task.dependencies if Path(p).exists()]
         if not existing_inputs:
             return False, "up to date"
         newest_in = max(p.stat().st_mtime_ns for p in existing_inputs)
@@ -469,7 +504,7 @@ def _execute(
                 and all(
                     (producer := producer_by_output.get(Path(task_input))) is None
                     or producer in executed
-                    for task_input in candidate.task.inputs
+                    for task_input in candidate.task.dependencies
                 )
             ]
             result = _run_parallel_batch(
@@ -652,7 +687,7 @@ def _verify_outputs(task: Task) -> None:
 
 def _order_output_mtimes(task: Task) -> None:
     """Keep completed outputs strictly newer than their existing inputs."""
-    existing_inputs = [Path(path) for path in task.inputs if Path(path).exists()]
+    existing_inputs = [Path(path) for path in task.dependencies if Path(path).exists()]
     if not existing_inputs:
         return
     newest_input = max(path.stat().st_mtime_ns for path in existing_inputs)
@@ -667,14 +702,25 @@ def _execute_task(task: Task) -> None:
     marker = task.completion_marker
     if marker is not None:
         marker.unlink(missing_ok=True)
+    missing = [Path(path) for path in task.inputs if not Path(path).exists()]
+    if missing:
+        raise FileNotFoundError(f"task {task.name!r} requires input: {missing[0]}")
+    optional_presence = _optional_input_presence(task)
     task.fn()
     _verify_outputs(task)
     _order_output_mtimes(task)
     if marker is not None:
         marker.parent.mkdir(parents=True, exist_ok=True)
         temporary = marker.with_name(f"{marker.name}.tmp-{os.getpid()}")
-        temporary.write_text(f"task={task.name}\n", encoding="utf-8")
+        temporary.write_text(
+            json.dumps({"task": task.name, "optional_inputs": optional_presence}) + "\n",
+            encoding="utf-8",
+        )
         temporary.replace(marker)
+
+
+def _optional_input_presence(task: Task) -> dict[str, bool]:
+    return {str(path): Path(path).exists() for path in task.optional_inputs}
 
 
 def _pool_startup_probe() -> None:
