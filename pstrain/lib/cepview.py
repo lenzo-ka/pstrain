@@ -35,7 +35,7 @@ def view_cepstra(
 
     Args:
         mfc_path: Path to the MFC file.
-        n_coeff: Number of coefficients in the feature vector (for validation).
+        n_coeff: Number of coefficients per frame, from the producing front end.
         display_cols: Number of columns to display per line.
         start_frame: Starting frame (0-based).
         end_frame: Ending frame (exclusive). None means all frames.
@@ -45,12 +45,8 @@ def view_cepstra(
     Returns:
         Formatted string representation of the features.
     """
-    mfc = read_sphinx_mfc(mfc_path)
+    mfc = read_sphinx_mfc(mfc_path, veclen=n_coeff)
     n_frames, veclen = mfc.shape
-
-    if veclen != n_coeff:
-        # Just a warning, not an error - file may have different size
-        pass
 
     if end_frame is None:
         end_frame = n_frames
