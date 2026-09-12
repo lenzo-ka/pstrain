@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Self
@@ -130,14 +132,60 @@ class HMM:
         return cls(means, variances, mixw, tmat)
 
     def save(self, model_dir: Path) -> None:
-        """Save model to directory using CFFI."""
+        """Save a complete parameter set, checking every native write.
+
+        Writes are staged before any destination parameter is replaced. A
+        replacement error restores the old files. Concurrent readers/writers
+        and process death during the replacements require external coordination;
+        this is not an atomic directory snapshot.
+        """
         model_dir = Path(model_dir)
         model_dir.mkdir(parents=True, exist_ok=True)
+        parameters = (
+            ("means", _pstrainc.write_gau, self.means),
+            ("variances", _pstrainc.write_gau, self.variances),
+            ("mixture_weights", _pstrainc.write_mixw, self.mixw),
+            ("transition_matrices", _pstrainc.write_tmat, self.tmat),
+        )
+        for name, _, _ in parameters:
+            destination = model_dir / name
+            if destination.is_dir():
+                raise RuntimeError(f"Cannot save model parameter over directory: {destination}")
 
-        _pstrainc.write_gau(str(model_dir / "means"), self.means)
-        _pstrainc.write_gau(str(model_dir / "variances"), self.variances)
-        _pstrainc.write_mixw(str(model_dir / "mixture_weights"), self.mixw)
-        _pstrainc.write_tmat(str(model_dir / "transition_matrices"), self.tmat)
+        staging = Path(tempfile.mkdtemp(prefix=".hmm-save-", dir=model_dir))
+        discard_staging = True
+        replaced: list[str] = []
+        originals: set[str] = set()
+        try:
+            backup = staging / "backup"
+            backup.mkdir()
+            for name, writer, values in parameters:
+                if writer(str(staging / name), values) != 0:
+                    raise RuntimeError(f"Failed to write model parameter: {model_dir / name}")
+                destination = model_dir / name
+                if destination.exists() or destination.is_symlink():
+                    shutil.copy2(destination, backup / name, follow_symlinks=False)
+                    originals.add(name)
+            try:
+                for name, _, _ in parameters:
+                    (staging / name).replace(model_dir / name)
+                    replaced.append(name)
+            except OSError:
+                try:
+                    for name in reversed(replaced):
+                        if name in originals:
+                            (backup / name).replace(model_dir / name)
+                        else:
+                            (model_dir / name).unlink()
+                except OSError as recovery_error:
+                    discard_staging = False
+                    raise RuntimeError(
+                        f"Model save rollback failed; original parameters retained in {backup}"
+                    ) from recovery_error
+                raise
+        finally:
+            if discard_staging:
+                shutil.rmtree(staging)
 
 
 class BWTrainer:

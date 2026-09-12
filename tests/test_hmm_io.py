@@ -73,3 +73,64 @@ def test_transition_reader_checks_stored_row_count(tmp_path: Path) -> None:
     assert _pstrainc.write_mixw(path, np.ones((2, 1, 4), dtype=np.float32)) == 0
     with pytest.raises(RuntimeError, match="Failed to read tmat"):
         _pstrainc.read_tmat_counts(path)
+
+
+@pytest.mark.parametrize(
+    "failed_parameter", ["means", "variances", "mixture_weights", "transition_matrices"]
+)
+def test_hmm_save_preserves_model_on_write_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failed_parameter: str
+) -> None:
+    model = _model()
+    model.save(tmp_path)
+    originals = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
+    writers = {
+        "means": "write_gau",
+        "variances": "write_gau",
+        "mixture_weights": "write_mixw",
+        "transition_matrices": "write_tmat",
+    }
+    writer_name = writers[failed_parameter]
+    real_writer = getattr(_pstrainc, writer_name)
+
+    def fail_one(filename: str, values: np.ndarray) -> int:
+        if Path(filename).name == failed_parameter:
+            return -1
+        return int(real_writer(filename, values))
+
+    monkeypatch.setattr(_pstrainc, writer_name, fail_one)
+    model.means += 1
+    with pytest.raises(RuntimeError, match=failed_parameter):
+        model.save(tmp_path)
+    assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == originals
+
+
+def test_hmm_save_reports_existing_output_directory(tmp_path: Path) -> None:
+    (tmp_path / "means").mkdir()
+    with pytest.raises(RuntimeError, match="means"):
+        _model().save(tmp_path)
+    assert list(tmp_path.iterdir()) == [tmp_path / "means"]
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_hmm_save_rolls_back_replacement_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, existing: bool
+) -> None:
+    model = _model()
+    if existing:
+        model.save(tmp_path)
+    # Model directories may also contain an mdef, dictionaries, or provenance.
+    (tmp_path / "mdef").write_text("preserved metadata")
+    originals = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
+    real_replace = Path.replace
+
+    def fail_replacement(path: Path, target: Path) -> Path:
+        if path.name == "variances" and path.parent.name.startswith(".hmm-save-"):
+            raise OSError("injected replacement failure")
+        return real_replace(path, target)
+
+    monkeypatch.setattr(Path, "replace", fail_replacement)
+    model.means += 1
+    with pytest.raises(OSError, match="injected"):
+        model.save(tmp_path)
+    assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == originals
