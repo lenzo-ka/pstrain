@@ -38,7 +38,6 @@ from pstrain.benchmarks.arctic import (
     configuration_provenance,
     engine_identity,
     extract_archive,
-    fetch_archive,
     load_transcripts,
     main,
     make_record,
@@ -56,6 +55,7 @@ from pstrain.benchmarks.arctic import (
     validate_record,
     write_project,
 )
+from pstrain.benchmarks.corpora import fetch_pinned_archive
 from pstrain.lib.config.models import Profile
 from pstrain.lib.config.resolver import resolve_config
 from pstrain.lib.corpus.split import train_test_split
@@ -86,13 +86,21 @@ def test_network_and_benchmark_children_use_safe_launch_shape(
         raise AssertionError("the harness parent must never access the network")
 
     monkeypatch.setattr("pstrain.benchmarks.arctic.subprocess.run", fake_run)
+    monkeypatch.setattr("pstrain.benchmarks.corpora.subprocess.run", fake_run)
     monkeypatch.setattr(
-        "pstrain.benchmarks.arctic.urllib.request.urlopen", reject_in_process_network
+        "pstrain.benchmarks.corpora.urllib.request.urlopen", reject_in_process_network
     )
 
-    destination = fetch_archive(ARCHIVES[0], tmp_path)
+    # The harness fetches through the one hardened downloader in corpora, which
+    # is where the archive is authenticated against its pin.
+    destination = fetch_pinned_archive(ARCHIVES[0].url, ARCHIVES[0].sha256, tmp_path)
     assert destination == tmp_path / Path(ARCHIVES[0].url).name
-    assert calls[0][0][2] == "_fetch-archive"
+    assert calls[0][0][2:] == [
+        "_fetch-archive",
+        ARCHIVES[0].url,
+        ARCHIVES[0].sha256,
+        str(tmp_path.resolve()),
+    ]
     _run_trusted_child(["/absolute/python", "/absolute/child.py"])
     assert len(calls) == 2
     for _command, kwargs in calls:
@@ -108,12 +116,12 @@ def test_archive_fetch_reports_what_the_network_helper_said(
     stderr = b"Traceback (most recent call last):\nRuntimeError: HEAD failed: no route\n"
 
     def failing_run(command: list[str], **kwargs: object) -> None:
-        assert kwargs["stderr"] is subprocess.PIPE
+        assert kwargs["capture_output"] is True
         raise subprocess.CalledProcessError(1, command, stderr=stderr)
 
-    monkeypatch.setattr("pstrain.benchmarks.arctic.subprocess.run", failing_run)
+    monkeypatch.setattr("pstrain.benchmarks.corpora.subprocess.run", failing_run)
     with pytest.raises(RuntimeError, match="RuntimeError: HEAD failed: no route"):
-        fetch_archive(ARCHIVES[0], tmp_path)
+        fetch_pinned_archive(ARCHIVES[0].url, ARCHIVES[0].sha256, tmp_path)
 
 
 def test_archive_fetch_falls_back_to_the_helper_exit_status(
@@ -124,9 +132,9 @@ def test_archive_fetch_falls_back_to_the_helper_exit_status(
     def silent_run(command: list[str], **kwargs: object) -> None:
         raise subprocess.CalledProcessError(-11, command, stderr=b"")
 
-    monkeypatch.setattr("pstrain.benchmarks.arctic.subprocess.run", silent_run)
+    monkeypatch.setattr("pstrain.benchmarks.corpora.subprocess.run", silent_run)
     with pytest.raises(RuntimeError, match="helper exited with status -11"):
-        fetch_archive(ARCHIVES[0], tmp_path)
+        fetch_pinned_archive(ARCHIVES[0].url, ARCHIVES[0].sha256, tmp_path)
 
 
 def test_committed_transcripts_are_normalized_and_complete() -> None:
