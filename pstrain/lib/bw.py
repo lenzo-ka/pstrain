@@ -427,8 +427,6 @@ class BWTrainer:
 
     def dump_accumulators(self, accum_dir: Path) -> None:
         """Write mergeable upstream-format accumulators for this session."""
-        if self.config.multipron:
-            raise RuntimeError("BW sharding is unavailable when multipron_training=true")
         if hasattr(self, "_proxy"):
             self._proxy.call("dump_accumulators", accum_dir)
             return
@@ -438,8 +436,6 @@ class BWTrainer:
 
     def restore_accumulators(self, accum_dirs: list[Path]) -> None:
         """Merge accumulator directories through vendored norm's rdacc primitives."""
-        if self.config.multipron:
-            raise RuntimeError("BW sharding is unavailable when multipron_training=true")
         if not accum_dirs:
             raise ValueError("At least one accumulator directory is required")
         if hasattr(self, "_proxy"):

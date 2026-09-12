@@ -589,9 +589,11 @@ class _PoolAnalyzer:
         source: str,
         package_pool_symbols: set[str] | None = None,
         module_name: str | None = None,
+        package_nonfactory_functions: set[str] | None = None,
     ) -> None:
         self.tree = ast.parse(source)
         self.module_name = module_name
+        self.package_nonfactory_functions = package_nonfactory_functions or set()
         self.aliases: dict[str, str] = {}
         self.pool_symbols: set[str] = {
             "concurrent.futures.ProcessPoolExecutor",
@@ -727,6 +729,7 @@ class _PoolAnalyzer:
                         final_name in {"ThreadPool", "ThreadPoolExecutor"}
                         or lower_name.endswith(("_size", "_workers", "_class"))
                         or final_name in nonfactory_functions
+                        or name in analyzer.package_nonfactory_functions
                     )
                     if (
                         isinstance(node.func, ast.Name)
@@ -835,9 +838,44 @@ def _package_pool_symbols(sources: dict[Path, str]) -> set[str]:
 def _pool_inventory(sources: dict[Path, str]) -> dict[tuple[str, str], tuple[str | None, ...]]:
     pools: defaultdict[tuple[str, str], list[str | None]] = defaultdict(list)
     package_pool_symbols = _package_pool_symbols(sources)
+    # Apply the existing local nonfactory criterion to definitions in scanned
+    # modules, too. Their bodies are still scanned: a constructor inside a
+    # context manager remains an inventoried pool, rather than an exemption.
+    package_nonfactory_functions = set()
+    for path, source in sources.items():
+        analyzer = _PoolAnalyzer(source, package_pool_symbols, _module_name(path))
+        # A definition describes the exported value only if that name has no
+        # other syntactic binding. Count conservatively even inside nested
+        # scopes; this gate need not accept ambiguous shadowing.
+        bindings: Counter[str] = Counter()
+        for binding in ast.walk(analyzer.tree):
+            if isinstance(binding, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                bindings[binding.name] += 1
+            elif isinstance(binding, ast.Name) and isinstance(binding.ctx, (ast.Store, ast.Del)):
+                bindings[binding.id] += 1
+            elif isinstance(binding, ast.alias):
+                bindings[binding.asname or binding.name.split(".")[0]] += 1
+        for node in analyzer.tree.body:
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if bindings[node.name] != 1:
+                continue
+            # Unknown decorators can replace a function with a pool factory.
+            if any(
+                analyzer._resolve_name(decorator) != "contextlib.contextmanager"
+                for decorator in node.decorator_list
+            ):
+                continue
+            if not any(
+                isinstance(child, ast.Return) and child.value is not None
+                for child in ast.walk(node)
+            ):
+                package_nonfactory_functions.add(f"{_module_name(path)}.{node.name}")
     for path, source in sources.items():
         relative_path = path.relative_to(ROOT).as_posix()
-        analyzer = _PoolAnalyzer(source, package_pool_symbols, _module_name(path))
+        analyzer = _PoolAnalyzer(
+            source, package_pool_symbols, _module_name(path), package_nonfactory_functions
+        )
         for call in analyzer.calls():
             pools[(relative_path, call.owner)].append(call.initializer)
     return {owner: tuple(initializers) for owner, initializers in pools.items()}
@@ -983,3 +1021,73 @@ def test_pools_that_can_start_native_helpers_install_the_shutdown_finalizer() ->
     # resolved or initializer-free pool fails instead of becoming an exception.
     expected = POOLS_THAT_INSTALL_HELPER_FINALIZER | POOLS_WITHOUT_NATIVE_HELPERS
     assert _production_pools() == expected
+
+
+@pytest.mark.parametrize("construct_inside", [False, True])
+def test_imported_pool_context_is_not_a_hidden_factory(construct_inside: bool) -> None:
+    body = "yield ProcessPoolExecutor()" if construct_inside else "yield existing"
+    sources = {
+        ROOT / "pstrain/lib/bw_pool.py": (
+            "from contextlib import contextmanager\n"
+            "from concurrent.futures import ProcessPoolExecutor\n"
+            f"@contextmanager\ndef contain_pool(existing):\n    {body}\n"
+        ),
+        ROOT / "pstrain/lib/steps/train.py": (
+            "from pstrain.lib.bw_pool import contain_pool\n"
+            "from concurrent.futures import ProcessPoolExecutor\n"
+            "def run():\n    with contain_pool(ProcessPoolExecutor()):\n        pass\n"
+        ),
+    }
+    expected = {("pstrain/lib/steps/train.py", "run"): (None,)}
+    if construct_inside:
+        expected[("pstrain/lib/bw_pool.py", "contain_pool")] = (None,)
+    assert _pool_inventory(sources) == expected
+
+
+def test_unscanned_imported_pool_context_fails_closed() -> None:
+    sources = {
+        ROOT / "pstrain/lib/steps/train.py": (
+            "from external import contain_pool\ncontain_pool(existing)\n"
+        )
+    }
+    with pytest.raises(AssertionError, match="unresolved pool-shaped call: contain_pool"):
+        _pool_inventory(sources)
+
+
+def test_imported_unknown_decorator_cannot_hide_pool_factory() -> None:
+    sources = {
+        ROOT / "pstrain/lib/bw_pool.py": (
+            "from external import replace_with_pool\n"
+            "@replace_with_pool\ndef contain_pool(existing):\n    yield existing\n"
+        ),
+        ROOT / "pstrain/lib/steps/train.py": (
+            "from pstrain.lib.bw_pool import contain_pool\ncontain_pool(existing)\n"
+        ),
+    }
+    with pytest.raises(AssertionError, match="unresolved pool-shaped call: contain_pool"):
+        _pool_inventory(sources)
+
+
+@pytest.mark.parametrize(
+    "rebind",
+    [
+        "contain_pool = choose_backend()",
+        "contain_pool: object = choose_backend()",
+        "contain_pool += choose_backend()",
+        "from external import contain_pool",
+        "class contain_pool: pass",
+        "def contain_pool(): return choose_backend()",
+    ],
+)
+def test_rebound_imported_nonfactory_fails_closed(rebind: str) -> None:
+    sources = {
+        ROOT / "pstrain/lib/bw_pool.py": (
+            "from external import choose_backend\n"
+            "def contain_pool(existing):\n    yield existing\n" + rebind + "\n"
+        ),
+        ROOT / "pstrain/lib/steps/train.py": (
+            "from pstrain.lib.bw_pool import contain_pool\ncontain_pool(existing)\n"
+        ),
+    }
+    with pytest.raises(AssertionError, match="unresolved pool-shaped call: contain_pool"):
+        _pool_inventory(sources)

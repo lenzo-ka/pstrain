@@ -546,9 +546,7 @@ class PipelineContext:
             payload["split"] = asdict(self.split)
         elif stage == "training":
             requested_bw_jobs = self.runner.jobs or 1
-            effective_bw_shards = (
-                1 if requested_bw_jobs > 1 and self.train.multipron_training else requested_bw_jobs
-            )
+            effective_bw_shards = requested_bw_jobs
             payload.update(
                 features=asdict(self.feat),
                 training=asdict(self.train),

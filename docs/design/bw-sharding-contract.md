@@ -1,6 +1,6 @@
 # Baum-Welch sharding contract
 
-Non-multipron Baum-Welch training partitions the canonical manifest into contiguous ranges and
+Baum-Welch training with multiple workers partitions the canonical manifest into contiguous ranges and
 reduces shard artifacts in ascending shard ID through the vendored accumulator reducers.
 
 <!-- BEGIN GENERATED GATE SCOPE -->
@@ -16,7 +16,7 @@ reduces shard artifacts in ascending shard ID through the vendored accumulator r
 
 4. `tests/test_bw_sharding.py::test_model_comparison_surfaces_effective_bw_shard_count`. CHECKED (mechanically asserted): nothing. DESCRIBES (certifies nothing): kind `provenance-comparison`, declared shard counts `1` and `2`.
 
-5. `tests/test_bw_sharding.py::test_multipron_multiple_shards_falls_back_loudly`. CHECKED (mechanically asserted): nothing. DESCRIBES (certifies nothing): kind `multipron-fallback`, declared shard counts `4`.
+5. `tests/test_bw_sharding.py::test_multipron_multiple_shards_preserves_requested_parallelism`. CHECKED (mechanically asserted): nothing. DESCRIBES (certifies nothing): kind `multipron-sharding`, declared shard counts `4`.
 
 6. `tests/test_bw_sharding.py::test_artifacts_reject_missing_or_stale_payload`. CHECKED (mechanically asserted): nothing. DESCRIBES (certifies nothing): kind `artifact-validation`, declared shard counts `not declared`. The declared mutations are orientation, not a certified artifact inventory.
 
@@ -31,12 +31,17 @@ The contract guarantees remain:
    passes; other shard counts and pass counts are untested.
 2. Assigned, processed, retried, and skipped utterance identities, accepted frame counts, and
    per-pass stop decisions are exactly partition-independent. The executable evidence compares
-   shard counts 1 and 2 for exactly three passes; other shard counts and pass counts are untested.
+   shard counts 1 and 2 for exactly three passes in the non-multipron gate. The additional
+   multipron fixture exercises 1, 2, and 4 as described below; other cases are untested.
 3. Floating parameters are not claimed equal across shard counts.
 4. Effective BW shard count is recorded in training provenance and model-directory comparison
    includes `provenance.json`.
-5. Multipron training requested with more than one shard falls back loudly to one shard and logs
-   `fallback_senone` as the reason.
+5. Multipron training uses the requested shard count. Each shard writes raw sufficient statistics
+   and a success-only CI fallback activation bitmap. Reduction sums the statistics and unions the
+   bitmaps before normalization seeds the survival prior once globally. Zero-occupancy activated
+   states retain the same parameters as in the serial path. Normalization clears the bitmap.
+6. A single requested worker never constructs a process pool. Multipron uses the existing serial
+   loop; non-multipron executes its one-shard transport inline with native containment.
 
 The reproducibility gate detects unstable ordering, races, and uninitialized bytes, but does not
 independently test arbitrary completion-order permutations. Floating parameters are not claimed
@@ -75,3 +80,30 @@ outside the earlier arithmetic-derived budget. Maximum relative raw-mean-numerat
 from pass one to pass two. The per-frame likelihood gaps were `0`, `3.964e-7`, and `2.960e-6`; both
 arms improved monotonically. These three observations do not establish convergence to a common
 value—the likelihood gap was still growing at the iteration cap.
+
+
+## Multipron activation and worker lifetime
+
+The `fallback_senones` sidecar contains the ASCII version line
+`PSTRAIN_FALLBACK_SENONES_V1`, the decimal tied-state count on its own line, and exactly one
+binary byte (zero or one) per tied state. Multipron reduction requires a sidecar even for empty
+shards and all-zero masks. Native validation checks every sidecar before merging any counts;
+Python artifact validation includes the sidecar in the payload digest and binds it to the same
+model, configuration, pass, and manifest identities as the raw counts. Non-multipron artifacts
+retain their original three-file format.
+
+The native numerical test uses actual successful fallback graphs and asserts both observed and
+unobserved activated states. It compares against the existing serial native path, checks one
+unit of survival prior rather than one per shard, and verifies reset after normalization in both
+variance modes. The full-loop multipron fixture compares one, two, and four workers for three
+passes, including retry/skip accounting, actual overlapping worker lifetimes, and byte-identical
+repeated two-shard artifacts. Its small float32 error budget characterizes that fixture only;
+it does not replace the broader cross-count limitations above. Failed attempts contribute no
+counts or activation flags; skipped utterances remain eligible on the next pass.
+
+Worker PIDs and lifetimes are diagnostic telemetry, excluded from deterministic artifacts.
+Contained serial native CPU usage is reported as unavailable when it cannot be measured; parent
+CPU alone is not reported as BW worker CPU. A failed or interrupted parallel pass terminates and
+reaps only its owned pool workers before propagating the failure. Each pool worker also watches
+its parent sentinel and exits if the coordinator dies, including during a native update.
+Incomplete artifacts are not reduced or promoted into a model.

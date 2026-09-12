@@ -980,6 +980,9 @@ def test_complete_cd_inventory_leaves_ci_fallback_accumulators_zero(
     mfcc = read_sphinx_mfc(full_project.features_dir / "arctic_a0001.mfc")
     assert trainer.process_utterance_mfcc(mfcc, "<s> a and </s>")
     assert trainer.count_active_fallback_senones() == 0
+    accumulators = tmp_path / "complete-accumulators"
+    trainer.dump_accumulators(accumulators)
+    assert not any((accumulators / "fallback_senones").read_bytes().split(b"\n", 2)[2])
     non_filler_ci_senones = [
         int(state)
         for row in _mdef_rows(complete_mdef)
@@ -1435,3 +1438,305 @@ def test_one_shard_reducer_matches_established_in_process_bw(
         contract_check_fields(
             left=established_pass, right=reduced_pass, artifacts=_CONTRACT_TELEMETRY_FIELDS, scope=3
         )
+
+
+@pytest.fixture(scope="module")
+def multipron_fallback_seed(
+    full_project: PipelineContext, tmp_path_factory: pytest.TempPathFactory
+) -> Path:
+    from pstrain.lib.mdef import generate_untied_mdef
+
+    root = tmp_path_factory.mktemp("multipron-fallback-seed")
+    transcription = root / "transcription"
+    transcription.write_text("<s> a and </s> (arctic_a0001)\n")
+    mdef = root / "mdef"
+    generate_untied_mdef(
+        full_project.shared_dir / "phoneset.txt",
+        full_project.shared_dir / "dictionary.dict",
+        transcription,
+        mdef,
+        filler_dict=full_project.filler_dict,
+        inventory_policy="linear",
+    )
+    initial = root / "initial"
+    run_init_cd_untied(full_project.model_dir("ci-2g"), mdef, initial)
+    return initial
+
+
+def _fallback_trainer(
+    model: Path, project: PipelineContext, *, pass2var: bool = False
+) -> BWTrainer:
+    trainer = BWTrainer(
+        model / "mdef",
+        model / "means",
+        model / "variances",
+        model / "mixture_weights",
+        model / "transition_matrices",
+        BWConfig(
+            pass2var=pass2var,
+            unobserved_gaussian_policy="zero",
+            a_beam=1e-200,
+            b_beam=1e-200,
+            multipron=True,
+            optional_final_silence=False,
+        ),
+    )
+    trainer.set_dict(project.shared_dir / "dictionary.dict", project.filler_dict)
+    return trainer
+
+
+@requires_c_library
+@pytest.mark.parametrize("pass2var", [False, True])
+def test_multipron_union_applies_one_prior_and_retains_zero_posterior_states(
+    multipron_fallback_seed: Path, full_project: PipelineContext, tmp_path: Path, pass2var: bool
+) -> None:
+    """Two overlapping success masks get one global prior, matching old serial BW."""
+    seed = multipron_fallback_seed
+    mfcc = read_sphinx_mfc(full_project.features_dir / "arctic_a0001.mfc")
+    serial = _fallback_trainer(seed, full_project, pass2var=pass2var)
+    directories = []
+    for index in range(2):
+        worker = _fallback_trainer(seed, full_project, pass2var=pass2var)
+        assert worker.process_utterance_mfcc(mfcc, "<s> a and </s>")
+        assert serial.process_utterance_mfcc(mfcc, "<s> a and </s>")
+        assert worker.count_active_fallback_senones() > 0
+        directory = tmp_path / f"shard-{index}"
+        worker.dump_accumulators(directory)
+        directories.append(directory)
+    receiver = _fallback_trainer(seed, full_project, pass2var=pass2var)
+    empty = _fallback_trainer(seed, full_project, pass2var=pass2var)
+    empty_directory = tmp_path / "empty"
+    empty.dump_accumulators(empty_directory)
+    assert not any((empty_directory / "fallback_senones").read_bytes().split(b"\n", 2)[2])
+    directories.append(empty_directory)
+    receiver.restore_accumulators(directories)
+    assert receiver.count_active_fallback_senones() == serial.count_active_fallback_senones()
+    before = tmp_path / "before"
+    receiver.dump_accumulators(before)
+    serial_before = tmp_path / "serial-before"
+    serial.dump_accumulators(serial_before)
+    for name in ("gauden_counts", "mixw_counts", "tmat_counts", "fallback_senones"):
+        assert (before / name).read_bytes() == (serial_before / name).read_bytes()
+    original = read_model_arrays(seed)
+    n_senones = original["mixture_weights"].shape[0]
+    active = np.asarray([receiver.fallback_senone_active(i) for i in range(n_senones)])
+    posterior_counts = tmp_path / "posterior-counts"
+    assert receiver.save_density_counts(posterior_counts)
+    counts = _pstrainc.read_dnom(str(posterior_counts))[0].reshape(n_senones, -1)
+    positive = active & (counts.sum(axis=1) > 0)
+    zero = active & (counts.sum(axis=1) == 0)
+    assert positive.any() and zero.any(), (
+        "fixture must distinguish prior and zero-posterior retention"
+    )
+    raw_mixw = _pstrainc.read_mixw_counts(str(before / "mixw_counts"))[0]
+    for trainer, name in [(serial, "serial"), (receiver, "reduced")]:
+        assert trainer.normalize()
+        assert trainer.count_active_fallback_senones() == 0
+        output = tmp_path / name
+        output.mkdir()
+        assert trainer.save(
+            output / "means",
+            output / "variances",
+            output / "mixture_weights",
+            output / "transition_matrices",
+        )
+    reduced = read_model_arrays(tmp_path / "reduced")
+    for name in reduced:
+        np.testing.assert_array_equal(reduced[name], read_model_arrays(tmp_path / "serial")[name])
+    # Saved raw occupancies expose prior mass directly; a per-shard prior gives 2.
+    added = reduced["mixture_weights"][positive] - raw_mixw[positive]
+    np.testing.assert_allclose(added.sum(axis=-1), 1.0, rtol=0, atol=1e-4)
+    for name in ("means", "variances", "mixture_weights"):
+        np.testing.assert_array_equal(reduced[name][zero], original[name][zero])
+    reset = tmp_path / "reset"
+    receiver.dump_accumulators(reset)
+    assert not any((reset / "fallback_senones").read_bytes().split(b"\n", 2)[2])
+
+
+@requires_c_library
+@pytest.mark.parametrize(
+    "damage", ["missing", "truncated", "version", "dimension", "nonboolean", "trailing"]
+)
+def test_multipron_reducer_rejects_bad_activation_before_mutating_counts(
+    multipron_fallback_seed: Path, full_project: PipelineContext, tmp_path: Path, damage: str
+) -> None:
+    trainer = _fallback_trainer(multipron_fallback_seed, full_project)
+    mfcc = read_sphinx_mfc(full_project.features_dir / "arctic_a0001.mfc")
+    assert trainer.process_utterance_mfcc(mfcc, "<s> a and </s>")
+    original = tmp_path / "original"
+    trainer.dump_accumulators(original)
+    broken = tmp_path / "broken"
+    shutil.copytree(original, broken)
+    path = broken / "fallback_senones"
+    payload = path.read_bytes()
+    if damage == "missing":
+        path.unlink()
+    else:
+        changes = {
+            "truncated": payload[:-1],
+            "version": payload.replace(b"_V1", b"_V2", 1),
+            "dimension": payload.split(b"\n", 1)[0] + b"\n0\n" + payload.split(b"\n", 2)[2],
+            "nonboolean": payload[:-1] + b"\x02",
+            "trailing": payload + b"\x00",
+        }
+        path.write_bytes(changes[damage])
+    with pytest.raises(RuntimeError, match="merge BW"):
+        trainer.restore_accumulators([original, broken])
+    after = tmp_path / "after"
+    trainer.dump_accumulators(after)
+    for name in ("gauden_counts", "mixw_counts", "tmat_counts", "fallback_senones"):
+        assert (after / name).read_bytes() == (original / name).read_bytes()
+
+
+@requires_c_library
+def test_multipron_parallel_passes_match_serial_outcomes_and_run_concurrently(
+    multipron_fallback_seed: Path,
+    full_project: PipelineContext,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exercise real workers against the preexisting direct-native serial path."""
+    from pstrain.lib.features import _write_sphinx_mfc
+
+    features = tmp_path / "features"
+    features.mkdir()
+    # Longer real feature sequences make simultaneous native work observable
+    # without sleeps, fake workers, or timing-based speed assertions.
+    mfcc = np.tile(read_sphinx_mfc(full_project.features_dir / "arctic_a0001.mfc"), (8, 1))
+    identities = [f"repeat-{index}" for index in range(4)]
+    for identity in identities:
+        _write_sphinx_mfc(mfcc, features / f"{identity}.mfc")
+    fileids = tmp_path / "fileids"
+    fileids.write_text("\n".join(identities) + "\n")
+    transcription = tmp_path / "transcription"
+    transcription.write_text("".join(f"{identity} a and\n" for identity in identities))
+    common = {
+        "model_dir": multipron_fallback_seed,
+        "features_dir": features,
+        "train_fileids": fileids,
+        "transcription": transcription,
+        "dictionary": full_project.shared_dir / "dictionary.dict",
+        "filler_dict": full_project.filler_dict,
+        "first_pass_2passvar": False,
+        "config": BWConfig(
+            pass2var=True,
+            unobserved_gaussian_policy="zero",
+            a_beam=1e-200,
+            b_beam=1e-200,
+            optional_final_silence=False,
+        ),
+        "multipron": True,
+        "n_iter": 3,
+        "min_iterations": 3,
+        "checkpoint_iterations": True,
+    }
+
+    def forbidden_pool(*args: object, **kwargs: object) -> None:
+        raise AssertionError("jobs=1 must not construct a process pool")
+
+    with monkeypatch.context() as patch:
+        patch.setattr("pstrain.lib.steps.train.ProcessPoolExecutor", forbidden_pool)
+        serial = run_bw_training(
+            output_dir=tmp_path / "serial", _in_process_reference=True, **common
+        )
+        one = run_bw_training(output_dir=tmp_path / "one", n_shards=1, **common)
+    assert serial.trajectory == one.trajectory
+    for name in (*_CONTRACT_MODEL_FILES, "gauden_counts"):
+        assert (tmp_path / "serial" / name).read_bytes() == (tmp_path / "one" / name).read_bytes()
+    for shards in (2, 4):
+        output = tmp_path / f"parallel-{shards}"
+        result = run_bw_training(output_dir=output, n_shards=shards, **common)
+        assert result.iterations == serial.iterations
+        for expected, actual in zip(serial.trajectory, result.trajectory, strict=True):
+            assert (
+                actual.frames,
+                actual.processed_utts,
+                actual.retried_utts,
+                actual.skipped_utts,
+            ) == (
+                expected.frames,
+                expected.processed_utts,
+                expected.retried_utts,
+                expected.skipped_utts,
+            )
+            # Fixed-fixture characterization, not a cross-corpus error bound.
+            assert actual.avg_log_prob == pytest.approx(expected.avg_log_prob, rel=0, abs=1e-9)
+        if shards == 2:
+            repeated = tmp_path / "parallel-2-repeat"
+            run_bw_training(output_dir=repeated, n_shards=2, **common)
+            for path in (output / ".bw-accum").rglob("*"):
+                if path.is_file():
+                    assert path.read_bytes() == (repeated / path.relative_to(output)).read_bytes()
+            for name in (*_CONTRACT_MODEL_FILES, "gauden_counts"):
+                assert (output / name).read_bytes() == (repeated / name).read_bytes()
+        rows = json.loads((output / "bw_telemetry.json").read_text())["passes"]
+        assert all(row["performance"]["workers"] == shards for row in rows)
+        observed_overlap = False
+        for row in rows:
+            pids = row["performance"]["worker_pids"]
+            intervals = row["performance"]["worker_intervals"]
+            for index, (start, stop) in enumerate(intervals):
+                for other in range(index):
+                    if pids[index] != pids[other] and max(start, intervals[other][0]) < min(
+                        stop, intervals[other][1]
+                    ):
+                        observed_overlap = True
+        assert observed_overlap, "real worker PID intervals must overlap"
+        for iteration in range(1, 4):
+            reference = read_model_arrays(tmp_path / "serial" / "iterations" / f"{iteration:02d}")
+            candidate = read_model_arrays(output / "iterations" / f"{iteration:02d}")
+            for name in reference:
+                # This fixture measured < 1 scaled float32 epsilon in raw
+                # transition counts; the other three arrays were exact. This
+                # two-epsilon budget is local to this fixture, not a general
+                # bound for regrouped EM trajectories.
+                float32_budget = 2 * np.finfo(np.float32).eps
+                error = np.abs(candidate[name].astype(np.float64) - reference[name])
+                scale = np.maximum(1.0, np.abs(reference[name]))
+                assert np.all(error <= float32_budget * scale), name
+        for artifact in (output / ".bw-accum").glob("pass-*/shard-*/artifact.json"):
+            metadata = json.loads(artifact.read_text())
+            assert "worker_pid" not in metadata
+            assert (artifact.parent / "fallback_senones").is_file()
+
+
+@requires_c_library
+def test_multipron_failed_attempt_and_retry_commit_counts_and_flags_once(
+    flat_project: PipelineContext, tmp_path: Path
+) -> None:
+    from pstrain.lib.steps.train import _process_with_final_state_retry
+
+    mfcc = read_sphinx_mfc(flat_project.features_dir / "arctic_a0001.mfc")
+    retry = _trainer(flat_project)
+    untouched = tmp_path / "untouched"
+    retry.dump_accumulators(untouched)
+    retry.set_a_beam(0.1)
+    assert not retry.process_utterance_mfcc(
+        mfcc, "<s> author of the danger trail philip steels etc </s>"
+    )
+    assert retry.final_state_not_reached
+    failed = tmp_path / "failed"
+    retry.dump_accumulators(failed)
+    for name in ("gauden_counts", "mixw_counts", "tmat_counts", "fallback_senones"):
+        assert (failed / name).read_bytes() == (untouched / name).read_bytes()
+    assert _process_with_final_state_retry(
+        retry,
+        mfcc,
+        "<s> author of the danger trail philip steels etc </s>",
+        normal_beam=0.1,
+        retry_beam_factor=1e199,
+        fileid="retry-probe",
+        failed_alignment="recover",
+    )
+    assert retry._last_process_retried
+    assert retry.get_stats().total_utts == 1
+    retried = tmp_path / "retried"
+    retry.dump_accumulators(retried)
+    wide = _trainer(flat_project)
+    assert wide.process_utterance_mfcc(
+        mfcc, "<s> author of the danger trail philip steels etc </s>"
+    )
+    direct = tmp_path / "direct"
+    wide.dump_accumulators(direct)
+    for name in ("gauden_counts", "mixw_counts", "tmat_counts", "fallback_senones"):
+        assert (retried / name).read_bytes() == (direct / name).read_bytes()

@@ -195,10 +195,13 @@ pstrain_bw_process_utt(pstrain_bw_context_t *ctx,
 int
 pstrain_bw_normalize(pstrain_bw_context_t *ctx);
 
-/** Serialize native BW accumulators in the upstream accum_dump format. */
+/** Serialize raw BW accumulators in upstream format. Multipron contexts also
+ * require the versioned fallback_senones activation artifact. No prior is added. */
 int pstrain_bw_dump_accum(pstrain_bw_context_t *ctx, const char *accum_dir);
 
-/** Merge upstream accumulator directories with the vendored norm rdacc path. */
+/** Merge raw counts in supplied order and union multipron fallback activations.
+ * Every activation artifact is validated before receiver counts are touched.
+ * Call normalize once after reduction to apply the pass-wide survival prior. */
 int pstrain_bw_restore_accumdirs(pstrain_bw_context_t *ctx,
                                  const char *const *accum_dirs,
                                  uint32 n_accum_dirs);
