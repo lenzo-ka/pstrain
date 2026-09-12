@@ -421,6 +421,19 @@ def _overlay(
     if not path.exists():
         return {}, [], kind
     raw = _load_yaml(path)
+    if kind == "user":
+        from pstrain.lib.config.user import PstrainUserConfig
+
+        try:
+            user = PstrainUserConfig.from_document(raw, path)
+        except ValidationError as exc:
+            raise ValueError(f"invalid configuration layer {path}: {exc}") from exc
+        legacy = "config_version" not in raw
+        return (
+            user.semantic_overlay(),
+            [_warn_legacy(path, project_dir)] if legacy else [],
+            "legacy" if legacy else kind,
+        )
     if "config_version" not in raw:
         warning = [_warn_legacy(path, project_dir)]
         if not legacy_effective:
