@@ -94,9 +94,7 @@ inc_densities_core(float32 ***new_mixw,
     uint32 max_wt_idx;
     float32 std;
 
-    assert(n_mgau <= n_mixw);
-
-    if (n_mgau < n_mixw) {
+    if (n_mgau != n_mixw) {
         E_ERROR("Splitting of tied mixture gaussians not implemented\n");
         return -1;
     }
@@ -111,6 +109,9 @@ inc_densities_core(float32 ***new_mixw,
             }
         }
     }
+
+    if (n_inc == 0)
+        return 0;
 
     /* Track which densities have been split */
     did = (uint32 **)ckd_calloc_2d(n_feat, n_inc, sizeof(uint32));
@@ -191,7 +192,9 @@ pstrain_inc_comp(const char *in_mean_path,
 
     uint32 n_mixw, n_mgau, n_dnom;
     uint32 n_feat, n_density;
-    uint32 *veclen = NULL;
+    uint32 mean_n_feat, mean_n_density, var_n_mgau, var_n_feat, var_n_density;
+    uint32 count_n_feat, count_n_density, j;
+    uint32 *veclen = NULL, *var_veclen = NULL;
 
     int ret = -1;
 
@@ -202,37 +205,53 @@ pstrain_inc_comp(const char *in_mean_path,
         goto cleanup;
     }
 
-    /* Validate n_inc */
-    if (n_inc > n_density) {
-        E_WARN("n_inc (%u) > n_density (%u), clamping to %u\n",
-               n_inc, n_density, n_density);
-        n_inc = n_density;
-    }
-
     /* Read means */
     E_INFO("Reading means from %s\n", in_mean_path);
-    if (s3gau_read(in_mean_path, &mean, &n_mgau, &n_feat, &n_density, &veclen) != S3_SUCCESS) {
+    if (s3gau_read(in_mean_path, &mean, &n_mgau, &mean_n_feat, &mean_n_density, &veclen) != S3_SUCCESS) {
         E_ERROR("Failed to read means\n");
         goto cleanup;
     }
 
     /* Read variances */
     E_INFO("Reading variances from %s\n", in_var_path);
-    ckd_free(veclen);
-    veclen = NULL;
-    if (s3gau_read(in_var_path, &var, &n_mgau, &n_feat, &n_density, &veclen) != S3_SUCCESS) {
+    if (s3gau_read(in_var_path, &var, &var_n_mgau, &var_n_feat, &var_n_density, &var_veclen) != S3_SUCCESS) {
         E_ERROR("Failed to read variances\n");
         goto cleanup;
     }
-    gauden_floor_variance_array(var, n_mgau, n_feat, n_density, veclen,
-                                GAUDEN_EVAL_VAR_FLOOR);
-
     /* Read density counts */
     E_INFO("Reading density counts from %s\n", dcount_path);
-    if (s3gaudnom_read(dcount_path, &dnom, &n_dnom, &n_feat, &n_density) != S3_SUCCESS) {
+    if (s3gaudnom_read(dcount_path, &dnom, &n_dnom, &count_n_feat, &count_n_density) != S3_SUCCESS) {
         E_ERROR("Failed to read density counts\n");
         goto cleanup;
     }
+
+    /* Preserve each file's metadata until compatibility has been established.
+     * Indexing one allocation with another file's dimensions is unsafe. */
+    if (n_mgau != var_n_mgau || n_mgau != n_dnom || n_mgau != n_mixw ||
+        n_feat != mean_n_feat || n_feat != var_n_feat || n_feat != count_n_feat ||
+        n_density != mean_n_density || n_density != var_n_density ||
+        n_density != count_n_density) {
+        E_ERROR("Incompatible split inputs: mixw=%ux%ux%u means=%ux%ux%u "
+                "variances=%ux%ux%u counts=%ux%ux%u\n",
+                n_mixw, n_feat, n_density, n_mgau, mean_n_feat, mean_n_density,
+                var_n_mgau, var_n_feat, var_n_density,
+                n_dnom, count_n_feat, count_n_density);
+        goto cleanup;
+    }
+    for (j = 0; j < n_feat; ++j) {
+        if (veclen[j] != var_veclen[j]) {
+            E_ERROR("Incompatible means/variances vector length for stream %u: %u != %u\n",
+                    j, veclen[j], var_veclen[j]);
+            goto cleanup;
+        }
+    }
+    if (n_inc > n_density) {
+        E_WARN("n_inc (%u) > n_density (%u), clamping to %u\n",
+               n_inc, n_density, n_density);
+        n_inc = n_density;
+    }
+    gauden_floor_variance_array(var, n_mgau, n_feat, n_density, veclen,
+                                GAUDEN_EVAL_VAR_FLOOR);
 
     E_INFO("Input: n_mgau=%u, n_feat=%u, n_density=%u, n_inc=%u\n",
            n_mgau, n_feat, n_density, n_inc);
@@ -287,6 +306,7 @@ cleanup:
     if (new_mixw) ckd_free_3d((void ***)new_mixw);
     if (dnom) ckd_free_3d((void ***)dnom);
     if (veclen) ckd_free(veclen);
+    if (var_veclen) ckd_free(var_veclen);
 
     return ret;
 }
