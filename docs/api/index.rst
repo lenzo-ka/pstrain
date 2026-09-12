@@ -12,6 +12,7 @@ creation, and training workflows.
 
    lib
    alignment
+   checkpoints
    config
    corpus
    diagnostics

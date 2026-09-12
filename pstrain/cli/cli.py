@@ -65,6 +65,7 @@ def create_parser() -> argparse.ArgumentParser:
     # Import command instances
     from pstrain.cli.align import align_command
     from pstrain.cli.build import build_command
+    from pstrain.cli.checkpoints import checkpoints_command
     from pstrain.cli.clean import clean_command
     from pstrain.cli.compare import compare_command
     from pstrain.cli.config import register_config_command
@@ -83,6 +84,7 @@ def create_parser() -> argparse.ArgumentParser:
 
     # Register Command-based commands
     commands = [
+        checkpoints_command,
         setup_command,
         build_command,
         split_command,
