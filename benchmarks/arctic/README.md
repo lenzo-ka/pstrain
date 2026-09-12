@@ -48,9 +48,13 @@ The upper confidence bound must be at or below parity. Engine identity includes 
 the native library, Python, PocketSphinx, and the selected decode dictionary.
 Engine drift requires the explicit `--allow-engine-drift` override.
 
-Decode shortfalls are non-blocking and appear in every WER headline as
+Decode shortfalls do not block a comparison and appear in every WER headline as
 `decoded/denominator`; both missing WAVs and decoder failures therefore remain
-visible. Training skips remain gated. The product-default pin has no accepted
+visible. A shortfall may not be pinned, though: a live cell whose `decoded` is
+below its `decode_denominator` is refused, because the cell's absolute WER is
+summed over the decoded rows alone. The retired historical cells keep whatever
+coverage they were measured with. Training skips remain gated. The
+product-default pin has no accepted
 exception manifest: the former a0587 and a0302 exception hooks are disabled,
 and any terminal skip fails the run.
 

@@ -38,7 +38,6 @@ from pstrain.benchmarks.arctic import (
     configuration_provenance,
     engine_identity,
     extract_archive,
-    fetch_archive,
     load_transcripts,
     main,
     make_record,
@@ -56,6 +55,7 @@ from pstrain.benchmarks.arctic import (
     validate_record,
     write_project,
 )
+from pstrain.benchmarks.corpora import fetch_pinned_archive
 from pstrain.lib.config.models import Profile
 from pstrain.lib.config.resolver import resolve_config
 from pstrain.lib.corpus.split import train_test_split
@@ -86,19 +86,55 @@ def test_network_and_benchmark_children_use_safe_launch_shape(
         raise AssertionError("the harness parent must never access the network")
 
     monkeypatch.setattr("pstrain.benchmarks.arctic.subprocess.run", fake_run)
+    monkeypatch.setattr("pstrain.benchmarks.corpora.subprocess.run", fake_run)
     monkeypatch.setattr(
-        "pstrain.benchmarks.arctic.urllib.request.urlopen", reject_in_process_network
+        "pstrain.benchmarks.corpora.urllib.request.urlopen", reject_in_process_network
     )
 
-    destination = fetch_archive(ARCHIVES[0], tmp_path)
+    # The harness fetches through the one hardened downloader in corpora, which
+    # is where the archive is authenticated against its pin.
+    destination = fetch_pinned_archive(ARCHIVES[0].url, ARCHIVES[0].sha256, tmp_path)
     assert destination == tmp_path / Path(ARCHIVES[0].url).name
-    assert calls[0][0][2] == "_fetch-archive"
+    assert calls[0][0][2:] == [
+        "_fetch-archive",
+        ARCHIVES[0].url,
+        ARCHIVES[0].sha256,
+        str(tmp_path.resolve()),
+    ]
     _run_trusted_child(["/absolute/python", "/absolute/child.py"])
     assert len(calls) == 2
     for _command, kwargs in calls:
         assert "cwd" not in kwargs
         assert kwargs["close_fds"] is False
         assert kwargs["check"] is True
+
+
+def test_archive_fetch_reports_what_the_network_helper_said(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A caller sees the helper's own failure, not the status it exited with."""
+    stderr = b"Traceback (most recent call last):\nRuntimeError: HEAD failed: no route\n"
+
+    def failing_run(command: list[str], **kwargs: object) -> None:
+        assert kwargs["capture_output"] is True
+        raise subprocess.CalledProcessError(1, command, stderr=stderr)
+
+    monkeypatch.setattr("pstrain.benchmarks.corpora.subprocess.run", failing_run)
+    with pytest.raises(RuntimeError, match="RuntimeError: HEAD failed: no route"):
+        fetch_pinned_archive(ARCHIVES[0].url, ARCHIVES[0].sha256, tmp_path)
+
+
+def test_archive_fetch_falls_back_to_the_helper_exit_status(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A helper that dies without saying anything still produces a report."""
+
+    def silent_run(command: list[str], **kwargs: object) -> None:
+        raise subprocess.CalledProcessError(-11, command, stderr=b"")
+
+    monkeypatch.setattr("pstrain.benchmarks.corpora.subprocess.run", silent_run)
+    with pytest.raises(RuntimeError, match="helper exited with status -11"):
+        fetch_pinned_archive(ARCHIVES[0].url, ARCHIVES[0].sha256, tmp_path)
 
 
 def test_committed_transcripts_are_normalized_and_complete() -> None:
@@ -1095,6 +1131,55 @@ def test_record_cells_bind_schema_owned_comparability() -> None:
     record["results"]["on"]["slt55"]["comparability"]["paired_decode"]["status"] = "NOT COMPARABLE"
     with pytest.raises(RuntimeError, match="comparability"):
         validate_record(record)
+
+
+def _record_a_short_run_would_have_pinned(
+    mode: str, dataset: str, *, keep_denominator: bool
+) -> dict[str, Any]:
+    """Build the record produced when one utterance of a cell fails to decode.
+
+    ``score_model`` counts only decoded utterances into the aggregates and keeps
+    the reference count as the denominator, so a run that loses one utterance
+    emits exactly this: one fewer row, aggregates and WER over the rows that
+    survived, and a denominator that still names every reference. With
+    ``keep_denominator`` false the same rows are pinned as a complete cell, which
+    is what a genuinely smaller reference set would have produced.
+    """
+    record = json.loads(Path("evidence/arctic-pin/record.json").read_text())
+    cell = record["results"][mode][dataset]
+    rows = sorted(cell["utterance_rows"])[:-1]
+    cell["utterance_rows"] = rows
+    cell["decoded"] = len(rows)
+    if not keep_denominator:
+        cell["decode_denominator"] = len(rows)
+        cell["utterances"] = len(rows)
+    cell["ref_words"] = sum(row[1] for row in rows)
+    cell["errors"] = sum(row[2] for row in rows)
+    cell["wer"] = cell["errors"] / cell["ref_words"] * 100
+    bind_record(record)
+    return record
+
+
+def test_live_cell_may_not_pin_an_absolute_wer_over_an_incomplete_decode() -> None:
+    complete = _record_a_short_run_would_have_pinned("on", "slt55", keep_denominator=False)
+    validate_record(complete)
+
+    short = _record_a_short_run_would_have_pinned("on", "slt55", keep_denominator=True)
+    cell = short["results"]["on"]["slt55"]
+    assert cell["decoded"] < cell["decode_denominator"]
+    pinned = json.loads(Path("evidence/arctic-pin/record.json").read_text())
+    assert cell["wer"] < pinned["results"]["on"]["slt55"]["wer"]
+
+    with pytest.raises(RuntimeError, match="live absolute WER over an incomplete decode"):
+        validate_record(short)
+
+
+def test_retired_cells_keep_their_own_decode_coverage() -> None:
+    retired = _record_a_short_run_would_have_pinned("off", "slt55", keep_denominator=True)
+    cell = retired["results"]["off"]["slt55"]
+    assert cell["decoded"] < cell["decode_denominator"]
+
+    validate_record(retired)
 
 
 def test_headline_reports_decode_shortfall_denominator() -> None:

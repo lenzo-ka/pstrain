@@ -214,7 +214,7 @@ training
 ``training.ci.convergence_ratio``
    :Type: ``float``
    :Default: ``0.001``
-   :Description: Stop a stage once the per-frame log-likelihood improves by no more than this many nats between passes. Despite the name -- kept because SphinxTrain's $CFG_CONVERGENCE_RATIO is the same signed per-frame delta -- this is an absolute difference, not a ratio. At the default, corpora of Arctic's size run all ten passes in every schedule, which is the more accurate outcome as measured; treat max_iterations as the operative control. The sphinxtrain profile carries SphinxTrain's own 0.1
+   :Description: Converge after min_iterations when the finite per-frame log-likelihood increase is between zero and this many nats, inclusive. Negative or nonfinite changes do not indicate convergence. Despite the name -- kept because SphinxTrain's $CFG_CONVERGENCE_RATIO is the same signed per-frame delta -- this is an absolute difference, not a ratio. At the default, corpora of Arctic's size run all ten passes in every schedule, which is the more accurate outcome as measured; treat max_iterations as the operative control. The sphinxtrain profile carries SphinxTrain's own 0.1
 
 ``training.ci.max_iterations``
    :Type: ``int``
@@ -286,10 +286,15 @@ training
    :Default: ``False``
    :Description: Enable SphinxTrain's $CFG_SKIPSTATE topology, adding an arc from each eligible emitting state to the state two positions ahead so a phone can be realized with fewer frames than states. SphinxTrain writes raw 3/1/1 weights and normalizes them on read; pstrain writes the behaviorally equivalent normalized values
 
+``training.split_variance_floor_fraction``
+   :Type: ``float``
+   :Default: ``0.0``
+   :Description: Experimental variance lower bound for split training stages, as a fraction of each matching coordinate in the fixed CI-1g or CD-1g variance reference. Zero disables regularization. The reference never advances with later splits; zero reference coordinates contribute no positive floor. Select a nonzero fraction explicitly after evaluation; no universal nonzero value is assumed
+
 ``training.tied.convergence_ratio``
    :Type: ``float``
    :Default: ``0.001``
-   :Description: Stop a stage once the per-frame log-likelihood improves by no more than this many nats between passes. Despite the name -- kept because SphinxTrain's $CFG_CONVERGENCE_RATIO is the same signed per-frame delta -- this is an absolute difference, not a ratio. At the default, corpora of Arctic's size run all ten passes in every schedule, which is the more accurate outcome as measured; treat max_iterations as the operative control. The sphinxtrain profile carries SphinxTrain's own 0.1
+   :Description: Converge after min_iterations when the finite per-frame log-likelihood increase is between zero and this many nats, inclusive. Negative or nonfinite changes do not indicate convergence. Despite the name -- kept because SphinxTrain's $CFG_CONVERGENCE_RATIO is the same signed per-frame delta -- this is an absolute difference, not a ratio. At the default, corpora of Arctic's size run all ten passes in every schedule, which is the more accurate outcome as measured; treat max_iterations as the operative control. The sphinxtrain profile carries SphinxTrain's own 0.1
 
 ``training.tied.max_iterations``
    :Type: ``int``
@@ -349,7 +354,7 @@ training
 ``training.untied.convergence_ratio``
    :Type: ``float``
    :Default: ``0.001``
-   :Description: Stop a stage once the per-frame log-likelihood improves by no more than this many nats between passes. Despite the name -- kept because SphinxTrain's $CFG_CONVERGENCE_RATIO is the same signed per-frame delta -- this is an absolute difference, not a ratio. At the default, corpora of Arctic's size run all ten passes in every schedule, which is the more accurate outcome as measured; treat max_iterations as the operative control. The sphinxtrain profile carries SphinxTrain's own 0.1
+   :Description: Converge after min_iterations when the finite per-frame log-likelihood increase is between zero and this many nats, inclusive. Negative or nonfinite changes do not indicate convergence. Despite the name -- kept because SphinxTrain's $CFG_CONVERGENCE_RATIO is the same signed per-frame delta -- this is an absolute difference, not a ratio. At the default, corpora of Arctic's size run all ten passes in every schedule, which is the more accurate outcome as measured; treat max_iterations as the operative control. The sphinxtrain profile carries SphinxTrain's own 0.1
 
 ``training.untied.max_iterations``
    :Type: ``int``

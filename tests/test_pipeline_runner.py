@@ -89,7 +89,7 @@ def test_simple_linear_chain_runs_in_order(tmp_path: Path) -> None:
     assert flat.stat().st_mtime <= ci.stat().st_mtime
 
 
-def test_skip_when_up_to_date(tmp_path: Path) -> None:
+def test_skip_when_unchanged(tmp_path: Path) -> None:
     """If outputs are newer than inputs, nothing runs and rc=0."""
     flat = tmp_path / "flat.txt"
     ci = tmp_path / "ci.txt"
@@ -130,7 +130,7 @@ def test_skip_when_up_to_date(tmp_path: Path) -> None:
 
 
 def test_force_reruns_everything(tmp_path: Path) -> None:
-    """--force runs all reachable tasks even if up to date."""
+    """--force runs all reachable tasks even if unchanged."""
     flat = tmp_path / "flat.txt"
     ci = tmp_path / "ci.txt"
     flat.write_text("old")
@@ -200,7 +200,7 @@ def test_stale_input_triggers_rerun(tmp_path: Path) -> None:
 
     rc = pl.run("ci-1g")
     assert rc == 0
-    assert ran == ["ci-1g"]  # flat is up to date; only ci-1g reruns
+    assert ran == ["ci-1g"]  # flat is unchanged; only ci-1g reruns
 
 
 def test_equal_mtime_input_triggers_rerun(tmp_path: Path) -> None:
@@ -1390,5 +1390,438 @@ def test_rollup_schema_and_summary_are_value_tolerant() -> None:
     assert document["stages"] == [
         {"stage": "features", "wall": 2.0, "cpu": 1.5, "cpu_wall_ratio": 0.75}
     ]
-    assert "features" in pipeline_timings.format_summary(document)
-    assert "0.75x" in pipeline_timings.format_summary(document)
+    summary = pipeline_timings.format_summary(document)
+    rows = summary.splitlines()
+    assert rows[0] == "stage\twall_s\tcpu_s\tcpu_wall_ratio"
+    assert rows[1] == "features\t2.00\t1.50\t0.75"
+    # Every row has the same column count, so the block pastes as a TSV, and
+    # the values are bare numbers rather than "2.00s" / "0.75x".
+    assert {row.count("\t") for row in rows} == {3}
+
+
+def _fan_out_entries(
+    tmp_path: Path,
+    n: int,
+    *,
+    member_reason: str = "stale",
+) -> list[runner._PlanEntry]:
+    """One ungrouped task followed by an n-member fan-out, as features runs.
+
+    ``member_reason`` defaults to the one reason that really is staleness, so
+    a group built by this helper reads as stale unless a test says otherwise.
+    """
+    entries = [
+        runner._PlanEntry(
+            Task(
+                "provenance:features",
+                functools.partial(_touch, tmp_path / "provenance", "p"),
+                outputs=(tmp_path / "provenance",),
+            ),
+            stale=True,
+            reason="test",
+        )
+    ]
+    for i in range(n):
+        output = tmp_path / f"feat-{i}"
+        entries.append(
+            runner._PlanEntry(
+                Task(
+                    f"extract:utt_{i}",
+                    functools.partial(_touch, output, str(i)),
+                    outputs=(output,),
+                    parallel_group="extract",
+                ),
+                stale=True,
+                reason=member_reason,
+            )
+        )
+    return entries
+
+
+def test_serial_fan_out_reports_as_a_group_not_once_per_member(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Progress is one tab-separated row per stage, not two lines per utterance.
+
+    Feature extraction creates one task per utterance, and a notebook runs
+    ``jobs=1`` to avoid the spawn-pool hang, so the serial path is the one a
+    reader actually sees. Before this collapsed, 150 utterances printed 300
+    lines and buried every other message in the run.
+    """
+    result = runner._execute(_fan_out_entries(tmp_path, 12), jobs=1)
+    output = capsys.readouterr().out
+    lines = output.splitlines()
+
+    assert result.rc == 0
+    assert lines[0] == "stage\ttasks\twall\tstatus"
+    # The whole 13-task run is a header and two rows.
+    assert len(lines) == 3
+    assert any(line.startswith("extract\t12\t") for line in lines)
+    assert any(line.startswith("provenance:features\t1\t") for line in lines)
+    assert "extract:utt_0" not in output
+    assert "extract:utt_11" not in output
+    # Every row carries the same column count, so the block pastes as a TSV.
+    assert {line.count("\t") for line in lines} == {3}
+
+
+def test_verbose_restores_the_per_task_rows(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    result = runner._execute(_fan_out_entries(tmp_path, 3), jobs=1, verbose=True)
+    output = capsys.readouterr().out
+
+    assert result.rc == 0
+    for i in range(3):
+        assert f"extract:utt_{i}\t1\t" in output
+    assert "extract\t3\t" not in output
+
+
+def test_dry_run_plan_summarizes_a_fan_out_instead_of_listing_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A plan is meant to show the build's shape; a per-utterance listing hides it.
+
+    A real cd-1g plan for this corpus is 1,263 tasks, of which 1,132 are one
+    feature-extraction task per utterance. Listed one per line it runs past
+    1,200 lines and the dozen tasks that describe the actual training chain
+    are lost in it.
+    """
+    plan = _fan_out_entries(tmp_path, 40)
+    runner._print_plan(plan, target="cd-1g")
+    output = capsys.readouterr().out
+    lines = output.splitlines()
+
+    assert lines[2] == "index\tstage\ttasks\tstatus\tdescription"
+    assert "2-41\textract\t40\tstale\t" in output
+    assert "1\tprovenance:features\t1\ttest\t" in output
+    assert "extract:utt_0\t" not in output
+    # Two comment lines, a header, and one row per stage: no bullet markers
+    # and no continuation line, so every row carries the same column count.
+    assert len(lines) == 5
+    assert {line.count("\t") for line in lines[2:]} == {4}
+
+
+def test_dry_run_plan_lists_every_member_when_verbose(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _fan_out_entries(tmp_path, 40)
+    runner._print_plan(plan, target="cd-1g", verbose=True)
+    output = capsys.readouterr().out
+
+    for i in (0, 17, 39):
+        assert f"extract:utt_{i}\t1\tstale\t" in output
+    assert "\textract\t40\t" not in output
+
+
+def test_dry_run_plan_says_a_group_nothing_has_built_is_unbuilt(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A fan-out nothing has built yet must not be reported as stale.
+
+    "stale" means outputs exist and have fallen behind. In a plan for a fresh
+    project every member is simply unbuilt, and the group has to say the same
+    thing a single unbuilt stage says rather than invent a fault.
+    """
+    plan = _fan_out_entries(tmp_path, 4, member_reason="unbuilt")
+    runner._print_plan(plan, target="cd-1g")
+    output = capsys.readouterr().out
+
+    assert "2-5\textract\t4\tunbuilt\t" in output
+    assert "\tstale\t" not in output
+
+
+def test_dry_run_plan_keeps_a_group_reason_that_is_not_staleness(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Only outputs that fell behind are stale; the other reasons keep their words.
+
+    An uncollapsed row prints the member's reason verbatim, so a collapsed one
+    must not flatten "forced", "incomplete" or an upstream dependency into
+    "stale". Each names a different situation, and only the last of these is
+    staleness.
+    """
+    for reason in (
+        "forced",
+        "incomplete",
+        "unconditional",
+        "upstream:flat",
+    ):
+        plan = _fan_out_entries(tmp_path, 4, member_reason=reason)
+        runner._print_plan(plan, target="cd-1g")
+        output = capsys.readouterr().out
+
+        assert f"2-5\textract\t4\t{reason}\t" in output
+        assert "\tstale\t" not in output
+
+
+def test_group_status_lists_unknown_reasons_after_known_ones_and_sorted(
+    tmp_path: Path,
+) -> None:
+    """A mixed row is the same every time it is printed.
+
+    Known states come in a fixed order; anything else follows them sorted, so
+    two runs over the same plan can never disagree about the row's text.
+    """
+    plan = _fan_out_entries(tmp_path, 4)
+    plan[1].reason = "upstream:split"
+    plan[2].reason = "upstream:flat"
+    plan[3].reason = "unbuilt"
+
+    assert runner._group_status(plan[1:]) == (
+        "mixed: 1 unbuilt, 1 stale, 1 upstream:flat, 1 upstream:split"
+    )
+
+
+def test_group_status_rejects_an_empty_group() -> None:
+    """The helper summarizes members, so it has none to summarize at zero."""
+    with pytest.raises(ValueError, match="at least one member"):
+        runner._group_status([])
+
+
+def test_dry_run_plan_summarizes_a_fan_out_the_planner_read_off_disk(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The collapsed row is built from states the planner really found on disk.
+
+    The other group tests hand ``_print_plan`` a reason they wrote themselves,
+    so none of them notices if ``_staleness`` starts wording one differently
+    from the strings ``_group_status`` matches on. This one builds four real
+    filesystem states and lets ``Pipeline.plan`` derive every reason.
+    """
+    pl = Pipeline()
+    tasks = []
+    for i in range(4):
+        (tmp_path / f"src-{i}").write_text(str(i))
+        task = Task(
+            f"extract:utt_{i}",
+            functools.partial(_touch, tmp_path / f"out-{i}", str(i)),
+            inputs=(tmp_path / f"src-{i}",),
+            outputs=(tmp_path / f"out-{i}",),
+            parallel_group="extract",
+        )
+        tasks.append(task)
+        pl.add(task)
+    pl.add(
+        Task(
+            "collect",
+            functools.partial(_touch, tmp_path / "collected", "c"),
+            inputs=tuple(task.outputs[0] for task in tasks),
+            outputs=(tmp_path / "collected",),
+        )
+    )
+
+    older, newer = 1_000_000_000, 2_000_000_000
+    # utt_0 was never built. utt_1 finished, but its input has moved since.
+    # utt_2 is genuinely current. utt_3 wrote its output and then died before
+    # it could record that it had finished.
+    states = [
+        (None, older, False),
+        (older, newer, True),
+        (newer, older, True),
+        (newer, older, False),
+    ]
+    for i, (output_time, source_time, complete) in enumerate(states):
+        os.utime(tmp_path / f"src-{i}", (source_time, source_time))
+        if output_time is None:
+            continue
+        (tmp_path / f"out-{i}").write_text(str(i))
+        os.utime(tmp_path / f"out-{i}", (output_time, output_time))
+        if complete:
+            _mark_complete(tasks[i])
+
+    plan = pl.plan(tmp_path / "collected")
+    members = [entry for entry in plan if entry.task.parallel_group == "extract"]
+
+    # The reasons are the planner's own, not this test's.
+    assert [entry.reason for entry in members] == [
+        "unbuilt",
+        "stale",
+        "unchanged",
+        "incomplete",
+    ]
+    runner._print_plan(plan, target="collected")
+    output = capsys.readouterr().out
+    assert "1-4\textract\t4\tmixed: 1 unbuilt, 1 incomplete, 1 stale, 1 unchanged\t" in output
+
+    forced = [
+        entry
+        for entry in pl.plan(tmp_path / "collected", force=True)
+        if entry.task.parallel_group == "extract"
+    ]
+    assert runner._group_status(forced) == "forced"
+
+
+def test_dry_run_plan_says_a_group_whose_members_disagree_is_mixed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A partly-cached fan-out says it is mixed and carries the counts."""
+    plan = _fan_out_entries(tmp_path, 4)
+    plan[1].stale = False
+    plan[2].stale = False
+    runner._print_plan(plan, target="cd-1g")
+    output = capsys.readouterr().out
+
+    assert "2-5\textract\t4\tmixed: 2 stale, 2 unchanged\t" in output
+
+
+def test_dry_run_plan_separates_unbuilt_members_from_stale_ones(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A group holding both states counts them apart, not all as stale."""
+    plan = _fan_out_entries(tmp_path, 4, member_reason="unbuilt")
+    plan[4].reason = "stale"
+    runner._print_plan(plan, target="cd-1g")
+    output = capsys.readouterr().out
+
+    assert "2-5\textract\t4\tmixed: 3 unbuilt, 1 stale\t" in output
+
+
+def test_dry_run_plan_reports_a_fully_cached_group_as_unchanged(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A group with nothing to do says so, rather than reporting '0 stale'."""
+    plan = _fan_out_entries(tmp_path, 4)
+    for entry in plan[1:]:
+        entry.stale = False
+    runner._print_plan(plan, target="cd-1g")
+    output = capsys.readouterr().out
+
+    assert "2-5\textract\t4\tunchanged\t" in output
+    assert "0 of 4" not in output
+
+
+def test_dry_run_plan_keeps_a_description_on_one_row(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A tab or a newline inside a description must not invent a column."""
+    plan = _fan_out_entries(tmp_path, 2)
+    plan[0].task = Task(
+        "provenance:features",
+        plan[0].task.fn,
+        outputs=plan[0].task.outputs,
+        description="Record\teffective\nfeatures configuration",
+    )
+    runner._print_plan(plan, target="cd-1g")
+    lines = capsys.readouterr().out.splitlines()
+
+    assert "1\tprovenance:features\t1\ttest\tRecord effective features configuration" in lines
+    assert {line.count("\t") for line in lines[2:]} == {4}
+
+
+def test_a_failure_inside_a_collapsed_group_still_names_the_task(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Collapsing progress must never collapse a diagnostic."""
+
+    def boom() -> None:
+        raise RuntimeError("could not build a tree for OY")
+
+    entries = _fan_out_entries(tmp_path, 2)
+    entries.append(
+        runner._PlanEntry(
+            Task("extract:bad", boom, parallel_group="extract"),
+            stale=True,
+            reason="test",
+        )
+    )
+
+    result = runner._execute(entries, jobs=1)
+    output = capsys.readouterr().out
+
+    assert result.rc == 1
+    assert result.status == "failed"
+    # The diagnostic names the task, and is not squeezed into a TSV column.
+    assert "!! extract:bad failed: could not build a tree for OY" in output
+    # The failing task also gets its own row, marked as such.
+    assert any(
+        line.startswith("extract:bad\t1\t") and line.endswith("\tfailed")
+        for line in output.splitlines()
+    )
+
+
+def test_missing_required_external_input_fails_before_any_task(tmp_path: Path) -> None:
+    source = tmp_path / "required.dict"
+    upstream = tmp_path / "upstream"
+    output = tmp_path / "model"
+    pl = Pipeline()
+    pl.add(_make_touch_task("upstream", upstream))
+    task = _make_touch_task("model", output, inputs=(upstream, source))
+    pl.add(task)
+    pl.register_target("model", output)
+    # Even cached outputs and force cannot hide a deleted required source.
+    output.touch()
+    _mark_complete(task)
+    for force in (False, True):
+        with pytest.raises(FileNotFoundError, match="requires external input.*required.dict"):
+            pl.run("model", force=force)
+    assert not upstream.exists()
+
+
+def test_required_input_disappearing_after_plan_is_rejected(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.touch()
+    output = tmp_path / "out"
+    task = _make_touch_task("work", output, inputs=(source,))
+    pl = Pipeline()
+    pl.add(task)
+    pl.register_target("work", output)
+    entries = pl.plan("work")
+    source.unlink()
+    assert runner._execute(entries, jobs=1).rc == 1
+    assert not output.exists()
+
+
+def test_optional_input_add_edit_remove_invalidates_and_propagates(tmp_path: Path) -> None:
+    optional = tmp_path / "filler.dict"
+    output = tmp_path / "model"
+    package = tmp_path / "package"
+    pl = Pipeline()
+    pl.add(
+        Task(
+            "model",
+            functools.partial(_touch, output),
+            outputs=(output,),
+            optional_inputs=(optional,),
+        )
+    )
+    pl.add(_make_touch_task("package", package, inputs=(output,)))
+    pl.register_target("package", package)
+    assert pl.run("package") == 0
+    assert not any(entry.stale for entry in pl.plan("package"))
+    for content in ("<sil> SIL", "<noise> NOISE", None):
+        if content is None:
+            optional.unlink()
+        else:
+            optional.write_text(content)
+            # Exercise the ordinary mtime contract deterministically.
+            stamp = output.stat().st_mtime_ns + 1
+            os.utime(optional, ns=(stamp, stamp))
+        changed_plan = pl.plan("package")
+        assert all(entry.stale for entry in changed_plan)
+        assert all(not any(char.isspace() for char in entry.reason) for entry in changed_plan)
+        assert pl.run("package") == 0
+        assert not any(entry.stale for entry in pl.plan("package"))
+
+
+def test_preflight_rejects_before_dependencies_execute(tmp_path: Path) -> None:
+    dependency = tmp_path / "dependency"
+    output = tmp_path / "output"
+
+    def reject() -> None:
+        raise ValueError("unsupported configuration")
+
+    pl = Pipeline()
+    pl.add(_make_touch_task("dependency", dependency))
+    pl.add(
+        Task(
+            "output",
+            functools.partial(_touch, output),
+            inputs=(dependency,),
+            outputs=(output,),
+            preflight=reject,
+        )
+    )
+    pl.register_target("output", output)
+    with pytest.raises(ValueError, match="unsupported configuration"):
+        pl.run("output")
+    assert not dependency.exists()

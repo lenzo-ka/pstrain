@@ -45,6 +45,7 @@
  *********************************************************************/
 
 #include <sphinxbase/matrix.h>
+#include <sphinxbase/ckd_alloc.h>
 #include <sphinxbase/bio.h>
 
 #include <s3/s3tmat_io.h>
@@ -98,6 +99,15 @@ s3tmat_read(const char *fn,
 	s3close(fp);
 
 	return S3_ERROR;
+    }
+
+    if (*out_n_state < 2 || tmp != *out_n_state - 1 || *out_n_tmat == 0) {
+        E_ERROR("Invalid transition dimensions in %s: %ux%ux%u\n",
+                fn, *out_n_tmat, tmp, *out_n_state);
+        ckd_free_3d((void ***)*out_tmat);
+        *out_tmat = NULL;
+        s3close(fp);
+        return S3_ERROR;
     }
 
     if (do_chk) {

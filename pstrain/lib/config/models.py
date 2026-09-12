@@ -70,8 +70,9 @@ class TrainingScheduleConfig(StrictModel):
         Field(
             gt=0,
             description=(
-                "Stop a stage once the per-frame log-likelihood improves by no more than "
-                "this many nats between passes. Despite the name -- kept because SphinxTrain's "
+                "Converge after min_iterations when the finite per-frame log-likelihood "
+                "increase is between zero and this many nats, inclusive. Negative or "
+                "nonfinite changes do not indicate convergence. Despite the name -- kept because SphinxTrain's "
                 "$CFG_CONVERGENCE_RATIO is the same signed per-frame delta -- this is an "
                 "absolute difference, not a ratio. At the default, corpora of Arctic's size "
                 "run all ten passes in every schedule, which is the more accurate outcome as "
@@ -110,6 +111,22 @@ class TrainingConfig(StrictModel):
     ci: TrainingScheduleConfig = Field(default_factory=TrainingScheduleConfig)
     tied: TrainingScheduleConfig = Field(default_factory=TrainingScheduleConfig)
     untied: TrainingScheduleConfig = Field(default_factory=TrainingScheduleConfig)
+    split_variance_floor_fraction: Annotated[
+        float,
+        Field(
+            ge=0,
+            le=1,
+            allow_inf_nan=False,
+            strict=True,
+            description=(
+                "Experimental variance lower bound for split training stages, as a fraction "
+                "of each matching coordinate in the fixed CI-1g or CD-1g variance reference. "
+                "Zero disables regularization. The reference never advances with later splits; "
+                "zero reference coordinates contribute no positive floor. Select a nonzero "
+                "fraction explicitly after evaluation; no universal nonzero value is assumed"
+            ),
+        ),
+    ] = 0.0
     max_skip_fraction: Annotated[
         float, Field(ge=0, le=1, description="Maximum skipped-update fraction")
     ] = 0.05
@@ -226,7 +243,7 @@ class TrainingConfig(StrictModel):
         ),
     ] = "transcript-reachable"
     exclusion_schedule: Annotated[
-        dict[str, dict[int | str, list[str]]],
+        dict[str, dict[Annotated[int, Field(strict=True)] | str, list[str]]],
         Field(description="Experimental stage/pass utterance exclusions"),
     ] = Field(default_factory=dict)
 
@@ -265,15 +282,21 @@ class TrainingConfig(StrictModel):
             "cd-16g",
             "cd-32g",
         }
+        normalized: dict[str, dict[int | str, list[str]]] = {}
         for stage, passes in value.items():
             if stage not in stages:
                 raise ValueError(f"unknown BW stage {stage!r}")
+            normalized[stage] = {}
             for selector, utterances in passes.items():
                 if selector != "*" and (isinstance(selector, bool) or int(selector) < 1):
                     raise ValueError("pass selectors must be positive integers or '*'")
                 if not all(utterances):
                     raise ValueError("utterance IDs must be non-empty")
-        return value
+                key = selector if selector == "*" else int(selector)
+                if key in normalized[stage]:
+                    raise ValueError(f"duplicate pass selector {selector!r} for {stage!r}")
+                normalized[stage][key] = utterances
+        return normalized
 
     @model_validator(mode="after")
     def validate_training(self) -> TrainingConfig:

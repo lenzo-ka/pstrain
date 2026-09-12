@@ -22,7 +22,7 @@ from pstrain.lib.steps import (
     ci_hmm_step,
     features_step,
 )
-from pstrain.lib.steps.lm import run_build_lm
+from pstrain.lib.steps.lm import run_build_lm as _run_build_lm
 
 # Re-export base classes
 __all__ = [
@@ -46,6 +46,22 @@ __all__ = [
     "run_step_cd_hmm_untied",
     "run_build_lm",
 ]
+
+
+def run_build_lm(
+    train_transcripts: Path,
+    output_path: Path,
+    max_order: int = 3,
+    smoothing: str = "auto",
+) -> Path:
+    """Build a language model through a concrete public-API call frame."""
+    return _run_build_lm(train_transcripts, output_path, max_order, smoothing)
+
+
+# These forwarders exist to put an API call frame on the stack. That is an
+# implementation requirement and must not cost the published reference the
+# documentation each re-exported name carried before.
+run_build_lm.__doc__ = _run_build_lm.__doc__ or run_build_lm.__doc__
 
 
 # =============================================================================

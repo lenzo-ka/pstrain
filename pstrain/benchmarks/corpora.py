@@ -7,6 +7,8 @@ import fnmatch
 import hashlib
 import json
 import shutil
+import subprocess
+import sys
 import tarfile
 import urllib.error
 import urllib.request
@@ -89,31 +91,107 @@ def verify_archive(path: Path, archive: CorpusArchive) -> None:
             )
 
 
+def fetch_pinned_archive(url: str, digest: str, cache: Path) -> Path:
+    """Fetch an archive without performing network operations in this process.
+
+    This is the only place in pstrain's benchmark code that downloads anything,
+    and it does so in a short-lived child. On macOS the first connection a
+    process opens installs atfork handlers, after which that process can no
+    longer spawn the native worker: the worker dies of SIGSEGV during startup,
+    long after and far away from the fetch that poisoned it. Any new caller that
+    needs a file from the network must come through here rather than open a
+    connection of its own.
+
+    The archive is authenticated against ``digest`` in the child, and a transfer
+    that fails or does not match the pin leaves the cache untouched.
+    """
+    cache.mkdir(parents=True, exist_ok=True)
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "_fetch-archive",
+        url,
+        digest,
+        str(cache.resolve()),
+    ]
+    # close_fds=False with no cwd and no preexec keeps this launch
+    # posix_spawn-eligible, which is what avoids the atfork crash in the
+    # spawning process. Capturing the streams keeps it so -- the pipes are file
+    # descriptors above 2 -- and lets the caller be told why a fetch failed
+    # rather than which status a child exited with.
+    try:
+        subprocess.run(command, check=True, close_fds=False, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(f"could not fetch {url}: {_child_failure(exc)}") from exc
+    return cache / Path(url).name
+
+
+def _child_failure(exc: subprocess.CalledProcessError) -> str:
+    """Report what the fetch helper said rather than the status it exited with."""
+    stream = exc.stderr if exc.stderr else exc.stdout
+    if isinstance(stream, bytes):
+        stream = stream.decode("utf-8", errors="replace")
+    lines = [line.strip() for line in (stream or "").splitlines() if line.strip()]
+    return lines[-1] if lines else f"helper exited with status {exc.returncode}"
+
+
+def _fetch_archive_in_helper(url: str, digest: str, cache: Path) -> Path:
+    """HEAD-check, download, and authenticate an archive in the network helper."""
+    cache.mkdir(parents=True, exist_ok=True)
+    request = urllib.request.Request(url, method="HEAD")
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            if response.status != 200:
+                raise RuntimeError(f"HEAD {url}: HTTP {response.status}")
+    except (OSError, urllib.error.URLError) as exc:
+        raise RuntimeError(f"HEAD failed for {url}: {exc}") from exc
+    destination = cache / Path(url).name
+    if not destination.exists():
+        temporary = destination.with_suffix(destination.suffix + ".part")
+        temporary.unlink(missing_ok=True)
+        try:
+            with (
+                urllib.request.urlopen(url, timeout=60) as response,
+                temporary.open("xb") as output,
+            ):
+                shutil.copyfileobj(response, output)
+            actual = sha256(temporary)
+            if actual != digest:
+                raise RuntimeError(f"SHA-256 mismatch for {url}: expected {digest}, got {actual}")
+            temporary.replace(destination)
+        except (OSError, RuntimeError, urllib.error.URLError):
+            temporary.unlink(missing_ok=True)
+            raise
+    actual = sha256(destination)
+    if actual != digest:
+        raise RuntimeError(f"SHA-256 mismatch for {destination}: expected {digest}, got {actual}")
+    return destination
+
+
 def fetch_archive(archive: CorpusArchive, cache: Path) -> Path:
     """Fetch atomically, or fully re-verify an existing pinned archive."""
-    cache.mkdir(parents=True, exist_ok=True)
     destination = cache / Path(archive.url).name
     if destination.exists():
         verify_archive(destination, archive)
         return destination
-    temporary = destination.with_suffix(destination.suffix + ".part")
-    temporary.unlink(missing_ok=True)
+    fetch_pinned_archive(archive.url, archive.sha256, cache)
     try:
-        with (
-            urllib.request.urlopen(archive.url, timeout=60) as response,
-            temporary.open("xb") as output,
-        ):
-            shutil.copyfileobj(response, output)
-        verify_archive(temporary, archive)
-        temporary.replace(destination)
-    except (OSError, RuntimeError, urllib.error.URLError, tarfile.TarError):
-        temporary.unlink(missing_ok=True)
+        verify_archive(destination, archive)
+    except (OSError, RuntimeError, tarfile.TarError):
+        destination.unlink(missing_ok=True)
         raise
     return destination
 
 
 def main(argv: list[str] | None = None) -> None:
     """Fetch every archive for one manifest corpus."""
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv[:1] == ["_fetch-archive"]:
+        if len(argv) != 4:
+            raise SystemExit("_fetch-archive requires a URL, a SHA-256, and a cache path")
+        _fetch_archive_in_helper(argv[1], argv[2], Path(argv[3]))
+        return
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("corpus")
     parser.add_argument("cache", type=Path)

@@ -650,3 +650,68 @@ def test_native_failed_pass_then_retry_matches_clean_wide_beam_model(
         retried_values = reader(str(retried / filename))[0]
         clean_values = reader(str(clean / filename))[0]
         np.testing.assert_array_equal(retried_values, clean_values, err_msg=filename)
+
+
+@requires_c_library
+@pytest.mark.parametrize("failed_method", ["save_density_counts", "normalize", "save"])
+def test_training_stops_on_native_false_return_before_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failed_method: str
+) -> None:
+    import json
+
+    from pstrain.lib.bw import BWConfig, BWTrainer
+    from pstrain.lib.pipeline import PipelineContext
+    from pstrain.lib.pipeline.tasks import build_pipeline
+    from pstrain.lib.setup import setup_project
+    from pstrain.lib.steps.train import run_bw_training
+
+    project = tmp_path / "project"
+    setup_project(
+        project,
+        transcription_path=FIXTURE / "transcription.txt",
+        audio_path=FIXTURE / "wav",
+        dictionary_path=FIXTURE / "dictionary.dict",
+        phoneset_path=FIXTURE / "phoneset.txt",
+        filler_dict_path=FIXTURE / "filler.dict",
+    )
+    context = PipelineContext.from_config(project)
+    assert build_pipeline(context).run("flat", jobs=1) == 0
+    fileids = context.etc_dir / "failure.fileids"
+    transcription = context.etc_dir / "failure.transcription"
+    fileids.write_text("arctic_a0001\n")
+    transcription.write_text("arctic_a0001 author of the danger trail philip steels etc\n")
+    failures: list[str] = []
+
+    def fail_native_status(*_args: object, **_kwargs: object) -> bool:
+        failures.append(failed_method)
+        return False
+
+    # All extraction, initialization, accumulation and statistics use the real
+    # native machinery; only the selected failure return is injected.
+    monkeypatch.setattr(BWTrainer, failed_method, fail_native_status)
+    output = tmp_path / "failed-model"
+    expected = {
+        "save_density_counts": "density count save failed",
+        "normalize": "normalization failed",
+        "save": "model save failed",
+    }[failed_method]
+    with pytest.raises(RuntimeError, match=f"Iteration 1: BW {expected}"):
+        run_bw_training(
+            model_dir=context.model_dir("flat"),
+            output_dir=output,
+            features_dir=context.features_dir,
+            train_fileids=fileids,
+            transcription=transcription,
+            dictionary=context.shared_dir / "dictionary.dict",
+            filler_dict=context.filler_dict,
+            first_pass_2passvar=False,
+            n_iter=1,
+            config=BWConfig(pass2var=False, unobserved_gaussian_policy="zero"),
+            checkpoint_iterations=True,
+        )
+    assert failures == [failed_method]
+    assert not (output / "iterations" / "01").exists()
+    row = json.loads((output / "bw_telemetry.json").read_text())["passes"][-1]
+    assert row["stop_decision"] == "failed"
+    assert expected in row["error"]
+    assert row["total_frames"] > 0

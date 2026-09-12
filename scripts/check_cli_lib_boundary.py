@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""Enforce the closed boundary between pstrain.cli and pstrain.lib.
+"""Provide a static early warning for the pstrain.cli-to-pstrain.lib boundary.
 
 No direct imports are permitted; the empty allowlist makes this boundary
 zero-tolerance.
 
-The scanner fully covers ordinary ``import`` and ``from ... import`` statements
-that target ``pstrain.lib``, including relative imports. Dynamic-import
-detection is defense-in-depth for common ``importlib`` spellings: it is
-best-effort over statically resolvable importlib bindings with string-literal
+The scanner covers ordinary ``import`` and ``from ... import`` statements that
+target ``pstrain.lib``, including relative imports, plus ``pstrain.lib``
+attribute access through a directly imported ``pstrain`` alias. Dynamic-import
+detection is defense-in-depth for common ``importlib`` spellings and literal
 targets. Reflective access (for example, ``getattr(importlib,
 "import_module")``), data flow through assignments or function returns (for
 example, ``f = importlib; f.import_module(...)``), and non-literal or computed
-import targets are intentionally outside this static analysis's scope. Those
-forms rely on code review rather than a gate failure.
+import targets are outside this static analysis's scope. The runtime guard
+rejects supported name-based import requests with CLI provenance when those
+requests execute; it does not make every dynamic or transitive form observable.
 """
 
 from __future__ import annotations
@@ -31,6 +32,8 @@ def _lib_module(module: str | None) -> bool:
 
 
 def _from_import_edges(module: str, names: list[ast.alias]) -> set[str]:
+    if module == "pstrain":
+        return {"pstrain.lib" for alias in names if alias.name == "lib"}
     if module == "pstrain.lib":
         return {f"{module}.{alias.name}" for alias in names}
     return {module} if _lib_module(module) else set()
@@ -84,10 +87,37 @@ def _dynamic_import_bindings(tree: ast.AST) -> tuple[set[str], set[str], bool]:
     return module_names, function_names, import_builtin_rebound
 
 
+def _pstrain_module_bindings(tree: ast.AST) -> set[str]:
+    """Return names bound directly to the top-level pstrain package."""
+    bindings: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Import):
+            continue
+        for alias in node.names:
+            if alias.name == "pstrain":
+                bindings.add(alias.asname or "pstrain")
+            elif alias.asname is None and alias.name.startswith("pstrain."):
+                bindings.add("pstrain")
+    return bindings
+
+
+def _attribute_parts(node: ast.Attribute) -> tuple[str, ...] | None:
+    parts = [node.attr]
+    value = node.value
+    while isinstance(value, ast.Attribute):
+        parts.append(value.attr)
+        value = value.value
+    if not isinstance(value, ast.Name):
+        return None
+    parts.append(value.id)
+    return tuple(reversed(parts))
+
+
 def discover_edges(source: str, package: str, filename: str = "<unknown>") -> set[str]:
     """Extract unique ``pstrain.lib`` module edges from one Python source string."""
     tree = ast.parse(source, filename=filename)
     module_names, function_names, import_builtin_rebound = _dynamic_import_bindings(tree)
+    pstrain_bindings = _pstrain_module_bindings(tree)
     imports: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
@@ -97,10 +127,16 @@ def discover_edges(source: str, package: str, filename: str = "<unknown>") -> se
                     candidate = f"{module}.{alias.name}" if module else alias.name
                     if _lib_module(candidate):
                         imports.add(candidate)
-            elif _lib_module(module):
+            elif module == "pstrain" or _lib_module(module):
                 imports.update(_from_import_edges(module, node.names))
         elif isinstance(node, ast.Import):
             imports.update(alias.name for alias in node.names if _lib_module(alias.name))
+        elif isinstance(node, ast.Attribute):
+            parts = _attribute_parts(node)
+            if parts is not None and len(parts) >= 2:
+                root, child = parts[:2]
+                if root in pstrain_bindings and child == "lib":
+                    imports.add("pstrain.lib")
         elif isinstance(node, ast.Call) and node.args:
             callee = node.func
             is_import = isinstance(callee, ast.Name) and (
@@ -157,7 +193,7 @@ def main() -> int:
     for entry in new:
         path, module = entry.split("::", 1)
         print(
-            f"NEW: {path} imports {module} directly; route it through pstrain.api "
+            f"NEW: {path} accesses {module} directly; route it through pstrain.api "
             "or, if unavoidable for now, add it to the allowlist with justification",
             file=sys.stderr,
         )

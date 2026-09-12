@@ -523,6 +523,7 @@ def test_training_fingerprint_payload_composition_is_pinned(empty_project: Path)
             "training.question_quests_per_state",
             "training.retry_beam_factor",
             "training.skip_state",
+            "training.split_variance_floor_fraction",
             "training.tied.convergence_ratio",
             "training.tied.max_iterations",
             "training.tied.min_iterations",
@@ -852,7 +853,7 @@ def test_editing_persistent_split_revalidates_and_changes_membership(tmp_path: P
     rerun = build_pipeline(PipelineContext.from_config(project))
     plan = rerun.plan("split")
     assert plan[-1].stale
-    assert plan[-1].reason == "missing completion marker"
+    assert plan[-1].reason == "incomplete"
     assert rerun.run("split") == 0
 
     assert {name: (etc / name).read_bytes() for name in before} == before
@@ -870,7 +871,7 @@ def test_editing_persistent_split_revalidates_and_changes_membership(tmp_path: P
     edited = build_pipeline(PipelineContext.from_config(project))
     edited_plan = edited.plan("split")
     assert edited_plan[-1].stale
-    assert edited_plan[-1].reason == "inputs not older than outputs"
+    assert edited_plan[-1].reason == "stale"
     assert edited.run("split") == 0
     assert (etc / "train.fileids").read_text().splitlines() == reordered_train
 
@@ -1340,3 +1341,70 @@ def test_configured_untied_schedule_and_variance_reach_training_call(
     assert captured["min_iterations"] == 2
     assert captured["convergence_ratio"] == 0.02
     assert captured["first_pass_2passvar"] is True
+
+
+def test_filler_consumers_track_optional_dictionary_even_when_absent(empty_project: Path) -> None:
+    ctx = PipelineContext.from_config(empty_project)
+    tasks = build_pipeline(ctx).tasks()
+    consumers = {
+        "ci-1g",
+        "ci-2g",
+        "ci-4g",
+        "ci-8g",
+        "cd-untied-init",
+        "cd-untied",
+        "alltriphones-mdef",
+        "cd-1g",
+        "cd-2g",
+        "cd-4g",
+        "cd-8g",
+        "cd-16g",
+        "cd-32g",
+        "package-ci-8g",
+        "package-cd-8g",
+        "package-cd-32g",
+        "test-ci-8g",
+        "test-cd-8g",
+    }
+    assert ctx.filler_dict is None
+    for name in consumers:
+        assert ctx.filler_dict_path in tasks[name].optional_inputs, name
+
+
+@pytest.mark.parametrize("feature_changes", [{"ncep": 26}, {"feat_type": "1s_c"}])
+def test_training_rejects_unsupported_features_before_extraction(
+    empty_project: Path, feature_changes: dict[str, object]
+) -> None:
+    ctx = PipelineContext.from_config(empty_project)
+    ctx = replace(ctx, feat=replace(ctx.feat, **feature_changes))
+    pipeline = build_pipeline(ctx)
+    # Feature-only planning remains valid for the configurable extractor.
+    assert pipeline.plan("features")
+    with pytest.raises(ValueError, match="BW training requires features.ncep=13"):
+        pipeline.plan("ci-1g")
+    with pytest.raises(ValueError, match="BW training requires features.ncep=13"):
+        pipeline.run("ci-1g")
+    assert not ctx.features_dir.exists()
+    assert not ctx.model_dir("flat").exists()
+
+
+@pytest.mark.parametrize(
+    "stage", ["ci-2g", "ci-4g", "ci-8g", "cd-2g", "cd-4g", "cd-8g", "cd-16g", "cd-32g"]
+)
+def test_split_variance_floor_keeps_family_one_gaussian_anchor(
+    empty_project: Path, stage: str
+) -> None:
+    base = PipelineContext.from_config(empty_project)
+    enabled = PipelineContext.from_config(
+        empty_project,
+        cli_overrides={"training": {"split_variance_floor_fraction": 0.2}},
+    )
+    assert enabled.train.split_variance_floor_fraction == 0.2
+    anchor = enabled.model_dir(stage.split("-", 1)[0] + "-1g") / "variances"
+    graph = build_pipeline(enabled)
+    task = graph.tasks()[stage]
+    assert anchor in task.inputs
+    assert any(anchor in item.task.outputs for item in graph.plan(stage))
+    if not stage.endswith("-2g"):
+        assert anchor not in build_pipeline(base).tasks()[stage].inputs
+    assert enabled.fingerprint_payload("training") != base.fingerprint_payload("training")

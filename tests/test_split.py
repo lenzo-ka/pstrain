@@ -409,3 +409,41 @@ class TestKMeansInit:
         assert weights.shape == (4,)
         np.testing.assert_allclose(weights.sum(), 1.0, rtol=1e-5)
         assert np.all(variances >= 1e-4)  # Floor applied
+
+
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
+@pytest.mark.parametrize("parameter", ["means", "variances", "mixw", "dnom"])
+@pytest.mark.parametrize("axis", [0, 1, 2])
+def test_split_rejects_incompatible_inventory(tmp_path: Path, parameter: str, axis: int) -> None:
+    arrays = {
+        "means": np.zeros((2, 1, 2, 3), dtype=np.float32),
+        "variances": np.ones((2, 1, 2, 3), dtype=np.float32),
+        "mixw": np.ones((2, 1, 2), dtype=np.float32),
+        "dnom": np.ones((2, 1, 2), dtype=np.float32),
+    }
+    arrays[parameter] = np.repeat(arrays[parameter], 2, axis=axis)
+    writers = {
+        "means": _pstrainc.write_gau,
+        "variances": _pstrainc.write_gau,
+        "mixw": _pstrainc.write_mixw,
+        "dnom": _pstrainc.write_dnom,
+    }
+    for name, values in arrays.items():
+        assert writers[name](str(tmp_path / name), values) == 0
+    outputs = [tmp_path / name for name in ("out_mean", "out_var", "out_mixw")]
+    with pytest.raises(RuntimeError, match="pstrain_inc_comp"):
+        split.split_gaussians(*(tmp_path / name for name in arrays), *outputs, n_inc=1)
+    assert not any(path.exists() for path in outputs)
+
+
+@pytest.mark.skipif(not _lib_exists, reason="libpstrainc not built")
+def test_split_rejects_incompatible_vector_lengths(tmp_path: Path) -> None:
+    assert _pstrainc.write_gau(str(tmp_path / "means"), np.zeros((1, 1, 2), dtype=np.float32)) == 0
+    assert _pstrainc.write_gau(str(tmp_path / "vars"), np.ones((1, 1, 3), dtype=np.float32)) == 0
+    assert _pstrainc.write_mixw(str(tmp_path / "mixw"), np.ones((1, 1), dtype=np.float32)) == 0
+    assert _pstrainc.write_dnom(str(tmp_path / "counts"), np.ones((1, 1), dtype=np.float32)) == 0
+    with pytest.raises(RuntimeError, match="pstrain_inc_comp"):
+        split.split_gaussians(
+            *(tmp_path / name for name in ("means", "vars", "mixw", "counts", "om", "ov", "ow")),
+            n_inc=1,
+        )

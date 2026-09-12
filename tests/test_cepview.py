@@ -63,11 +63,11 @@ class TestViewCepstra:
         # Just data lines, no header
         assert len(lines) == n_frames
 
-    def test_frame_range(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("n_coeff", [13, 14, 26, 39])
+    def test_frame_range(self, tmp_path: Path, n_coeff: int) -> None:
         """Test frame range selection."""
         mfc_path = tmp_path / "test.mfc"
         n_frames = 20
-        n_coeff = 13
         data = np.arange(n_frames * n_coeff, dtype=np.float32).reshape(n_frames, n_coeff)
 
         with mfc_path.open("wb") as f:

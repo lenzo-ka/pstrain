@@ -82,6 +82,7 @@
         "retry_beam_factor",
         "failed_alignment",
         "bw_checkpoint_iterations",
+        "split_variance_floor_fraction",
         "arctic_a0302_zero_codebook_band",
         "accept_arctic_a0587_known_skip",
         "optional_final_silence",
@@ -156,6 +157,7 @@
         "training.question_quests_per_state": "project-profile",
         "training.retry_beam_factor": "project-profile",
         "training.skip_state": "project-profile",
+        "training.split_variance_floor_fraction": "project-profile",
         "training.tied.convergence_ratio": "project-profile",
         "training.tied.max_iterations": "project-profile",
         "training.tied.min_iterations": "project-profile",
@@ -240,6 +242,7 @@
           "question_quests_per_state": 20,
           "retry_beam_factor": 10000000000.0,
           "skip_state": false,
+          "split_variance_floor_fraction": 0.0,
           "tied": {
             "convergence_ratio": 0.001,
             "max_iterations": 10,
@@ -395,7 +398,7 @@
       "models",
       "results"
     ],
-    "sha256": "fd10ff7d3632a52c2840e1c463d83874dc6f96f938a53467d41e7451b0e5585b"
+    "sha256": "d8cbf2990faae24dab796f4784b6a506964273ed0bbeacf76f571c1facbf43f9"
   },
   "resources": {
     "archives": {

@@ -2,7 +2,11 @@
 
 Every WER result records decode coverage as decoded utterances over its
 evaluation-set denominator. Missing audio and decode failures remain visible as
-coverage shortfalls but never block record production or the WER comparison.
+coverage shortfalls, and never block the WER comparison, whose paired delta
+requires identical utterance sets and is therefore sound under a shortfall. A
+live cell may not be pinned with one: its absolute WER is summed over the
+decoded rows alone, so a shortfall would otherwise publish a headline rate over
+a denominator the cell's own coverage fields contradict.
 """
 
 from __future__ import annotations
@@ -18,8 +22,6 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-import urllib.error
-import urllib.request
 import warnings
 from contextlib import suppress
 from dataclasses import asdict, dataclass, fields
@@ -28,7 +30,7 @@ from typing import Any
 
 import yaml
 
-from pstrain.benchmarks.corpora import sha256
+from pstrain.benchmarks.corpora import fetch_pinned_archive, sha256
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -301,6 +303,7 @@ PIN_CONFIGS: dict[str, dict[str, Any]] = {
             "feat_type": "1s_c_d_dd",
         },
         "training": {
+            "split_variance_floor_fraction": 0.0,
             "n_state": 3,
             "skip_state": False,
             "n_senones": 200,
@@ -360,6 +363,7 @@ PIN_CONFIGS: dict[str, dict[str, Any]] = {
             "feat_type": "1s_c_d_dd",
         },
         "training": {
+            "split_variance_floor_fraction": 0.0,
             "n_state": 3,
             "skip_state": False,
             "n_senones": 200,
@@ -988,54 +992,6 @@ def paired_delta_ci(
     return [float(low), float(high)]
 
 
-def fetch_archive(archive: Archive, cache: Path) -> Path:
-    """Fetch an archive without performing network operations in this process."""
-    destination = cache / Path(archive.url).name
-    command = [
-        sys.executable,
-        str(Path(__file__).resolve()),
-        "_fetch-archive",
-        json.dumps(asdict(archive), separators=(",", ":")),
-        str(cache.resolve()),
-    ]
-    # pp8-segv-report-2026-08-11.md diagnosed a macOS 27 Network.framework atfork
-    # crash: after any in-process HTTP connection, a raw fork child can segfault
-    # before exec. Keep the harness network-clean and this helper posix_spawn-eligible.
-    _run_trusted_child(command)
-    return destination
-
-
-def _fetch_archive_in_helper(archive: Archive, cache: Path) -> Path:
-    """HEAD-check, download, and authenticate an archive in the network helper."""
-    cache.mkdir(parents=True, exist_ok=True)
-    request = urllib.request.Request(archive.url, method="HEAD")
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            if response.status != 200:
-                raise RuntimeError(f"HEAD {archive.url}: HTTP {response.status}")
-    except (OSError, urllib.error.URLError) as exc:
-        raise RuntimeError(f"HEAD failed for {archive.url}: {exc}") from exc
-    destination = cache / Path(archive.url).name
-    if not destination.exists():
-        temporary = destination.with_suffix(destination.suffix + ".part")
-        try:
-            with (
-                urllib.request.urlopen(archive.url, timeout=60) as response,
-                temporary.open("wb") as output,
-            ):
-                shutil.copyfileobj(response, output)
-            temporary.replace(destination)
-        except (OSError, urllib.error.URLError) as exc:
-            temporary.unlink(missing_ok=True)
-            raise RuntimeError(f"download failed for {archive.url}: {exc}") from exc
-    actual = sha256(destination)
-    if actual != archive.sha256:
-        raise RuntimeError(
-            f"SHA-256 mismatch for {destination}: expected {archive.sha256}, got {actual}"
-        )
-    return destination
-
-
 def load_transcripts(path: Path) -> dict[str, str]:
     """Read normalized ``fileid text`` or Sphinx transcript lines."""
     result: dict[str, str] = {}
@@ -1380,6 +1336,21 @@ def _validate_cell(cell: Any, label: str, *, recorded: bool, mode: str | None = 
         or cell["decoded"] > cell["decode_denominator"]
     ):
         raise RuntimeError(f"benchmark record has impossible counts in result cell: {label}")
+    if recorded and mode == "on" and cell["decoded"] < cell["decode_denominator"]:
+        # A cell's absolute WER is the sum of its per-utterance rows over the words
+        # those rows contain, and the rows are the decoded subset. A live cell that
+        # decoded less than its denominator therefore publishes a headline rate over
+        # a denominator its own coverage fields contradict, and a comparison against
+        # a record carrying the same shortfall reports no difference at all. The
+        # paired delta stays sound under a shortfall because it requires identical
+        # utterance sets, so only the absolute rate is gated, and only where it is
+        # pinned: the retired cells were measured on a path that no longer exists
+        # and their coverage is a fact about the past.
+        raise RuntimeError(
+            f"benchmark record pins a live absolute WER over an incomplete decode: {label}: "
+            f"{cell['decoded']:,}/{cell['decode_denominator']:,} decoded. Resolve the "
+            "shortfall and re-measure; a live cell may not be pinned without full coverage."
+        )
     if not isinstance(cell["known_skips"], list) or any(
         not isinstance(item, dict)
         or not all(
@@ -1797,7 +1768,7 @@ def run(
     cache = Path(
         os.environ.get("PSTRAIN_BENCH_CACHE", Path.home() / ".cache" / "pstrain" / "benchmarks")
     )
-    archives = {item.voice: fetch_archive(item, cache) for item in ARCHIVES}
+    archives = {item.voice: fetch_pinned_archive(item.url, item.sha256, cache) for item in ARCHIVES}
     corpus = work_dir / "corpora"
     corpus.mkdir(parents=True, exist_ok=True)
     for archive in ARCHIVES:
@@ -1914,11 +1885,6 @@ def run(
 def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
-    if argv[:1] == ["_fetch-archive"]:
-        if len(argv) != 3:
-            raise SystemExit("_fetch-archive requires an archive JSON object and cache path")
-        _fetch_archive_in_helper(Archive(**json.loads(argv[1])), Path(argv[2]))
-        return 0
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--work-dir", type=Path, default=Path(".pstrain-benchmark/arctic"))
     parser.add_argument("--record", type=Path, help="committed docs/benchmarks JSON record")

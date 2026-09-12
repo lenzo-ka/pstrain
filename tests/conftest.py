@@ -21,9 +21,13 @@ from typing import Any
 import pytest
 
 import pstrain
+from tests import cli_lib_boundary_guard
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _PRODUCTION_ROOT = _PROJECT_ROOT / "pstrain"
+# Install before pytest imports test modules.  Name-based imports remain visible
+# even when earlier conftest setup has already populated sys.modules.
+cli_lib_boundary_guard.install(_PROJECT_ROOT)
 # Authoritative pool invariant: every process pool constructed by production
 # code must close native helpers before CPython joins child processes at exit.
 # Observing constructors here covers aliases, subclasses, and dynamic factories.
@@ -202,16 +206,41 @@ def pytest_configure(config: pytest.Config) -> None:
             "Build it first (e.g. 'make build-c') or unset PSTRAIN_REQUIRE_CLIB."
         )
     _install_pool_constructor_guards()
+    cli_lib_boundary_guard.assert_installed()
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_call(item: pytest.Item) -> Any:
+    """Keep tests from silently displacing a session-wide boundary wrapper."""
+    cli_lib_boundary_guard.assert_installed()
+    try:
+        yield
+    finally:
+        cli_lib_boundary_guard.assert_installed()
+        cli_lib_boundary_guard.assert_no_escaped_violations()
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:
     _restore_pool_constructor_guards()
+    cli_lib_boundary_guard.restore()
+    cli_lib_boundary_guard.assert_no_escaped_violations()
 
 
 def pytest_terminal_summary(terminalreporter: Any) -> None:
     terminalreporter.write_sep("=", "observed production process pools")
     for location, count in sorted(_OBSERVED_PRODUCTION_POOLS.items()):
         terminalreporter.write_line(f"{location}: {count}")
+    terminalreporter.write_sep("=", "observed CLI-to-library import routes")
+    if getattr(terminalreporter.config.option, "numprocesses", None):
+        terminalreporter.write_line(
+            "xdist workers enforce the guard independently; route observations are not aggregated"
+        )
+    else:
+        routes = cli_lib_boundary_guard.observed_routes()
+        if not routes:
+            terminalreporter.write_line("no CLI-routed library imports observed in this process")
+        for route, count in sorted(routes.items()):
+            terminalreporter.write_line(f"{route}: {count}")
 
 
 # =============================================================================

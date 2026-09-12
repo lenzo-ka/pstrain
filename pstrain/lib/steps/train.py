@@ -9,6 +9,7 @@ import ctypes
 import hashlib
 import json
 import logging
+import math
 import multiprocessing
 import os
 import shutil
@@ -17,7 +18,7 @@ import time
 import uuid
 from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import ProcessPoolExecutor
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager, nullcontext, suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -34,9 +35,10 @@ if TYPE_CHECKING:
     import numpy.typing as npt
 
 from pstrain.lib import native_worker
-from pstrain.lib.bw import HMM, BWConfig, BWResult, BWTrainer
+from pstrain.lib.bw import BW_CEPSTRAL_LENGTH, HMM, BWConfig, BWResult, BWTrainer
 from pstrain.lib.features import read_sphinx_mfc
-from pstrain.lib.model import MODEL_FILES_REQUIRED
+from pstrain.lib.model import MODEL_FILES_REQUIRED, MODEL_PARAMETER_FILES, staged_model_update
+from pstrain.lib.steps.variance import VarianceFloor, load_variance_floor
 from pstrain.lib.transcription import parse_transcription_file
 from pstrain.lib.validate import validate_files_exist
 
@@ -343,6 +345,35 @@ def _checkpoint_iteration(output_dir: Path, iteration: int) -> None:
         shutil.copyfile(output_dir / filename, checkpoint / filename)
 
 
+def _save_iteration_model(
+    trainer: BWTrainer,
+    output_dir: Path,
+    iteration: int,
+    variance_floor: VarianceFloor | None,
+) -> int:
+    """Save one update, staging parameters and counts together when regularized."""
+    destination = (
+        staged_model_update(output_dir, (*MODEL_PARAMETER_FILES, "gauden_counts"))
+        if variance_floor is not None
+        else nullcontext(output_dir)
+    )
+    with destination as candidate:
+        if not trainer.save_density_counts(candidate / "gauden_counts"):
+            raise RuntimeError(
+                f"Iteration {iteration}: BW density count save failed for {output_dir}"
+            )
+        if not trainer.normalize():
+            raise RuntimeError(f"Iteration {iteration}: BW normalization failed for {output_dir}")
+        if not trainer.save(
+            means_path=candidate / "means",
+            vars_path=candidate / "variances",
+            mixw_path=candidate / "mixture_weights",
+            tmat_path=candidate / "transition_matrices",
+        ):
+            raise RuntimeError(f"Iteration {iteration}: BW model save failed for {output_dir}")
+        return variance_floor.apply(candidate / "variances") if variance_floor is not None else 0
+
+
 def _convergence_delta(current: float, previous: float) -> float:
     """Return SphinxTrain's signed per-frame log-likelihood delta."""
     if previous == 0:
@@ -357,8 +388,15 @@ def _has_converged(
     threshold: float,
     min_iterations: int,
 ) -> bool:
-    """Apply the upstream convergence decision after a non-initial iteration."""
-    return _convergence_delta(current, previous) <= threshold and iteration >= min_iterations
+    """Converge only on a finite, nonnegative improvement within the threshold."""
+    delta = _convergence_delta(current, previous)
+    return (
+        math.isfinite(current)
+        and math.isfinite(previous)
+        and math.isfinite(delta)
+        and 0 <= delta <= threshold
+        and iteration >= min_iterations
+    )
 
 
 def _process_with_final_state_retry(
@@ -666,8 +704,8 @@ def _run_bw_shard(
             skipped.append((fileid, "transcript_not_found"))
             continue
         try:
-            mfcc = read_sphinx_mfc(mfc_path)
-            if mfcc.shape[1] != 13:
+            mfcc = read_sphinx_mfc(mfc_path, veclen=BW_CEPSTRAL_LENGTH)
+            if mfcc.shape[1] != BW_CEPSTRAL_LENGTH:
                 skipped.append((fileid, "feature_dimension"))
                 continue
             with _redirect_bw_stdout(diagnostic_log):
@@ -759,6 +797,8 @@ def run_bw_training(
     stage: str | None = None,
     _in_process_reference: bool = False,
     _output_note: Callable[[str], None] | None = None,
+    variance_floor_reference: Path | None = None,
+    variance_floor_fraction: float = 0.0,
 ) -> TrainingResult:
     """Run Baum-Welch training iterations.
 
@@ -774,8 +814,9 @@ def run_bw_training(
         n_iter: Maximum training iterations
         convergence_ratio: Signed per-frame likelihood delta threshold, using
             each pass's own frame count. A delta strictly greater than this
-            threshold continues training; otherwise training converges once
-            ``min_iterations`` is satisfied.
+            threshold continues training. A finite, nonnegative delta at or
+            below the threshold converges once ``min_iterations`` is satisfied.
+            Negative or nonfinite deltas do not indicate convergence.
         min_iterations: Minimum number of completed iterations before convergence
         config: BW training configuration, including the explicit variance
             policy retained after the stage-specific first iteration.
@@ -793,6 +834,14 @@ def run_bw_training(
             selects one-pass variance accumulation.
         exclusion_schedule: Experimental mapping of one-based pass numbers or
             ``"*"`` to utterance IDs that must not reach BW accumulation.
+        variance_floor_reference: Optional raw one-density variance file with
+            the same codebook mapping and native feature layout as the model.
+            The pipeline selects CI-1g or CD-1g for split stages. Standalone
+            callers must supply a matching mapping; shape alone cannot prove it.
+        variance_floor_fraction: Experimental fixed-reference lower bound,
+            between zero and one. Zero disables it. Each normalized update is
+            bounded before publication/checkpointing; the initial model is
+            validated but not rewritten before its first scoring pass.
 
     Returns:
         TrainingResult with training statistics
@@ -802,6 +851,9 @@ def run_bw_training(
         RuntimeError: If training fails
     """
     requested_shards = n_shards
+    variance_floor = load_variance_floor(
+        variance_floor_reference, variance_floor_fraction, Path(model_dir) / "variances"
+    )
     n_shards = _effective_bw_shard_count(n_shards, multipron=multipron)
     if requested_shards > 1 and multipron:
         (_output_note or print)("bw-parallelism\tserial (multipron_training is on)")
@@ -1031,10 +1083,10 @@ def run_bw_training(
                 continue
 
             try:
-                # Load raw MFCC features (13-dim)
+                # Load raw MFCC features using the native BW front-end contract.
                 # C code handles CMN and delta computation via feat module
-                mfcc = read_sphinx_mfc(mfc_path)
-                if mfcc.shape[1] != 13:
+                mfcc = read_sphinx_mfc(mfc_path, veclen=BW_CEPSTRAL_LENGTH)
+                if mfcc.shape[1] != BW_CEPSTRAL_LENGTH:
                     logger.warning("Unexpected feature dimension %d for %s", mfcc.shape[1], fileid)
                     skipped += 1
                     skip_reasons["feature_dimension"] += 1
@@ -1234,19 +1286,19 @@ def run_bw_training(
                 "Model may be degenerate (check flat model initialization)."
             )
 
-        # Save density counts BEFORE normalization (normalization clears accumulators)
-        trainer.save_density_counts(output_dir / "gauden_counts")
-
-        # Normalize accumulators (also resets stats for next iteration)
-        trainer.normalize()
-
-        # Save model
-        trainer.save(
-            means_path=output_dir / "means",
-            vars_path=output_dir / "variances",
-            mixw_path=output_dir / "mixture_weights",
-            tmat_path=output_dir / "transition_matrices",
-        )
+        try:
+            regularized = _save_iteration_model(trainer, output_dir, iteration, variance_floor)
+        except BaseException as error:
+            telemetry_row["stop_decision"] = "failed"
+            telemetry_row["error"] = str(error) or type(error).__name__
+            _write_telemetry(output_dir, telemetry_rows, schema_version=2)
+            raise
+        if variance_floor is not None:
+            telemetry_row["variance_regularization"] = {
+                **variance_floor.metadata(),
+                "clamped_coordinates": regularized,
+            }
+            _write_telemetry(output_dir, telemetry_rows, schema_version=2)
         if checkpoints_enabled:
             _checkpoint_iteration(output_dir, iteration)
 
@@ -1259,8 +1311,8 @@ def run_bw_training(
                     "WARNING: negative convergence ratio at iteration %d; check BW inputs and logs",
                     iteration,
                 )
-            # SphinxTrain continues only for a strictly greater delta, and
-            # otherwise enforces CFG_MIN_ITERATIONS before declaring convergence.
+            # Keep the signed upstream delta and minimum-pass requirement, but
+            # do not mistake a likelihood regression for convergence.
             if _has_converged(
                 stats.avg_log_prob,
                 prev_likelihood,

@@ -400,14 +400,6 @@ bio_fread_intv_3d(void ****arr,
     return S3_SUCCESS;
 }
 
-/* Macro to byteswap an int variable.  x = ptr to variable */
-#define MYSWAP_INT(x)   *(x) = ((0x000000ff & (*(x))>>24) | \
-                                (0x0000ff00 & (*(x))>>8) | \
-                                (0x00ff0000 & (*(x))<<8) | \
-                                (0xff000000 & (*(x))<<24))
-/* Macro to byteswap a float variable.  x = ptr to variable */
-#define MYSWAP_FLOAT(x) MYSWAP_INT((int *) x)
-
 int get_length(char *file,
                int *byterev)
 {
@@ -435,7 +427,7 @@ int get_length(char *file,
   /* Check if length matches file size */
   if ((length*sizeof(float) + 4) != statbuf.st_size) {
       n = length;
-      MYSWAP_INT(&n);
+      SWAP_INT32(&n);
 
       if ((n*sizeof(float) + 4) != statbuf.st_size) {
           printf("Header size field: %d(%08x); filesize: %d(%08x)\n",
@@ -510,7 +502,7 @@ areadfloat (char *file,
   fclose (fp);
   *data_ref = (float *) data;
   if (byterev==1)
-     for(offset = 0; offset < length; offset++) MYSWAP_FLOAT(*data_ref+offset);
+     for(offset = 0; offset < length; offset++) SWAP_FLOAT32(*data_ref + offset);
   *length_ref = length;
   return length;
 }
@@ -610,7 +602,7 @@ areadfloat_part (char *file,
 
   if (byterev==1)
     for (i = 0; i < r_len; i++) {
-        MYSWAP_FLOAT(&r_buf[i]);
+        SWAP_FLOAT32(&r_buf[i]);
     }
 
     *data_ref = r_buf;
