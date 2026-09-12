@@ -122,23 +122,10 @@ class HMM:
         )
         if n_feat_stream != 1:
             raise ValueError("HMM.load currently requires a single mixture-weight stream")
-        mixw_counts = mixw_raw.reshape(n_mixw, n_density_mw)
-        mixw_sums = mixw_counts.sum(axis=-1, keepdims=True)
-        mixw = np.divide(
-            mixw_counts,
-            mixw_sums,
-            out=np.zeros_like(mixw_counts),
-            where=mixw_sums != 0,
-        )
-
-        tmat_counts, n_tmat, n_state = _pstrainc.read_tmat(str(model_dir / "transition_matrices"))
-        tmat_sums = tmat_counts.sum(axis=-1, keepdims=True)
-        tmat = np.divide(
-            tmat_counts,
-            tmat_sums,
-            out=np.zeros_like(tmat_counts),
-            where=tmat_sums != 0,
-        )
+        mixw = mixw_raw.reshape(n_mixw, n_density_mw)
+        # The probability readers own normalization; transition storage omits
+        # the exit-state row and remains rectangular in the loaded HMM.
+        tmat, _, _ = _pstrainc.read_tmat(str(model_dir / "transition_matrices"))
 
         return cls(means, variances, mixw, tmat)
 

@@ -60,22 +60,30 @@ def write_tmat(filename: str, tmat: npt.NDArray[np.float32]) -> int:
 
     Args:
         filename: Output file path
-        tmat: Transition matrix array of shape (n_tmat, n_state, n_state)
-              where n_state includes the exit state row.
-              Only the first n_state-1 rows are written (exit state excluded).
+        tmat: Transition matrices, either square (n_tmat, n_state, n_state)
+              including an exit-state row, or stored rectangular shape
+              (n_tmat, n_state-1, n_state). The exit-state row, when present,
+              is excluded; values are stored without row normalization.
 
     Returns:
         0 on success, non-zero on error
     """
     ffi, lib = _init()
 
-    n_tmat, n_state, _ = tmat.shape
-
-    # C function uses n_state-1 rows and writes from arr[0][0] contiguously.
-    # We must provide a contiguous array with only n_state-1 rows per tmat.
-    # Slice to exclude exit state row, then make contiguous.
-    tmat_no_exit = np.ascontiguousarray(tmat[:, :-1, :], dtype=np.float32)
+    if tmat.ndim != 3:
+        raise ValueError("Transition matrices must have three dimensions")
+    n_tmat, input_rows, n_state = tmat.shape
     n_rows = n_state - 1
+    if n_tmat == 0 or n_state < 2 or input_rows not in (n_rows, n_state):
+        raise ValueError(
+            "Expected transition shape (n_tmat, n_state-1, n_state) or "
+            f"(n_tmat, n_state, n_state), with n_tmat > 0 and n_state >= 2; got {tmat.shape}"
+        )
+
+    # S3 writes one contiguous rectangular block across all matrices. Merely
+    # reshaping a square array would retain exit rows between matrices.
+    # Copy also prevents the native writer's flooring from mutating the caller.
+    tmat_no_exit = np.array(tmat[:, :n_rows, :], dtype=np.float32, order="C", copy=True)
 
     # Build pointer hierarchy for float32***
     tmat_level1 = ffi.new("float32**[]", n_tmat)
@@ -163,15 +171,19 @@ def read_mixw_counts(filename: str) -> tuple[npt.NDArray[np.float32], int, int, 
     n_feat = out_n_feat[0]
     n_density = out_n_density[0]
 
-    # Convert C array to numpy
-    mixw = np.zeros((n_mixw, n_feat, n_density), dtype=np.float32)
-    for i in range(n_mixw):
-        for j in range(n_feat):
-            for k in range(n_density):
-                mixw[i, j, k] = out_mixw[0][i][j][k]
-
-    # Free C-allocated memory using proper 3d free
-    lib.pstrain_cffi_ckd_free_3d(out_mixw[0])
+    try:
+        mixw = (
+            np.frombuffer(
+                ffi.buffer(
+                    out_mixw[0][0][0], n_mixw * n_feat * n_density * np.dtype(np.float32).itemsize
+                ),
+                dtype=np.float32,
+            )
+            .copy()
+            .reshape(n_mixw, n_feat, n_density)
+        )
+    finally:
+        lib.pstrain_cffi_ckd_free_3d(out_mixw[0])
 
     return mixw, n_mixw, n_feat, n_density
 
@@ -203,15 +215,20 @@ def read_tmat_counts(filename: str) -> tuple[npt.NDArray[np.float32], int, int]:
     n_tmat = out_n_tmat[0]
     n_state = out_n_state[0]
 
-    # tmat is (n_tmat, n_state-1, n_state) - n_state-1 rows because last is exit
-    tmat = np.zeros((n_tmat, n_state - 1, n_state), dtype=np.float32)
-    for t in range(n_tmat):
-        for i in range(n_state - 1):
-            for j in range(n_state):
-                tmat[t, i, j] = out_tmat[0][t][i][j]
-
-    # Free C-allocated memory using proper 3d free
-    lib.pstrain_cffi_ckd_free_3d(out_tmat[0])
+    try:
+        tmat = (
+            np.frombuffer(
+                ffi.buffer(
+                    out_tmat[0][0][0],
+                    n_tmat * (n_state - 1) * n_state * np.dtype(np.float32).itemsize,
+                ),
+                dtype=np.float32,
+            )
+            .copy()
+            .reshape(n_tmat, n_state - 1, n_state)
+        )
+    finally:
+        lib.pstrain_cffi_ckd_free_3d(out_tmat[0])
 
     return tmat, n_tmat, n_state
 
@@ -265,23 +282,22 @@ def read_gau(filename: str) -> tuple[npt.NDArray[np.float32], int, int, int, lis
     n_mgau = out_n_mgau[0]
     n_feat = out_n_feat[0]
     n_density = out_n_density[0]
-    veclen = [out_veclen[0][f] for f in range(n_feat)]
-    max_veclen = max(veclen)
-
-    # Convert C array to numpy
-    gau = np.zeros((n_mgau, n_feat, n_density, max_veclen), dtype=np.float32)
-    for m in range(n_mgau):
-        for f in range(n_feat):
-            for d in range(n_density):
-                for v in range(veclen[f]):
-                    gau[m, f, d, v] = out_gau[0][m][f][d][v]
-
-    # Free C-allocated memory (gauden_free_param pattern):
-    # - p[0][0][0] is the raw data block
-    # - p is the 3D pointer structure
-    lib.pstrain_cffi_ckd_free(out_gau[0][0][0][0])  # Free raw data
-    lib.pstrain_cffi_ckd_free_3d(out_gau[0])  # Free pointer structure
-    lib.pstrain_cffi_ckd_free(out_veclen[0])  # Free veclen array
+    try:
+        veclen = [out_veclen[0][f] for f in range(n_feat)]
+        gau = np.zeros((n_mgau, n_feat, n_density, max(veclen)), dtype=np.float32)
+        # Each stream's densities are contiguous, including variable-width
+        # streams. Copy into owned NumPy storage before releasing native data.
+        for m in range(n_mgau):
+            for f, width in enumerate(veclen):
+                values = np.frombuffer(
+                    ffi.buffer(out_gau[0][m][f][0], n_density * width * gau.itemsize),
+                    dtype=np.float32,
+                )
+                gau[m, f, :, :width] = values.reshape(n_density, width)
+    finally:
+        lib.pstrain_cffi_ckd_free(out_gau[0][0][0][0])
+        lib.pstrain_cffi_ckd_free_3d(out_gau[0])
+        lib.pstrain_cffi_ckd_free(out_veclen[0])
 
     return gau, n_mgau, n_feat, n_density, veclen
 
@@ -356,14 +372,18 @@ def read_dnom(filename: str) -> tuple[npt.NDArray[np.float32], int, int, int]:
     n_feat = out_n_feat[0]
     n_density = out_n_density[0]
 
-    # Convert C array to numpy
-    dnom = np.zeros((n_cb, n_feat, n_density), dtype=np.float32)
-    for i in range(n_cb):
-        for j in range(n_feat):
-            for k in range(n_density):
-                dnom[i, j, k] = out_dnom[0][i][j][k]
-
-    # Free C-allocated memory
-    lib.pstrain_cffi_ckd_free_3d(out_dnom[0])
+    try:
+        dnom = (
+            np.frombuffer(
+                ffi.buffer(
+                    out_dnom[0][0][0], n_cb * n_feat * n_density * np.dtype(np.float32).itemsize
+                ),
+                dtype=np.float32,
+            )
+            .copy()
+            .reshape(n_cb, n_feat, n_density)
+        )
+    finally:
+        lib.pstrain_cffi_ckd_free_3d(out_dnom[0])
 
     return dnom, n_cb, n_feat, n_density
