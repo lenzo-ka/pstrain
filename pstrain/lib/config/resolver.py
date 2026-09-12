@@ -362,7 +362,12 @@ def _profile_documents(
         if definition.extends is None:
             expected = Profile().model_dump(mode="python")
             missing = sorted(
-                path for path, _ in _leaves(expected) if path not in dict(_leaves(body))
+                path
+                for path, _ in _leaves(expected)
+                if path not in dict(_leaves(body))
+                # This default-off addition must not invalidate existing complete
+                # version-1 profiles. Leave it absent so schema provenance applies.
+                and path != "training.split_variance_floor_fraction"
             )
             if missing:
                 raise ValueError(

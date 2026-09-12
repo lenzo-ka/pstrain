@@ -221,7 +221,8 @@ its first iteration, matching the unconditional `-2passvar yes` in
 ## Experimental split variance regularization
 
 `training.split_variance_floor_fraction` defaults to `0.0`, which disables
-regularization and preserves the existing training path. A user-selected finite
+regularization and preserves the existing training path. Existing version-1
+complete profiles that omit this newly optional field retain its schema default. A user-selected finite
 fraction greater than zero and at most one enables a lower bound on every saved
 variance coordinate in split training stages. This is an experimental coefficient,
 not a universal tuning recommendation. CI splits always use the CI one-Gaussian
