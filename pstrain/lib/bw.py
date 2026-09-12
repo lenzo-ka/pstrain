@@ -164,7 +164,6 @@ class HMM:
 
         staging = Path(tempfile.mkdtemp(prefix=".hmm-save-", dir=model_dir))
         discard_staging = True
-        replaced: list[str] = []
         originals: set[str] = set()
         try:
             backup = staging / "backup"
@@ -179,15 +178,17 @@ class HMM:
             try:
                 for name, _, _ in parameters:
                     (staging / name).replace(model_dir / name)
-                    replaced.append(name)
-            except OSError:
+            except BaseException:
+                # A replacement can succeed before an interrupt/error reaches
+                # Python. Restore the captured set, including the uncertain
+                # operation, instead of trusting a post-call progress list.
                 try:
-                    for name in reversed(replaced):
+                    for name, _, _ in reversed(parameters):
                         if name in originals:
                             (backup / name).replace(model_dir / name)
                         else:
-                            (model_dir / name).unlink()
-                except OSError as recovery_error:
+                            (model_dir / name).unlink(missing_ok=True)
+                except BaseException as recovery_error:
                     discard_staging = False
                     raise RuntimeError(
                         f"Model save rollback failed; original parameters retained in {backup}"

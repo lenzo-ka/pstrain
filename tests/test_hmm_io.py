@@ -173,3 +173,62 @@ def test_gaussian_reader_preserves_variable_stream_lengths(tmp_path: Path) -> No
     # the first returned array must own its data independently.
     _pstrainc.read_gau(path)
     np.testing.assert_array_equal(result, expected)
+
+
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize("after_replace", [False, True])
+@pytest.mark.parametrize("exception", [OSError, KeyboardInterrupt])
+def test_hmm_save_recovers_uncertain_replacements(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    existing: bool,
+    after_replace: bool,
+    exception: type[BaseException],
+) -> None:
+    model = _model()
+    if existing:
+        model.save(tmp_path)
+    originals = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
+    real_replace = Path.replace
+    injected = False
+
+    def uncertain_replace(path: Path, target: Path) -> Path:
+        nonlocal injected
+        if not injected and path.name == "variances" and path.parent.name.startswith(".hmm-save-"):
+            injected = True
+            if after_replace:
+                real_replace(path, target)
+            raise exception("injected uncertain outcome")
+        return real_replace(path, target)
+
+    monkeypatch.setattr(Path, "replace", uncertain_replace)
+    model.means += 1
+    model.variances += 1
+    with pytest.raises(exception, match="uncertain outcome"):
+        model.save(tmp_path)
+    assert injected
+    assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == originals
+
+
+def test_hmm_save_retains_backups_when_recovery_is_interrupted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _model()
+    model.save(tmp_path)
+    originals = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
+    real_replace = Path.replace
+
+    def fail_publication_and_recovery(path: Path, target: Path) -> Path:
+        if path.parent.name == "backup":
+            raise KeyboardInterrupt("recovery interrupted")
+        if path.name == "variances" and path.parent.name.startswith(".hmm-save-"):
+            raise OSError("publication failed")
+        return real_replace(path, target)
+
+    monkeypatch.setattr(Path, "replace", fail_publication_and_recovery)
+    model.means += 1
+    with pytest.raises(RuntimeError, match="original parameters retained"):
+        model.save(tmp_path)
+    (staging,) = tmp_path.glob(".hmm-save-*")
+    assert {path.name: path.read_bytes() for path in (staging / "backup").iterdir()} == originals
