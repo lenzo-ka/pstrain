@@ -1133,6 +1133,55 @@ def test_record_cells_bind_schema_owned_comparability() -> None:
         validate_record(record)
 
 
+def _record_a_short_run_would_have_pinned(
+    mode: str, dataset: str, *, keep_denominator: bool
+) -> dict[str, Any]:
+    """Build the record produced when one utterance of a cell fails to decode.
+
+    ``score_model`` counts only decoded utterances into the aggregates and keeps
+    the reference count as the denominator, so a run that loses one utterance
+    emits exactly this: one fewer row, aggregates and WER over the rows that
+    survived, and a denominator that still names every reference. With
+    ``keep_denominator`` false the same rows are pinned as a complete cell, which
+    is what a genuinely smaller reference set would have produced.
+    """
+    record = json.loads(Path("evidence/arctic-pin/record.json").read_text())
+    cell = record["results"][mode][dataset]
+    rows = sorted(cell["utterance_rows"])[:-1]
+    cell["utterance_rows"] = rows
+    cell["decoded"] = len(rows)
+    if not keep_denominator:
+        cell["decode_denominator"] = len(rows)
+        cell["utterances"] = len(rows)
+    cell["ref_words"] = sum(row[1] for row in rows)
+    cell["errors"] = sum(row[2] for row in rows)
+    cell["wer"] = cell["errors"] / cell["ref_words"] * 100
+    bind_record(record)
+    return record
+
+
+def test_live_cell_may_not_pin_an_absolute_wer_over_an_incomplete_decode() -> None:
+    complete = _record_a_short_run_would_have_pinned("on", "slt55", keep_denominator=False)
+    validate_record(complete)
+
+    short = _record_a_short_run_would_have_pinned("on", "slt55", keep_denominator=True)
+    cell = short["results"]["on"]["slt55"]
+    assert cell["decoded"] < cell["decode_denominator"]
+    pinned = json.loads(Path("evidence/arctic-pin/record.json").read_text())
+    assert cell["wer"] < pinned["results"]["on"]["slt55"]["wer"]
+
+    with pytest.raises(RuntimeError, match="live absolute WER over an incomplete decode"):
+        validate_record(short)
+
+
+def test_retired_cells_keep_their_own_decode_coverage() -> None:
+    retired = _record_a_short_run_would_have_pinned("off", "slt55", keep_denominator=True)
+    cell = retired["results"]["off"]["slt55"]
+    assert cell["decoded"] < cell["decode_denominator"]
+
+    validate_record(retired)
+
+
 def test_headline_reports_decode_shortfall_denominator() -> None:
     cell = _cell((1, 2, 3), recorded=False)
     cell["utterances"] = 5

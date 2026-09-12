@@ -203,10 +203,26 @@ trains under product defaults and neither former exception fires. The
 `training.accept_arctic_a0587_known_skip` knob is retained solely to describe
 the retired `off` profile's provenance; that profile carries the true value,
 while the live `on` profile disables it (and the a0302 exception band). Thus
-all live cells run exception-free. Decode shortfalls are not gates: coverage
-is a recorded comparison field, and drift from its pinned
-`decoded/denominator` is surfaced in `field_differences` for deliberate record
-adoption without raising or failing the WER gate.
+all live cells run exception-free.
+
+A live cell must decode every utterance its denominator names. A cell's
+absolute WER is summed from its per-utterance rows, and those rows are the
+decoded subset, so a live cell whose `decoded` fell below its
+`decode_denominator` would publish a headline rate over a denominator its own
+coverage fields contradict, and a comparison against a record carrying the
+same shortfall would report no difference at all. `validate_record` therefore
+refuses to pin such a cell, which places the refusal ahead of record emission,
+fresh-record adoption, and `make config-check` alike. The retired `off` cells
+are not re-gated: they were measured on a path that no longer exists, and
+their coverage is a fact about the past.
+
+The paired comparison stays ungated, because it is sound under a shortfall:
+`paired_delta_ci` requires identical utterance sets, so lost coverage cannot
+bias the delta between the arms. A run that transiently decodes fewer
+utterances than the record still compares, and drift from the pinned
+`decoded/denominator` is surfaced in `field_differences` beside the row for
+deliberate record adoption rather than raising or failing the WER gate. Such a
+run simply cannot become the pin.
 
 ## Condition contract maintenance
 
