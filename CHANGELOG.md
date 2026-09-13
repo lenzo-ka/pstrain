@@ -5,6 +5,55 @@ the version in `pyproject.toml` is authoritative.
 
 ## Unreleased
 
+## 0.4.0 - 2026-09-13
+
+### Upgrading from 0.3.0
+
+- Rebuild source installations and custom native integrations together: the
+  native ABI is now 5. Published wheels bundle their matching native library.
+- Multipronunciation training now honors multiple requested workers. Different
+  shard counts may change floating-point reduction and later training results;
+  use one worker when retaining the serial path matters.
+- The split-variance bound is opt-in and defaults to zero. Checkpoint restoration
+  is also explicit; neither feature silently repairs or rewinds training.
+- Training supports 13-coefficient `1s_c_d_dd` features and now rejects unsupported
+  front-end configurations early. Standalone feature extraction supports other
+  widths; pass their actual `veclen` when reading nondefault Sphinx MFC files.
+- Native Windows training remains unsupported despite Windows library and wheel
+  support. See [platform support](docs/support.md).
+
+### Changes
+
+- Multipronunciation Baum-Welch training now uses the requested worker count
+  through separate processes. Shards merge raw statistics and fallback-state
+  activation before applying the survival prior once; one-worker training
+  retains its serial path. Interrupted workers and workers whose coordinator
+  exits are contained and cleaned up.
+- Training no longer reports a negative or nonfinite likelihood change as
+  convergence. Optional `training.split_variance_floor_fraction` bounds split
+  variances against fixed one-Gaussian references; its default remains zero.
+- Added `pstrain checkpoints` for inspection and explicit restoration of a
+  retained checkpoint, with dry-run and JSON support. Update N is evaluated in
+  pass N+1; evidence binds that model and its associated counts. The final
+  update remains unevaluated until scored. Restoration preserves a
+  backup and invalidates completion metadata; training never rolls back
+  automatically.
+- The quick start now explains Python prerequisites and virtual environments,
+  and provides an exercised bundled-corpus training, testing, and packaging
+  walkthrough. The tutorial uses isolated corpus downloads and is executed
+  offline in CI.
+- Configuration, corpus validation, feature dimensions, model buffer layouts,
+  and pipeline dependency tracking now fail clearly on inconsistent inputs.
+  Model updates preserve raw count semantics and recover from caught file-write
+  failures instead of leaving partially replaced parameter sets.
+- Native float/model storage and byte swaps avoid strict-aliasing violations;
+  corpus fetching is isolated from notebook processes. Windows native-worker
+  requests use the supported pipe transport. Native Windows training remains
+  unsupported; see the platform support guide.
+- Runtime tests enforce CLI access through the public API. Commands
+  honor JSON output or reject unsupported JSON use explicitly. Benchmark
+  adoption rejects incomplete decoding rather than treating it as a valid score.
+
 - The CMU Pronouncing Dictionary can now be fetched, converted, and cached from
   its original upstream repository through `pstrain.api.dictionary`, defaulting
   to the latest revision and accepting a pinned one; the resolved commit and
