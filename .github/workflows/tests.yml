@@ -93,7 +93,7 @@ jobs:
 
       - name: Build
         if: needs.changes.outputs.code == 'true'
-        run: cmake --build build
+        run: cmake --build build --parallel "$(python -c 'import os; print(os.cpu_count() or 1)')"
 
       - name: Test
         if: needs.changes.outputs.code == 'true'
@@ -123,7 +123,7 @@ jobs:
 
       - name: Build (optimized)
         if: needs.changes.outputs.code == 'true'
-        run: cmake --build build-release
+        run: cmake --build build-release --parallel "$(python -c 'import os; print(os.cpu_count() or 1)')"
 
       - name: Test (optimized)
         if: needs.changes.outputs.code == 'true'
@@ -152,7 +152,7 @@ jobs:
 
       - name: Build
         if: needs.changes.outputs.code == 'true'
-        run: cmake --build build
+        run: cmake --build build --parallel "$(python -c 'import os; print(os.cpu_count() or 1)')"
 
       - name: Test
         if: needs.changes.outputs.code == 'true'
@@ -191,7 +191,7 @@ jobs:
         if: needs.changes.outputs.code == 'true' || (github.event_name == 'pull_request' && matrix.python == '3.11' && matrix.os == 'ubuntu-latest')
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_CLI=ON
-          cmake --build build
+          cmake --build build --parallel "$(python -c 'import os; print(os.cpu_count() or 1)')"
 
       - name: Verify emitted floating-point contraction policy
         if: needs.changes.outputs.code == 'true' || (github.event_name == 'pull_request' && matrix.python == '3.11' && matrix.os == 'ubuntu-latest')
