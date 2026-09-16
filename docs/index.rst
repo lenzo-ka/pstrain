@@ -5,29 +5,29 @@ pstrain is an acoustic model training toolkit.
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+   :caption: User Guide
 
    getting-started
-   package-safety
    input-formats
-   glossary
-   api/index
    examples
-   cffi-progress
-   detached-runs
-   development
    support
+   package-safety
+   glossary
 
 .. toctree::
    :maxdepth: 2
-   :caption: Design Documents:
+   :caption: API Reference
+
+   api/index
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Design Notes
 
    design/README
    design/parity-and-deviations
    design/config-unification
    design/one-command-training
-   design/cli-lib-boundary
-   design/native-boundary
    design/pipeline-runner
    design/training-pipeline
    design/multi-pron-training
@@ -35,31 +35,31 @@ pstrain is an acoustic model training toolkit.
    design/bw-sharding-contract
    design/failed-alignment-policy
    design/optional-final-silence
-   design/f10-multipron-alignment-stage
+   design/cli-lib-boundary
+   design/native-boundary
    design/numeric-harness
    design/tree-comparison
    design/per-step-profiling
    design/source-determinable-rerolls
-   design/terminology
    design/project-setup
    design/ci-model-requirements
-   design/ci-training-cli-plan
    design/testing-with-cmu-arctic
-   design/task-orchestration
-   design/mlflow-evaluation
+   design/terminology
 
 .. toctree::
    :maxdepth: 2
-   :caption: Benchmarks:
+   :caption: Benchmarks and Evidence
 
    benchmarks/arctic-pin
    benchmarks/oracle-provenance
+   evidence/m4b-slt-runs
 
 .. toctree::
    :maxdepth: 2
-   :caption: Historical, Incomplete Evidence:
+   :caption: Contributing
 
-   evidence/m4b-slt-runs
+   development
+   detached-runs
 
 Indices and tables
 ==================

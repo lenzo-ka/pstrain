@@ -4,6 +4,9 @@ Design notes for pstrain. Most of these are background documents written
 while making decisions; the current source of truth is the code in
 `pstrain/lib/`.
 
+Notes linked here by repository address are working plans or background kept in
+the source tree; they are not part of the published documentation.
+
 ## Current architecture
 
 * [`parity-and-deviations.md`](parity-and-deviations.md) — stock-equivalence
@@ -27,7 +30,7 @@ while making decisions; the current source of truth is the code in
 * [`multi-pron-training.md`](multi-pron-training.md) — how Baum-Welch
   training handles multiple pronunciations per word (per-utterance
   graph with parallel variant paths; default on).
-* [`task-orchestration.md`](task-orchestration.md) — long-form notes on
+* [`task-orchestration.md`](https://github.com/lenzo-ka/pstrain/blob/main/docs/design/task-orchestration.md) — long-form notes on
   observability, build tracking, and chunk composition. Still useful
   as background; the framework-comparison sections are now stale (we
   rolled our own runner).
@@ -38,7 +41,7 @@ while making decisions; the current source of truth is the code in
   initial setup.
 * [`ci-model-requirements.md`](ci-model-requirements.md) — what CI
   models need (features, dictionary, transcripts, flat init).
-* [`ci-training-cli-plan.md`](ci-training-cli-plan.md) — CLI surface
+* [`ci-training-cli-plan.md`](https://github.com/lenzo-ka/pstrain/blob/main/docs/design/ci-training-cli-plan.md) — CLI surface
   for stepping through CI training manually.
 * [`testing-with-cmu-arctic.md`](testing-with-cmu-arctic.md) —
   end-to-end test corpus.
@@ -47,7 +50,7 @@ while making decisions; the current source of truth is the code in
 
 ## Past decisions
 
-* [`mlflow-evaluation.md`](mlflow-evaluation.md) — why pstrain doesn't use
+* [`mlflow-evaluation.md`](https://github.com/lenzo-ka/pstrain/blob/main/docs/design/mlflow-evaluation.md) — why pstrain doesn't use
   MLflow; we keep a small build tracker instead.
 
 ## Decisions reversed (kept here for context)
