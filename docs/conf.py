@@ -64,6 +64,13 @@ exclude_patterns = [
     ".DS_Store",
     # Internal historical audit, not a source for published documentation claims.
     "code-review-2026-01-15.md",
+    # Working plans and progress notes kept in the repository but not published:
+    # they describe intended or past states rather than the released package.
+    "cffi-progress.md",
+    "design/ci-training-cli-plan.md",
+    "design/f10-multipron-alignment-stage.md",
+    "design/mlflow-evaluation.md",
+    "design/task-orchestration.md",
 ]
 
 # Source file extensions

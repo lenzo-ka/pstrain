@@ -74,7 +74,7 @@ pstrain = "pstrain.cli:main"
 [project.urls]
 Homepage = "https://github.com/lenzo-ka/pstrain"
 Repository = "https://github.com/lenzo-ka/pstrain"
-Documentation = "https://github.com/lenzo-ka/pstrain/blob/main/docs/getting-started.md"
+Documentation = "https://lenzo-ka.github.io/pstrain/"
 Issues = "https://github.com/lenzo-ka/pstrain/issues"
 Changelog = "https://github.com/lenzo-ka/pstrain/blob/main/CHANGELOG.md"
 

@@ -83,7 +83,7 @@ the established external evaluation cells intact.
 
 The previous record carried its on-mode numbers from a `7f13286`
 all-triphone run but mislabeled them as a `578f6a9` transcript-reachable run.
-On 2026-08-17, the pin was remeasured on shrub at `bbb2fef` under the declared
+On 2026-08-17, the pin was remeasured on a Linux x86-64 host at `bbb2fef` under the declared
 transcript-reachable profile. The retained run includes its resolved
 configuration, training log, and an 11,883-row CD-untied mdef. It reproduced
 the published rows byte-for-byte: `on/big` SHA-256
