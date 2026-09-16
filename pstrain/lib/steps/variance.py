@@ -14,7 +14,9 @@ from pstrain.lib import _pstrainc
 from pstrain.lib.bw import BW_FEATURE_LENGTH
 
 
-def _read_variances(path: Path) -> tuple[npt.NDArray[np.float32], int, int]:
+def _read_variances(
+    path: Path, *, allow_finite_negative: bool = False
+) -> tuple[npt.NDArray[np.float32], int, int]:
     values, codebooks, streams, densities, widths = _pstrainc.read_gau(str(path))
     if streams != 1 or widths != [BW_FEATURE_LENGTH] or codebooks < 1 or densities < 1:
         raise ValueError(
@@ -22,7 +24,9 @@ def _read_variances(path: Path) -> tuple[npt.NDArray[np.float32], int, int]:
             f"Gaussians; {path} has {codebooks} codebooks, {streams} streams, "
             f"{densities} densities and widths {widths}"
         )
-    if not np.isfinite(values).all() or np.any(values < 0):
+    if not np.isfinite(values).all():
+        raise ValueError(f"Variances must be finite before regularization: {path}")
+    if not allow_finite_negative and np.any(values < 0):
         raise ValueError(f"Variances must be finite and nonnegative before regularization: {path}")
     return values, codebooks, densities
 
@@ -60,7 +64,12 @@ class VarianceFloor:
 
     def apply(self, candidate_path: Path) -> int:
         """Validate and bound a staged variance file; return changed coordinate count."""
-        values, codebooks, _ = _read_variances(candidate_path)
+        # Native single-precision normalization can produce tiny negative
+        # second-moment residuals through cancellation. They are precisely
+        # values this explicit floor can safely replace; NaN and infinities
+        # remain fatal. Where the reference is zero the replacement is zero,
+        # which evaluation floors like any other stored variance.
+        values, codebooks, _ = _read_variances(candidate_path, allow_finite_negative=True)
         if codebooks != self.lower_bound.shape[0]:
             raise ValueError(
                 "Variance floor reference and candidate must have matching codebook counts"

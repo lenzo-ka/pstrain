@@ -5,6 +5,13 @@ the version in `pyproject.toml` is authoritative.
 
 ## Unreleased
 
+### Fixes
+
+- Training with `training.split_variance_floor_fraction` above zero no longer
+  aborts when normalization leaves small negative variances in sparsely observed
+  split densities. The bound now replaces them, storing zero where the reference
+  variance is zero. Variances that are NaN or infinite still stop training.
+
 ## 0.4.0 - 2026-09-13
 
 ### Upgrading from 0.3.0
