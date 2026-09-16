@@ -69,8 +69,8 @@ def test_raw_floor_persists_all_densities_and_keeps_zero_reference_unobserved(
 
 
 @requires_c_library
-@pytest.mark.parametrize("invalid", [-1.0, float("nan"), float("inf")])
-def test_invalid_candidate_is_rejected_before_maximum(tmp_path: Path, invalid: float) -> None:
+@pytest.mark.parametrize("invalid", [float("nan"), float("inf"), -float("inf")])
+def test_nonfinite_candidate_is_rejected_before_maximum(tmp_path: Path, invalid: float) -> None:
     reference = _write(tmp_path / "reference", _variances())
     candidate = _write(tmp_path / "candidate", _variances(densities=2))
     floor = load_variance_floor(reference, 0.25, candidate)
@@ -79,9 +79,28 @@ def test_invalid_candidate_is_rejected_before_maximum(tmp_path: Path, invalid: f
     bad[0, 0, 0, 0] = invalid
     _write(candidate, bad)
     before = candidate.read_bytes()
-    with pytest.raises(ValueError, match="finite and nonnegative"):
+    with pytest.raises(ValueError, match="must be finite"):
         floor.apply(candidate)
     assert candidate.read_bytes() == before
+
+
+@requires_c_library
+def test_finite_negative_candidate_is_replaced_by_floor(tmp_path: Path) -> None:
+    reference_values = _variances()
+    reference_values[1] = 0
+    reference = _write(tmp_path / "reference", reference_values)
+    candidate = _write(tmp_path / "candidate", _variances(densities=2))
+    floor = load_variance_floor(reference, 0.25, candidate)
+    assert floor is not None
+    values = _variances(densities=2)
+    values[0, 0, 0, 0] = -np.float32(2**-11)
+    values[1, 0, 1, 1] = -np.float32(2**-20)
+    _write(candidate, values)
+
+    assert floor.apply(candidate) == 2
+    stored = _pstrainc.read_gau(str(candidate))[0]
+    assert stored[0, 0, 0, 0] == np.float32(0.25)
+    assert stored[1, 0, 1, 1] == np.float32(0)
 
 
 @requires_c_library

@@ -270,8 +270,13 @@ splits retain that same reference instead of ratcheting against their parent.
 For each codebook and feature coordinate, the lower bound is the selected fraction
 of its matching one-Gaussian reference variance, broadcast across all densities.
 Reference zeros contribute a zero bound; the mechanism does not invent observations
-or guarantee a positive variance for unobserved coordinates. Both reference and
-candidate values must be finite and nonnegative before applying the bound. The
+or guarantee a positive variance for unobserved coordinates. Reference values must
+be finite and nonnegative. Candidate values must be finite, but may be negative:
+single-precision normalization can leave small negative second-moment residuals in
+sparsely observed split densities, and the bound replaces them. Where the reference
+is zero, such a residual is stored as zero. Stored variances are unfloored
+normalization output either way; training and `HMM.load` apply their own evaluation
+floor before scoring, so a stored zero is never evaluated as zero. The
 current native front end supports one stream of 39 features; incompatible shapes
 are rejected rather than reshaped.
 
