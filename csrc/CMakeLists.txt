@@ -36,7 +36,6 @@ set(LIB_SRCS
   libs/libsphinxbase/util/err.c
   libs/libsphinxbase/util/glist.c
   libs/libsphinxbase/util/dtoa.c
-  libs/libsphinxbase/util/bitarr.c
   libs/libsphinxbase/util/profile.c
   libs/libsphinxbase/util/bio.c
   libs/libsphinxbase/util/filename.c
