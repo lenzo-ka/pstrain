@@ -5,12 +5,22 @@ the version in `pyproject.toml` is authoritative.
 
 ## Unreleased
 
+## 0.4.1 - 2026-09-16
+
 ### Fixes
 
 - Training with `training.split_variance_floor_fraction` above zero no longer
   aborts when normalization leaves small negative variances in sparsely observed
   split densities. The bound now replaces them, storing zero where the reference
   variance is zero. Variances that are NaN or infinite still stop training.
+
+### Changes
+
+- Documentation is published at https://lenzo-ka.github.io/pstrain/ from each
+  release, so it matches the installed version. Working plans and progress notes
+  remain in the repository but are not part of the published site.
+- Removed an unused copy of the sphinxbase bit array from the native library.
+  Language model reading is unchanged; it uses PocketSphinx's own implementation.
 
 ## 0.4.0 - 2026-09-13
 
