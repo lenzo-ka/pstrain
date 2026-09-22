@@ -15,7 +15,11 @@ from typing import Literal
 
 from pstrain.lib.alignment.core import DEFAULT_BEAM, DEFAULT_RETRY_BEAM_FACTOR, AlignmentResult
 from pstrain.lib.alignment.native import Aligner
-from pstrain.lib.lexicon_check import UnsupportedPhoneReport, check_model_lexicon
+from pstrain.lib.lexicon_check import (
+    UnsupportedPhoneReport,
+    base_word,
+    check_model_lexicon,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,13 +86,46 @@ def collect_phone_report(
         The collected report, or ``None`` when the model definition or a
         dictionary could not be read. An unreadable input is the aligner's
         problem to report, not this check's: it must never be the reason a
-        corpus pass does not start.
+        corpus pass does not start. Skipping is said out loud, because a
+        silent skip turns the whole check off with no trace.
     """
     try:
         return check_model_lexicon(model_dir, dict_path, filler_dict)
     except (OSError, ValueError) as exc:
-        logger.debug("Skipping the model phone-inventory check: %s", exc)
+        logger.warning(
+            "Not checking the dictionary against the model's phone inventory: %s. "
+            "Pronunciations using phones the model does not define will not be "
+            "reported before the run.",
+            exc,
+        )
         return None
+
+
+def explain_init_failure(
+    message: str,
+    phone_report: UnsupportedPhoneReport | None,
+) -> str:
+    """Name the phone inventory as the cause when the aligner will not start.
+
+    The alignment loader ends the process rather than load a surviving
+    ``word(2)`` whose unsuffixed base was dropped. Every utterance then fails
+    with the same opaque init error, including utterances that never use the
+    word, so this is the failure that most needs the diagnosis.
+
+    Args:
+        message: The native initialization failure message.
+        phone_report: Report collected before the run, if any.
+
+    Returns:
+        The message, with the phone-inventory cause appended when one applies.
+    """
+    if phone_report is None or not phone_report.fatal_words:
+        return message
+    causes = _name_causes(sorted(phone_report.fatal_words), phone_report)
+    return (
+        f"{message} [the aligner refuses to start because the unsuffixed "
+        f"pronunciation was dropped while an alternative survived for: {causes}]"
+    )
 
 
 def explain_failure(
@@ -113,19 +150,25 @@ def explain_failure(
     if phone_report is None or not phone_report.unresolvable_words:
         return message
 
-    missing_by_word = {entry.word: entry.missing for entry in phone_report.entries}
-    causes = []
-    for token in dict.fromkeys(transcript.split()):
-        if token in phone_report.unresolvable_words:
-            phones = missing_by_word.get(token, ())
-            detail = f" ({', '.join(phones)})" if phones else ""
-            causes.append(f"{token}{detail}")
-    if not causes:
+    unresolvable = phone_report.unresolvable_words
+    tokens = [base_word(token) for token in dict.fromkeys(transcript.split())]
+    affected = [token for token in dict.fromkeys(tokens) if token in unresolvable]
+    if not affected:
         return message
     return (
         f"{message} [no pronunciation survived the model's phone inventory for: "
-        f"{'; '.join(causes)}]"
+        f"{_name_causes(affected, phone_report)}]"
     )
+
+
+def _name_causes(words: list[str], phone_report: UnsupportedPhoneReport) -> str:
+    """Name each word with every phone its dropped pronunciations needed."""
+    named = []
+    for word in words:
+        phones = phone_report.missing_by_base.get(word, ())
+        detail = f" ({', '.join(phones)})" if phones else ""
+        named.append(f"{word}{detail}")
+    return "; ".join(named)
 
 
 def align_corpus(
@@ -213,9 +256,10 @@ def align_corpus(
             verbatim_tokens=verbatim_tokens,
         )
     except (FileNotFoundError, RuntimeError) as e:
-        logger.error("Failed to initialize aligner: %s", e)
+        init_error = explain_init_failure(f"Aligner init failed: {e}", phone_report)
+        logger.error("%s", init_error)
         for utt_id in transcripts:
-            errors[utt_id] = f"Aligner init failed: {e}"
+            errors[utt_id] = init_error
         return AlignmentJob(
             model_dir=model_dir,
             n_utterances=total,

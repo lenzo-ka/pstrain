@@ -582,6 +582,52 @@ class TestAlignCorpus:
         assert "phone inventory" in job.errors["bad"]
         assert "boeuf (OE)" in job.errors["bad"]
 
+    def test_dropped_base_with_surviving_variant_fails_the_whole_run(self, tmp_path: Path) -> None:
+        # The aligner ends the process rather than load "boeuf(2)" with its
+        # base absent, so utterances that never use the word fail too. The
+        # report has to say that, and the failures have to carry the cause.
+        model = _alignment_model(tmp_path)
+        dict_path = tmp_path / "dictionary.dict"
+        source = (_FIXTURES / "mini_arctic" / "dictionary.dict").read_text()
+        dict_path.write_text(f"{source}boeuf B OE F\nboeuf(2) B AH F\n")
+        audio_dir = tmp_path / "audio"
+        audio_dir.mkdir()
+        shutil.copy(
+            _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
+            audio_dir / "unrelated.wav",
+        )
+
+        job = align_corpus(
+            transcripts={"unrelated": f"<s> {_ALIGNMENT_TRANSCRIPT} </s>"},
+            audio_dir=audio_dir,
+            model_dir=model,
+            dict_path=dict_path,
+            filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
+        )
+
+        # The aligner ended the native helper along with itself. Start a fresh
+        # one here, on this module's own import route, before asserting: a
+        # later test that had to spawn one from inside a CLI command would
+        # trip the CLI-to-library boundary guard, because multiprocessing
+        # imports the helper module to pickle its entry point.
+        with Aligner(
+            model,
+            _FIXTURES / "mini_arctic" / "dictionary.dict",
+            filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
+        ):
+            pass
+
+        assert job.phone_report is not None
+        assert job.phone_report.fatal_words == frozenset({"boeuf"})
+        assert job.phone_report.format().startswith("Alignment will not start")
+
+        # The transcript does not contain "boeuf", and still nothing aligns.
+        assert "boeuf" not in _ALIGNMENT_TRANSCRIPT
+        assert job.n_aligned == 0
+        assert job.n_failed == 1
+        assert "refuses to start" in job.errors["unrelated"]
+        assert "boeuf (OE)" in job.errors["unrelated"]
+
     def test_cli_prints_the_collected_phone_report(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:

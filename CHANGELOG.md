@@ -14,6 +14,15 @@ the version in `pyproject.toml` is authoritative.
   the words surfaced much later as alignment failures that read like an
   out-of-vocabulary problem. Such a failure now says which word lost its
   pronunciation and which phone was missing.
+- The report distinguishes the case that stops alignment outright. When a
+  word's unsuffixed pronunciation is dropped and an alternative survives, the
+  aligner refuses to start and no utterance aligns, including utterances that
+  never use that word. The report says so before the run and names the word,
+  and the resulting failures carry the reason instead of an opaque
+  initialization error. Training does not share that rule, and the report
+  says which outcome applies.
+- A dictionary or model the check cannot read no longer turns the check off
+  silently; the reason is reported.
 - `pstrain validate` and the input validation run by `pstrain train` name the
   affected words and their pronunciations when the dictionary uses phones
   outside the phoneset, rather than counting the phones alone.

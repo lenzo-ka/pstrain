@@ -2,17 +2,23 @@
 
 from __future__ import annotations
 
+import logging
 import shutil
 from pathlib import Path
 
 import pytest
 
-from pstrain.lib.alignment.batch import collect_phone_report, explain_failure
+from pstrain.lib.alignment.batch import (
+    collect_phone_report,
+    explain_failure,
+    explain_init_failure,
+)
 from pstrain.lib.dictionary import Dictionary
 from pstrain.lib.lexicon_check import (
     check_lexicon_phones,
     check_model_lexicon,
     describe_unsupported,
+    read_pronunciations,
     unsupported_pronunciations,
 )
 from pstrain.lib.model import read_ci_phones
@@ -66,6 +72,33 @@ class TestReadCiPhones:
         with pytest.raises(ValueError, match="holds 1 model records"):
             read_ci_phones(mdef)
 
+    def test_an_empty_inventory_is_rejected(self, tmp_path: Path) -> None:
+        # An empty inventory would report every phone in use as undefined.
+        mdef = tmp_path / "mdef"
+        mdef.write_text("0.3\n0 n_base\n0 n_tri\n")
+        with pytest.raises(ValueError, match="declares no base phones"):
+            read_ci_phones(mdef)
+
+
+class TestReadPronunciations:
+    """The file's own spelling of each word is what the native loaders key on."""
+
+    def test_variant_suffixes_are_kept_as_written(self, tmp_path: Path) -> None:
+        # Dictionary renumbers these by order of appearance; this must not.
+        path = tmp_path / "d.dict"
+        path.write_text("boeuf(2) B OE F\nboeuf B AH F\n", encoding="utf-8")
+
+        assert read_pronunciations(path) == [
+            ("boeuf(2)", ("B", "OE", "F")),
+            ("boeuf", ("B", "AH", "F")),
+        ]
+
+    def test_blank_comment_and_pronunciationless_lines_are_skipped(self, tmp_path: Path) -> None:
+        path = tmp_path / "d.dict"
+        path.write_text("\n# a comment\nlonely\ngood B AH F # trailing\n", encoding="utf-8")
+
+        assert read_pronunciations(path) == [("good", ("B", "AH", "F"))]
+
 
 class TestUnsupportedPronunciations:
     """Offending words are named, not just their phones."""
@@ -88,7 +121,7 @@ class TestUnsupportedPronunciations:
         assert entry.word == "boeuf"
         assert entry.phones == ("B", "OE", "F")
         assert entry.missing == ("OE",)
-        assert entry.source == "dictionary.dict"
+        assert entry.source == "dictionary"
 
     def test_report_text_names_word_phones_and_inventory(self, tmp_path: Path) -> None:
         dict_path = _dictionary_with(tmp_path, "boeuf B OE F\noeil OE Y2\n")
@@ -116,14 +149,79 @@ class TestUnsupportedPronunciations:
         report = check_model_lexicon(_MODEL, _DICT, filler)
 
         assert report.words == ("<cough>",)
-        assert report.entries[0].source == "filler.dict"
+        assert report.entries[0].source == "filler dictionary"
 
-    def test_a_word_keeping_a_supported_variant_is_not_unresolvable(self, tmp_path: Path) -> None:
-        dict_path = _dictionary_with(tmp_path, "bear(2) B EH2 R\nboeuf B OE F\n")
+    def test_dictionaries_sharing_a_basename_are_both_reported(self, tmp_path: Path) -> None:
+        # Keyed by basename, the second would have replaced the first.
+        main_dir = tmp_path / "main"
+        filler_dir = tmp_path / "filler"
+        main_dir.mkdir()
+        filler_dir.mkdir()
+        (main_dir / "shared.dict").write_text("boeuf B OE F\n", encoding="utf-8")
+        (filler_dir / "shared.dict").write_text("<cough> KQ\n", encoding="utf-8")
+
+        report = check_model_lexicon(_MODEL, main_dir / "shared.dict", filler_dir / "shared.dict")
+
+        assert report.words == ("<cough>", "boeuf")
+        assert {entry.source for entry in report.entries} == {
+            "dictionary",
+            "filler dictionary",
+        }
+
+    def test_a_dropped_alternative_leaves_the_word_usable(self, tmp_path: Path) -> None:
+        # The fixture supplies an unsuffixed "bear"; only the alternative goes.
+        dict_path = _dictionary_with(tmp_path, "bear(2) B EH2 R\n")
         report = check_model_lexicon(_MODEL, dict_path)
 
-        assert "bear(2)" in report.words
-        assert report.unresolvable_words == frozenset({"boeuf"})
+        assert report.words == ("bear(2)",)
+        assert report.unresolvable_words == frozenset()
+        assert report.fatal_words == frozenset()
+        assert "still resolve" in report.format()
+
+    def test_a_dropped_base_with_a_surviving_alternative_stops_the_run(
+        self, tmp_path: Path
+    ) -> None:
+        # The aligner refuses to add "boeuf(2)" when "boeuf" is absent, and
+        # ends the process: this is a whole-run failure, not a per-word one.
+        dict_path = _dictionary_with(tmp_path, "boeuf B OE F\nboeuf(2) B AH F\n")
+        report = check_model_lexicon(_MODEL, dict_path)
+
+        assert report.fatal_words == frozenset({"boeuf"})
+        assert report.unresolvable_words == frozenset()
+
+        text = report.format()
+        assert text.startswith("Alignment will not start")
+        # The paragraphs are wrapped, so compare against unwrapped text.
+        prose = " ".join(text.split())
+        assert "no utterance aligns" in prose
+        assert "including every utterance that does not use these words" in prose
+        assert "Training does not share this rule" in prose
+
+    def test_an_alternative_written_before_its_base_is_not_fatal(self, tmp_path: Path) -> None:
+        # The native loader keys on the spelling in the file, and adds the
+        # unsuffixed "boeuf" whatever its line order, so nothing is orphaned.
+        # A check built on Dictionary keys would renumber these and call it
+        # fatal; this is the guard against that.
+        dict_path = _dictionary_with(tmp_path, "boeuf(2) B OE F\nboeuf B AH F\n")
+        report = check_model_lexicon(_MODEL, dict_path)
+
+        assert report.words == ("boeuf(2)",)
+        assert report.fatal_words == frozenset()
+        assert report.unresolvable_words == frozenset()
+
+    def test_missing_phones_are_gathered_across_a_word_s_variants(self, tmp_path: Path) -> None:
+        dict_path = _dictionary_with(tmp_path, "chien SH Y2\nchien(2) SH OE\n")
+        report = check_model_lexicon(_MODEL, dict_path)
+
+        assert report.missing_by_base["chien"] == ("OE", "Y2")
+
+    def test_a_word_with_no_pronunciation_does_not_disable_the_check(self, tmp_path: Path) -> None:
+        # The native loader ignores such a line; so must this, or one sloppy
+        # line silently turns the whole check off.
+        dict_path = _dictionary_with(tmp_path, "orphanword\nboeuf B OE F\n")
+        report = check_model_lexicon(_MODEL, dict_path)
+
+        assert report.words == ("boeuf",)
 
     def test_describe_unsupported_names_words_on_one_line(self) -> None:
         phoneset = Phoneset({"B", "F"})
@@ -159,6 +257,37 @@ class TestAlignmentPathReporting:
 
     def test_collect_phone_report_survives_an_unreadable_model(self, tmp_path: Path) -> None:
         assert collect_phone_report(tmp_path / "absent-model", _DICT) is None
+
+    def test_a_skipped_check_says_so(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Silently skipping turns the whole feature off with no trace.
+        model = tmp_path / "model"
+        model.mkdir()
+        (model / "mdef").write_text("0.2\n1 n_base\n", encoding="utf-8")
+
+        with caplog.at_level(logging.WARNING):
+            assert collect_phone_report(model, _DICT) is None
+
+        assert "Not checking the dictionary" in caplog.text
+        assert "0.2" in caplog.text
+
+    def test_init_failure_names_the_word_that_stopped_the_run(self, tmp_path: Path) -> None:
+        dict_path = _dictionary_with(tmp_path, "boeuf B OE F\nboeuf(2) B AH F\n")
+        report = collect_phone_report(_MODEL, dict_path)
+        assert report is not None
+
+        explained = explain_init_failure("Aligner init failed: boom", report)
+        assert explained.startswith("Aligner init failed: boom")
+        assert "refuses to start" in explained
+        assert "boeuf (OE)" in explained
+
+    def test_init_failures_with_no_fatal_word_are_left_alone(self, tmp_path: Path) -> None:
+        dict_path = _dictionary_with(tmp_path, "boeuf B OE F\n")
+        report = collect_phone_report(_MODEL, dict_path)
+
+        assert explain_init_failure("model file missing", report) == "model file missing"
+        assert explain_init_failure("model file missing", None) == "model file missing"
 
     def test_failure_message_names_the_phone_inventory_cause(self, tmp_path: Path) -> None:
         dict_path = _dictionary_with(tmp_path, "boeuf B OE F\n")

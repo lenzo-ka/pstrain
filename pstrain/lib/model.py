@@ -359,6 +359,10 @@ def read_ci_phones(mdef_path: str | Path) -> list[str]:
         break
     if n_base is None:
         raise ValueError(f"Model definition {path} has no n_base declaration")
+    if n_base < 1:
+        # An empty inventory would make every phone look undefined, which is
+        # a louder and more misleading answer than refusing the file.
+        raise ValueError(f"Model definition {path} declares no base phones")
 
     records = lines[first_record:]
     if len(records) < n_base:
