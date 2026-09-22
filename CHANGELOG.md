@@ -19,9 +19,13 @@ the version in `pyproject.toml` is authoritative.
   no beam can recover such an utterance. The minimum is measured on the graph
   the engine actually built, so it is exact for that model and dictionary.
 - Every Baum-Welch pass now reports how many utterances the wider-beam retry was
-  spent on and how many it recovered, and the same pair appears in the stage
-  omission summary and in the training telemetry. Nothing about when the retry
-  runs has changed; it simply says what it bought.
+  spent on and how many it recovered, and the training telemetry records the same
+  pair per pass. The stage summary totals the second forward passes across every
+  pass, so an utterance retried on three passes counts three times there.
+  Nothing about when the retry runs has changed; it simply says what it bought.
+- With `failed_alignment` set to `omit`, an utterance dropped for the same reason
+  on later passes is now reported once for the stage rather than once per pass.
+  The stage omission summary still lists every pass it was dropped on.
 
 ## 0.4.1 - 2026-09-16
 

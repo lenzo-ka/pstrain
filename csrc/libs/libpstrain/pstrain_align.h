@@ -140,7 +140,9 @@ pstrain_align_mfc_file(pstrain_align_context_t *ctx,
  * cannot recover it.
  *
  * @param ctx Context.
- * @param transcript Reference transcript (sphinx <s>/</s> markers tolerated).
+ * @param transcript Reference transcript. The sentence HMM built here is the
+ *        one pstrain_align_mfcc() would build for the same string, so the
+ *        measurement always describes the graph that was actually searched.
  * @param out_min_frames Out: the minimum frame count.
  * @return 0 on success, negative on failure.
  */

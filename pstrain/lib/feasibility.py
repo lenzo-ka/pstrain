@@ -8,9 +8,8 @@ than the shortest path through its HMM cannot reach the final state at any beam
 width. That condition is arithmetic, it can be decided exactly from the graph
 the engine already built, and no retry can recover it.
 
-A large multi-locale alignment audit found this family to be a substantial share
-of real final-state failures, which is why the engines name it instead of
-reporting only the generic message.
+So the engines name it rather than reporting only the generic message, and skip
+the wider-beam retry, which by construction cannot change the outcome.
 """
 
 from __future__ import annotations

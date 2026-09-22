@@ -232,6 +232,7 @@ def _write_shard_metadata(
         "assigned_ids": list(result.assigned_ids),
         "processed_ids": list(result.processed_ids),
         "retried_ids": list(result.retried_ids),
+        "retry_attempts": result.retry_attempts,
         "skipped": [list(item) for item in result.skipped],
         "accepted_exceptions": [list(item) for item in result.accepted_exceptions],
         "payload_sha256": _sha256_files(payload_files),
@@ -675,13 +676,16 @@ def _report_skip_summary(
     ``retry_yield`` is the stage total ``(attempted, recovered)`` for the
     wider-beam final-state retry. It is printed alongside the omissions so a
     reader can see what the second forward pass bought without instrumenting
-    the run.
+    the run. Both numbers count second forward passes, not distinct
+    utterances: one utterance retried on three passes contributes three, which
+    is the right unit for a cost the stage pays once per pass. The line says so
+    rather than leaving the reader to infer it.
     """
     for (fileid, reason), passes in omitted_passes.items():
         print(f"omitted\t{fileid}\t{reason}\tpasses {_pass_ranges(passes)}")
     if retry_yield is not None and retry_yield[0]:
         attempted, recovered = retry_yield
-        print(f"retry\tattempted {attempted}\trecovered {recovered}")
+        print(f"retry\tsecond-pass attempts {attempted}\trecovered {recovered}")
 
 
 def _report_retry_yield(iteration: int, attempted: int, recovered: int) -> None:
@@ -1536,6 +1540,7 @@ def run_bw_training(
             ):
                 if total_skipped or total_retry_attempts:
                     _report_skip_summary(omitted_passes, retry_yield)
+                if total_skipped:
                     logger.warning(
                         "WARNING: BW training skipped %d utterance updates in total",
                         total_skipped,

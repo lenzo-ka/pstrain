@@ -270,8 +270,16 @@ class Aligner:
     def _mfc_frame_count(self, mfc_path: Path) -> int:
         """Frame count from a Sphinx ``.mfc`` header, without reading the data."""
         with mfc_path.open("rb") as stream:
-            n_floats = struct.unpack("<i", stream.read(4))[0]
-        return int(n_floats) // self._ceplen
+            n_floats = int(struct.unpack("<i", stream.read(4))[0])
+        if n_floats < 0 or n_floats % self._ceplen:
+            # Flooring a partial frame would put a made-up number into a
+            # diagnosis. Refuse to guess; the caller falls back to the
+            # engine's own final-state message.
+            raise ValueError(
+                f"{mfc_path}: header declares {n_floats} floats, "
+                f"not a multiple of ceplen={self._ceplen}"
+            )
+        return n_floats // self._ceplen
 
     @staticmethod
     def _infeasible_message(utterance_id: str, shortfall: tuple[int, int]) -> str:
@@ -279,6 +287,23 @@ class Aligner:
             infeasible_frames_message(utterance_id, *shortfall)
             + "; no wider beam can change that, so the retry was skipped"
         )
+
+    def _infeasible_frames_for_mfc(
+        self, rc: int, transcript: str, mfc_path: Path
+    ) -> tuple[int, int] | None:
+        """``_infeasible_frames`` for a cepstrum file, reading its header lazily.
+
+        The header is only consulted on a final-state failure, and a header this
+        cannot trust yields no diagnosis at all rather than a guessed one: the
+        caller then reports the engine's own message.
+        """
+        if rc != -3:
+            return None
+        try:
+            frames = self._mfc_frame_count(mfc_path)
+        except (OSError, ValueError, struct.error):
+            return None
+        return self._infeasible_frames(rc, transcript, frames)
 
     def _infeasible_frames(self, rc: int, transcript: str, n_frames: int) -> tuple[int, int] | None:
         """Return ``(minimum, available)`` when no beam width could have worked.
@@ -429,7 +454,7 @@ class Aligner:
                 out_pp,
             )
         )
-        shortfall = self._infeasible_frames(rc, transcript, self._mfc_frame_count(mfc_path))
+        shortfall = self._infeasible_frames_for_mfc(rc, transcript, mfc_path)
         if shortfall is not None:
             self._last_alignment_retried = False
             raise RuntimeError(self._infeasible_message(utt_id, shortfall))

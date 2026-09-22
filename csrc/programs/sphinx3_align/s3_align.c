@@ -772,8 +772,13 @@ destroy_state_dag(void)
         }
     }
 
+    /* Null them as well as free them: align_min_emitting_states() treats a
+     * non-empty shead.succlist as "a sentence HMM is built", and a dangling
+     * one would send it walking freed links. */
     slinks_free(shead.succlist);
+    shead.succlist = NULL;
     slinks_free(stail.predlist);
+    stail.predlist = NULL;
 }
 
 

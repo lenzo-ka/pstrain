@@ -873,7 +873,7 @@ def test_widened_beam_retry_reports_what_it_bought(
     assert result.final_utts == 1
 
     assert "iteration 1 widened the beam on 1 utterance(s) and recovered 1" in caplog.text
-    assert "retry\tattempted 1\trecovered 1" in capsys.readouterr().out
+    assert "retry\tsecond-pass attempts 1\trecovered 1" in capsys.readouterr().out
     row = json.loads((output / "bw_telemetry.json").read_text())["passes"][-1]
     assert row["accounting"]["retry_attempted_utts"] == 1
     assert row["accounting"]["retry_recovered_utts"] == 1
@@ -903,12 +903,12 @@ def test_retry_yield_reports_attempts_that_recovered_nothing(
     )
     assert "iteration 1 widened the beam on 3 utterance(s) and recovered 0" in caplog.text
     # Below the skip limit, so no summary is printed; the per-pass line stands alone.
-    assert "retry\tattempted" not in capsys.readouterr().out
+    assert "retry\tsecond-pass attempts" not in capsys.readouterr().out
 
     from pstrain.lib.steps.train import _report_skip_summary
 
     _report_skip_summary(omissions, (3, 0))
-    assert "retry\tattempted 3\trecovered 0" in capsys.readouterr().out
+    assert "retry\tsecond-pass attempts 3\trecovered 0" in capsys.readouterr().out
 
 
 def test_retry_yield_is_silent_when_the_retry_never_ran(
@@ -930,3 +930,128 @@ def test_retry_yield_is_silent_when_the_retry_never_ran(
     _report_skip_summary({}, (0, 0))
     assert "widened the beam" not in caplog.text
     assert capsys.readouterr().out == ""
+
+
+@requires_c_library
+def test_converged_clean_run_does_not_claim_skips_it_did_not_have(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Printing the retry summary must not drag the skip warning along with it.
+
+    The converged tail prints both the stage omission summary and the total-skip
+    warning. Admitting the retry summary when nothing was skipped widened the
+    guard around both, so a clean run that used the retry announced skips it
+    never had.
+    """
+    from pstrain.lib.bw import BWConfig
+    from pstrain.lib.pipeline import PipelineContext
+    from pstrain.lib.pipeline.tasks import build_pipeline
+    from pstrain.lib.setup import setup_project
+    from pstrain.lib.steps.train import run_bw_training
+
+    project = tmp_path / "project"
+    setup_project(
+        project,
+        transcription_path=FIXTURE / "transcription.txt",
+        audio_path=FIXTURE / "wav",
+        dictionary_path=FIXTURE / "dictionary.dict",
+        phoneset_path=FIXTURE / "phoneset.txt",
+        filler_dict_path=FIXTURE / "filler.dict",
+    )
+    context = PipelineContext.from_config(project)
+    assert build_pipeline(context).run("flat", jobs=1) == 0
+
+    fileids = context.etc_dir / "converged.fileids"
+    transcription = context.etc_dir / "converged.transcription"
+    fileids.write_text("arctic_a0001\n")
+    transcription.write_text("arctic_a0001 author of the danger trail philip steels etc\n")
+
+    caplog.set_level(logging.WARNING, logger="pstrain.lib.steps.train")
+    result = run_bw_training(
+        model_dir=context.model_dir("flat"),
+        output_dir=tmp_path / "converged",
+        features_dir=context.features_dir,
+        train_fileids=fileids,
+        transcription=transcription,
+        dictionary=context.shared_dir / "dictionary.dict",
+        filler_dict=context.filler_dict,
+        first_pass_2passvar=True,
+        n_iter=4,
+        # A tight beam so every pass pays for the retry, and a threshold wide
+        # enough that the run converges and leaves through the converged tail.
+        config=BWConfig(pass2var=True, unobserved_gaussian_policy="zero", a_beam=1e-1),
+        retry_beam_factor=1e199,
+        convergence_ratio=1e6,
+    )
+    assert result.converged
+    assert result.total_skipped == 0
+
+    # The retry summary is still printed, because the retry did run.
+    assert "retry\tsecond-pass attempts" in capsys.readouterr().out
+    assert "widened the beam" in caplog.text
+    # But nothing was skipped, so nothing claims otherwise.
+    assert "skipped" not in caplog.text
+
+
+@requires_c_library
+def test_sharded_retry_attempts_are_summed_across_shards(tmp_path: Path) -> None:
+    """The merge path must carry the counter, not just the serial path.
+
+    ``multipron`` with one shard runs in this process; more than one shard goes
+    through ``_ShardResult`` and a pool merge, which is a different accounting
+    route for the same number.
+    """
+    import json
+
+    from pstrain.lib.bw import BWConfig
+    from pstrain.lib.pipeline import PipelineContext
+    from pstrain.lib.pipeline.tasks import build_pipeline
+    from pstrain.lib.setup import setup_project
+    from pstrain.lib.steps.train import run_bw_training
+
+    project = tmp_path / "project"
+    setup_project(
+        project,
+        transcription_path=FIXTURE / "transcription.txt",
+        audio_path=FIXTURE / "wav",
+        dictionary_path=FIXTURE / "dictionary.dict",
+        phoneset_path=FIXTURE / "phoneset.txt",
+        filler_dict_path=FIXTURE / "filler.dict",
+    )
+    context = PipelineContext.from_config(project)
+    assert build_pipeline(context).run("flat", jobs=1) == 0
+
+    text = "author of the danger trail philip steels etc"
+    fileids = context.etc_dir / "sharded.fileids"
+    transcription = context.etc_dir / "sharded.transcription"
+    ids = ["arctic_a0001", "arctic_a0002"]
+    fileids.write_text("".join(f"{fileid}\n" for fileid in ids))
+    transcription.write_text("".join(f"{fileid} {text}\n" for fileid in ids))
+
+    output = tmp_path / "sharded"
+    result = run_bw_training(
+        model_dir=context.model_dir("flat"),
+        output_dir=output,
+        features_dir=context.features_dir,
+        train_fileids=fileids,
+        transcription=transcription,
+        dictionary=context.shared_dir / "dictionary.dict",
+        filler_dict=context.filler_dict,
+        first_pass_2passvar=True,
+        n_iter=1,
+        config=BWConfig(pass2var=True, unobserved_gaussian_policy="zero", a_beam=1e-1),
+        retry_beam_factor=1e199,
+        n_shards=2,
+    )
+    assert result.final_utts == len(ids)
+
+    row = json.loads((output / "bw_telemetry.json").read_text())["passes"][-1]
+    assert row["accounting"]["retry_attempted_utts"] == len(ids)
+    assert row["accounting"]["retry_recovered_utts"] == len(ids)
+
+    # Each shard's own artifact records its share, and the shares add up.
+    artifacts = sorted((output / ".bw-accum" / "pass-01").glob("shard-*/artifact.json"))
+    assert len(artifacts) == 2
+    per_shard = [json.loads(path.read_text())["retry_attempts"] for path in artifacts]
+    assert sum(per_shard) == len(ids)
+    assert per_shard == [1, 1]
