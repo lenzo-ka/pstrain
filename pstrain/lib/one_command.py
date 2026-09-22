@@ -14,6 +14,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path, PurePosixPath
 
 from pstrain.lib.dictionary import Dictionary
+from pstrain.lib.lexicon_check import describe_unsupported, unsupported_pronunciations
 from pstrain.lib.phoneset import Phoneset
 
 PROMPT_FORMATS = ("auto", "leading-id", "sphinx", "tsv", "csv", "festival")
@@ -256,11 +257,10 @@ def validate_inputs(
         for label, lexicon in (("dictionary", dictionary), ("filler dictionary", filler)):
             if lexicon is None:
                 continue
-            valid_phones, missing_phones = phoneset.validate_dictionary(lexicon)
-            if not valid_phones:
+            unsupported = unsupported_pronunciations(phoneset, lexicon, label)
+            if unsupported:
                 report.errors.append(
-                    f"Phones outside phoneset in {label}: {len(missing_phones)} "
-                    f"(e.g. {sorted(missing_phones)[0]})"
+                    f"Phones outside phoneset in {label}: {describe_unsupported(unsupported)}"
                 )
     dictionary_words = dictionary.words()
     words = set(dictionary_words)

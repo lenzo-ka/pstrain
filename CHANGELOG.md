@@ -5,6 +5,22 @@ the version in `pyproject.toml` is authoritative.
 
 ## Unreleased
 
+### Changes
+
+- `pstrain align` now checks the pronunciation dictionary against the phone
+  inventory the model was trained on, and prints one collected report before
+  the run naming every word whose pronunciation uses a phone the model does
+  not define. Those pronunciations were already being dropped silently, so
+  the words surfaced much later as alignment failures that read like an
+  out-of-vocabulary problem. Such a failure now says which word lost its
+  pronunciation and which phone was missing.
+- `pstrain validate` and the input validation run by `pstrain train` name the
+  affected words and their pronunciations when the dictionary uses phones
+  outside the phoneset, rather than counting the phones alone.
+- The native lexicon loader states how many pronunciations it dropped for
+  undefined phones, so its end-of-load summary no longer reports only the
+  entries that loaded.
+
 ## 0.4.1 - 2026-09-16
 
 ### Fixes

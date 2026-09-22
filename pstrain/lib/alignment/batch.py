@@ -15,6 +15,7 @@ from typing import Literal
 
 from pstrain.lib.alignment.core import DEFAULT_BEAM, DEFAULT_RETRY_BEAM_FACTOR, AlignmentResult
 from pstrain.lib.alignment.native import Aligner
+from pstrain.lib.lexicon_check import UnsupportedPhoneReport, check_model_lexicon
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,9 @@ class AlignmentJob:
         results: Dict mapping utterance_id to AlignmentResult
         errors: Dict mapping utterance_id to error message
         timestamp: When the job was run
+        phone_report: Pronunciations the model's phone inventory cannot
+            support, collected before the run. ``None`` when the model
+            definition could not be read.
     """
 
     model_dir: Path
@@ -52,6 +56,7 @@ class AlignmentJob:
     results: dict[str, AlignmentResult] = field(default_factory=dict)
     errors: dict[str, str] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=datetime.now)
+    phone_report: UnsupportedPhoneReport | None = None
 
     @property
     def success_rate(self) -> float:
@@ -59,6 +64,68 @@ class AlignmentJob:
         if self.n_utterances == 0:
             return 0.0
         return self.n_aligned / self.n_utterances
+
+
+def collect_phone_report(
+    model_dir: Path,
+    dict_path: Path,
+    filler_dict: Path | None = None,
+) -> UnsupportedPhoneReport | None:
+    """Collect the pronunciations this model's phone inventory cannot support.
+
+    Args:
+        model_dir: Acoustic model directory.
+        dict_path: Pronunciation dictionary.
+        filler_dict: Filler dictionary. Optional.
+
+    Returns:
+        The collected report, or ``None`` when the model definition or a
+        dictionary could not be read. An unreadable input is the aligner's
+        problem to report, not this check's: it must never be the reason a
+        corpus pass does not start.
+    """
+    try:
+        return check_model_lexicon(model_dir, dict_path, filler_dict)
+    except (OSError, ValueError) as exc:
+        logger.debug("Skipping the model phone-inventory check: %s", exc)
+        return None
+
+
+def explain_failure(
+    message: str,
+    transcript: str,
+    phone_report: UnsupportedPhoneReport | None,
+) -> str:
+    """Name the phone inventory as the cause of a failure when it is the cause.
+
+    A word whose every pronunciation was dropped at load time is missing from
+    the lexicon by the time the aligner looks for it, so the native failure
+    reads as an out-of-vocabulary one. Say what actually happened.
+
+    Args:
+        message: The native failure message.
+        transcript: Transcript of the failed utterance.
+        phone_report: Report collected before the run, if any.
+
+    Returns:
+        The message, with the phone-inventory cause appended when one applies.
+    """
+    if phone_report is None or not phone_report.unresolvable_words:
+        return message
+
+    missing_by_word = {entry.word: entry.missing for entry in phone_report.entries}
+    causes = []
+    for token in dict.fromkeys(transcript.split()):
+        if token in phone_report.unresolvable_words:
+            phones = missing_by_word.get(token, ())
+            detail = f" ({', '.join(phones)})" if phones else ""
+            causes.append(f"{token}{detail}")
+    if not causes:
+        return message
+    return (
+        f"{message} [no pronunciation survived the model's phone inventory for: "
+        f"{'; '.join(causes)}]"
+    )
 
 
 def align_corpus(
@@ -73,6 +140,7 @@ def align_corpus(
     retry_beam_factor: float = DEFAULT_RETRY_BEAM_FACTOR,
     failed_alignment: Literal["recover", "abort", "omit"] = "recover",
     verbatim_tokens: bool = False,
+    phone_report: UnsupportedPhoneReport | None = None,
 ) -> AlignmentJob:
     """Align an entire corpus.
 
@@ -90,6 +158,10 @@ def align_corpus(
         retry_beam_factor: Factor for one wider-beam final-state retry.
         failed_alignment: Whether final-state failures are retried before being recorded.
         verbatim_tokens: Honor explicit pronunciation variants exactly.
+        phone_report: An already-collected report of pronunciations the
+            model cannot support, so a caller that reported it before the
+            run does not pay for the check or report it twice. When
+            omitted, the check runs here and any finding is logged.
 
     Returns:
         :class:`AlignmentJob` with all alignment results.
@@ -108,6 +180,11 @@ def align_corpus(
     n_aligned = 0
     n_failed = 0
 
+    if phone_report is None:
+        phone_report = collect_phone_report(model_dir, dict_path, filler_dict)
+        if phone_report:
+            logger.error("%s", phone_report.format())
+
     total = len(transcripts)
     if total == 0:
         return AlignmentJob(
@@ -117,6 +194,7 @@ def align_corpus(
             n_failed=0,
             results=results,
             errors=errors,
+            phone_report=phone_report,
         )
 
     logger.info("Aligning %d utterances...", total)
@@ -145,6 +223,7 @@ def align_corpus(
             n_failed=total,
             results=results,
             errors=errors,
+            phone_report=phone_report,
         )
 
     try:
@@ -164,7 +243,7 @@ def align_corpus(
                 results[utt_id] = result
                 n_aligned += 1
             except Exception as e:
-                message = _error_message(e)
+                message = explain_failure(_error_message(e), transcript, phone_report)
                 errors[utt_id] = message
                 n_failed += 1
                 logger.warning("Alignment failed for %s: %s", utt_id, message)
@@ -185,6 +264,7 @@ def align_corpus(
         n_failed=n_failed,
         results=results,
         errors=errors,
+        phone_report=phone_report,
     )
 
 

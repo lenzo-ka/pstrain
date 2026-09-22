@@ -551,6 +551,85 @@ class TestAlignCorpus:
         assert job.n_failed == 1
         assert "the(9)" in job.errors["bad"]
 
+    def test_unsupported_phone_is_reported_before_the_run(self, tmp_path: Path) -> None:
+        # A pronunciation using a phone the model never trained on is dropped
+        # by the native lexicon reader. Report it up front, and say so again
+        # when the word's utterance then fails.
+        model = _alignment_model(tmp_path)
+        dict_path = tmp_path / "dictionary.dict"
+        source = (_FIXTURES / "mini_arctic" / "dictionary.dict").read_text()
+        dict_path.write_text(f"{source}boeuf B OE F\n")
+        audio_dir = tmp_path / "audio"
+        audio_dir.mkdir()
+        shutil.copy(
+            _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
+            audio_dir / "bad.wav",
+        )
+
+        job = align_corpus(
+            transcripts={"bad": "<s> boeuf </s>"},
+            audio_dir=audio_dir,
+            model_dir=model,
+            dict_path=dict_path,
+            filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
+        )
+
+        assert job.phone_report is not None
+        assert job.phone_report.words == ("boeuf",)
+        assert job.phone_report.missing_phones == ("OE",)
+        assert "boeuf" in job.phone_report.format()
+        assert job.n_failed == 1
+        assert "phone inventory" in job.errors["bad"]
+        assert "boeuf (OE)" in job.errors["bad"]
+
+    def test_cli_prints_the_collected_phone_report(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        project = tmp_path / "project"
+        (project / "etc").mkdir(parents=True)
+        (project / "etc" / "config.yaml").write_text("config_version: 1\n")
+        model = _alignment_model(tmp_path)
+        dict_path = tmp_path / "dictionary.dict"
+        source = (_FIXTURES / "mini_arctic" / "dictionary.dict").read_text()
+        dict_path.write_text(f"{source}boeuf B OE F\n")
+        transcript_file = project / "bad.transcription"
+        transcript_file.write_text("<s> boeuf </s> (bad)\n")
+        audio_dir = project / "audio"
+        audio_dir.mkdir()
+        shutil.copy(
+            _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
+            audio_dir / "bad.wav",
+        )
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "pstrain",
+                "align",
+                str(model),
+                "--project-dir",
+                str(project),
+                "--transcripts",
+                str(transcript_file),
+                "--audio-dir",
+                str(audio_dir),
+                "--dict",
+                str(dict_path),
+                "--filler-dict",
+                str(_FIXTURES / "mini_arctic" / "filler.dict"),
+            ],
+        )
+
+        assert main() != 0
+        output = capsys.readouterr()
+        combined = output.out + output.err
+        assert "Pronunciations using phones the model does not define" in combined
+        assert "no pronunciation survived the model's phone inventory for: boeuf (OE)" in combined
+        assert "boeuf" in combined
+        assert "Undefined: OE" in combined
+        # The report precedes the corpus pass rather than trailing it.
+        assert combined.index("Undefined: OE") < combined.index("Aligning...")
+
     def test_profile_cli_unknown_variant_exits_nonzero_and_names_token(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:

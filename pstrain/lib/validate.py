@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from pstrain.lib.dictionary import Dictionary
+from pstrain.lib.lexicon_check import describe_unsupported, unsupported_pronunciations
 from pstrain.lib.phoneset import Phoneset
 from pstrain.lib.transcription import get_fileids, parse_transcription_file
 
@@ -203,12 +204,13 @@ def validate_project(project_dir: Path, experiment: str = "default") -> Validati
 
     # Validate phoneset vs dictionary
     if dictionary and phoneset:
-        is_valid, phones_missing = phoneset.validate_dictionary(dictionary)
-        if not is_valid:
-            report.missing_phones = sorted(phones_missing)
+        unsupported = unsupported_pronunciations(phoneset, dictionary, "dictionary")
+        if unsupported:
+            report.missing_phones = sorted(
+                {phone for entry in unsupported for phone in entry.missing}
+            )
             report.errors.append(
-                f"Phones in dictionary not in phoneset: {len(phones_missing)} "
-                f"(e.g., {', '.join(sorted(phones_missing)[:5])})"
+                f"Phones in dictionary not in phoneset: {describe_unsupported(unsupported)}"
             )
 
     # Check transcripts and collect vocabulary
