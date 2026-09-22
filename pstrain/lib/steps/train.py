@@ -38,6 +38,7 @@ from pstrain.lib import native_worker
 from pstrain.lib.bw import BW_CEPSTRAL_LENGTH, HMM, BWConfig, BWResult, BWTrainer
 from pstrain.lib.bw_pool import contained_bw_pool, watch_bw_parent
 from pstrain.lib.checkpoints import evaluation_health, model_snapshot
+from pstrain.lib.feasibility import infeasible_frames_message, minimum_emitting_states
 from pstrain.lib.features import read_sphinx_mfc
 from pstrain.lib.model import (
     MODEL_FILES_REQUIRED,
@@ -151,6 +152,13 @@ _BW_COLUMN_HEADER = (
 )
 
 
+# Accounting label for an utterance whose audio is arithmetically too short for
+# its transcript. Held apart from the retry-exhaustion reason so the two appear
+# as separate lines in the stage omission summary, and kept free of the
+# per-utterance numbers so the caller can build the key before the measurement.
+_INFEASIBLE_OMISSION_REASON = "audio has fewer frames than the transcript requires"
+
+
 class TerminalAlignmentError(RuntimeError):
     """An utterance still cannot reach its final state after retry."""
 
@@ -192,6 +200,9 @@ class _ShardResult:
     accepted_exceptions: tuple[tuple[str, int, int, int], ...] = ()
     user_cpu_seconds: float | None = 0.0
     final_state_omissions: tuple[tuple[str, str], ...] = ()
+    # Second forward passes that actually ran. ``retried_ids`` holds the subset
+    # the wider beam recovered, so the pair says what the retry bought.
+    retry_attempts: int = 0
     worker_pid: int | None = None
     worker_started: float | None = None
     worker_finished: float | None = None
@@ -426,6 +437,33 @@ def _has_converged(
     )
 
 
+def _infeasible_frame_budget(
+    trainer: BWTrainer,
+    transcript: str,
+    frames: int,
+) -> tuple[int, int] | None:
+    """Return ``(minimum frames, available frames)`` if the audio is too short.
+
+    The minimum is a shortest path over the utterance HMM the trainer just
+    built, so a result here is arithmetic and not an estimate: the audio cannot
+    reach the final state at any beam width, and a wider-beam retry cannot
+    change that. Return ``None`` when the graph is unavailable or the frame
+    budget is sufficient -- in that case the failure really is a search failure.
+    """
+    inspect = getattr(trainer, "inspect_state_seq", None)
+    if inspect is None:
+        return None
+    try:
+        states = inspect(transcript)
+    except Exception:  # noqa: BLE001 - a diagnosis must never replace the failure
+        logger.debug("Could not measure the frame budget for %r", transcript, exc_info=True)
+        return None
+    required = minimum_emitting_states(states)
+    if required is None or frames >= required:
+        return None
+    return required, frames
+
+
 def _process_with_final_state_retry(
     trainer: BWTrainer,
     mfcc: npt.NDArray[np.float32],
@@ -444,6 +482,7 @@ def _process_with_final_state_retry(
     """
     assert not trainer._retry_transaction_active, "BWTrainer cannot be shared across threads"
     trainer._last_process_retried = False
+    trainer._last_infeasible_frames = None
     trainer._retry_transaction_active = True
 
     def process() -> bool:
@@ -461,6 +500,25 @@ def _process_with_final_state_retry(
                 raise TerminalAlignmentError(f"Alignment failed for {fileid}")
             if failed_alignment == "omit":
                 logger.error("%s ignored after failed alignment", fileid)
+            return False
+
+        # Before treating this as a pruning failure, ask whether it could ever
+        # have succeeded. An utterance HMM spends at least one frame in every
+        # emitting state it passes through, so audio shorter than the shortest
+        # path through the graph cannot reach the final state at any beam.
+        # Naming that is the whole diagnosis; searching harder for it is waste.
+        shortfall = _infeasible_frame_budget(trainer, transcript, int(mfcc.shape[0]))
+        if shortfall is not None:
+            trainer._last_infeasible_frames = shortfall
+            diagnosis = infeasible_frames_message(fileid, *shortfall)
+            if failed_alignment == "abort":
+                raise TerminalAlignmentError(diagnosis)
+            if report_retry:
+                logger.error(
+                    "%s; no wider beam can change that, so the retry was skipped and "
+                    "this utterance is omitted from this pass",
+                    diagnosis,
+                )
             return False
 
         if failed_alignment == "omit":
@@ -610,10 +668,36 @@ def _pass_ranges(passes: list[int]) -> str:
 
 def _report_skip_summary(
     omitted_passes: dict[tuple[str, str], list[int]],
+    retry_yield: tuple[int, int] | None = None,
 ) -> None:
-    """Report each distinct stage-level omission and its affected passes."""
+    """Report each distinct stage-level omission and its affected passes.
+
+    ``retry_yield`` is the stage total ``(attempted, recovered)`` for the
+    wider-beam final-state retry. It is printed alongside the omissions so a
+    reader can see what the second forward pass bought without instrumenting
+    the run.
+    """
     for (fileid, reason), passes in omitted_passes.items():
         print(f"omitted\t{fileid}\t{reason}\tpasses {_pass_ranges(passes)}")
+    if retry_yield is not None and retry_yield[0]:
+        attempted, recovered = retry_yield
+        print(f"retry\tattempted {attempted}\trecovered {recovered}")
+
+
+def _report_retry_yield(iteration: int, attempted: int, recovered: int) -> None:
+    """Say what the wider-beam retry bought on this pass, or stay silent.
+
+    The retry costs a second forward pass on every final-state failure, so the
+    pass that pays for it reports its own yield. Silence means it never ran.
+    """
+    if not attempted:
+        return
+    logger.warning(
+        "iteration %d widened the beam on %d utterance(s) and recovered %d",
+        iteration,
+        attempted,
+        recovered,
+    )
 
 
 def _report_changed_skip(
@@ -657,13 +741,17 @@ def _account_and_enforce_skips(
     max_skip_fraction: float,
     skipped_by_pass: list[tuple[int, int]],
     omitted_passes: dict[tuple[str, str], list[int]],
+    retry_attempts: int = 0,
+    retry_recoveries: int = 0,
+    retry_yield: tuple[int, int] | None = None,
 ) -> float:
-    """Report changing skip rates and enforce the configured stage limit."""
+    """Report changing skip rates and the retry yield, and enforce the limit."""
     skipped_by_pass.append((iteration, skipped))
     _report_changed_skip(skipped_by_pass, input_utts)
+    _report_retry_yield(iteration, retry_attempts, retry_recoveries)
     skip_fraction = skipped / input_utts if input_utts else 1.0
     if skip_fraction > max_skip_fraction:
-        _report_skip_summary(omitted_passes)
+        _report_skip_summary(omitted_passes, retry_yield)
         raise RuntimeError(
             f"Iteration {iteration}: skipped {skipped}/{input_utts} utterance "
             f"updates ({skip_fraction:.2%}), above configured limit "
@@ -712,6 +800,7 @@ def _run_bw_shard(
     trainer.set_dict(dictionary, filler_dict)
     processed: list[str] = []
     retried: list[str] = []
+    retry_attempts = 0
     skipped: list[tuple[str, str]] = []
     accepted_exceptions: list[tuple[str, int, int, int]] = []
     final_state_omissions: list[tuple[str, str]] = []
@@ -744,11 +833,16 @@ def _run_bw_shard(
                     retry_beam_factor,
                     fileid,
                     failed_alignment,
-                    report_retry=(fileid, omission_reason) not in reported_omissions,
+                    report_retry=(fileid, omission_reason) not in reported_omissions
+                    and (fileid, _INFEASIBLE_OMISSION_REASON) not in reported_omissions,
                 )
+            if trainer._last_process_retried:
+                retry_attempts += 1
             if not success:
                 skipped.append((fileid, "alignment_failure"))
-                if trainer._last_process_retried:
+                if trainer._last_infeasible_frames is not None:
+                    final_state_omissions.append((fileid, _INFEASIBLE_OMISSION_REASON))
+                elif trainer._last_process_retried:
                     final_state_omissions.append((fileid, omission_reason))
             elif trainer._last_process_retried:
                 retried.append(fileid)
@@ -792,6 +886,7 @@ def _run_bw_shard(
         accepted_exceptions=tuple(accepted_exceptions),
         user_cpu_seconds=_cpu_delta(user_cpu_start, _user_cpu_seconds()),
         final_state_omissions=tuple(final_state_omissions),
+        retry_attempts=retry_attempts,
         worker_pid=os.getpid(),
         worker_started=worker_started,
         worker_finished=time.perf_counter(),
@@ -923,6 +1018,8 @@ def run_bw_training(
     last_frames = 0
     last_utts = 0
     total_skipped = 0
+    total_retry_attempts = 0
+    total_retry_recoveries = 0
     trajectory: list[TrainingIteration] = []
     telemetry_rows: list[dict[str, object]] = []
     omitted_passes: dict[tuple[str, str], list[int]] = {}
@@ -969,6 +1066,7 @@ def run_bw_training(
         processed = 0
         skipped = 0
         retried = 0
+        retry_attempts = 0
         excluded = 0
         skip_reasons = {
             "excluded_by_schedule": 0,
@@ -1069,6 +1167,7 @@ def run_bw_training(
             skipped_items = [item for result in shard_results for item in result.skipped]
             processed = len(processed_ids)
             retried = len(retried_ids)
+            retry_attempts = sum(result.retry_attempts for result in shard_results)
             skipped = len(skipped_items)
             excluded = sum(reason == "excluded_by_schedule" for _, reason in skipped_items)
             for fileid, reason in skipped_items:
@@ -1148,8 +1247,11 @@ def run_bw_training(
                         retry_beam_factor,
                         fileid,
                         failed_alignment,
-                        report_retry=(fileid, omission_reason) not in omitted_passes,
+                        report_retry=(fileid, omission_reason) not in omitted_passes
+                        and (fileid, _INFEASIBLE_OMISSION_REASON) not in omitted_passes,
                     )
+                if trainer._last_process_retried:
+                    retry_attempts += 1
                 if success:
                     if trainer._last_process_retried:
                         retried += 1
@@ -1159,7 +1261,11 @@ def run_bw_training(
                     skipped += 1
                     skip_reasons["alignment_failure"] += 1
                     terminal_skips.append({"utterance": fileid, "reason": "alignment_failure"})
-                    if trainer._last_process_retried:
+                    if trainer._last_infeasible_frames is not None:
+                        _record_omission(
+                            omitted_passes, fileid, _INFEASIBLE_OMISSION_REASON, iteration
+                        )
+                    elif trainer._last_process_retried:
                         _record_omission(omitted_passes, fileid, omission_reason, iteration)
             except TerminalAlignmentError:
                 if fileid == "arctic_a0587" and iteration == accept_arctic_a0587_pass:
@@ -1198,6 +1304,9 @@ def run_bw_training(
                 terminal_skips.append({"utterance": fileid, "reason": "exception"})
 
         total_skipped += skipped
+        total_retry_attempts += retry_attempts
+        total_retry_recoveries += retried
+        retry_yield = (total_retry_attempts, total_retry_recoveries)
         # Bind evidence to the input, not the update produced by this pass.
         stats = merged_stats or trainer.get_stats()
         health = {
@@ -1227,9 +1336,12 @@ def run_bw_training(
                 max_skip_fraction=max_skip_fraction,
                 skipped_by_pass=skipped_by_pass,
                 omitted_passes=omitted_passes,
+                retry_attempts=retry_attempts,
+                retry_recoveries=retried,
+                retry_yield=retry_yield,
             )
             if processed + retried == 0:
-                _report_skip_summary(omitted_passes)
+                _report_skip_summary(omitted_passes, retry_yield)
                 raise RuntimeError("No utterances processed successfully")
         except RuntimeError as error:
             telemetry_rows.append(
@@ -1246,6 +1358,8 @@ def run_bw_training(
                         "input_utts": len(fileids),
                         "processed_utts": processed,
                         "retried_utts": retried,
+                        "retry_attempted_utts": retry_attempts,
+                        "retry_recovered_utts": retried,
                         "skipped_utts": skipped,
                         "terminal_skips": terminal_skips,
                         "skip_reasons": skip_reasons,
@@ -1353,6 +1467,8 @@ def run_bw_training(
             "input_utts": len(fileids),
             "processed_utts": processed,
             "retried_utts": retried,
+            "retry_attempted_utts": retry_attempts,
+            "retry_recovered_utts": retried,
             "skipped_utts": skipped,
             "skip_reasons": skip_reasons,
             "terminal_skips": terminal_skips,
@@ -1418,8 +1534,8 @@ def run_bw_training(
                 convergence_ratio,
                 min_iterations,
             ):
-                if total_skipped:
-                    _report_skip_summary(omitted_passes)
+                if total_skipped or total_retry_attempts:
+                    _report_skip_summary(omitted_passes, retry_yield)
                     logger.warning(
                         "WARNING: BW training skipped %d utterance updates in total",
                         total_skipped,
@@ -1443,8 +1559,9 @@ def run_bw_training(
         # Clean up trainer
         del trainer
 
+    if total_skipped or total_retry_attempts:
+        _report_skip_summary(omitted_passes, (total_retry_attempts, total_retry_recoveries))
     if total_skipped:
-        _report_skip_summary(omitted_passes)
         logger.warning("WARNING: BW training skipped %d utterance updates in total", total_skipped)
     logger.info(
         "Completed %d iterations (did not converge); total skipped=%d", n_iter, total_skipped

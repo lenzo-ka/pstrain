@@ -5,6 +5,24 @@ the version in `pyproject.toml` is authoritative.
 
 ## Unreleased
 
+### Upgrading
+
+- Rebuild source installations and custom native integrations together: the
+  native ABI is now 6. Published wheels bundle their matching native library.
+
+### Changes
+
+- Training and `pstrain align` now say when an utterance cannot be aligned at
+  any beam width because its transcript needs more frames than the audio has.
+  The report names the required minimum and the frames available instead of the
+  generic "final state not reached", and the wider-beam retry is skipped, since
+  no beam can recover such an utterance. The minimum is measured on the graph
+  the engine actually built, so it is exact for that model and dictionary.
+- Every Baum-Welch pass now reports how many utterances the wider-beam retry was
+  spent on and how many it recovered, and the same pair appears in the stage
+  omission summary and in the training telemetry. Nothing about when the retry
+  runs has changed; it simply says what it bought.
+
 ## 0.4.1 - 2026-09-16
 
 ### Fixes

@@ -61,6 +61,19 @@ int align_utt_capture(char *sent,
 
 void align_utt_release(void);
 
+/**
+ * Fewest feature frames that could possibly align to `sent` under the loaded
+ * model and dictionary. Builds a sentence HMM for the measurement and
+ * destroys it again, so it must not be called while another utterance's
+ * sentence HMM is live.
+ *
+ * @param sent     Reference transcript (mutable buffer).
+ * @param verbatim_tokens Honor explicit pronunciation tokens.
+ * @param out_min  Out: the minimum frame count.
+ * @return 0 on success, negative on failure.
+ */
+int align_utt_min_frames(char *sent, int32 verbatim_tokens, int32 *out_min);
+
 #ifdef __cplusplus
 }
 #endif

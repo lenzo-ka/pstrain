@@ -21,6 +21,7 @@ Typical use::
 from __future__ import annotations
 
 import contextlib
+import struct
 import wave
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self
@@ -30,6 +31,7 @@ import numpy as np
 from pstrain.lib import native_worker
 from pstrain.lib._cffi.core import _init
 from pstrain.lib.alignment.core import AlignedSegment, AlignmentResult
+from pstrain.lib.feasibility import infeasible_frames_message
 from pstrain.lib.features import FeatureExtractor
 from pstrain.lib.model import MODEL_FILES_REQUIRED, read_complete_model_feat_params
 from pstrain.lib.pipeline.feat_params import feature_extractor_config_from_record
@@ -201,6 +203,7 @@ class Aligner:
             raise RuntimeError(f"pstrain_align_init failed: {err or 'unknown'}")
 
         self._ctx = ctx
+        self._ceplen = int(feat_record["-ceplen"])
         self._beam = beam
         self._retry_beam_factor = retry_beam_factor
         self._failed_alignment = failed_alignment
@@ -243,6 +246,58 @@ class Aligner:
         if self._ctx == self._ffi.NULL:
             raise RuntimeError("Aligner is closed")
         return float(self._lib.pstrain_align_set_beam(self._ctx, beam))
+
+    def minimum_frames(self, transcript: str) -> int:
+        """Fewest feature frames that could possibly align to this transcript.
+
+        A shortest path over the sentence HMM this aligner builds for the
+        transcript, counting one frame per emitting state. It is exact for this
+        model and dictionary, not an estimate from the word count, and it is
+        measured on the aligner's own graph -- Baum-Welch builds a different
+        utterance HMM and its minimum is a different number.
+        """
+        if hasattr(self, "_proxy"):
+            return int(self._proxy.call("minimum_frames", transcript))
+        if self._ctx == self._ffi.NULL:
+            raise RuntimeError("Aligner is closed")
+        out = self._ffi.new("uint32 *")
+        rc = int(self._lib.pstrain_align_min_frames(self._ctx, transcript.encode(), out))
+        if rc != 0:
+            err = self._last_error()
+            raise RuntimeError(f"pstrain_align_min_frames failed: {err or f'rc={rc}'}")
+        return int(out[0])
+
+    def _mfc_frame_count(self, mfc_path: Path) -> int:
+        """Frame count from a Sphinx ``.mfc`` header, without reading the data."""
+        with mfc_path.open("rb") as stream:
+            n_floats = struct.unpack("<i", stream.read(4))[0]
+        return int(n_floats) // self._ceplen
+
+    @staticmethod
+    def _infeasible_message(utterance_id: str, shortfall: tuple[int, int]) -> str:
+        return (
+            infeasible_frames_message(utterance_id, *shortfall)
+            + "; no wider beam can change that, so the retry was skipped"
+        )
+
+    def _infeasible_frames(self, rc: int, transcript: str, n_frames: int) -> tuple[int, int] | None:
+        """Return ``(minimum, available)`` when no beam width could have worked.
+
+        An utterance HMM spends at least one frame in every emitting state it
+        passes through, so audio shorter than the shortest path through the
+        sentence HMM cannot reach the final state however wide the beam is. That
+        makes the wider-beam retry pure waste, and it makes the generic
+        final-state message misleading: nothing was mis-pruned.
+        """
+        if rc != -3:
+            return None
+        try:
+            required = self.minimum_frames(transcript)
+        except Exception:  # noqa: BLE001 - a diagnosis must never replace the failure
+            return None
+        if n_frames >= required:
+            return None
+        return required, n_frames
 
     def _final_state_retry_beam(self, rc: int) -> float | None:
         """Return the widened beam for one final-state retry, or ``None`` to skip it.
@@ -316,6 +371,10 @@ class Aligner:
                 out_pp,
             )
         )
+        shortfall = self._infeasible_frames(rc, transcript, int(n_frames))
+        if shortfall is not None:
+            self._last_alignment_retried = False
+            raise RuntimeError(self._infeasible_message(utterance_id, shortfall))
         retry_beam = self._final_state_retry_beam(rc)
         if retry_beam is not None:
             previous_beam = self.set_beam(retry_beam)
@@ -370,6 +429,10 @@ class Aligner:
                 out_pp,
             )
         )
+        shortfall = self._infeasible_frames(rc, transcript, self._mfc_frame_count(mfc_path))
+        if shortfall is not None:
+            self._last_alignment_retried = False
+            raise RuntimeError(self._infeasible_message(utt_id, shortfall))
         retry_beam = self._final_state_retry_beam(rc)
         if retry_beam is not None:
             previous_beam = self.set_beam(retry_beam)

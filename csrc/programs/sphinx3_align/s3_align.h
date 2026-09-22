@@ -166,6 +166,13 @@ int32 align_build_sent_hmm(char *transcript,  /**< In: Word transcript */
                            int verbatim_tokens /**< In: Honor explicit pronunciation tokens */
     );
 
+/**
+ * Fewest emitting states on any path through the sentence HMM most recently
+ * built by align_build_sent_hmm(), i.e. the fewest frames that could possibly
+ * reach the final state. Returns -1 if no sentence HMM is built.
+ */
+int32 align_min_emitting_states(void);
+
 int32 align_destroy_sent_hmm(void);
 
 int32 align_start_utt(char *uttid);

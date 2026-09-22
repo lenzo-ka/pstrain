@@ -37,7 +37,7 @@ typedef struct pstrain_align_config_s {
     int     verbatim_tokens; /**< Honor explicit WORD(n).    Default 0.    */
 } pstrain_align_config_t;
 
-#define PSTRAIN_ABI_VERSION 5
+#define PSTRAIN_ABI_VERSION 6
 
 uint32 pstrain_abi_version(void);
 void pstrain_align_config_default(pstrain_align_config_t *config);
@@ -132,6 +132,22 @@ pstrain_align_mfc_file(pstrain_align_context_t *ctx,
                    const char *transcript,
                    const char *utt_id,
                    pstrain_align_result_t **out_result);
+
+/**
+ * Fewest feature frames that could possibly align to this transcript under
+ * the loaded model and dictionary. An utterance with fewer frames than this
+ * cannot reach the final state at any beam width, so a wider-beam retry
+ * cannot recover it.
+ *
+ * @param ctx Context.
+ * @param transcript Reference transcript (sphinx <s>/</s> markers tolerated).
+ * @param out_min_frames Out: the minimum frame count.
+ * @return 0 on success, negative on failure.
+ */
+int
+pstrain_align_min_frames(pstrain_align_context_t *ctx,
+                     const char *transcript,
+                     uint32 *out_min_frames);
 
 /**
  * Free a result struct returned by pstrain_align_mfcc / pstrain_align_mfc_file.

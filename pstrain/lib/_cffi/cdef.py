@@ -767,6 +767,11 @@ pstrain_align_mfc_file(pstrain_align_context_t *ctx,
                    const char *utt_id,
                    pstrain_align_result_t **out_result);
 
+int
+pstrain_align_min_frames(pstrain_align_context_t *ctx,
+                     const char *transcript,
+                     uint32 *out_min_frames);
+
 void pstrain_align_result_free(pstrain_align_result_t *result);
 
 const char *pstrain_align_last_error(void);
