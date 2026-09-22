@@ -186,5 +186,7 @@ set(LEXICON_UNDEFINED_PHONE_DIR ${CMAKE_CURRENT_BINARY_DIR}/lexicon_undefined_ph
 file(MAKE_DIRECTORY ${LEXICON_UNDEFINED_PHONE_DIR})
 add_test(
   NAME lexicon_undefined_phone
-  COMMAND test_lexicon_undefined_phone ${LEXICON_UNDEFINED_PHONE_DIR}
+  COMMAND test_lexicon_undefined_phone
+    ${BW_FIXTURE}/model/mdef
+    ${LEXICON_UNDEFINED_PHONE_DIR}
 )

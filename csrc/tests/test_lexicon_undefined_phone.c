@@ -3,6 +3,8 @@
  * dropped by lexicon_read.  Check that the entry really is dropped, that the
  * rest of the file still loads, and that the end-of-load summary states the
  * shortfall instead of reporting only what survived.
+ *
+ * Usage: test_lexicon_undefined_phone <mdef> <scratch dir>
  */
 
 #include <stdio.h>
@@ -11,17 +13,20 @@
 
 #include <s3/acmod_set.h>
 #include <s3/lexicon.h>
+#include <s3/model_def_io.h>
 #include <s3/s3.h>
+#include <sphinxbase/err.h>
 
 #define CHECK(cond, msg)                                                    \
     do {                                                                    \
         if (!(cond)) {                                                      \
-            fprintf(stdout, "FAIL: %s (%s:%d)\n", (msg), __FILE__,          \
+            fprintf(stderr, "FAIL: %s (%s:%d)\n", (msg), __FILE__,          \
                     __LINE__);                                              \
             return 1;                                                       \
         }                                                                   \
     } while (0)
 
+/* AH, B and F are in every ARPABET inventory; OE and Y2 are in none. */
 static const char *DICT_TEXT =
     "GOOD B AH F\n"
     "BAD B OE F\n"
@@ -31,17 +36,19 @@ static const char *DICT_TEXT =
 int
 main(int argc, char *argv[])
 {
-    static const char *attr[] = { "ci", "base", NULL };
-    static const char *ci_phones[] = { "AH", "B", "F", "SIL" };
-    const char *dir = (argc > 1) ? argv[1] : ".";
+    const char *mdef_path;
+    const char *dir;
     char dict_path[1024];
     char log_path[1024];
-    acmod_set_t *acmod_set;
+    model_def_t *mdef = NULL;
     lexicon_t *lex;
     FILE *fp;
     char *log_text;
     long log_size;
-    size_t i;
+
+    CHECK(argc > 2, "usage: test_lexicon_undefined_phone <mdef> <scratch dir>");
+    mdef_path = argv[1];
+    dir = argv[2];
 
     snprintf(dict_path, sizeof(dict_path), "%s/undefined_phone.dict", dir);
     snprintf(log_path, sizeof(log_path), "%s/undefined_phone.log", dir);
@@ -51,18 +58,18 @@ main(int argc, char *argv[])
     fputs(DICT_TEXT, fp);
     fclose(fp);
 
-    acmod_set = acmod_set_new();
-    acmod_set_set_n_ci_hint(acmod_set, 4);
-    for (i = 0; i < sizeof(ci_phones) / sizeof(ci_phones[0]); ++i)
-        acmod_set_add_ci(acmod_set, ci_phones[i], attr);
+    CHECK(model_def_read(&mdef, mdef_path) == S3_SUCCESS,
+          "could not read the model definition");
 
-    /* Capture the loader's diagnostics so the summary can be inspected.
-     * stderr stays redirected for the rest of the run; every check in this
-     * test reports on stdout. */
-    fflush(stderr);
-    CHECK(freopen(log_path, "w", stderr) != NULL, "could not redirect stderr");
-    lex = lexicon_read(NULL, dict_path, acmod_set);
-    fflush(stderr);
+    /* Route only the library's own diagnostics into a file, so the summary
+     * can be inspected while the process stderr stays free for this test's
+     * failures and for anything a sanitizer has to say. */
+    fp = fopen(log_path, "w");
+    CHECK(fp != NULL, "could not open the diagnostics file");
+    err_set_logfp(fp);
+    lex = lexicon_read(NULL, dict_path, mdef->acmod_set);
+    err_set_logfp(stderr);
+    fclose(fp);
 
     CHECK(lex != NULL, "lexicon_read returned no lexicon");
     CHECK(lexicon_lookup(lex, "GOOD") != NULL, "GOOD should have loaded");
@@ -82,15 +89,18 @@ main(int argc, char *argv[])
     log_text[log_size] = '\0';
     fclose(fp);
 
-    CHECK(strstr(log_text, "2 entries added from") != NULL,
-          "the summary should still count what loaded");
-    CHECK(strstr(log_text, "2 pronunciations in") != NULL,
-          "the summary should count the dropped pronunciations");
-    CHECK(strstr(log_text, "phones the model does not define") != NULL,
-          "the summary should name the cause");
+    if (strstr(log_text, "2 entries added from") == NULL
+        || strstr(log_text, "2 pronunciations in") == NULL
+        || strstr(log_text, "phones the model does not define") == NULL) {
+        fprintf(stderr, "FAIL: the end-of-load summary does not state the "
+                        "dropped pronunciations (%s:%d)\n", __FILE__, __LINE__);
+        fputs(log_text, stderr);
+        return 1;
+    }
 
     free(log_text);
     lexicon_free(lex);
+    model_def_free(mdef);
 
     printf("PASS: %s\n", __FILE__);
     return 0;
