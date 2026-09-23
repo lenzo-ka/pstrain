@@ -72,6 +72,7 @@ EXPORTS
     pstrain_inc_comp
     pstrain_init_gau
     pstrain_init_mixw
+    pstrain_interface_fingerprint
     pstrain_kdtree_build
     pstrain_kmeans
     pstrain_kmeans_init
