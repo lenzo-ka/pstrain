@@ -22,7 +22,6 @@ from pstrain.lib.alignment.batch import (
     align_corpus,
     collect_phone_report,
     explain_failure,
-    explain_init_failure,
     load_transcripts,
 )
 from pstrain.lib.alignment.core import (
@@ -48,7 +47,6 @@ __all__ = [
     "align_utterance",
     "collect_phone_report",
     "explain_failure",
-    "explain_init_failure",
     "load_transcripts",
     "save_ctm",
     "save_textgrid",

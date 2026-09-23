@@ -101,33 +101,6 @@ def collect_phone_report(
         return None
 
 
-def explain_init_failure(
-    message: str,
-    phone_report: UnsupportedPhoneReport | None,
-) -> str:
-    """Name the phone inventory as the cause when the aligner will not start.
-
-    The alignment loader ends the process rather than load a surviving
-    ``word(2)`` whose unsuffixed base was dropped. Every utterance then fails
-    with the same opaque init error, including utterances that never use the
-    word, so this is the failure that most needs the diagnosis.
-
-    Args:
-        message: The native initialization failure message.
-        phone_report: Report collected before the run, if any.
-
-    Returns:
-        The message, with the phone-inventory cause appended when one applies.
-    """
-    if phone_report is None or not phone_report.fatal_words:
-        return message
-    causes = _name_causes(sorted(phone_report.fatal_words), phone_report)
-    return (
-        f"{message} [the aligner refuses to start because the unsuffixed "
-        f"pronunciation was dropped while an alternative survived for: {causes}]"
-    )
-
-
 def explain_failure(
     message: str,
     transcript: str,
@@ -256,7 +229,7 @@ def align_corpus(
             verbatim_tokens=verbatim_tokens,
         )
     except (FileNotFoundError, RuntimeError) as e:
-        init_error = explain_init_failure(f"Aligner init failed: {e}", phone_report)
+        init_error = f"Aligner init failed: {e}"
         logger.error("%s", init_error)
         for utt_id in transcripts:
             errors[utt_id] = init_error
