@@ -713,16 +713,14 @@ def _pass_ranges(passes: list[int]) -> str:
     return ",".join(ranges)
 
 
-def _final_state_omission_reason(a_beam: float, retry_beam_factor: RetryBeamFactor) -> str:
-    """The omission reason for an utterance the widest rung could not recover."""
-    rungs = retry_ladder(retry_beam_factor)
-    if rungs:
-        widest = rungs[-1]
-    else:
-        # Only a single number can disable the retry; a list is never empty.
-        assert isinstance(retry_beam_factor, int | float)
-        widest = float(retry_beam_factor)
-    return f"final state not reached even at a_beam={a_beam / widest:.3g}"
+def _final_state_omission_reason(a_beam: float, rungs: tuple[float, ...], rungs_run: int) -> str:
+    """The omission reason naming the widest beam the climb actually ran.
+
+    A climb can stop before its last rung when a rung fails for a reason no
+    wider beam answers, so the widest configured rung is not always one that
+    ran, and the reason must not claim a beam nothing tried.
+    """
+    return f"final state not reached even at a_beam={a_beam / rungs[rungs_run - 1]:.3g}"
 
 
 RungYield = tuple[tuple[float, int, int], ...]
@@ -913,7 +911,7 @@ def _run_bw_shard(
     arctic_a0302_zero_codebook_band: tuple[int, int] | None,
     accept_arctic_a0587_pass: int | None,
     diagnostic_log: Path,
-    reported_omissions: set[tuple[str, str]],
+    reported_fileids: set[str],
 ) -> _ShardResult:
     worker_started = time.perf_counter()
     user_cpu_start = _user_cpu_seconds()
@@ -954,9 +952,6 @@ def _run_bw_shard(
                 skipped.append((fileid, "feature_dimension"))
                 continue
             with _redirect_bw_stdout(diagnostic_log):
-                omission_reason = _final_state_omission_reason(
-                    iter_config.a_beam, retry_beam_factor
-                )
                 success = _process_with_final_state_retry(
                     trainer,
                     mfcc,
@@ -965,8 +960,7 @@ def _run_bw_shard(
                     retry_beam_factor,
                     fileid,
                     failed_alignment,
-                    report_retry=(fileid, omission_reason) not in reported_omissions
-                    and (fileid, _INFEASIBLE_OMISSION_REASON) not in reported_omissions,
+                    report_retry=fileid not in reported_fileids,
                 )
             if trainer._last_process_retried:
                 retry_attempts += 1
@@ -976,7 +970,14 @@ def _run_bw_shard(
                 if trainer._last_infeasible_frames is not None:
                     final_state_omissions.append((fileid, _INFEASIBLE_OMISSION_REASON))
                 elif trainer._last_process_retried:
-                    final_state_omissions.append((fileid, omission_reason))
+                    final_state_omissions.append(
+                        (
+                            fileid,
+                            _final_state_omission_reason(
+                                iter_config.a_beam, rungs, trainer._last_retry_rungs
+                            ),
+                        )
+                    )
             elif trainer._last_process_retried:
                 retried.append(fileid)
             else:
@@ -1223,6 +1224,11 @@ def run_bw_training(
         excluded_fileids = set(exclusion_schedule.get("*", ()))
         excluded_fileids.update(exclusion_schedule.get(iteration, ()))
         excluded_fileids.update(exclusion_schedule.get(str(iteration), ()))
+        # An utterance already omitted for an alignment failure on an earlier
+        # pass is reported there and in the stage summary, so later passes stay
+        # quiet about it. Keyed by utterance, since a ladder can stop at a
+        # different rung, and so name a different beam, from pass to pass.
+        reported_fileids = {fileid for fileid, _ in omitted_passes}
         merged_stats: BWResult | None = None
         shard_metadata: list[dict[str, object]] = []
         iteration_fileids = fileids
@@ -1255,7 +1261,7 @@ def run_bw_training(
                     arctic_a0302_zero_codebook_band,
                     accept_arctic_a0587_pass,
                     diagnostic_dir / f"pass-{iteration:02d}-shard-{index:02d}.log",
-                    set(omitted_passes),
+                    reported_fileids,
                 )
                 for index, assigned in enumerate(partitions)
             ]
@@ -1385,9 +1391,6 @@ def run_bw_training(
 
                 # Use process_utterance_mfcc - C handles CMN+deltas
                 with _redirect_bw_stdout(serial_diagnostic_log):
-                    omission_reason = _final_state_omission_reason(
-                        iter_config.a_beam, retry_beam_factor
-                    )
                     success = _process_with_final_state_retry(
                         trainer,
                         mfcc,
@@ -1396,8 +1399,7 @@ def run_bw_training(
                         retry_beam_factor,
                         fileid,
                         failed_alignment,
-                        report_retry=(fileid, omission_reason) not in omitted_passes
-                        and (fileid, _INFEASIBLE_OMISSION_REASON) not in omitted_passes,
+                        report_retry=fileid not in reported_fileids,
                     )
                 if trainer._last_process_retried:
                     retry_attempts += 1
@@ -1418,7 +1420,14 @@ def run_bw_training(
                             omitted_passes, fileid, _INFEASIBLE_OMISSION_REASON, iteration
                         )
                     elif trainer._last_process_retried:
-                        _record_omission(omitted_passes, fileid, omission_reason, iteration)
+                        _record_omission(
+                            omitted_passes,
+                            fileid,
+                            _final_state_omission_reason(
+                                iter_config.a_beam, ladder, trainer._last_retry_rungs
+                            ),
+                            iteration,
+                        )
             except TerminalAlignmentError:
                 if fileid == "arctic_a0587" and iteration == accept_arctic_a0587_pass:
                     logger.warning(

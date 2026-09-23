@@ -97,6 +97,8 @@ def _format_type(annotation: Any) -> str:
         return _format_type(get_args(annotation)[0])
     if get_origin(annotation) is Union:
         return " | ".join(_format_type(arg) for arg in get_args(annotation))
+    if get_origin(annotation) is list and get_args(annotation):
+        return f"list[{_format_type(get_args(annotation)[0])}]"
     if hasattr(annotation, "__name__"):
         return str(annotation.__name__)
     if hasattr(annotation, "__origin__"):

@@ -756,6 +756,71 @@ class TestAlignCorpus:
         assert captured["retry_beam_factor"] == 1e20
         assert captured["failed_alignment"] == "omit"
 
+    @pytest.mark.parametrize(
+        ("factor", "expected_yield"),
+        [
+            (1e20, ((1e20, 0, 0),)),
+            ([1e5, 1e10, 1e20], ((1e5, 1, 0), (1e10, 1, 1), (1e20, 0, 0))),
+        ],
+    )
+    def test_worker_death_mid_corpus_keeps_the_partial_job_and_its_yield(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        factor: float | list[float],
+        expected_yield: tuple[tuple[float, int, int], ...],
+    ) -> None:
+        """A helper killed mid-corpus must not discard the alignments already done.
+
+        The later utterances fail, because the replacement helper no longer
+        holds the aligner, and the job returns with the first one aligned. The
+        per-rung counts live in this process, so the first utterance's climb
+        is still reported.
+        """
+        import os
+        import signal
+
+        from pstrain.lib import native_worker
+
+        model = _alignment_model(tmp_path)
+        audio_dir = tmp_path / "audio"
+        audio_dir.mkdir()
+        ids = ["utt1", "utt2", "utt3"]
+        for utterance_id in ids:
+            shutil.copy(
+                _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
+                audio_dir / f"{utterance_id}.wav",
+            )
+
+        calls: list[str] = []
+        align_audio = Aligner.align_audio
+
+        def killing_align_audio(self: Aligner, *args: object, **kwargs: object) -> object:
+            calls.append("call")
+            if len(calls) == 2:
+                worker = native_worker._owned_worker()
+                assert worker.pid is not None
+                os.kill(worker.pid, signal.SIGKILL)
+                assert worker._process is not None
+                worker._process.join()
+            return align_audio(self, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Aligner, "align_audio", killing_align_audio)
+        job = align_corpus(
+            transcripts=dict.fromkeys(ids, _ALIGNMENT_TRANSCRIPT),
+            audio_dir=audio_dir,
+            model_dir=model,
+            dict_path=_FIXTURES / "mini_arctic" / "dictionary.dict",
+            filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
+            beam=1e-40 if isinstance(factor, list) else 1e-64,
+            retry_beam_factor=factor,
+        )
+
+        assert (job.n_aligned, job.n_failed) == (1, 2)
+        assert set(job.results) == {"utt1"}
+        assert set(job.errors) == {"utt2", "utt3"}
+        assert job.retry_yield == expected_yield
+
     def test_corpus_reports_what_each_rung_of_the_ladder_bought(self, tmp_path: Path) -> None:
         """At beam 1e-40 a factor of 1e5 fails this utterance and 1e10 recovers it."""
         model = _alignment_model(tmp_path)

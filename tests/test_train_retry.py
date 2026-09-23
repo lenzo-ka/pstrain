@@ -1388,3 +1388,63 @@ def test_native_infeasible_utterance_runs_no_rung_of_the_ladder(
         {"rung": 1, "factor": 1e10, "attempted_utts": 0, "recovered_utts": 0},
         {"rung": 2, "factor": 1e40, "attempted_utts": 0, "recovered_utts": 0},
     ]
+
+
+def test_numpy_scalar_factor_is_one_rung_as_before() -> None:
+    from pstrain.lib.retry_ladder import retry_ladder
+
+    assert retry_ladder(np.float32(1e10)) == (pytest.approx(1e10),)
+    assert retry_ladder(np.int64(100)) == (100.0,)
+    assert retry_ladder(np.float64(0.5)) == ()
+
+    trainer = TightBeamTrainer()
+    assert _process_with_final_state_retry(
+        trainer,  # type: ignore[arg-type]
+        np.zeros((4, 13), dtype=np.float32),
+        "<s> TEST </s>",
+        normal_beam=1e-90,
+        retry_beam_factor=np.float64(1e10),  # type: ignore[arg-type]
+        fileid="numpy-factor",
+    )
+    assert trainer.attempt_beams == [pytest.approx(1e-90), pytest.approx(1e-100)]
+
+
+@requires_c_library
+def test_omission_names_the_widest_beam_that_ran_not_the_widest_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A climb that stops early must not record a beam nothing tried.
+
+    The update below misses its final state, and the first rung then fails for
+    a reason no wider beam answers, so the climb stops after one rung: a_beam
+    1e-90 / 10 = 1e-91 ran, and 1e-93 never did.
+    """
+    import json
+
+    from pstrain.lib.steps import train
+
+    def stopped_after_one_rung(trainer: Any, *args: object, **kwargs: object) -> bool:
+        trainer._last_process_retried = True
+        trainer._last_retry_rungs = 1
+        trainer._last_infeasible_frames = None
+        return False
+
+    context = _ladder_project(tmp_path)
+    monkeypatch.setattr(train, "_process_with_final_state_retry", stopped_after_one_rung)
+    output = tmp_path / "stopped-early"
+    with pytest.raises(RuntimeError, match="No utterances processed successfully"):
+        _train_ladder(
+            context,
+            output,
+            ["arctic_a0001"],
+            [10.0, 100.0, 1000.0],
+            a_beam=1e-90,
+            max_skip_fraction=1.0,
+        )
+
+    out = capsys.readouterr().out
+    assert "omitted\tarctic_a0001\tfinal state not reached even at a_beam=1e-91\tpasses 1" in out
+    assert "1e-93" not in out
+    row = json.loads((output / "bw_telemetry.json").read_text())["passes"][-1]
+    assert row["accounting"]["retry_rungs"][0]["attempted_utts"] == 1
+    assert row["accounting"]["retry_rungs"][1]["attempted_utts"] == 0

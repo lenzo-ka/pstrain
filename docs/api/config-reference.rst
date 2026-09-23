@@ -18,7 +18,7 @@ alignment
    :Description: Forced-alignment failure policy: ``recover`` retries final-state failures at each ``retry_beam_factor`` in turn; ``abort`` and ``omit`` do not retry
 
 ``alignment.retry_beam_factor``
-   :Type: ``float | list``
+   :Type: ``float | list[float]``
    :Default: ``1e+36``
    :Description: Factor that widens the beam for one retry after an utterance fails to reach its final state, where values at or below 1 disable the retry; or an ascending list of factors, each greater than 1 and relative to the nominal beam, tried in order until one succeeds
 
@@ -277,7 +277,7 @@ training
    :Description: Questions generated per state
 
 ``training.retry_beam_factor``
-   :Type: ``float | list``
+   :Type: ``float | list[float]``
    :Default: ``10000000000.0``
    :Description: Factor that widens the forward beam for one retry after an utterance fails to reach its final state, or an ascending list of factors, each greater than 1 and relative to the nominal beam, tried in order until one succeeds; a retry is counted only when that attempt runs
 

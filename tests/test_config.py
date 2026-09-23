@@ -115,6 +115,44 @@ def test_retry_beam_factor_list_must_be_an_ascending_ladder(
         model(retry_beam_factor=factors)
 
 
+@pytest.mark.parametrize(
+    ("value", "complaint"),
+    [
+        ([1e48, 1e36], "strictly ascend"),
+        (["a"], "valid number"),
+        (-1.0, "greater than 0"),
+        ("x", "valid number"),
+    ],
+)
+def test_invalid_retry_beam_factor_reports_one_error_for_its_own_shape(
+    value: object, complaint: str
+) -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError) as raised:
+        AlignmentConfig(retry_beam_factor=value)
+    errors = raised.value.errors()
+    assert len(errors) == 1
+    assert complaint in errors[0]["msg"]
+    # A list is never told it is not a number, nor a number that it is not a list.
+    assert "valid list" not in errors[0]["msg"]
+    if isinstance(value, list):
+        assert "Input should be a valid number [" not in str(raised.value)
+
+
+def test_retry_beam_factor_schema_states_both_shapes() -> None:
+    schema = AlignmentConfig.model_json_schema()["properties"]["retry_beam_factor"]
+    number, ladder = schema["anyOf"]
+    assert number == {"type": "number", "exclusiveMinimum": 0}
+    assert ladder["minItems"] == 1
+    assert ladder["items"] == {"type": "number", "exclusiveMinimum": 1}
+    parameter = get_parameter("training.retry_beam_factor")
+    assert parameter is not None
+    assert parameter.type == "float | list[float]"
+    # Scalars keep the lax number parsing they always had, such as YAML's 1e10.
+    assert AlignmentConfig(retry_beam_factor="1e10").retry_beam_factor == 1e10
+
+
 def test_retry_beam_factor_accepts_a_number_or_a_ladder_and_defaults_are_one_rung(
     tmp_path: Path,
 ) -> None:
@@ -138,7 +176,7 @@ def test_retry_beam_factor_accepts_a_number_or_a_ladder_and_defaults_are_one_run
     assert PipelineContext.from_config(tmp_path).train.retry_beam_factor == [1e10, 1e20]
     reference = get_parameter("alignment.retry_beam_factor")
     assert reference is not None
-    assert reference.type == "float | list"
+    assert reference.type == "float | list[float]"
 
 
 def test_alignment_verbatim_tokens_resolves_opt_in(tmp_path: Path) -> None:

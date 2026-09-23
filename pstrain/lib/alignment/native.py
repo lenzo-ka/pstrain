@@ -118,7 +118,15 @@ class Aligner:
             )
 
         # An invalid factor list fails here, before any model is loaded.
-        retry_ladder(retry_beam_factor)
+        self._retry_rungs = retry_ladder(retry_beam_factor)
+        self._retry_beam_factor = retry_beam_factor
+        # Per-rung counts live in the object the caller holds. Behind the
+        # native worker that is this parent-side proxy, so a worker that dies
+        # mid-corpus takes none of the counts already gathered with it.
+        self._last_alignment_retried = False
+        self._last_retry_rungs = 0
+        self._retry_rung_attempts = [0] * len(self._retry_rungs)
+        self._retry_rung_recoveries = [0] * len(self._retry_rungs)
         model_dir = Path(model_dir)
         dict_path = Path(dict_path)
         if not model_dir.is_dir():
@@ -212,12 +220,7 @@ class Aligner:
         self._ctx = ctx
         self._ceplen = int(feat_record["-ceplen"])
         self._beam = beam
-        self._retry_beam_factor = retry_beam_factor
         self._failed_alignment = failed_alignment
-        self._last_alignment_retried = False
-        self._last_retry_rungs = 0
-        self._retry_rung_attempts: list[int] = []
-        self._retry_rung_recoveries: list[int] = []
         self._fe: FeatureExtractor | None = None
         self._sample_rate = int(self._fe_config["samprate"])
         self._frame_rate = int(feat_record["-frate"])
@@ -371,15 +374,51 @@ class Aligner:
                 rc = attempt()
             finally:
                 self.set_beam(previous_beam)
-            while len(self._retry_rung_attempts) <= rung:
-                self._retry_rung_attempts.append(0)
-                self._retry_rung_recoveries.append(0)
-            self._retry_rung_attempts[rung] += 1
-            if rc == 0:
-                self._retry_rung_recoveries[rung] += 1
             rung += 1
             self._last_retry_rungs = rung
+        self._record_retry(rung, recovered=rc == 0)
         return rc
+
+    def _record_retry(self, rungs_run: int, *, recovered: bool) -> None:
+        """Credit one utterance's climb: every rung that ran, and the one that recovered it."""
+        for rung in range(min(rungs_run, len(self._retry_rung_attempts))):
+            self._retry_rung_attempts[rung] += 1
+        if recovered and 0 < rungs_run <= len(self._retry_rung_recoveries):
+            self._retry_rung_recoveries[rungs_run - 1] += 1
+
+    def _align_reporting_rungs(self, method: str, *args: Any) -> tuple[AlignmentResult, int]:
+        """Worker side: align, and say how many rungs the climb ran."""
+        self._last_retry_rungs = 0
+        result = getattr(self, method)(*args)
+        return result, self._last_retry_rungs
+
+    def _reported_retry_rungs(self) -> int:
+        """Worker side: how many rungs the last alignment ran before it failed."""
+        return self._last_retry_rungs
+
+    def _count_proxied_success(self, outcome: tuple[AlignmentResult, int]) -> AlignmentResult:
+        """Parent side: keep the rung counts of a climb the worker ran."""
+        result, rungs = outcome
+        assert isinstance(result, AlignmentResult)
+        self._last_retry_rungs = int(rungs)
+        self._last_alignment_retried = self._last_retry_rungs > 0
+        self._record_retry(self._last_retry_rungs, recovered=True)
+        return result
+
+    def _count_proxied_failure(self) -> None:
+        """Parent side: count the rungs a failed climb ran, if the worker can still say.
+
+        The failure itself is what the caller needs. Its rung count is
+        bookkeeping: if the worker died with it, there is none to fetch, and
+        the counts already kept here are unaffected.
+        """
+        rungs: int | None = None
+        with contextlib.suppress(Exception):
+            rungs = int(self._proxy.call("_reported_retry_rungs"))
+        if rungs is not None:
+            self._last_retry_rungs = rungs
+            self._last_alignment_retried = rungs > 0
+            self._record_retry(rungs, recovered=False)
 
     def retry_yield(self) -> tuple[tuple[float, int, int], ...]:
         """Per-rung ``(factor, attempted, recovered)`` over this aligner's life.
@@ -389,17 +428,13 @@ class Aligner:
         ``recovered`` counts the utterances that rung aligned. With a single
         factor the one entry is the whole retry's yield.
         """
-        if hasattr(self, "_proxy"):
-            result = self._proxy.call("retry_yield")
-            return tuple((float(f), int(a), int(r)) for f, a, r in result)
-        rungs = retry_ladder(self._retry_beam_factor)
         return tuple(
-            (
-                factor,
-                self._retry_rung_attempts[rung] if rung < len(self._retry_rung_attempts) else 0,
-                self._retry_rung_recoveries[rung] if rung < len(self._retry_rung_recoveries) else 0,
+            zip(
+                self._retry_rungs,
+                self._retry_rung_attempts,
+                self._retry_rung_recoveries,
+                strict=True,
             )
-            for rung, factor in enumerate(rungs)
         )
 
     def __enter__(self) -> Self:
@@ -437,9 +472,14 @@ class Aligner:
             pronunciation and is preserved.
         """
         if hasattr(self, "_proxy"):
-            result = self._proxy.call("align_mfcc", mfcc, transcript, utterance_id)
-            assert isinstance(result, AlignmentResult)
-            return result
+            try:
+                outcome = self._proxy.call(
+                    "_align_reporting_rungs", "align_mfcc", mfcc, transcript, utterance_id
+                )
+            except Exception:
+                self._count_proxied_failure()
+                raise
+            return self._count_proxied_success(outcome)
         if self._ctx == self._ffi.NULL:
             raise RuntimeError("Aligner is closed")
         arr = np.ascontiguousarray(mfcc, dtype=np.float32)
@@ -499,9 +539,14 @@ class Aligner:
         ``sphinx3_align`` binary, which also accepts ``.mfc`` input.
         """
         if hasattr(self, "_proxy"):
-            result = self._proxy.call("align_mfc_file", mfc_path, transcript, utterance_id)
-            assert isinstance(result, AlignmentResult)
-            return result
+            try:
+                outcome = self._proxy.call(
+                    "_align_reporting_rungs", "align_mfc_file", mfc_path, transcript, utterance_id
+                )
+            except Exception:
+                self._count_proxied_failure()
+                raise
+            return self._count_proxied_success(outcome)
         if self._ctx == self._ffi.NULL:
             raise RuntimeError("Aligner is closed")
         mfc_path = Path(mfc_path)
@@ -554,9 +599,14 @@ class Aligner:
         reused across calls.
         """
         if hasattr(self, "_proxy"):
-            result = self._proxy.call("align_audio", audio_path, transcript, utterance_id)
-            assert isinstance(result, AlignmentResult)
-            return result
+            try:
+                outcome = self._proxy.call(
+                    "_align_reporting_rungs", "align_audio", audio_path, transcript, utterance_id
+                )
+            except Exception:
+                self._count_proxied_failure()
+                raise
+            return self._count_proxied_success(outcome)
         audio_path = Path(audio_path)
         if not audio_path.exists():
             raise FileNotFoundError(f"Audio file not found: {audio_path}")

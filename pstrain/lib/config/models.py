@@ -8,23 +8,72 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PlainValidator,
+    TypeAdapter,
+    ValidationError,
+    WithJsonSchema,
+    field_validator,
+    model_validator,
+)
 
 from pstrain.lib.retry_ladder import validate_retry_ladder
 
 CURRENT_CONFIG_VERSION: Literal[1] = 1
 
 
-def _retry_ladder_list(value: list[float]) -> list[float]:
-    return list(validate_retry_ladder(value))
+_RETRY_FACTOR_NUMBER: TypeAdapter[float] = TypeAdapter(Annotated[float, Field(gt=0)])
+_RETRY_FACTOR_LIST: TypeAdapter[list[float]] = TypeAdapter(list[float])
+
+
+def _one_error(error: ValidationError) -> ValueError:
+    detail = error.errors()[0]
+    location = "".join(f"[{part}]" for part in detail["loc"])
+    return ValueError(f"{location}: {detail['msg']}" if location else detail["msg"])
+
+
+def _validate_retry_beam_factor(value: Any) -> float | list[float]:
+    """Validate a number as one retry factor, or a list as a ladder, with one error.
+
+    A plain union would try both shapes and report both failures, so a bad
+    list would also be told it is not a number. This picks the shape from the
+    input and reports only that shape's problem.
+    """
+    if isinstance(value, list | tuple):
+        try:
+            factors = _RETRY_FACTOR_LIST.validate_python(list(value))
+        except ValidationError as error:
+            raise _one_error(error) from None
+        return list(validate_retry_ladder(factors))
+    try:
+        return _RETRY_FACTOR_NUMBER.validate_python(value)
+    except ValidationError as error:
+        raise _one_error(error) from None
 
 
 # One number keeps its long-standing meaning, a single retry at that factor; an
 # ascending list of factors, each above 1 and each relative to the nominal beam,
-# is a ladder whose rungs run in order until one succeeds.
-RetryBeamFactorSetting = (
-    Annotated[float, Field(gt=0)] | Annotated[list[float], AfterValidator(_retry_ladder_list)]
-)
+# is a ladder whose rungs run in order until one succeeds. JSON Schema cannot say
+# "ascending", so validation adds that to what the schema states.
+RetryBeamFactorSetting = Annotated[
+    float | list[float],
+    PlainValidator(_validate_retry_beam_factor),
+    WithJsonSchema(
+        {
+            "anyOf": [
+                {"type": "number", "exclusiveMinimum": 0},
+                {
+                    "type": "array",
+                    "items": {"type": "number", "exclusiveMinimum": 1},
+                    "minItems": 1,
+                },
+            ]
+        }
+    ),
+]
 
 
 class StrictModel(BaseModel):

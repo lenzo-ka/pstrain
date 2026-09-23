@@ -18,9 +18,10 @@ that outcome.
 from __future__ import annotations
 
 import math
+import numbers
 from collections.abc import Sequence
 from itertools import pairwise
-from typing import TypeAlias
+from typing import TypeAlias, cast
 
 __all__ = [
     "RetryBeamFactor",
@@ -62,9 +63,12 @@ def retry_ladder(factor: RetryBeamFactor) -> tuple[float, ...]:
     A single number keeps its long-standing meaning: one retry at that factor,
     or none when it is at or below 1. A sequence must be a valid ladder.
     """
-    if isinstance(factor, int | float):
-        return (float(factor),) if factor > 1.0 else ()
-    return validate_retry_ladder(factor)
+    # ``numbers.Real`` rather than ``float``: a NumPy scalar is one number, as it
+    # always was here, not a sequence of factors.
+    if isinstance(factor, numbers.Real):
+        value = float(factor)
+        return (value,) if value > 1.0 else ()
+    return validate_retry_ladder(cast("Sequence[float]", factor))
 
 
 def format_retry_factor(factor: float) -> str:

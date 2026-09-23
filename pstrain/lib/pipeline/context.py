@@ -552,6 +552,11 @@ class PipelineContext:
             effective_bw_shards = requested_bw_jobs
             payload.update(
                 features=asdict(self.feat),
+                # Fingerprinted as written, not by effect. ``retry_beam_factor``
+                # of 1e10 and [1e10] run the same single retry but fingerprint
+                # apart, just as 1 and 0.5 both disable it and differ. That is
+                # deliberate: normalizing by effect would make the fingerprint
+                # depend on retry semantics, and it costs only a rebuild.
                 training=asdict(self.train),
                 split=asdict(self.split),
                 sharding=asdict(self.sharding),
