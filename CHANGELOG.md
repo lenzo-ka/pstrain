@@ -7,6 +7,11 @@ the version in `pyproject.toml` is authoritative.
 
 ### Changes
 
+- A source checkout whose Python code has moved ahead of its native library now
+  fails at import with a message naming the stale library and `make build-c`,
+  for any change to the declared native interface. Previously such a library
+  could load and fail later, deep inside a run, unless someone had remembered
+  to bump a version number by hand.
 - Training and `pstrain align` now say when an utterance cannot be aligned at
   any beam width because its transcript needs more frames than the audio has.
   The report names the required minimum and the frames available instead of the

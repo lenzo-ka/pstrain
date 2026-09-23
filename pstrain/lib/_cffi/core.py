@@ -5,6 +5,8 @@ This module handles library discovery, FFI initialization, and common utilities.
 
 from __future__ import annotations
 
+import hashlib
+import re
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +16,62 @@ from pstrain.lib._cffi.cdef import CDEF
 
 _ffi: FFI | None = None
 _lib: Any = None
+# Bump together with PSTRAIN_ABI_VERSION in csrc/libs/libpstrain/pstrain_align.h,
+# and ONLY for a change of meaning behind unchanged declarations (a return
+# contract, ownership rule, or field semantics that changed while CDEF did
+# not). Declaration changes are caught by the interface fingerprint instead.
 PSTRAIN_ABI_VERSION = 1
+
+
+def interface_fingerprint(declarations: str = CDEF) -> str:
+    """Return the fingerprint of the declared C interface.
+
+    The native library embeds the same value, generated from ``CDEF`` by
+    ``scripts/generate_cffi_exports.py`` into
+    ``csrc/libs/libpstrain/pstrain_interface_fingerprint.h``. Any edit to the
+    declarations changes it, so a library built from older declarations is
+    rejected at load time.
+    """
+    return hashlib.sha256(declarations.encode("utf-8")).hexdigest()
+
+
+# Where the generated fingerprint header lives in a source checkout. Absent in
+# an installed distribution, where the library was built with the package.
+_SOURCE_FINGERPRINT_HEADER = (
+    Path(__file__).resolve().parents[3]
+    / "csrc"
+    / "libs"
+    / "libpstrain"
+    / "pstrain_interface_fingerprint.h"
+)
+_HEADER_FINGERPRINT = re.compile(r'#define\s+PSTRAIN_INTERFACE_FINGERPRINT\s+"([^"]*)"')
+
+
+def _source_header_fingerprint() -> str | None:
+    """Return the fingerprint in the source checkout's generated header, if any."""
+    try:
+        text = _SOURCE_FINGERPRINT_HEADER.read_text()
+    except OSError:
+        return None
+    match = _HEADER_FINGERPRINT.search(text)
+    return match.group(1) if match else None
+
+
+def _fingerprint_remedy(lib_path: Path, expected_fingerprint: str) -> str:
+    """Name the one fix for a library whose interface fingerprint is wrong.
+
+    ``make build-c`` compiles the checked-in header, so when ``CDEF`` changed
+    without regenerating that header, rebuilding alone reproduces the same
+    mismatch; the header must be regenerated first.
+    """
+    header_fingerprint = _source_header_fingerprint()
+    if header_fingerprint is not None and header_fingerprint != expected_fingerprint:
+        return (
+            f"The native library at {lib_path} is stale, and so is the generated header "
+            f"{_SOURCE_FINGERPRINT_HEADER} (fingerprint {header_fingerprint}): CDEF changed "
+            "without regenerating it. Run `make cffi-exports-gen`, then `make build-c`."
+        )
+    return f"The native library at {lib_path} is stale; rebuild it with `make build-c`."
 
 
 def _find_library() -> Path:
@@ -53,6 +110,7 @@ def _init() -> tuple[FFI, Any]:
 
     lib_path = _find_library()
     lib = _ffi.dlopen(str(lib_path))
+    stale = f"The native library at {lib_path} is stale; rebuild it with `make build-c`."
     try:
         actual_abi = int(lib.pstrain_abi_version())
     except AttributeError as exc:
@@ -61,16 +119,34 @@ def _init() -> tuple[FFI, Any]:
         raise RuntimeError(
             "libpstrainc ABI mismatch: Python expects ABI version "
             f"{PSTRAIN_ABI_VERSION}, but the library has no ABI version handshake "
-            f"(pre-handshake library). The native library at {lib_path} is stale; "
-            "rebuild it with `make build-c`."
+            f"(pre-handshake library). {stale}"
         ) from exc
     if actual_abi != PSTRAIN_ABI_VERSION:
         _ffi = None
         _lib = None
         raise RuntimeError(
             "libpstrainc ABI mismatch: Python expects ABI version "
-            f"{PSTRAIN_ABI_VERSION}, library reports {actual_abi}. "
-            f"The native library at {lib_path} is stale; rebuild it with `make build-c`."
+            f"{PSTRAIN_ABI_VERSION}, library reports {actual_abi}. {stale}"
+        )
+    expected_fingerprint = interface_fingerprint(CDEF)
+    try:
+        fingerprint_ptr = lib.pstrain_interface_fingerprint()
+    except AttributeError as exc:
+        _ffi = None
+        _lib = None
+        raise RuntimeError(
+            "libpstrainc interface fingerprint mismatch: Python expects interface "
+            f"fingerprint {expected_fingerprint}, but the library has no interface "
+            f"fingerprint (pre-fingerprint library). {_fingerprint_remedy(lib_path, expected_fingerprint)}"
+        ) from exc
+    actual_fingerprint = _ffi.string(fingerprint_ptr).decode("ascii", "replace")
+    if actual_fingerprint != expected_fingerprint:
+        _ffi = None
+        _lib = None
+        raise RuntimeError(
+            "libpstrainc interface fingerprint mismatch: Python expects interface "
+            f"fingerprint {expected_fingerprint}, library reports {actual_fingerprint}. "
+            f"{_fingerprint_remedy(lib_path, expected_fingerprint)}"
         )
     _lib = lib
 

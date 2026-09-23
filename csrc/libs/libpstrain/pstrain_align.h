@@ -37,9 +37,28 @@ typedef struct pstrain_align_config_s {
     int     verbatim_tokens; /**< Honor explicit WORD(n).    Default 0.    */
 } pstrain_align_config_t;
 
+/* Load-time handshake with the Python package (pstrain/lib/_cffi/core.py).
+ *
+ * Two checks run when Python loads this library:
+ *
+ * 1. pstrain_interface_fingerprint() returns a hash of the declared C
+ *    interface (the CDEF string in pstrain/lib/_cffi/cdef.py), generated
+ *    into pstrain_interface_fingerprint.h by `make cffi-exports-gen`.
+ *    Any change to CDEF -- an added, removed, or re-typed function, or a
+ *    changed struct -- changes the fingerprint, so a library built before
+ *    the change is rejected as stale with no manual step.  Regenerate
+ *    after editing CDEF; `make config-check` fails until you do.
+ *
+ * 2. PSTRAIN_ABI_VERSION must equal PSTRAIN_ABI_VERSION in core.py.  Bump
+ *    both ONLY for a change of meaning behind unchanged declarations: a
+ *    function whose signature stays the same but whose return contract,
+ *    ownership rule, units, or field semantics change.  Do not bump it for
+ *    a declaration change; the fingerprint already covers that.
+ */
 #define PSTRAIN_ABI_VERSION 1
 
 uint32 pstrain_abi_version(void);
+const char *pstrain_interface_fingerprint(void);
 void pstrain_align_config_default(pstrain_align_config_t *config);
 
 typedef struct pstrain_align_context_s pstrain_align_context_t;

@@ -713,6 +713,7 @@ typedef struct pstrain_align_config_s {
 } pstrain_align_config_t;
 
 uint32 pstrain_abi_version(void);
+const char *pstrain_interface_fingerprint(void);
 void pstrain_align_config_default(pstrain_align_config_t *config);
 
 typedef struct pstrain_align_context_s pstrain_align_context_t;
