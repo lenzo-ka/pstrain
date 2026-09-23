@@ -98,6 +98,8 @@
 #include <sphinxbase/feat.h>
 #include <sphinxbase/strfuncs.h>
 
+#include <stdint.h>
+
 #include "s3types.h"
 #include "mdef.h"
 #include "tmat.h"
@@ -205,6 +207,7 @@ static int32 curfrm;            /** Current frame */
 static int32 beam;              /** Pruning beamwidth */
 static logmath_t *lmath;        /** Log math used to convert the live beam */
 static int32 *score_scale;      /** Score by which state scores scaled in each frame */
+static int32 max_frames;        /** Entries in score_scale: the most frames one utterance may have */
 
 /** Lists of state, phone and word-level alignments for most recent utterance */
 static align_stseg_t *align_stseg;
@@ -1171,6 +1174,15 @@ align_frame(int32 * senscr)
     history_t *tmphist = NULL;
     snode_t **tmpswap;
 
+    /* score_scale holds one entry per frame; refuse a frame it has no room
+     * for rather than write past its end.  Callers bound the utterance
+     * length before aligning, so reaching this is a caller error. */
+    if (curfrm >= max_frames) {
+        E_ERROR("Frame %d is beyond the aligner's limit of %d frames\n",
+                curfrm, max_frames);
+        return -1;
+    }
+
     nf = curfrm + 1;
     n_active = 0;
 
@@ -1242,6 +1254,20 @@ align_frame(int32 * senscr)
 }
 
 
+/* Segment scores sum one scaled score per frame, so a long segment can
+ * pass the range of the int32 it is reported in.  Sum in 64 bits and
+ * saturate at the int32 range instead of overflowing. */
+static int32
+clamp_score(int64 v)
+{
+    if (v < INT32_MIN)
+        return INT32_MIN;
+    if (v > INT32_MAX)
+        return INT32_MAX;
+    return (int32) v;
+}
+
+
 static void
 build_stseg(history_t * rooth)
 {
@@ -1268,7 +1294,8 @@ build_stseg(history_t * rooth)
         stseg->start = ((!prevh)
                         || (prevh->snode->pnode->id !=
                             h->snode->pnode->id));
-        stseg->score = h->score - prevscr + score_scale[f];
+        stseg->score =
+            clamp_score((int64) h->score - prevscr + score_scale[f]);
         stseg->bsdiff = h->score;
 
         prevscr = h->score;
@@ -1282,7 +1309,8 @@ build_phseg(history_t * rooth)
 {
     history_t *h, *nh;
     align_phseg_t *phseg, *tail = NULL;
-    int32 f, prevf, prevscr, scale, bsdiff;
+    int32 f, prevf, prevscr;
+    int64 scale, bsdiff;
 
     assert(align_phseg == NULL);
 
@@ -1309,8 +1337,8 @@ build_phseg(history_t * rooth)
             phseg->pid = h->snode->pnode->pid;
             phseg->sf = prevf + 1;
             phseg->ef = f;
-            phseg->score = h->score - prevscr + scale,
-                phseg->bsdiff = bsdiff;
+            phseg->score = clamp_score((int64) h->score - prevscr + scale);
+            phseg->bsdiff = clamp_score(bsdiff);
 
             bsdiff = 0;
             scale = 0;
@@ -1326,7 +1354,8 @@ build_wdseg(history_t * rooth)
 {
     history_t *h, *nh;
     align_wdseg_t *wdseg, *tail = NULL;
-    int32 f, prevf, prevscr, scale, bsdiff;
+    int32 f, prevf, prevscr;
+    int64 scale, bsdiff;
 
     assert(align_wdseg == NULL);
 
@@ -1354,8 +1383,8 @@ build_wdseg(history_t * rooth)
             wdseg->wid = h->snode->pnode->wid;
             wdseg->sf = prevf + 1;
             wdseg->ef = f;
-            wdseg->score = h->score - prevscr + scale,
-                wdseg->bsdiff = bsdiff;
+            wdseg->score = clamp_score((int64) h->score - prevscr + scale);
+            wdseg->bsdiff = clamp_score(bsdiff);
 
             bsdiff = 0;
             scale = 0;
@@ -1440,7 +1469,8 @@ align_end_utt(align_stseg_t ** stseg_out,
 
 
 int32
-align_init(mdef_t * _mdef, tmat_t * _tmat, dict_t * _dict, cmd_ln_t *_config, logmath_t * _logmath)
+align_init(mdef_t * _mdef, tmat_t * _tmat, dict_t * _dict, cmd_ln_t *_config, logmath_t * _logmath,
+           int32 _max_frames)
 {
     int32 k;
     s3wid_t w;
@@ -1453,6 +1483,7 @@ align_init(mdef_t * _mdef, tmat_t * _tmat, dict_t * _dict, cmd_ln_t *_config, lo
     assert(mdef);
     assert(tmat);
     assert(dict);
+    assert(_max_frames > 0);
 
     /* Create list of optional filler words to be inserted between transcript words */
     fillwid =
@@ -1472,7 +1503,8 @@ align_init(mdef_t * _mdef, tmat_t * _tmat, dict_t * _dict, cmd_ln_t *_config, lo
     beam = logs3(lmath, cmd_ln_float64_r(_config, "-beam"));
     E_INFO("logs3(beam)= %d\n", beam);
 
-    score_scale = (int32 *) ckd_calloc(S3_MAX_FRAMES, sizeof(int32));
+    max_frames = _max_frames;
+    score_scale = (int32 *) ckd_calloc(max_frames, sizeof(int32));
 
     hist_head = NULL;
 
@@ -1494,6 +1526,9 @@ align_free(void)
 {
     if (fillwid)
         ckd_free(fillwid);
+    fillwid = NULL;
     if (score_scale)
         ckd_free(score_scale);
+    score_scale = NULL;
+    max_frames = 0;
 }

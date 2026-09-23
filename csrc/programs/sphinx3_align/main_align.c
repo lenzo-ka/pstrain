@@ -255,8 +255,10 @@ models_init(cmd_ln_t *config)
 
 
 
-    for (cisencnt = 0; cisencnt == kbc->mdef->cd2cisen[cisencnt];
-         cisencnt++);
+    /* Count the leading CI senones.  A CI-only model has no others, so stop
+     * at n_sen rather than read past the end of cd2cisen. */
+    for (cisencnt = 0; cisencnt < kbc->mdef->n_sen &&
+         cisencnt == kbc->mdef->cd2cisen[cisencnt]; cisencnt++);
 
     ascr = ascr_init(kbc->mdef->n_sen, 0,       /* No composite senone */
                      mdef_n_sseq(kbc->mdef), 0, /* No composite senone sequence */
@@ -691,8 +693,9 @@ write_outctl(FILE * fp, char *uttctl)
  * them) and must NOT be freed by the caller.
  *
  * Returns 0 on success, negative on failure (transcript too short, sent_hmm
- * build failed, or final state not reached). On failure, the seg-list out
- * params are set to NULL and the sent HMM is already torn down.
+ * build failed, more frames than align_init() allowed, or final state not
+ * reached). On failure, the seg-list out params are set to NULL and the sent
+ * HMM is already torn down.
  */
 int
 align_utt_capture(char *sent,
@@ -754,7 +757,12 @@ align_utt_capture(char *sent,
                                         &tm_ovrhd,
                                         kbcore_logmath(kbc));
         }
-        align_frame(ascr->senscr);
+        if (align_frame(ascr->senscr) < 0) {
+            align_destroy_sent_hmm();
+            E_ERROR("Utterance %s has more frames than the aligner accepts; "
+                    "no alignment\n", uttid);
+            return -4;
+        }
     }
 
     if (align_end_utt(out_stseg, out_phseg, out_wdseg) < 0) {
@@ -1137,7 +1145,7 @@ main(int32 argc, char *argv[])
     timers[tmr_align].name = "A";
 
     /* Initialize align module */
-    align_init(kbc->mdef, kbc->tmat, dict, config, kbc->logmath);
+    align_init(kbc->mdef, kbc->tmat, dict, config, kbc->logmath, S3_MAX_FRAMES);
     printf("\n");
 
     if (cmd_ln_str_r(config, "-mllr") != NULL) {

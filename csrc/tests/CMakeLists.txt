@@ -206,3 +206,19 @@ add_test(
     ${BW_FIXTURE}/model/mdef
     ${ALIGN_DICT_DROPPED_BASE_DIR}
 )
+
+add_executable(test_align_frame_limit test_align_frame_limit.c)
+target_link_libraries(test_align_frame_limit pstrainc)
+target_include_directories(test_align_frame_limit
+  PRIVATE ${CMAKE_BINARY_DIR}
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../libs/libpstrain
+)
+
+set(ALIGN_FRAME_LIMIT_DIR ${CMAKE_CURRENT_BINARY_DIR}/align_frame_limit)
+file(MAKE_DIRECTORY ${ALIGN_FRAME_LIMIT_DIR})
+add_test(
+  NAME align_frame_limit
+  COMMAND test_align_frame_limit
+    ${BW_FIXTURE}
+    ${ALIGN_FRAME_LIMIT_DIR}
+)
