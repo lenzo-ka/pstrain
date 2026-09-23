@@ -6,6 +6,7 @@ This module handles library discovery, FFI initialization, and common utilities.
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,45 @@ def interface_fingerprint(declarations: str = CDEF) -> str:
     rejected at load time.
     """
     return hashlib.sha256(declarations.encode("utf-8")).hexdigest()
+
+
+# Where the generated fingerprint header lives in a source checkout. Absent in
+# an installed distribution, where the library was built with the package.
+_SOURCE_FINGERPRINT_HEADER = (
+    Path(__file__).resolve().parents[3]
+    / "csrc"
+    / "libs"
+    / "libpstrain"
+    / "pstrain_interface_fingerprint.h"
+)
+_HEADER_FINGERPRINT = re.compile(r'#define\s+PSTRAIN_INTERFACE_FINGERPRINT\s+"([^"]*)"')
+
+
+def _source_header_fingerprint() -> str | None:
+    """Return the fingerprint in the source checkout's generated header, if any."""
+    try:
+        text = _SOURCE_FINGERPRINT_HEADER.read_text()
+    except OSError:
+        return None
+    match = _HEADER_FINGERPRINT.search(text)
+    return match.group(1) if match else None
+
+
+def _fingerprint_remedy(lib_path: Path, expected_fingerprint: str) -> str:
+    """Name the one fix for a library whose interface fingerprint is wrong.
+
+    ``make build-c`` compiles the checked-in header, so when ``CDEF`` changed
+    without regenerating that header, rebuilding alone reproduces the same
+    mismatch; the header must be regenerated first.
+    """
+    header_fingerprint = _source_header_fingerprint()
+    if header_fingerprint is not None and header_fingerprint != expected_fingerprint:
+        return (
+            f"The native library at {lib_path} is stale, and so is the generated header "
+            f"{_SOURCE_FINGERPRINT_HEADER} (fingerprint {header_fingerprint}): CDEF changed "
+            "without regenerating it. Run `make cffi-exports-gen`, then `make build-c`."
+        )
+    return f"The native library at {lib_path} is stale; rebuild it with `make build-c`."
 
 
 def _find_library() -> Path:
@@ -97,7 +137,7 @@ def _init() -> tuple[FFI, Any]:
         raise RuntimeError(
             "libpstrainc interface fingerprint mismatch: Python expects interface "
             f"fingerprint {expected_fingerprint}, but the library has no interface "
-            f"fingerprint (pre-fingerprint library). {stale}"
+            f"fingerprint (pre-fingerprint library). {_fingerprint_remedy(lib_path, expected_fingerprint)}"
         ) from exc
     actual_fingerprint = _ffi.string(fingerprint_ptr).decode("ascii", "replace")
     if actual_fingerprint != expected_fingerprint:
@@ -106,7 +146,7 @@ def _init() -> tuple[FFI, Any]:
         raise RuntimeError(
             "libpstrainc interface fingerprint mismatch: Python expects interface "
             f"fingerprint {expected_fingerprint}, library reports {actual_fingerprint}. "
-            f"{stale}"
+            f"{_fingerprint_remedy(lib_path, expected_fingerprint)}"
         )
     _lib = lib
 

@@ -139,6 +139,8 @@ def test_init_rejects_library_without_interface_fingerprint(
         RuntimeError, match=_pre_fingerprint_message("prefingerprint-libpstrainc.so")
     ):
         core._init()
+    assert core._ffi is None
+    assert core._lib is None
 
 
 @pytest.mark.skipif(
@@ -163,6 +165,100 @@ def test_real_library_at_current_abi_without_fingerprint_is_stale(
 
     with pytest.raises(RuntimeError, match=_pre_fingerprint_message(str(library))):
         core._init()
+    assert core._ffi is None
+    assert core._lib is None
+
+
+def _write_header(path: Path, fingerprint: str) -> Path:
+    path.write_text(f'#define PSTRAIN_INTERFACE_FINGERPRINT "{fingerprint}"\n')
+    return path
+
+
+def _stale_header_message(path: str, header: Path, header_fingerprint: str) -> str:
+    return (
+        rf"The native library at {re.escape(path)} is stale, and so is the generated header "
+        rf"{re.escape(str(header))} \(fingerprint {header_fingerprint}\): CDEF changed "
+        r"without regenerating it\. Run `make cffi-exports-gen`, then `make build-c`\.$"
+    )
+
+
+def test_mismatch_after_unregenerated_cdef_edit_names_cffi_exports_gen(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """CDEF edited, header not regenerated, library rebuilt: `make build-c` alone
+    compiles the same stale header, so the message must name the generator."""
+    old = "1" * 64
+    header = _write_header(tmp_path / "pstrain_interface_fingerprint.h", old)
+    monkeypatch.setattr(core, "_SOURCE_FINGERPRINT_HEADER", header)
+    _patch_loader(monkeypatch, old.encode("ascii"), "rebuilt-libpstrainc.so")
+
+    with pytest.raises(RuntimeError) as excinfo:
+        core._init()
+
+    message = str(excinfo.value)
+    assert message.startswith(
+        "libpstrainc interface fingerprint mismatch: Python expects interface "
+        f"fingerprint {core.interface_fingerprint()}, library reports {old}. "
+    )
+    assert re.search(_stale_header_message("rebuilt-libpstrainc.so", header, old), message)
+    assert "rebuild it with `make build-c`" not in message
+    assert core._ffi is None
+    assert core._lib is None
+
+
+def test_missing_fingerprint_with_stale_header_names_cffi_exports_gen(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    old = "2" * 64
+    header = _write_header(tmp_path / "pstrain_interface_fingerprint.h", old)
+    monkeypatch.setattr(core, "_SOURCE_FINGERPRINT_HEADER", header)
+    _patch_loader(monkeypatch, None, "old-libpstrainc.so")
+
+    with pytest.raises(RuntimeError) as excinfo:
+        core._init()
+
+    assert "(pre-fingerprint library)" in str(excinfo.value)
+    assert re.search(_stale_header_message("old-libpstrainc.so", header, old), str(excinfo.value))
+    assert core._ffi is None
+    assert core._lib is None
+
+
+def test_mismatch_with_current_header_names_build_c_only(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    header = _write_header(
+        tmp_path / "pstrain_interface_fingerprint.h", core.interface_fingerprint()
+    )
+    monkeypatch.setattr(core, "_SOURCE_FINGERPRINT_HEADER", header)
+    _patch_loader(monkeypatch, b"3" * 64, "stale-libpstrainc.so")
+
+    with pytest.raises(RuntimeError) as excinfo:
+        core._init()
+
+    assert str(excinfo.value).endswith(
+        "The native library at stale-libpstrainc.so is stale; rebuild it with `make build-c`."
+    )
+    assert "cffi-exports-gen" not in str(excinfo.value)
+
+
+def test_mismatch_without_source_header_names_build_c_only(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An installed distribution has no source header to consult."""
+    monkeypatch.setattr(core, "_SOURCE_FINGERPRINT_HEADER", tmp_path / "absent.h")
+    _patch_loader(monkeypatch, b"4" * 64, "installed-libpstrainc.so")
+
+    with pytest.raises(RuntimeError) as excinfo:
+        core._init()
+
+    assert str(excinfo.value).endswith("rebuild it with `make build-c`.")
+    assert "cffi-exports-gen" not in str(excinfo.value)
+
+
+def test_source_header_path_is_the_generated_header() -> None:
+    generator = _load_generator()
+    assert generator.FINGERPRINT_HEADER.resolve() == core._SOURCE_FINGERPRINT_HEADER
+    assert core._source_header_fingerprint() == core.interface_fingerprint()
 
 
 def _load_generator() -> ModuleType:
