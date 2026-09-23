@@ -206,8 +206,11 @@ class TrainParams:
     # Warn on every skipped update; fail a stage above five percent.
     max_skip_fraction: float = field(default_factory=lambda: Profile().training.max_skip_fraction)
     # Retry forward-final-state pruning failures once at a beam this many
-    # times wider (1e-90 / 1e10 = 1e-100).
-    retry_beam_factor: float = field(default_factory=lambda: Profile().training.retry_beam_factor)
+    # times wider (1e-90 / 1e10 = 1e-100), or at each factor of an ascending
+    # list in turn until one succeeds.
+    retry_beam_factor: float | list[float] = field(
+        default_factory=lambda: Profile().training.retry_beam_factor
+    )
     failed_alignment: Literal["recover", "abort", "omit"] = field(
         default_factory=lambda: Profile().training.failed_alignment
     )

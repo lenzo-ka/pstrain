@@ -14,7 +14,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from pstrain.lib.retry_ladder import RetryBeamFactor
 
 # Default pruning beam for the sphinx3 aligner. 1e-64 matches the
 # upstream sphinx3_align CLI default; it is wide enough for cd-1g
@@ -102,7 +105,7 @@ def align_utterance(
     filler_dict: Path | None = None,
     include_phones: bool = True,
     beam: float = DEFAULT_BEAM,
-    retry_beam_factor: float = DEFAULT_RETRY_BEAM_FACTOR,
+    retry_beam_factor: RetryBeamFactor = DEFAULT_RETRY_BEAM_FACTOR,
     failed_alignment: Literal["recover", "abort", "omit"] = "recover",
     verbatim_tokens: bool = False,
 ) -> AlignmentResult:
@@ -125,8 +128,9 @@ def align_utterance(
         filler_dict: Filler / non-speech dictionary (optional).
         include_phones: Return phone-level segments in the result.
         beam: Viterbi pruning beam (default 1e-64, sphinx3_align default).
-        retry_beam_factor: Factor for one wider-beam final-state retry.
-        failed_alignment: ``"recover"`` retries final-state failures once;
+        retry_beam_factor: Factor for one wider-beam final-state retry, or an
+            ascending sequence of factors tried in order until one succeeds.
+        failed_alignment: ``"recover"`` retries final-state failures;
             ``"abort"`` and ``"omit"`` do not retry.
         verbatim_tokens: Honor explicit pronunciation variants exactly. The
             default collapses suffixes and considers every alternative.

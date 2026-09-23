@@ -23,6 +23,7 @@ from __future__ import annotations
 import contextlib
 import struct
 import wave
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self
 
@@ -35,6 +36,7 @@ from pstrain.lib.feasibility import infeasible_frames_message
 from pstrain.lib.features import FeatureExtractor
 from pstrain.lib.model import MODEL_FILES_REQUIRED, read_complete_model_feat_params
 from pstrain.lib.pipeline.feat_params import feature_extractor_config_from_record
+from pstrain.lib.retry_ladder import RetryBeamFactor, retry_ladder
 
 if TYPE_CHECKING:
     import numpy.typing as npt
@@ -58,7 +60,10 @@ class Aligner:
         filler_dict: Filler / non-speech dictionary path. Optional.
         beam: Pruning beam (default 1e-64, matches sphinx3_align).
         retry_beam_factor: Factor that widens the beam for one retry after a
-            final-state failure. Values at or below 1 disable the retry.
+            final-state failure; values at or below 1 disable the retry. An
+            ascending sequence of factors, each greater than 1 and relative to
+            ``beam``, is a ladder: its rungs run in order and the first success
+            ends it. :meth:`retry_yield` reports what each rung bought.
         failed_alignment: ``"recover"`` retries final-state failures;
             ``"abort"`` and ``"omit"`` raise without retrying.
         insert_sil: Insert optional inter-word silences (default ``True``).
@@ -92,7 +97,7 @@ class Aligner:
         *,
         filler_dict: Path | str | None = None,
         beam: float = _DEFAULT_BEAM,
-        retry_beam_factor: float = _DEFAULT_RETRY_BEAM_FACTOR,
+        retry_beam_factor: RetryBeamFactor = _DEFAULT_RETRY_BEAM_FACTOR,
         failed_alignment: Literal["recover", "abort", "omit"] = "recover",
         insert_sil: bool = True,
         include_phones: bool = True,
@@ -112,6 +117,8 @@ class Aligner:
                 "Call .close() on the existing instance first."
             )
 
+        # An invalid factor list fails here, before any model is loaded.
+        retry_ladder(retry_beam_factor)
         model_dir = Path(model_dir)
         dict_path = Path(dict_path)
         if not model_dir.is_dir():
@@ -208,6 +215,9 @@ class Aligner:
         self._retry_beam_factor = retry_beam_factor
         self._failed_alignment = failed_alignment
         self._last_alignment_retried = False
+        self._last_retry_rungs = 0
+        self._retry_rung_attempts: list[int] = []
+        self._retry_rung_recoveries: list[int] = []
         self._fe: FeatureExtractor | None = None
         self._sample_rate = int(self._fe_config["samprate"])
         self._frame_rate = int(feat_record["-frate"])
@@ -324,19 +334,73 @@ class Aligner:
             return None
         return required, n_frames
 
-    def _final_state_retry_beam(self, rc: int) -> float | None:
-        """Return the widened beam for one final-state retry, or ``None`` to skip it.
+    def _final_state_retry_beam(self, rc: int, rung: int = 0) -> float | None:
+        """Return the beam for retry ladder rung ``rung``, or ``None`` to stop.
 
         Mirrors Baum-Welch training: a final-state pruning failure (``rc == -3``)
-        under the ``recover`` policy is retried once at ``beam / retry_beam_factor``
-        (a smaller value is a wider beam). Any other rc or policy, or a factor at or
-        below 1, disables the retry.
+        under the ``recover`` policy is retried at ``beam / factor`` for each
+        factor of the ladder in turn (a smaller value is a wider beam). Any other
+        rc or policy, a single factor at or below 1, or a ladder already climbed
+        ends the retry. Asking for rung 0 starts a new utterance's accounting.
         """
-        self._last_alignment_retried = False
-        if rc != -3 or self._failed_alignment != "recover" or self._retry_beam_factor <= 1.0:
+        if rung == 0:
+            self._last_alignment_retried = False
+            self._last_retry_rungs = 0
+        if rc != -3 or self._failed_alignment != "recover":
+            return None
+        rungs = retry_ladder(self._retry_beam_factor)
+        if rung >= len(rungs):
             return None
         self._last_alignment_retried = True
-        return self._beam / self._retry_beam_factor
+        return self._beam / rungs[rung]
+
+    def _climb_retry_ladder(self, rc: int, attempt: Callable[[], int]) -> int:
+        """Retry a final-state failure up the ladder; return the final rc.
+
+        Each rung runs ``attempt`` at its own beam and the nominal beam is
+        restored after every rung, success or not. The ladder stops at the first
+        rung that succeeds, and at any failure that is not a final-state failure,
+        since no wider beam answers that. When every rung fails, the native
+        error left behind is the last rung's: the widest search that ran, and
+        the same message a single retry has always reported.
+        """
+        rung = 0
+        while (beam := self._final_state_retry_beam(rc, rung)) is not None:
+            previous_beam = self.set_beam(beam)
+            try:
+                rc = attempt()
+            finally:
+                self.set_beam(previous_beam)
+            while len(self._retry_rung_attempts) <= rung:
+                self._retry_rung_attempts.append(0)
+                self._retry_rung_recoveries.append(0)
+            self._retry_rung_attempts[rung] += 1
+            if rc == 0:
+                self._retry_rung_recoveries[rung] += 1
+            rung += 1
+            self._last_retry_rungs = rung
+        return rc
+
+    def retry_yield(self) -> tuple[tuple[float, int, int], ...]:
+        """Per-rung ``(factor, attempted, recovered)`` over this aligner's life.
+
+        One entry per ladder rung, in order. ``attempted`` counts utterances
+        that reached the rung, so it counts only retries that actually ran;
+        ``recovered`` counts the utterances that rung aligned. With a single
+        factor the one entry is the whole retry's yield.
+        """
+        if hasattr(self, "_proxy"):
+            result = self._proxy.call("retry_yield")
+            return tuple((float(f), int(a), int(r)) for f, a, r in result)
+        rungs = retry_ladder(self._retry_beam_factor)
+        return tuple(
+            (
+                factor,
+                self._retry_rung_attempts[rung] if rung < len(self._retry_rung_attempts) else 0,
+                self._retry_rung_recoveries[rung] if rung < len(self._retry_rung_recoveries) else 0,
+            )
+            for rung, factor in enumerate(rungs)
+        )
 
     def __enter__(self) -> Self:
         return self
@@ -399,24 +463,22 @@ class Aligner:
         shortfall = self._infeasible_frames(rc, transcript, int(n_frames))
         if shortfall is not None:
             self._last_alignment_retried = False
+            self._last_retry_rungs = 0
             raise RuntimeError(self._infeasible_message(utterance_id, shortfall))
-        retry_beam = self._final_state_retry_beam(rc)
-        if retry_beam is not None:
-            previous_beam = self.set_beam(retry_beam)
-            try:
-                rc = int(
-                    self._lib.pstrain_align_mfcc(
-                        self._ctx,
-                        cepstra,
-                        n_frames,
-                        ncep,
-                        transcript.encode(),
-                        utterance_id.encode(),
-                        out_pp,
-                    )
+        rc = self._climb_retry_ladder(
+            rc,
+            lambda: int(
+                self._lib.pstrain_align_mfcc(
+                    self._ctx,
+                    cepstra,
+                    n_frames,
+                    ncep,
+                    transcript.encode(),
+                    utterance_id.encode(),
+                    out_pp,
                 )
-            finally:
-                self.set_beam(previous_beam)
+            ),
+        )
         if rc != 0:
             err = self._last_error()
             raise RuntimeError(f"pstrain_align_mfcc failed: {err or f'rc={rc}'}")
@@ -457,22 +519,20 @@ class Aligner:
         shortfall = self._infeasible_frames_for_mfc(rc, transcript, mfc_path)
         if shortfall is not None:
             self._last_alignment_retried = False
+            self._last_retry_rungs = 0
             raise RuntimeError(self._infeasible_message(utt_id, shortfall))
-        retry_beam = self._final_state_retry_beam(rc)
-        if retry_beam is not None:
-            previous_beam = self.set_beam(retry_beam)
-            try:
-                rc = int(
-                    self._lib.pstrain_align_mfc_file(
-                        self._ctx,
-                        str(mfc_path).encode(),
-                        transcript.encode(),
-                        utt_id.encode(),
-                        out_pp,
-                    )
+        rc = self._climb_retry_ladder(
+            rc,
+            lambda: int(
+                self._lib.pstrain_align_mfc_file(
+                    self._ctx,
+                    str(mfc_path).encode(),
+                    transcript.encode(),
+                    utt_id.encode(),
+                    out_pp,
                 )
-            finally:
-                self.set_beam(previous_beam)
+            ),
+        )
         if rc != 0:
             err = self._last_error()
             raise RuntimeError(f"pstrain_align_mfc_file failed: {err or f'rc={rc}'}")

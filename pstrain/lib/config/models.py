@@ -8,9 +8,23 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from pstrain.lib.retry_ladder import validate_retry_ladder
 
 CURRENT_CONFIG_VERSION: Literal[1] = 1
+
+
+def _retry_ladder_list(value: list[float]) -> list[float]:
+    return list(validate_retry_ladder(value))
+
+
+# One number keeps its long-standing meaning, a single retry at that factor; an
+# ascending list of factors, each above 1 and each relative to the nominal beam,
+# is a ladder whose rungs run in order until one succeeds.
+RetryBeamFactorSetting = (
+    Annotated[float, Field(gt=0)] | Annotated[list[float], AfterValidator(_retry_ladder_list)]
+)
 
 
 class StrictModel(BaseModel):
@@ -131,12 +145,13 @@ class TrainingConfig(StrictModel):
         float, Field(ge=0, le=1, description="Maximum skipped-update fraction")
     ] = 0.05
     retry_beam_factor: Annotated[
-        float,
+        RetryBeamFactorSetting,
         Field(
-            gt=0,
             description=(
                 "Factor that widens the forward beam for one retry after an utterance fails "
-                "to reach its final state; a retry is counted only when that second attempt runs"
+                "to reach its final state, or an ascending list of factors, each greater than "
+                "1 and relative to the nominal beam, tried in order until one succeeds; a retry "
+                "is counted only when that attempt runs"
             ),
         ),
     ] = 1e10
@@ -144,9 +159,9 @@ class TrainingConfig(StrictModel):
         Literal["recover", "abort", "omit"],
         Field(
             description=(
-                "Action when an utterance fails to reach its final state: ``recover`` runs one "
-                "wider-beam retry and, if that also fails, reports the utterance and continues "
-                "without it; ``abort`` fails the run on the first failure; and ``omit`` reports "
+                "Action when an utterance fails to reach its final state: ``recover`` runs the "
+                "wider-beam retries in ``retry_beam_factor`` and, if they all fail, reports the "
+                "utterance and continues without it; ``abort`` fails the run on the first failure; and ``omit`` reports "
                 "and excludes it without retrying. Skips are counted either way, and "
                 "``max_skip_fraction`` still fails the run when they stop being incidental"
             )
@@ -359,12 +374,13 @@ class AlignmentConfig(StrictModel):
 
     beam: Annotated[float, Field(gt=0, description="Viterbi pruning beam")] = 1e-64
     retry_beam_factor: Annotated[
-        float,
+        RetryBeamFactorSetting,
         Field(
-            gt=0,
             description=(
                 "Factor that widens the beam for one retry after an utterance fails to reach "
-                "its final state; values at or below 1 disable the retry"
+                "its final state, where values at or below 1 disable the retry; or an ascending "
+                "list of factors, each greater than 1 and relative to the nominal beam, tried "
+                "in order until one succeeds"
             ),
         ),
     ] = 1e36
@@ -372,8 +388,8 @@ class AlignmentConfig(StrictModel):
         Literal["recover", "abort", "omit"],
         Field(
             description=(
-                "Forced-alignment failure policy: ``recover`` retries final-state failures "
-                "once; ``abort`` and ``omit`` do not retry"
+                "Forced-alignment failure policy: ``recover`` retries final-state failures at "
+                "each ``retry_beam_factor`` in turn; ``abort`` and ``omit`` do not retry"
             )
         ),
     ] = "recover"

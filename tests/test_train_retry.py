@@ -4,6 +4,7 @@ import logging
 import os
 import re
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -1055,3 +1056,335 @@ def test_sharded_retry_attempts_are_summed_across_shards(tmp_path: Path) -> None
     per_shard = [json.loads(path.read_text())["retry_attempts"] for path in artifacts]
     assert sum(per_shard) == len(ids)
     assert per_shard == [1, 1]
+
+
+# --- Retry ladder -------------------------------------------------------------
+
+
+class LadderTrainer:
+    """Synthetic trainer that reaches its final state only at or below ``threshold``.
+
+    Every failure is a final-state failure, so the only thing that ends a climb
+    early is a success. ``threshold=None`` never succeeds.
+    """
+
+    def __init__(self, beam: float, threshold: float | None) -> None:
+        self.beam = beam
+        self.threshold = threshold
+        self.attempt_beams: list[float] = []
+        self.final_state_not_reached = False
+        self._retry_transaction_active = False
+
+    def process_utterance_mfcc(self, mfcc: np.ndarray, transcript: str) -> bool:
+        self.attempt_beams.append(self.beam)
+        success = self.threshold is not None and self.beam <= self.threshold
+        self.final_state_not_reached = not success
+        return success
+
+    def set_a_beam(self, beam: float) -> float:
+        previous = self.beam
+        self.beam = beam
+        return previous
+
+
+def _climb(trainer: LadderTrainer, factors: list[float], fileid: str = "ladder") -> bool:
+    return _process_with_final_state_retry(
+        trainer,  # type: ignore[arg-type]
+        np.zeros((4, 13), dtype=np.float32),
+        "<s> TEST </s>",
+        normal_beam=1e-90,
+        retry_beam_factor=factors,
+        fileid=fileid,
+        failed_alignment="recover",
+    )
+
+
+def test_ladder_recovers_at_a_wider_rung_and_runs_no_rung_after_it(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    trainer = LadderTrainer(1e-90, threshold=1e-110)
+    caplog.set_level(logging.WARNING, logger="pstrain.lib.steps.train")
+
+    assert _climb(trainer, [1e10, 1e20, 1e30])
+
+    # The first rung fails, the second recovers, and the third never runs.
+    assert trainer.attempt_beams == [
+        pytest.approx(1e-90),
+        pytest.approx(1e-100),
+        pytest.approx(1e-110),
+    ]
+    assert trainer._last_retry_rungs == 2  # type: ignore[attr-defined]
+    assert trainer._last_process_retried  # type: ignore[attr-defined]
+    assert trainer.beam == pytest.approx(1e-90)
+    assert "retrying with a_beam=1e-100 (rung 1 of 3)" in caplog.text
+    assert "retrying with a_beam=1e-110 (rung 2 of 3)" in caplog.text
+    assert "rung 3 of 3" not in caplog.text
+
+
+def test_ladder_exhaustion_omits_the_utterance_at_the_widest_beam(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pstrain.lib.steps import train
+
+    measurements: list[str] = []
+
+    def measure(trainer: object, transcript: str, frames: int) -> None:
+        measurements.append(transcript)
+
+    monkeypatch.setattr(train, "_infeasible_frame_budget", measure)
+    trainer = LadderTrainer(1e-90, threshold=None)
+    caplog.set_level(logging.WARNING, logger="pstrain.lib.steps.train")
+
+    assert not _climb(trainer, [1e10, 1e20, 1e30], fileid="unalignable")
+
+    assert trainer.attempt_beams == [
+        pytest.approx(1e-90),
+        pytest.approx(1e-100),
+        pytest.approx(1e-110),
+        pytest.approx(1e-120),
+    ]
+    assert trainer._last_retry_rungs == 3  # type: ignore[attr-defined]
+    assert trainer.beam == pytest.approx(1e-90)
+    assert "Final state not reached for unalignable even at a_beam=1e-120" in caplog.text
+    # The frame budget is measured once for the failure, not once per rung.
+    assert measurements == ["<s> TEST </s>"]
+
+
+def test_infeasible_utterance_runs_no_rung_of_the_ladder(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pstrain.lib.steps import train
+
+    measurements: list[int] = []
+
+    def too_short(trainer: object, transcript: str, frames: int) -> tuple[int, int]:
+        measurements.append(frames)
+        return (40, frames)
+
+    monkeypatch.setattr(train, "_infeasible_frame_budget", too_short)
+    trainer = LadderTrainer(1e-90, threshold=1e-110)
+    caplog.set_level(logging.WARNING, logger="pstrain.lib.steps.train")
+
+    assert not _climb(trainer, [1e10, 1e20, 1e30], fileid="short")
+
+    assert trainer.attempt_beams == [pytest.approx(1e-90)]
+    assert trainer._last_retry_rungs == 0  # type: ignore[attr-defined]
+    assert not trainer._last_process_retried  # type: ignore[attr-defined]
+    assert trainer._last_infeasible_frames == (40, 4)  # type: ignore[attr-defined]
+    assert measurements == [4]
+    assert "retrying" not in caplog.text
+
+
+def test_ladder_yield_reports_every_rung_and_a_single_rung_reports_as_before(
+    caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from pstrain.lib.steps.train import _report_retry_yield, _report_skip_summary
+
+    caplog.set_level(logging.WARNING, logger="pstrain.lib.steps.train")
+    _report_retry_yield(1, 3, 2, ((1e48, 3, 1), (1e72, 2, 1)))
+    _report_skip_summary({}, (3, 2), ((1e48, 3, 1), (1e72, 2, 1)))
+    assert (
+        "iteration 1 widened the beam on 3 utterance(s) and recovered 2 "
+        "(rung 1 factor 1e+48: 3 attempted, 1 recovered; "
+        "rung 2 factor 1e+72: 2 attempted, 1 recovered)"
+    ) in caplog.text
+    assert capsys.readouterr().out == (
+        "retry\tsecond-pass attempts 3\trecovered 2\n"
+        "retry\trung 1 factor 1e+48\tattempts 3\trecovered 1\n"
+        "retry\trung 2 factor 1e+72\tattempts 2\trecovered 1\n"
+    )
+
+    caplog.clear()
+    _report_retry_yield(1, 3, 2, ((1e36, 3, 2),))
+    _report_skip_summary({}, (3, 2), ((1e36, 3, 2),))
+    assert caplog.messages == ["iteration 1 widened the beam on 3 utterance(s) and recovered 2"]
+    assert capsys.readouterr().out == "retry\tsecond-pass attempts 3\trecovered 2\n"
+
+
+def _ladder_project(tmp_path: Path, short_audio: bool = False) -> Any:
+    from pstrain.lib.pipeline import PipelineContext
+    from pstrain.lib.pipeline.tasks import build_pipeline
+    from pstrain.lib.setup import setup_project
+
+    project = tmp_path / "project"
+    setup_project(
+        project,
+        transcription_path=FIXTURE / "transcription.txt",
+        audio_path=FIXTURE / "wav",
+        dictionary_path=FIXTURE / "dictionary.dict",
+        phoneset_path=FIXTURE / "phoneset.txt",
+        filler_dict_path=FIXTURE / "filler.dict",
+    )
+    context = PipelineContext.from_config(project)
+    if short_audio:
+        _truncated_copy(
+            context.audio_dir / "arctic_a0001.wav",
+            context.audio_dir / "arctic_short.wav",
+            seconds=0.5,
+        )
+    assert build_pipeline(context).run("flat", jobs=1) == 0
+    return context
+
+
+def _train_ladder(
+    context: Any,
+    output: Path,
+    ids: list[str],
+    factors: list[float],
+    **options: Any,
+) -> Any:
+    from pstrain.lib.bw import BWConfig
+    from pstrain.lib.steps.train import run_bw_training
+
+    text = "author of the danger trail philip steels etc"
+    fileids = context.etc_dir / f"{output.name}.fileids"
+    transcription = context.etc_dir / f"{output.name}.transcription"
+    fileids.write_text("".join(f"{fileid}\n" for fileid in ids))
+    transcription.write_text("".join(f"{fileid} {text}\n" for fileid in ids))
+    return run_bw_training(
+        model_dir=context.model_dir("flat"),
+        output_dir=output,
+        features_dir=context.features_dir,
+        train_fileids=fileids,
+        transcription=transcription,
+        dictionary=context.shared_dir / "dictionary.dict",
+        filler_dict=context.filler_dict,
+        first_pass_2passvar=True,
+        n_iter=1,
+        config=BWConfig(
+            pass2var=True, unobserved_gaussian_policy="zero", a_beam=options.pop("a_beam", 1e-1)
+        ),
+        retry_beam_factor=factors,
+        **options,
+    )
+
+
+@requires_c_library
+@pytest.mark.parametrize("n_shards", [1, 2])
+def test_native_ladder_recovers_at_a_wider_rung_and_reports_each_rung(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+    n_shards: int,
+) -> None:
+    """Real training: the first rung recovers one utterance, the second the other.
+
+    At a_beam=1e-1 both fixture utterances miss the final state. A factor of 10
+    recovers arctic_a0002 but not arctic_a0001, and 1e199 recovers arctic_a0001.
+    So arctic_a0002 must stop at the first rung and arctic_a0001 must reach the
+    second, and the per-rung counts say exactly that on both accounting routes:
+    in process with one shard, and merged from a pool with two.
+    """
+    import json
+
+    context = _ladder_project(tmp_path)
+    ids = ["arctic_a0001", "arctic_a0002"]
+    caplog.set_level(logging.WARNING, logger="pstrain.lib.steps.train")
+    output = tmp_path / "ladder"
+    result = _train_ladder(context, output, ids, [10.0, 1e199], n_shards=n_shards)
+    assert result.final_utts == len(ids)
+    assert result.total_skipped == 0
+
+    row = json.loads((output / "bw_telemetry.json").read_text())["passes"][-1]
+    accounting = row["accounting"]
+    assert accounting["retry_attempted_utts"] == 2
+    assert accounting["retry_recovered_utts"] == 2
+    assert accounting["retry_rungs"] == [
+        {"rung": 1, "factor": 10.0, "attempted_utts": 2, "recovered_utts": 1},
+        {"rung": 2, "factor": 1e199, "attempted_utts": 1, "recovered_utts": 1},
+    ]
+    assert (
+        "iteration 1 widened the beam on 2 utterance(s) and recovered 2 "
+        "(rung 1 factor 10: 2 attempted, 1 recovered; "
+        "rung 2 factor 1e+199: 1 attempted, 1 recovered)"
+    ) in caplog.text
+    assert (
+        "retry\tsecond-pass attempts 2\trecovered 2\n"
+        "retry\trung 1 factor 10\tattempts 2\trecovered 1\n"
+        "retry\trung 2 factor 1e+199\tattempts 1\trecovered 1\n"
+    ) in capsys.readouterr().out
+
+    if n_shards > 1:
+        # Each shard records its own rungs, and the merge is their sum.
+        artifacts = sorted((output / ".bw-accum" / "pass-01").glob("shard-*/artifact.json"))
+        shards = [json.loads(path.read_text()) for path in artifacts]
+        assert [shard["retry_rung_attempts"] for shard in shards] == [[1, 1], [1, 0]]
+        assert [shard["retry_rung_recoveries"] for shard in shards] == [[0, 1], [1, 0]]
+
+
+@requires_c_library
+def test_native_irrecoverable_ladder_keeps_every_rung_diagnostic(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When every rung fails, the native record of each attempt survives.
+
+    The engine writes one line per forward pass to the pass diagnostic log, so
+    the first attempt and every rung all remain there, and the omission names
+    the widest beam that ran. The frame budget is measured once per failure,
+    not once per rung.
+    """
+    import json
+
+    from pstrain.lib.bw import BWTrainer
+
+    context = _ladder_project(tmp_path)
+    measured: list[str] = []
+    inspect = BWTrainer.inspect_state_seq
+
+    def counting_inspect(self: BWTrainer, transcript: str) -> Any:
+        measured.append(transcript)
+        return inspect(self, transcript)
+
+    monkeypatch.setattr(BWTrainer, "inspect_state_seq", counting_inspect)
+    caplog.set_level(logging.WARNING, logger="pstrain.lib.steps.train")
+    output = tmp_path / "irrecoverable"
+    with pytest.raises(RuntimeError, match="No utterances processed successfully"):
+        _train_ladder(context, output, ["arctic_a0001"], [1.5, 3.0], max_skip_fraction=1.0)
+
+    assert len(measured) == 1
+    log = (tmp_path / ".pstrain" / "bw" / "irrecoverable" / "pass-01-shard-00.log").read_text()
+    attempts = [line for line in log.splitlines() if "arctic_a0001" in line]
+    assert len(attempts) == 3
+    assert all(line.rstrip().endswith("failed") for line in attempts)
+    assert "Final state not reached for arctic_a0001 even at a_beam=0.0333" in caplog.text
+
+    row = json.loads((output / "bw_telemetry.json").read_text())["passes"][-1]
+    assert row["stop_decision"] == "failed"
+    assert row["accounting"]["retry_rungs"] == [
+        {"rung": 1, "factor": 1.5, "attempted_utts": 1, "recovered_utts": 0},
+        {"rung": 2, "factor": 3.0, "attempted_utts": 1, "recovered_utts": 0},
+    ]
+    out = capsys.readouterr().out
+    assert "omitted\tarctic_a0001\tfinal state not reached even at a_beam=0.0333" in out
+    assert "retry\trung 2 factor 3\tattempts 1\trecovered 0\n" in out
+
+
+@requires_c_library
+def test_native_infeasible_utterance_runs_no_rung_of_the_ladder(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    import json
+
+    context = _ladder_project(tmp_path, short_audio=True)
+    caplog.set_level(logging.WARNING, logger="pstrain.lib.steps.train")
+    output = tmp_path / "short-ladder"
+    result = _train_ladder(
+        context,
+        output,
+        ["arctic_a0001", "arctic_short"],
+        [1e10, 1e40],
+        a_beam=1e-90,
+        max_skip_fraction=0.6,
+    )
+    assert result.total_skipped == 1
+    assert "arctic_short cannot be aligned at any beam width" in caplog.text
+    assert "retrying" not in caplog.text
+    row = json.loads((output / "bw_telemetry.json").read_text())["passes"][-1]
+    assert row["accounting"]["retry_attempted_utts"] == 0
+    assert row["accounting"]["retry_rungs"] == [
+        {"rung": 1, "factor": 1e10, "attempted_utts": 0, "recovered_utts": 0},
+        {"rung": 2, "factor": 1e40, "attempted_utts": 0, "recovered_utts": 0},
+    ]

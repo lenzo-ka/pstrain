@@ -97,6 +97,50 @@ def test_alignment_retry_beam_factor_must_be_positive(retry_beam_factor: float) 
         AlignmentConfig(retry_beam_factor=retry_beam_factor)
 
 
+@pytest.mark.parametrize("model", [AlignmentConfig, TrainingConfig])
+@pytest.mark.parametrize(
+    ("factors", "complaint"),
+    [
+        ([], "at least one factor"),
+        ([1e48, 1e36], "strictly ascend"),
+        ([1e48, 1e48], "strictly ascend"),
+        ([1.0, 1e36], "greater than 1"),
+        ([0.5], "greater than 1"),
+    ],
+)
+def test_retry_beam_factor_list_must_be_an_ascending_ladder(
+    model: type[AlignmentConfig] | type[TrainingConfig], factors: list[float], complaint: str
+) -> None:
+    with pytest.raises(ValueError, match=complaint):
+        model(retry_beam_factor=factors)
+
+
+def test_retry_beam_factor_accepts_a_number_or_a_ladder_and_defaults_are_one_rung(
+    tmp_path: Path,
+) -> None:
+    from pstrain.lib.retry_ladder import retry_ladder
+
+    # Defaults stay single numbers, so every existing run is a one-rung ladder.
+    assert Profile().alignment.retry_beam_factor == 1e36
+    assert Profile().training.retry_beam_factor == 1e10
+    assert retry_ladder(Profile().alignment.retry_beam_factor) == (1e36,)
+    assert retry_ladder(1.0) == ()
+
+    (tmp_path / "etc").mkdir()
+    (tmp_path / "etc" / "config.yaml").write_text(
+        "config_version: 1\n"
+        "alignment:\n  retry_beam_factor: [1.0e+48, 1.0e+72]\n"
+        "training:\n  retry_beam_factor: [1.0e+10, 1.0e+20]\n"
+    )
+    resolved = resolve_config(tmp_path)
+    assert resolved.profile.alignment.retry_beam_factor == [1e48, 1e72]
+    assert resolved.profile.training.retry_beam_factor == [1e10, 1e20]
+    assert PipelineContext.from_config(tmp_path).train.retry_beam_factor == [1e10, 1e20]
+    reference = get_parameter("alignment.retry_beam_factor")
+    assert reference is not None
+    assert reference.type == "float | list"
+
+
 def test_alignment_verbatim_tokens_resolves_opt_in(tmp_path: Path) -> None:
     (tmp_path / "etc").mkdir()
     (tmp_path / "etc" / "config.yaml").write_text(
