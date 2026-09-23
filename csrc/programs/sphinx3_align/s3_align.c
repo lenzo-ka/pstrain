@@ -772,8 +772,13 @@ destroy_state_dag(void)
         }
     }
 
+    /* Null them as well as free them: align_min_emitting_states() treats a
+     * non-empty shead.succlist as "a sentence HMM is built", and a dangling
+     * one would send it walking freed links. */
     slinks_free(shead.succlist);
+    shead.succlist = NULL;
     slinks_free(stail.predlist);
+    stail.predlist = NULL;
 }
 
 
@@ -972,6 +977,91 @@ align_build_sent_hmm(char *wordstr, int insert_sil, int verbatim_tokens)
     }
 
     return 0;
+}
+
+
+/**
+ * Fewest emitting states on any path through the sentence HMM built by the
+ * most recent align_build_sent_hmm() call, i.e. the fewest frames an
+ * utterance must supply before the final state can be reached at all.
+ *
+ * Every snode left in the state DAG is emitting: build_state_dag() removes
+ * each phone HMM's non-emitting exit state and relinks its predecessors
+ * directly to the start states of the following phones. shead and stail are
+ * dummies and cost nothing. So a breadth-first walk from shead, counting one
+ * frame per snode entered, yields the exact minimum rather than an estimate.
+ *
+ * active_frm is scratch storage here, and is restored to its just-built value
+ * before returning: align_start_utt() asserts on it, so leaving distances
+ * behind would turn a measurement into a later crash.
+ *
+ * Return the minimum, or -1 if no sentence HMM is built or stail is
+ * unreachable.
+ */
+int32
+align_min_emitting_states(void)
+{
+    int32 n_state, capacity, head, tail, best;
+    snode_t **queue;
+    pnode_t *p;
+    slink_t *sl;
+    int32 i;
+
+    if (!shead.succlist || !mdef)
+        return -1;
+
+    n_state = mdef->n_emit_state + 1;
+    capacity = n_pnode * n_state + 2;
+
+    for (p = pnode_list; p; p = p->alloc_next) {
+        if (!p->startstate)
+            continue;
+        for (i = 0; i < n_state; i++)
+            p->startstate[i].active_frm = -1;
+    }
+
+    best = -1;
+    head = tail = 0;
+    queue = (snode_t **) ckd_calloc(capacity, sizeof(snode_t *));
+
+    for (sl = shead.succlist; sl; sl = sl->next) {
+        if (sl->node == &stail) {
+            best = 0;
+            continue;
+        }
+        if (sl->node->active_frm < 0) {
+            sl->node->active_frm = 1;
+            if (tail < capacity)
+                queue[tail++] = sl->node;
+        }
+    }
+
+    while (head < tail) {
+        snode_t *s = queue[head++];
+        for (sl = s->succlist; sl; sl = sl->next) {
+            if (sl->node == &stail) {
+                if (best < 0 || s->active_frm < best)
+                    best = s->active_frm;
+                continue;
+            }
+            if (sl->node->active_frm < 0) {
+                sl->node->active_frm = s->active_frm + 1;
+                if (tail < capacity)
+                    queue[tail++] = sl->node;
+            }
+        }
+    }
+
+    /* Put every state back to the value build_state_dag() left it at. */
+    for (p = pnode_list; p; p = p->alloc_next) {
+        if (!p->startstate)
+            continue;
+        for (i = 0; i < n_state; i++)
+            p->startstate[i].active_frm = -1;
+    }
+
+    ckd_free(queue);
+    return best;
 }
 
 

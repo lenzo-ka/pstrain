@@ -17,6 +17,7 @@ EXPORTS
     pstrain_align_last_error
     pstrain_align_mfc_file
     pstrain_align_mfcc
+    pstrain_align_min_frames
     pstrain_align_result_free
     pstrain_align_set_beam
     pstrain_build_tree

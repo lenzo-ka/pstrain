@@ -777,6 +777,29 @@ align_utt_release(void)
 }
 
 /*
+ * Fewest feature frames that could possibly align to this transcript. The
+ * sentence HMM is built, measured and destroyed here, so this must not be
+ * called while another utterance's sentence HMM is live.
+ */
+int
+align_utt_min_frames(char *sent, int32 verbatim_tokens, int32 *out_min)
+{
+    int32 best;
+
+    if (align_build_sent_hmm(sent, cmd_ln_int32_r(kbc->config, "-insert_sil"),
+                             verbatim_tokens) != 0) {
+        align_destroy_sent_hmm();
+        return -2;
+    }
+    best = align_min_emitting_states();
+    align_destroy_sent_hmm();
+    if (best < 0)
+        return -1;
+    *out_min = best;
+    return 0;
+}
+
+/*
  * Find Viterbi alignment.
  */
 static void

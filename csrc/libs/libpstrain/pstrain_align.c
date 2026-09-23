@@ -582,6 +582,32 @@ pstrain_align_mfcc(pstrain_align_context_t *ctx,
 }
 
 int
+pstrain_align_min_frames(pstrain_align_context_t *ctx,
+                     const char *transcript,
+                     uint32 *out_min_frames)
+{
+    if (ctx == NULL || transcript == NULL || out_min_frames == NULL) {
+        set_error("pstrain_align_min_frames: NULL argument");
+        return -1;
+    }
+    *out_min_frames = 0;
+
+    if (ctx->verbatim_tokens && validate_verbatim_tokens(transcript) < 0)
+        return -1;
+
+    char *sent = clean_transcript(transcript);
+    int32 best = 0;
+    int rc = align_utt_min_frames(sent, ctx->verbatim_tokens, &best);
+    ckd_free(sent);
+    if (rc != 0) {
+        set_error("pstrain_align_min_frames: sentence HMM measurement failed (rc=%d)", rc);
+        return rc;
+    }
+    *out_min_frames = (uint32)best;
+    return 0;
+}
+
+int
 pstrain_align_mfc_file(pstrain_align_context_t *ctx,
                    const char *mfc_path,
                    const char *transcript,

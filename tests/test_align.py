@@ -266,6 +266,54 @@ class TestAligner:
         assert result.phones
         assert result.words[-1].end_frame == result.n_frames - 1
 
+    @pytest.mark.parametrize("utterance_id", ["arctic_a0336"])
+    def test_audio_too_short_for_its_transcript_is_named_not_retried(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        utterance_id: str,
+    ) -> None:
+        """Alignment states the arithmetic instead of widening the beam in vain.
+
+        The aligner builds its own sentence HMM, so it measures its own minimum:
+        Baum-Welch builds a different utterance HMM for the same transcript and
+        arrives at a different number.
+        """
+        from pstrain.lib import native_worker
+        from pstrain.lib.features import read_sphinx_mfc
+
+        monkeypatch.setattr(native_worker, "in_worker", lambda: True)
+        fixture = _FIXTURES / "multipron_final_state"
+        transcript = next(
+            line.split(maxsplit=1)[1]
+            for line in (fixture / "transcription.txt").read_text().splitlines()
+            if line.startswith(f"{utterance_id} ")
+        )
+        model = _alignment_model(tmp_path)
+        mfcc = read_sphinx_mfc(fixture / f"{utterance_id}.mfc", veclen=13)
+
+        with Aligner(
+            model,
+            fixture / "dictionary.dict",
+            filler_dict=fixture / "filler.dict",
+            retry_beam_factor=1e36,
+            failed_alignment="recover",
+        ) as aligner:
+            required = aligner.minimum_frames(transcript)
+            # The measurement is exact, so one frame short fails and the
+            # minimum itself succeeds.
+            assert required <= mfcc.shape[0]
+            assert aligner.align_mfcc(mfcc[:required], transcript, utterance_id)
+
+            with pytest.raises(RuntimeError) as failure:
+                aligner.align_mfcc(mfcc[: required - 1], transcript, utterance_id)
+            message = str(failure.value)
+            assert f"{utterance_id} cannot be aligned at any beam width" in message
+            assert f"at least {required} frames" in message
+            assert f"the audio has {required - 1}" in message
+            assert "the retry was skipped" in message
+            assert aligner._last_alignment_retried is False
+
     def test_missing_model_files_raises(self, tmp_path: Path) -> None:
         empty_model = tmp_path / "model"
         empty_model.mkdir()
