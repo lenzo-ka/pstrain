@@ -1408,3 +1408,25 @@ def test_split_variance_floor_keeps_family_one_gaussian_anchor(
     if not stage.endswith("-2g"):
         assert anchor not in build_pipeline(base).tasks()[stage].inputs
     assert enabled.fingerprint_payload("training") != base.fingerprint_payload("training")
+
+
+def test_retry_beam_factor_fingerprints_as_written_not_by_effect(empty_project: Path) -> None:
+    """A deliberate choice, pinned: equivalent retry settings still fingerprint apart.
+
+    1e10 and [1e10] run the same single retry, and 1 and 0.5 both disable it,
+    yet each pair differs. The fingerprint records the configuration as
+    written; normalizing by effect would tie it to retry semantics.
+    """
+    base = PipelineContext.from_config(empty_project)
+
+    def with_factor(factor: float | list[float]) -> PipelineContext:
+        return replace(base, train=replace(base.train, retry_beam_factor=factor))
+
+    assert with_factor(1e10).provenance_path("training") == base.provenance_path("training")
+    assert with_factor([1e10]).provenance_path("training") != base.provenance_path("training")
+    assert with_factor(1.0).provenance_path("training") != with_factor(0.5).provenance_path(
+        "training"
+    )
+    assert with_factor([1e10, 1e20]).provenance_path("training") != with_factor(
+        [1e10]
+    ).provenance_path("training")

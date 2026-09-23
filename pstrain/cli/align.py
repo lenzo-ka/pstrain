@@ -208,6 +208,14 @@ class AlignCommand(Command):
             f"Aligned {job.n_aligned}/{job.n_utterances} "
             f"({job.success_rate * 100:.1f}%); {job.n_failed} failed"
         )
+        if len(job.retry_yield) > 1:
+            # A single retry has never had its own line; a ladder says what each
+            # rung bought, so its cost can be weighed against its yield.
+            for rung, (factor, attempted, recovered) in enumerate(job.retry_yield, start=1):
+                ctx.log(
+                    f"  Retry rung {rung} (factor {factor:.3g}): "
+                    f"{attempted} attempted, {recovered} recovered"
+                )
 
         if ctx.args.output_dir and job.results:
             out_dir = Path(ctx.args.output_dir)

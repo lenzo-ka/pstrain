@@ -7,6 +7,16 @@ the version in `pyproject.toml` is authoritative.
 
 ### Changes
 
+- `retry_beam_factor`, for both training and alignment, now also accepts an
+  ascending list of factors, each greater than 1 and each relative to the
+  nominal beam. An utterance that misses its final state is retried at each
+  factor in turn until one succeeds, and the nominal beam is restored
+  afterward. A single number means exactly what it did before, and the defaults
+  are unchanged. With more than one factor, training reports what each rung
+  attempted and recovered, per pass, in the stage summary, and in telemetry,
+  and `pstrain align` prints the same per rung. An utterance too short for its
+  transcript still runs no retry at all, and its frame budget is measured once
+  per failure, not once per rung.
 - A source checkout whose Python code has moved ahead of its native library now
   fails at import with a message naming the stale library and `make build-c`,
   for any change to the declared native interface. Previously such a library
