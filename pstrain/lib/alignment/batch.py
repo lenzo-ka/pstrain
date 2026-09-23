@@ -52,6 +52,11 @@ class AlignmentJob:
         phone_report: Pronunciations the model's phone inventory cannot
             support, collected before the run. ``None`` when the model
             definition could not be read.
+        retry_yield: Per-rung ``(factor, attempted, recovered)`` for the
+            wider-beam final-state retry, in ladder order. ``attempted``
+            counts utterances that reached the rung; ``recovered`` counts
+            those it aligned. Empty when the retry is disabled or the
+            aligner never started.
     """
 
     model_dir: Path
@@ -62,6 +67,7 @@ class AlignmentJob:
     errors: dict[str, str] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=datetime.now)
     phone_report: UnsupportedPhoneReport | None = None
+    retry_yield: tuple[tuple[float, int, int], ...] = ()
 
     @property
     def success_rate(self) -> float:
@@ -266,6 +272,7 @@ def align_corpus(
                 errors[utt_id] = message
                 n_failed += 1
                 logger.warning("Alignment failed for %s: %s", utt_id, message)
+        retry_yield = aligner.retry_yield()
     finally:
         aligner.close()
 
@@ -284,6 +291,7 @@ def align_corpus(
         results=results,
         errors=errors,
         phone_report=phone_report,
+        retry_yield=retry_yield,
     )
 
 

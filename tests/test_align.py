@@ -734,6 +734,9 @@ class TestAlignCorpus:
             def align_audio(self, *args: object, **kwargs: object) -> AlignmentResult:
                 return _sample_result("utt")
 
+            def retry_yield(self) -> tuple[tuple[float, int, int], ...]:
+                return ()
+
             def close(self) -> None:
                 pass
 
@@ -752,6 +755,29 @@ class TestAlignCorpus:
         assert captured["beam"] == 1e-80
         assert captured["retry_beam_factor"] == 1e20
         assert captured["failed_alignment"] == "omit"
+
+    def test_corpus_reports_what_each_rung_of_the_ladder_bought(self, tmp_path: Path) -> None:
+        """At beam 1e-40 a factor of 1e5 fails this utterance and 1e10 recovers it."""
+        model = _alignment_model(tmp_path)
+        audio_dir = tmp_path / "audio"
+        audio_dir.mkdir()
+        shutil.copy(
+            _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
+            audio_dir / "arctic_a0001.wav",
+        )
+
+        job = align_corpus(
+            transcripts={"arctic_a0001": _ALIGNMENT_TRANSCRIPT},
+            audio_dir=audio_dir,
+            model_dir=model,
+            dict_path=_FIXTURES / "mini_arctic" / "dictionary.dict",
+            filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
+            beam=1e-40,
+            retry_beam_factor=[1e5, 1e10, 1e20],
+        )
+
+        assert job.n_aligned == 1
+        assert job.retry_yield == ((1e5, 1, 0), (1e10, 1, 1), (1e20, 0, 0))
 
     def test_verbatim_unknown_variant_preserves_token(self, tmp_path: Path) -> None:
         model = _alignment_model(tmp_path)
@@ -1006,6 +1032,57 @@ class TestAlignCorpus:
         assert "Undefined: OE" in combined
         # The report precedes the corpus pass rather than trailing it.
         assert combined.index("Undefined: OE") < combined.index("Aligning...")
+
+    def test_cli_reports_each_rung_of_a_configured_ladder(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from pstrain.lib import native_worker
+
+        # Keep the aligner in this process, as the other aligner tests do.
+        monkeypatch.setattr(native_worker, "in_worker", lambda: True)
+        project = tmp_path / "project"
+        (project / "etc").mkdir(parents=True)
+        (project / "etc" / "config.yaml").write_text(
+            "config_version: 1\n"
+            "alignment:\n"
+            "  beam: 1.0e-40\n"
+            "  retry_beam_factor: [1.0e+10, 1.0e+20]\n"
+        )
+        model = _alignment_model(tmp_path)
+        transcript_file = project / "ladder.transcription"
+        transcript_file.write_text(f"<s> {_ALIGNMENT_TRANSCRIPT} </s> (arctic_a0001)\n")
+        audio_dir = project / "audio"
+        audio_dir.mkdir()
+        shutil.copy(
+            _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
+            audio_dir / "arctic_a0001.wav",
+        )
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "pstrain",
+                "align",
+                str(model),
+                "--project-dir",
+                str(project),
+                "--transcripts",
+                str(transcript_file),
+                "--audio-dir",
+                str(audio_dir),
+                "--dict",
+                str(_FIXTURES / "mini_arctic" / "dictionary.dict"),
+                "--filler-dict",
+                str(_FIXTURES / "mini_arctic" / "filler.dict"),
+            ],
+        )
+
+        assert main() == 0
+        output = capsys.readouterr()
+        combined = output.out + output.err
+        assert "Aligned 1/1" in combined
+        assert "Retry rung 1 (factor 1e+10): 1 attempted, 0 recovered" in combined
+        assert "Retry rung 2 (factor 1e+20): 1 attempted, 1 recovered" in combined
 
     def test_profile_cli_unknown_variant_exits_nonzero_and_names_token(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
