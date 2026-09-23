@@ -15,12 +15,12 @@ alignment
 ``alignment.failed_alignment``
    :Type: ``recover | abort | omit``
    :Default: ``'recover'``
-   :Description: Forced-alignment failure policy: ``recover`` retries final-state failures once; ``abort`` and ``omit`` do not retry
+   :Description: Forced-alignment failure policy: ``recover`` retries final-state failures at each ``retry_beam_factor`` in turn; ``abort`` and ``omit`` do not retry
 
 ``alignment.retry_beam_factor``
-   :Type: ``float``
+   :Type: ``float | list[float]``
    :Default: ``1e+36``
-   :Description: Factor that widens the beam for one retry after an utterance fails to reach its final state; values at or below 1 disable the retry
+   :Description: Factor that widens the beam for one retry after an utterance fails to reach its final state, where values at or below 1 disable the retry; or an ascending list of factors, each greater than 1 and relative to the nominal beam, tried in order until one succeeds
 
 ``alignment.verbatim_tokens``
    :Type: ``bool``
@@ -234,7 +234,7 @@ training
 ``training.failed_alignment``
    :Type: ``recover | abort | omit``
    :Default: ``'recover'``
-   :Description: Action when an utterance fails to reach its final state: ``recover`` runs one wider-beam retry and, if that also fails, reports the utterance and continues without it; ``abort`` fails the run on the first failure; and ``omit`` reports and excludes it without retrying. Skips are counted either way, and ``max_skip_fraction`` still fails the run when they stop being incidental
+   :Description: Action when an utterance fails to reach its final state: ``recover`` runs the wider-beam retries in ``retry_beam_factor`` and, if they all fail, reports the utterance and continues without it; ``abort`` fails the run on the first failure; and ``omit`` reports and excludes it without retrying. Skips are counted either way, and ``max_skip_fraction`` still fails the run when they stop being incidental
 
 ``training.max_skip_fraction``
    :Type: ``float``
@@ -277,9 +277,9 @@ training
    :Description: Questions generated per state
 
 ``training.retry_beam_factor``
-   :Type: ``float``
+   :Type: ``float | list[float]``
    :Default: ``10000000000.0``
-   :Description: Factor that widens the forward beam for one retry after an utterance fails to reach its final state; a retry is counted only when that second attempt runs
+   :Description: Factor that widens the forward beam for one retry after an utterance fails to reach its final state, or an ascending list of factors, each greater than 1 and relative to the nominal beam, tried in order until one succeeds; a retry is counted only when that attempt runs
 
 ``training.skip_state``
    :Type: ``bool``

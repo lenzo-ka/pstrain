@@ -20,6 +20,7 @@ from pstrain.lib.lexicon_check import (
     base_word,
     check_model_lexicon,
 )
+from pstrain.lib.retry_ladder import RetryBeamFactor
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,11 @@ class AlignmentJob:
         phone_report: Pronunciations the model's phone inventory cannot
             support, collected before the run. ``None`` when the model
             definition could not be read.
+        retry_yield: Per-rung ``(factor, attempted, recovered)`` for the
+            wider-beam final-state retry, in ladder order. ``attempted``
+            counts utterances that reached the rung; ``recovered`` counts
+            those it aligned. Empty when the retry is disabled or the
+            aligner never started.
     """
 
     model_dir: Path
@@ -61,6 +67,7 @@ class AlignmentJob:
     errors: dict[str, str] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=datetime.now)
     phone_report: UnsupportedPhoneReport | None = None
+    retry_yield: tuple[tuple[float, int, int], ...] = ()
 
     @property
     def success_rate(self) -> float:
@@ -153,7 +160,7 @@ def align_corpus(
     audio_ext: str = ".wav",
     include_phones: bool = True,
     beam: float = DEFAULT_BEAM,
-    retry_beam_factor: float = DEFAULT_RETRY_BEAM_FACTOR,
+    retry_beam_factor: RetryBeamFactor = DEFAULT_RETRY_BEAM_FACTOR,
     failed_alignment: Literal["recover", "abort", "omit"] = "recover",
     verbatim_tokens: bool = False,
     phone_report: UnsupportedPhoneReport | None = None,
@@ -171,7 +178,8 @@ def align_corpus(
         audio_ext: Audio file extension (default ``".wav"``).
         include_phones: Capture phone-level segmentation.
         beam: Viterbi pruning beam.
-        retry_beam_factor: Factor for one wider-beam final-state retry.
+        retry_beam_factor: Factor for one wider-beam final-state retry, or an
+            ascending sequence of factors tried in order until one succeeds.
         failed_alignment: Whether final-state failures are retried before being recorded.
         verbatim_tokens: Honor explicit pronunciation variants exactly.
         phone_report: An already-collected report of pronunciations the
@@ -264,6 +272,7 @@ def align_corpus(
                 errors[utt_id] = message
                 n_failed += 1
                 logger.warning("Alignment failed for %s: %s", utt_id, message)
+        retry_yield = aligner.retry_yield()
     finally:
         aligner.close()
 
@@ -282,6 +291,7 @@ def align_corpus(
         results=results,
         errors=errors,
         phone_report=phone_report,
+        retry_yield=retry_yield,
     )
 
 

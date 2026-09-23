@@ -9,7 +9,7 @@ Provides introspection capabilities for the config system:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, get_args, get_origin
+from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
@@ -93,6 +93,12 @@ def _format_type(annotation: Any) -> str:
         return "None"
     if get_origin(annotation) is Literal:
         return " | ".join(str(value) for value in get_args(annotation))
+    if get_origin(annotation) is Annotated:
+        return _format_type(get_args(annotation)[0])
+    if get_origin(annotation) is Union:
+        return " | ".join(_format_type(arg) for arg in get_args(annotation))
+    if get_origin(annotation) is list and get_args(annotation):
+        return f"list[{_format_type(get_args(annotation)[0])}]"
     if hasattr(annotation, "__name__"):
         return str(annotation.__name__)
     if hasattr(annotation, "__origin__"):

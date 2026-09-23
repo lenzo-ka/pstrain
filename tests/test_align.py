@@ -44,6 +44,17 @@ def _alignment_model(tmp_path: Path, **updates: str) -> Path:
     return model
 
 
+def _final_state_case(tmp_path: Path, utterance_id: str) -> tuple[Path, str, Path]:
+    """The final-state fixture, one utterance's transcript, and a model copy."""
+    fixture = _FIXTURES / "multipron_final_state"
+    transcript = next(
+        line.split(maxsplit=1)[1]
+        for line in (fixture / "transcription.txt").read_text().splitlines()
+        if line.startswith(f"{utterance_id} ")
+    )
+    return fixture, transcript, _alignment_model(tmp_path)
+
+
 def _downsample_to_8khz(source: Path, output: Path) -> Path:
     """Create the matching 8 kHz waveform used by the real-boundary construction."""
     with wave.open(str(source), "rb") as source_wav:
@@ -314,6 +325,170 @@ class TestAligner:
             assert "the retry was skipped" in message
             assert aligner._last_alignment_retried is False
 
+    def test_ladder_rung_beams_are_relative_to_the_nominal_beam(self) -> None:
+        aligner = object.__new__(Aligner)
+        aligner._beam = 1e-64
+        aligner._retry_beam_factor = [1e36, 1e48]
+        aligner._failed_alignment = "recover"
+
+        assert aligner._final_state_retry_beam(-3, 0) == 1e-64 / 1e36
+        assert aligner._final_state_retry_beam(-3, 1) == 1e-64 / 1e48
+        assert aligner._final_state_retry_beam(-3, 2) is None
+        assert aligner._last_alignment_retried is True
+        assert aligner._final_state_retry_beam(-2, 0) is None
+        assert aligner._last_alignment_retried is False
+
+    @pytest.mark.parametrize("utterance_id", ["arctic_a0336", "arctic_b0424"])
+    def test_ladder_recovers_at_a_wider_rung(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        utterance_id: str,
+    ) -> None:
+        """At beam 1e-40 a factor of 1e10 still fails and 1e40 recovers."""
+        from pstrain.lib import native_worker
+
+        monkeypatch.setattr(native_worker, "in_worker", lambda: True)
+        fixture, transcript, model = _final_state_case(tmp_path, utterance_id)
+
+        with Aligner(
+            model,
+            fixture / "dictionary.dict",
+            filler_dict=fixture / "filler.dict",
+            beam=1e-40,
+            retry_beam_factor=[1e10, 1e40],
+        ) as aligner:
+            result = aligner.align_mfc_file(fixture / f"{utterance_id}.mfc", transcript)
+            assert aligner._last_retry_rungs == 2
+            assert aligner.retry_yield() == ((1e10, 1, 0), (1e40, 1, 1))
+            # The nominal beam is back in force after the climb.
+            assert aligner.set_beam(1e-40) == pytest.approx(1e-40)
+
+        assert result.words[-1].end_frame == result.n_frames - 1
+
+    def test_ladder_runs_no_rung_after_the_first_success(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pstrain.lib import native_worker
+
+        monkeypatch.setattr(native_worker, "in_worker", lambda: True)
+        fixture, transcript, model = _final_state_case(tmp_path, "arctic_a0336")
+
+        with Aligner(
+            model,
+            fixture / "dictionary.dict",
+            filler_dict=fixture / "filler.dict",
+            beam=1e-40,
+            retry_beam_factor=[1e40, 1e60],
+        ) as aligner:
+            beams: list[float] = []
+            set_beam = aligner.set_beam
+
+            def recording_set_beam(beam: float) -> float:
+                beams.append(beam)
+                return set_beam(beam)
+
+            monkeypatch.setattr(aligner, "set_beam", recording_set_beam)
+            aligner.align_mfc_file(fixture / "arctic_a0336.mfc", transcript)
+            assert aligner._last_retry_rungs == 1
+            assert aligner.retry_yield() == ((1e40, 1, 1), (1e60, 0, 0))
+
+        # One rung, then the nominal beam restored; 1e-100 was never tried.
+        assert beams == [pytest.approx(1e-80), pytest.approx(1e-40)]
+
+    def test_irrecoverable_ladder_reports_the_native_diagnostic(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Every rung fails: the caller gets the engine's own final-state error.
+
+        The native error left behind is the last rung's, the widest search that
+        ran, and it is the same message a single retry reports. The frame budget
+        is measured once for the failure, not once per rung.
+        """
+        from pstrain.lib import native_worker
+
+        monkeypatch.setattr(native_worker, "in_worker", lambda: True)
+        fixture, transcript, model = _final_state_case(tmp_path, "arctic_a0336")
+
+        with Aligner(
+            model,
+            fixture / "dictionary.dict",
+            filler_dict=fixture / "filler.dict",
+            beam=1e-40,
+            retry_beam_factor=[1e2, 1e5, 1e10],
+        ) as aligner:
+            measured: list[str] = []
+            minimum_frames = aligner.minimum_frames
+
+            def counting_minimum_frames(text: str) -> int:
+                measured.append(text)
+                return minimum_frames(text)
+
+            monkeypatch.setattr(aligner, "minimum_frames", counting_minimum_frames)
+            with pytest.raises(RuntimeError) as failure:
+                aligner.align_mfc_file(fixture / "arctic_a0336.mfc", transcript)
+            assert str(failure.value) == (
+                "pstrain_align_mfc_file failed: "
+                "pstrain_align_mfc_file: align_utt_capture failed (rc=-3)"
+            )
+            assert measured == [transcript]
+            assert aligner._last_retry_rungs == 3
+            assert aligner.retry_yield() == ((1e2, 1, 0), (1e5, 1, 0), (1e10, 1, 0))
+            assert aligner.set_beam(1e-40) == pytest.approx(1e-40)
+
+    def test_infeasible_utterance_runs_no_rung_of_the_ladder(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pstrain.lib import native_worker
+        from pstrain.lib.features import read_sphinx_mfc
+
+        monkeypatch.setattr(native_worker, "in_worker", lambda: True)
+        fixture, transcript, model = _final_state_case(tmp_path, "arctic_a0336")
+        mfcc = read_sphinx_mfc(fixture / "arctic_a0336.mfc", veclen=13)
+
+        with Aligner(
+            model,
+            fixture / "dictionary.dict",
+            filler_dict=fixture / "filler.dict",
+            retry_beam_factor=[1e36, 1e48],
+        ) as aligner:
+            required = aligner.minimum_frames(transcript)
+            measured: list[str] = []
+            minimum_frames = aligner.minimum_frames
+
+            def counting_minimum_frames(text: str) -> int:
+                measured.append(text)
+                return minimum_frames(text)
+
+            monkeypatch.setattr(aligner, "minimum_frames", counting_minimum_frames)
+            with pytest.raises(RuntimeError, match="the retry was skipped"):
+                aligner.align_mfcc(mfcc[: required - 1], transcript, "arctic_a0336")
+            assert measured == [transcript]
+            assert aligner._last_alignment_retried is False
+            assert aligner._last_retry_rungs == 0
+            assert aligner.retry_yield() == ((1e36, 0, 0), (1e48, 0, 0))
+
+    def test_ladder_yield_crosses_the_native_worker_boundary(self, tmp_path: Path) -> None:
+        """The default aligner runs in a contained worker; its yield must come back."""
+        fixture, transcript, model = _final_state_case(tmp_path, "arctic_a0336")
+
+        with Aligner(
+            model,
+            fixture / "dictionary.dict",
+            filler_dict=fixture / "filler.dict",
+            beam=1e-40,
+            retry_beam_factor=[1e10, 1e40],
+        ) as aligner:
+            assert hasattr(aligner, "_proxy")
+            aligner.align_mfc_file(fixture / "arctic_a0336.mfc", transcript)
+            assert aligner.retry_yield() == ((1e10, 1, 0), (1e40, 1, 1))
+
+    def test_invalid_ladder_is_refused_before_loading_anything(self, tmp_path: Path) -> None:
+        dict_path = tmp_path / "dict"
+        dict_path.write_text("")
+        with pytest.raises(ValueError, match="strictly ascend"):
+            Aligner(tmp_path / "does-not-exist", dict_path, retry_beam_factor=[1e48, 1e36])
+
     def test_missing_model_files_raises(self, tmp_path: Path) -> None:
         empty_model = tmp_path / "model"
         empty_model.mkdir()
@@ -559,6 +734,9 @@ class TestAlignCorpus:
             def align_audio(self, *args: object, **kwargs: object) -> AlignmentResult:
                 return _sample_result("utt")
 
+            def retry_yield(self) -> tuple[tuple[float, int, int], ...]:
+                return ()
+
             def close(self) -> None:
                 pass
 
@@ -577,6 +755,94 @@ class TestAlignCorpus:
         assert captured["beam"] == 1e-80
         assert captured["retry_beam_factor"] == 1e20
         assert captured["failed_alignment"] == "omit"
+
+    @pytest.mark.parametrize(
+        ("factor", "expected_yield"),
+        [
+            (1e20, ((1e20, 0, 0),)),
+            ([1e5, 1e10, 1e20], ((1e5, 1, 0), (1e10, 1, 1), (1e20, 0, 0))),
+        ],
+    )
+    def test_worker_death_mid_corpus_keeps_the_partial_job_and_its_yield(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        factor: float | list[float],
+        expected_yield: tuple[tuple[float, int, int], ...],
+    ) -> None:
+        """A helper killed mid-corpus must not discard the alignments already done.
+
+        The later utterances fail, because the replacement helper no longer
+        holds the aligner, and the job returns with the first one aligned. The
+        per-rung counts live in this process, so the first utterance's climb
+        is still reported.
+        """
+        import os
+        import signal
+
+        from pstrain.lib import native_worker
+
+        model = _alignment_model(tmp_path)
+        audio_dir = tmp_path / "audio"
+        audio_dir.mkdir()
+        ids = ["utt1", "utt2", "utt3"]
+        for utterance_id in ids:
+            shutil.copy(
+                _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
+                audio_dir / f"{utterance_id}.wav",
+            )
+
+        calls: list[str] = []
+        align_audio = Aligner.align_audio
+
+        def killing_align_audio(self: Aligner, *args: object, **kwargs: object) -> object:
+            calls.append("call")
+            if len(calls) == 2:
+                worker = native_worker._owned_worker()
+                assert worker.pid is not None
+                os.kill(worker.pid, signal.SIGKILL)
+                assert worker._process is not None
+                worker._process.join()
+            return align_audio(self, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Aligner, "align_audio", killing_align_audio)
+        job = align_corpus(
+            transcripts=dict.fromkeys(ids, _ALIGNMENT_TRANSCRIPT),
+            audio_dir=audio_dir,
+            model_dir=model,
+            dict_path=_FIXTURES / "mini_arctic" / "dictionary.dict",
+            filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
+            beam=1e-40 if isinstance(factor, list) else 1e-64,
+            retry_beam_factor=factor,
+        )
+
+        assert (job.n_aligned, job.n_failed) == (1, 2)
+        assert set(job.results) == {"utt1"}
+        assert set(job.errors) == {"utt2", "utt3"}
+        assert job.retry_yield == expected_yield
+
+    def test_corpus_reports_what_each_rung_of_the_ladder_bought(self, tmp_path: Path) -> None:
+        """At beam 1e-40 a factor of 1e5 fails this utterance and 1e10 recovers it."""
+        model = _alignment_model(tmp_path)
+        audio_dir = tmp_path / "audio"
+        audio_dir.mkdir()
+        shutil.copy(
+            _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
+            audio_dir / "arctic_a0001.wav",
+        )
+
+        job = align_corpus(
+            transcripts={"arctic_a0001": _ALIGNMENT_TRANSCRIPT},
+            audio_dir=audio_dir,
+            model_dir=model,
+            dict_path=_FIXTURES / "mini_arctic" / "dictionary.dict",
+            filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
+            beam=1e-40,
+            retry_beam_factor=[1e5, 1e10, 1e20],
+        )
+
+        assert job.n_aligned == 1
+        assert job.retry_yield == ((1e5, 1, 0), (1e10, 1, 1), (1e20, 0, 0))
 
     def test_verbatim_unknown_variant_preserves_token(self, tmp_path: Path) -> None:
         model = _alignment_model(tmp_path)
@@ -831,6 +1097,57 @@ class TestAlignCorpus:
         assert "Undefined: OE" in combined
         # The report precedes the corpus pass rather than trailing it.
         assert combined.index("Undefined: OE") < combined.index("Aligning...")
+
+    def test_cli_reports_each_rung_of_a_configured_ladder(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from pstrain.lib import native_worker
+
+        # Keep the aligner in this process, as the other aligner tests do.
+        monkeypatch.setattr(native_worker, "in_worker", lambda: True)
+        project = tmp_path / "project"
+        (project / "etc").mkdir(parents=True)
+        (project / "etc" / "config.yaml").write_text(
+            "config_version: 1\n"
+            "alignment:\n"
+            "  beam: 1.0e-40\n"
+            "  retry_beam_factor: [1.0e+10, 1.0e+20]\n"
+        )
+        model = _alignment_model(tmp_path)
+        transcript_file = project / "ladder.transcription"
+        transcript_file.write_text(f"<s> {_ALIGNMENT_TRANSCRIPT} </s> (arctic_a0001)\n")
+        audio_dir = project / "audio"
+        audio_dir.mkdir()
+        shutil.copy(
+            _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
+            audio_dir / "arctic_a0001.wav",
+        )
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "pstrain",
+                "align",
+                str(model),
+                "--project-dir",
+                str(project),
+                "--transcripts",
+                str(transcript_file),
+                "--audio-dir",
+                str(audio_dir),
+                "--dict",
+                str(_FIXTURES / "mini_arctic" / "dictionary.dict"),
+                "--filler-dict",
+                str(_FIXTURES / "mini_arctic" / "filler.dict"),
+            ],
+        )
+
+        assert main() == 0
+        output = capsys.readouterr()
+        combined = output.out + output.err
+        assert "Aligned 1/1" in combined
+        assert "Retry rung 1 (factor 1e+10): 1 attempted, 0 recovered" in combined
+        assert "Retry rung 2 (factor 1e+20): 1 attempted, 1 recovered" in combined
 
     def test_profile_cli_unknown_variant_exits_nonzero_and_names_token(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]

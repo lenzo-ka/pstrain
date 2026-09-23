@@ -356,14 +356,19 @@ training driver treats that native status as recoverable: it retries the
 utterance exactly once with a forward beam widened by `retry_beam_factor`
 (default `1e10`, so `1e-90` becomes `1e-100`), restores the stage beam, and
 only then includes a second failure in the normal skip count and limit. Other
-Baum-Welch failures are never retried.
+Baum-Welch failures are never retried. `retry_beam_factor` may instead be an
+ascending list of factors, each relative to the stage beam: the rungs run in
+order, the first success ends the ladder, and each rung's attempts and
+recoveries are reported per pass, in the stage summary, and in telemetry. An
+utterance whose audio is too short for its transcript runs no rung; that is
+measured once per failure, before the first rung.
 
 **BASIS / deliberate deviation:** upstream SphinxTrain has no retry and silently
 skips an utterance when forward pruning loses the final state. The wider beam
 changes that utterance's lattice and posteriors for the iteration, but recovers
-training evidence that upstream discards. Pstrain therefore permits exactly one
-bounded retry, and accumulator counts come only from a successful pass; the
-failed pass contributes no counts.
+training evidence that upstream discards. Pstrain therefore permits a bounded
+retry (one by default, or the configured rungs), and accumulator counts come
+only from a successful pass; the failed passes contribute no counts.
 
 ---
 

@@ -199,6 +199,7 @@ class BWTrainer:
             self._dict_set = False
             self._last_process_result = 0
             self._last_process_retried = False
+            self._last_retry_rungs = 0
             self._last_infeasible_frames: tuple[int, int] | None = None
             self._retry_transaction_active = False
             return
@@ -243,6 +244,7 @@ class BWTrainer:
         self._dict_set = False
         self._last_process_result = 0
         self._last_process_retried = False
+        self._last_retry_rungs = 0
         self._last_infeasible_frames = None
         self._retry_transaction_active = False
 

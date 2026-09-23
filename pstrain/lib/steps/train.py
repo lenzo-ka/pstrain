@@ -46,6 +46,7 @@ from pstrain.lib.model import (
     fingerprint_model,
     staged_model_update,
 )
+from pstrain.lib.retry_ladder import RetryBeamFactor, format_retry_factor, retry_ladder
 from pstrain.lib.steps.variance import VarianceFloor, load_variance_floor
 from pstrain.lib.transcription import parse_transcription_file
 from pstrain.lib.validate import validate_files_exist
@@ -203,6 +204,9 @@ class _ShardResult:
     # Second forward passes that actually ran. ``retried_ids`` holds the subset
     # the wider beam recovered, so the pair says what the retry bought.
     retry_attempts: int = 0
+    # Per-rung attempts and recoveries, one entry per ladder rung in order.
+    retry_rung_attempts: tuple[int, ...] = ()
+    retry_rung_recoveries: tuple[int, ...] = ()
     worker_pid: int | None = None
     worker_started: float | None = None
     worker_finished: float | None = None
@@ -233,6 +237,14 @@ def _write_shard_metadata(
         "processed_ids": list(result.processed_ids),
         "retried_ids": list(result.retried_ids),
         "retry_attempts": result.retry_attempts,
+        **(
+            {
+                "retry_rung_attempts": list(result.retry_rung_attempts),
+                "retry_rung_recoveries": list(result.retry_rung_recoveries),
+            }
+            if len(result.retry_rung_attempts) > 1
+            else {}
+        ),
         "skipped": [list(item) for item in result.skipped],
         "accepted_exceptions": [list(item) for item in result.accepted_exceptions],
         "payload_sha256": _sha256_files(payload_files),
@@ -470,12 +482,23 @@ def _process_with_final_state_retry(
     mfcc: npt.NDArray[np.float32],
     transcript: str,
     normal_beam: float,
-    retry_beam_factor: float,
+    retry_beam_factor: RetryBeamFactor,
     fileid: str,
     failed_alignment: Literal["recover", "abort", "omit"] = "recover",
     report_retry: bool = True,
 ) -> bool:
     """Process an update, retrying only a forward-final-state pruning failure.
+
+    Under ``recover``, the retry climbs the ladder that ``retry_beam_factor``
+    describes: each rung runs at ``normal_beam / factor``, the first success
+    ends the ladder, and the nominal beam is restored however it ends. A
+    single factor is a one-rung ladder. Afterward ``trainer._last_retry_rungs``
+    holds how many rungs ran, so a success with rungs run was recovered by the
+    last of them.
+
+    Whether the audio is long enough for the transcript at all is decided
+    once, before the first rung: the frame count and the graph do not change
+    with the beam, so no rung repeats that measurement.
 
     ``BWTrainer`` is a mutable native session and must not be shared between
     threads. The debug assertion makes concurrent entry at this mutation seam
@@ -483,6 +506,7 @@ def _process_with_final_state_retry(
     """
     assert not trainer._retry_transaction_active, "BWTrainer cannot be shared across threads"
     trainer._last_process_retried = False
+    trainer._last_retry_rungs = 0
     trainer._last_infeasible_frames = None
     trainer._retry_transaction_active = True
 
@@ -526,46 +550,68 @@ def _process_with_final_state_retry(
             logger.error("%s ignored after failed alignment", fileid)
             return False
 
-        if failed_alignment == "abort" or retry_beam_factor <= 1.0:
+        rungs = retry_ladder(retry_beam_factor)
+        if failed_alignment == "abort" or not rungs:
             raise TerminalAlignmentError(
                 f"Final state not reached for {fileid} with a_beam={normal_beam:.3g}; "
                 "retry is disabled"
             )
 
-        retry_beam = normal_beam / retry_beam_factor
         trainer._last_process_retried = True
-        if report_retry:
-            logger.warning(
-                "Final state not reached for %s; retrying once with a_beam=%.3g",
-                fileid,
-                retry_beam,
-            )
-        previous_beam = trainer.set_a_beam(retry_beam)
+        retry_beam = normal_beam
+        previous_beam: float | None = None
         try:
-            success = process()
-            if not success:
-                # "recover" now recovers the pass, not only the utterance. One
-                # genuinely unalignable recording used to end a build that had
-                # already aligned everything else, leaving the operator to read
-                # the id out of the log, add it to an exclusion list, and start
-                # again -- a loop paid once per bad file.
-                #
-                # The drop is not silent, which is the part that matters: it is
-                # reported here, recorded as an "alignment_failure" skip, and
-                # max_skip_fraction still fails the run once skips stop being
-                # incidental. Use failed_alignment="abort" to fail on the first
-                # one instead.
+            for rung, factor in enumerate(rungs, start=1):
+                retry_beam = normal_beam / factor
                 if report_retry:
-                    logger.error(
-                        "Final state not reached for %s even at a_beam=%.3g; omitting it "
-                        "from this pass and continuing",
-                        fileid,
-                        retry_beam,
-                    )
-                return False
-            return True
+                    if len(rungs) == 1:
+                        logger.warning(
+                            "Final state not reached for %s; retrying once with a_beam=%.3g",
+                            fileid,
+                            retry_beam,
+                        )
+                    else:
+                        logger.warning(
+                            "Final state not reached for %s; retrying with a_beam=%.3g "
+                            "(rung %d of %d)",
+                            fileid,
+                            retry_beam,
+                            rung,
+                            len(rungs),
+                        )
+                live_beam = trainer.set_a_beam(retry_beam)
+                if previous_beam is None:
+                    previous_beam = live_beam
+                trainer._last_retry_rungs = rung
+                if process():
+                    return True
+                if not trainer.final_state_not_reached:
+                    # A wider beam answers only a pruning failure. Anything else
+                    # is not a search the next rung could finish.
+                    break
+            # "recover" now recovers the pass, not only the utterance. One
+            # genuinely unalignable recording used to end a build that had
+            # already aligned everything else, leaving the operator to read
+            # the id out of the log, add it to an exclusion list, and start
+            # again -- a loop paid once per bad file.
+            #
+            # The drop is not silent, which is the part that matters: it is
+            # reported here, recorded as an "alignment_failure" skip, and
+            # max_skip_fraction still fails the run once skips stop being
+            # incidental. Use failed_alignment="abort" to fail on the first
+            # one instead. Every rung's native output has already gone to the
+            # pass diagnostic log; this line names the widest beam that ran.
+            if report_retry:
+                logger.error(
+                    "Final state not reached for %s even at a_beam=%.3g; omitting it "
+                    "from this pass and continuing",
+                    fileid,
+                    retry_beam,
+                )
+            return False
         finally:
-            trainer.set_a_beam(previous_beam)
+            if previous_beam is not None:
+                trainer.set_a_beam(previous_beam)
     finally:
         trainer._retry_transaction_active = False
 
@@ -667,9 +713,57 @@ def _pass_ranges(passes: list[int]) -> str:
     return ",".join(ranges)
 
 
+def _final_state_omission_reason(a_beam: float, rungs: tuple[float, ...], rungs_run: int) -> str:
+    """The omission reason naming the widest beam the climb actually ran.
+
+    A climb can stop before its last rung when a rung fails for a reason no
+    wider beam answers, so the widest configured rung is not always one that
+    ran, and the reason must not claim a beam nothing tried.
+    """
+    return f"final state not reached even at a_beam={a_beam / rungs[rungs_run - 1]:.3g}"
+
+
+RungYield = tuple[tuple[float, int, int], ...]
+"""Per-rung ``(factor, attempted, recovered)``, in ladder order."""
+
+
+def _count_retry_rungs(
+    attempts: list[int], recoveries: list[int], rungs_run: int, success: bool
+) -> None:
+    """Credit one utterance's climb: every rung that ran, and the one that recovered it."""
+    for rung in range(rungs_run):
+        attempts[rung] += 1
+    if success and rungs_run:
+        recoveries[rungs_run - 1] += 1
+
+
+def _rung_yield(
+    factors: tuple[float, ...], attempts: list[int], recoveries: list[int]
+) -> RungYield:
+    return tuple(zip(factors, attempts, recoveries, strict=True))
+
+
+def _rung_accounting(rung_yield: RungYield) -> dict[str, object]:
+    """Per-rung telemetry for a ladder; a single rung is the pass totals already."""
+    if len(rung_yield) <= 1:
+        return {}
+    return {
+        "retry_rungs": [
+            {
+                "rung": rung,
+                "factor": factor,
+                "attempted_utts": attempted,
+                "recovered_utts": recovered,
+            }
+            for rung, (factor, attempted, recovered) in enumerate(rung_yield, start=1)
+        ]
+    }
+
+
 def _report_skip_summary(
     omitted_passes: dict[tuple[str, str], list[int]],
     retry_yield: tuple[int, int] | None = None,
+    rung_yield: RungYield = (),
 ) -> None:
     """Report each distinct stage-level omission and its affected passes.
 
@@ -680,21 +774,47 @@ def _report_skip_summary(
     utterances: one utterance retried on three passes contributes three, which
     is the right unit for a cost the stage pays once per pass. The line says so
     rather than leaving the reader to infer it.
+
+    With a ladder of more than one rung, ``rung_yield`` adds one line per rung
+    in the same unit: how many utterance passes reached that rung and how many
+    it recovered. A single rung is the first line already, so it adds nothing.
     """
     for (fileid, reason), passes in omitted_passes.items():
         print(f"omitted\t{fileid}\t{reason}\tpasses {_pass_ranges(passes)}")
     if retry_yield is not None and retry_yield[0]:
         attempted, recovered = retry_yield
         print(f"retry\tsecond-pass attempts {attempted}\trecovered {recovered}")
+        if len(rung_yield) > 1:
+            for rung, (factor, rung_attempted, rung_recovered) in enumerate(rung_yield, start=1):
+                print(
+                    f"retry\trung {rung} factor {format_retry_factor(factor)}"
+                    f"\tattempts {rung_attempted}\trecovered {rung_recovered}"
+                )
 
 
-def _report_retry_yield(iteration: int, attempted: int, recovered: int) -> None:
+def _report_retry_yield(
+    iteration: int, attempted: int, recovered: int, rung_yield: RungYield = ()
+) -> None:
     """Say what the wider-beam retry bought on this pass, or stay silent.
 
     The retry costs a second forward pass on every final-state failure, so the
     pass that pays for it reports its own yield. Silence means it never ran.
+    A ladder of more than one rung also says what each rung bought.
     """
     if not attempted:
+        return
+    if len(rung_yield) > 1:
+        logger.warning(
+            "iteration %d widened the beam on %d utterance(s) and recovered %d (%s)",
+            iteration,
+            attempted,
+            recovered,
+            "; ".join(
+                f"rung {rung} factor {format_retry_factor(factor)}: "
+                f"{rung_attempted} attempted, {rung_recovered} recovered"
+                for rung, (factor, rung_attempted, rung_recovered) in enumerate(rung_yield, start=1)
+            ),
+        )
         return
     logger.warning(
         "iteration %d widened the beam on %d utterance(s) and recovered %d",
@@ -748,14 +868,16 @@ def _account_and_enforce_skips(
     retry_attempts: int = 0,
     retry_recoveries: int = 0,
     retry_yield: tuple[int, int] | None = None,
+    pass_rung_yield: RungYield = (),
+    stage_rung_yield: RungYield = (),
 ) -> float:
     """Report changing skip rates and the retry yield, and enforce the limit."""
     skipped_by_pass.append((iteration, skipped))
     _report_changed_skip(skipped_by_pass, input_utts)
-    _report_retry_yield(iteration, retry_attempts, retry_recoveries)
+    _report_retry_yield(iteration, retry_attempts, retry_recoveries, pass_rung_yield)
     skip_fraction = skipped / input_utts if input_utts else 1.0
     if skip_fraction > max_skip_fraction:
-        _report_skip_summary(omitted_passes, retry_yield)
+        _report_skip_summary(omitted_passes, retry_yield, stage_rung_yield)
         raise RuntimeError(
             f"Iteration {iteration}: skipped {skipped}/{input_utts} utterance "
             f"updates ({skip_fraction:.2%}), above configured limit "
@@ -781,7 +903,7 @@ def _run_bw_shard(
     dictionary: Path,
     filler_dict: Path | None,
     iter_config: BWConfig,
-    retry_beam_factor: float,
+    retry_beam_factor: RetryBeamFactor,
     failed_alignment: Literal["recover", "abort", "omit"],
     excluded_fileids: set[str],
     accum_dir: Path,
@@ -789,7 +911,7 @@ def _run_bw_shard(
     arctic_a0302_zero_codebook_band: tuple[int, int] | None,
     accept_arctic_a0587_pass: int | None,
     diagnostic_log: Path,
-    reported_omissions: set[tuple[str, str]],
+    reported_fileids: set[str],
 ) -> _ShardResult:
     worker_started = time.perf_counter()
     user_cpu_start = _user_cpu_seconds()
@@ -805,6 +927,9 @@ def _run_bw_shard(
     processed: list[str] = []
     retried: list[str] = []
     retry_attempts = 0
+    rungs = retry_ladder(retry_beam_factor)
+    rung_attempts = [0] * len(rungs)
+    rung_recoveries = [0] * len(rungs)
     skipped: list[tuple[str, str]] = []
     accepted_exceptions: list[tuple[str, int, int, int]] = []
     final_state_omissions: list[tuple[str, str]] = []
@@ -827,8 +952,6 @@ def _run_bw_shard(
                 skipped.append((fileid, "feature_dimension"))
                 continue
             with _redirect_bw_stdout(diagnostic_log):
-                retry_beam = iter_config.a_beam / retry_beam_factor
-                omission_reason = f"final state not reached even at a_beam={retry_beam:.3g}"
                 success = _process_with_final_state_retry(
                     trainer,
                     mfcc,
@@ -837,17 +960,24 @@ def _run_bw_shard(
                     retry_beam_factor,
                     fileid,
                     failed_alignment,
-                    report_retry=(fileid, omission_reason) not in reported_omissions
-                    and (fileid, _INFEASIBLE_OMISSION_REASON) not in reported_omissions,
+                    report_retry=fileid not in reported_fileids,
                 )
             if trainer._last_process_retried:
                 retry_attempts += 1
+            _count_retry_rungs(rung_attempts, rung_recoveries, trainer._last_retry_rungs, success)
             if not success:
                 skipped.append((fileid, "alignment_failure"))
                 if trainer._last_infeasible_frames is not None:
                     final_state_omissions.append((fileid, _INFEASIBLE_OMISSION_REASON))
                 elif trainer._last_process_retried:
-                    final_state_omissions.append((fileid, omission_reason))
+                    final_state_omissions.append(
+                        (
+                            fileid,
+                            _final_state_omission_reason(
+                                iter_config.a_beam, rungs, trainer._last_retry_rungs
+                            ),
+                        )
+                    )
             elif trainer._last_process_retried:
                 retried.append(fileid)
             else:
@@ -891,6 +1021,8 @@ def _run_bw_shard(
         user_cpu_seconds=_cpu_delta(user_cpu_start, _user_cpu_seconds()),
         final_state_omissions=tuple(final_state_omissions),
         retry_attempts=retry_attempts,
+        retry_rung_attempts=tuple(rung_attempts),
+        retry_rung_recoveries=tuple(rung_recoveries),
         worker_pid=os.getpid(),
         worker_started=worker_started,
         worker_finished=time.perf_counter(),
@@ -912,7 +1044,7 @@ def run_bw_training(
     min_iterations: int = 1,
     multipron: bool = True,
     max_skip_fraction: float = 0.05,
-    retry_beam_factor: float = 1e10,
+    retry_beam_factor: RetryBeamFactor = 1e10,
     failed_alignment: Literal["recover", "abort", "omit"] = "recover",
     checkpoint_iterations: bool = False,
     exclusion_schedule: dict[int | str, list[str]] | None = None,
@@ -952,10 +1084,11 @@ def run_bw_training(
             policy retained after the stage-specific first iteration.
         max_skip_fraction: Fail when skipped utterances exceed this fraction.
         retry_beam_factor: Widen the forward beam by this factor for one retry
-            when pruning prevents the final state from being reached. Set to 1
-            to disable retries.
-        failed_alignment: Recover with one widened-beam retry, abort the stage,
-            or report and omit the utterance while continuing.
+            when pruning prevents the final state from being reached, or give
+            an ascending sequence of factors, each greater than 1, to try in
+            order until one succeeds. A single factor of 1 disables retries.
+        failed_alignment: Recover with the widened-beam retries, abort the
+            stage, or report and omit the utterance while continuing.
         checkpoint_iterations: Retain the compact model files produced by each
             pass. The deprecated ``PSTRAIN_BW_CHECKPOINTS=1`` environment
             variable can also enable retention, but cannot disable this setting.
@@ -1024,6 +1157,10 @@ def run_bw_training(
     total_skipped = 0
     total_retry_attempts = 0
     total_retry_recoveries = 0
+    # Validates a factor list before any pass runs, not in the first shard.
+    ladder = retry_ladder(retry_beam_factor)
+    total_rung_attempts = [0] * len(ladder)
+    total_rung_recoveries = [0] * len(ladder)
     trajectory: list[TrainingIteration] = []
     telemetry_rows: list[dict[str, object]] = []
     omitted_passes: dict[tuple[str, str], list[int]] = {}
@@ -1071,6 +1208,8 @@ def run_bw_training(
         skipped = 0
         retried = 0
         retry_attempts = 0
+        rung_attempts = [0] * len(ladder)
+        rung_recoveries = [0] * len(ladder)
         excluded = 0
         skip_reasons = {
             "excluded_by_schedule": 0,
@@ -1085,6 +1224,11 @@ def run_bw_training(
         excluded_fileids = set(exclusion_schedule.get("*", ()))
         excluded_fileids.update(exclusion_schedule.get(iteration, ()))
         excluded_fileids.update(exclusion_schedule.get(str(iteration), ()))
+        # An utterance already omitted for an alignment failure on an earlier
+        # pass is reported there and in the stage summary, so later passes stay
+        # quiet about it. Keyed by utterance, since a ladder can stop at a
+        # different rung, and so name a different beam, from pass to pass.
+        reported_fileids = {fileid for fileid, _ in omitted_passes}
         merged_stats: BWResult | None = None
         shard_metadata: list[dict[str, object]] = []
         iteration_fileids = fileids
@@ -1117,7 +1261,7 @@ def run_bw_training(
                     arctic_a0302_zero_codebook_band,
                     accept_arctic_a0587_pass,
                     diagnostic_dir / f"pass-{iteration:02d}-shard-{index:02d}.log",
-                    set(omitted_passes),
+                    reported_fileids,
                 )
                 for index, assigned in enumerate(partitions)
             ]
@@ -1172,6 +1316,12 @@ def run_bw_training(
             processed = len(processed_ids)
             retried = len(retried_ids)
             retry_attempts = sum(result.retry_attempts for result in shard_results)
+            for result in shard_results:
+                for rung, (attempted, recovered) in enumerate(
+                    zip(result.retry_rung_attempts, result.retry_rung_recoveries, strict=True)
+                ):
+                    rung_attempts[rung] += attempted
+                    rung_recoveries[rung] += recovered
             skipped = len(skipped_items)
             excluded = sum(reason == "excluded_by_schedule" for _, reason in skipped_items)
             for fileid, reason in skipped_items:
@@ -1241,8 +1391,6 @@ def run_bw_training(
 
                 # Use process_utterance_mfcc - C handles CMN+deltas
                 with _redirect_bw_stdout(serial_diagnostic_log):
-                    retry_beam = iter_config.a_beam / retry_beam_factor
-                    omission_reason = f"final state not reached even at a_beam={retry_beam:.3g}"
                     success = _process_with_final_state_retry(
                         trainer,
                         mfcc,
@@ -1251,11 +1399,13 @@ def run_bw_training(
                         retry_beam_factor,
                         fileid,
                         failed_alignment,
-                        report_retry=(fileid, omission_reason) not in omitted_passes
-                        and (fileid, _INFEASIBLE_OMISSION_REASON) not in omitted_passes,
+                        report_retry=fileid not in reported_fileids,
                     )
                 if trainer._last_process_retried:
                     retry_attempts += 1
+                _count_retry_rungs(
+                    rung_attempts, rung_recoveries, trainer._last_retry_rungs, success
+                )
                 if success:
                     if trainer._last_process_retried:
                         retried += 1
@@ -1270,7 +1420,14 @@ def run_bw_training(
                             omitted_passes, fileid, _INFEASIBLE_OMISSION_REASON, iteration
                         )
                     elif trainer._last_process_retried:
-                        _record_omission(omitted_passes, fileid, omission_reason, iteration)
+                        _record_omission(
+                            omitted_passes,
+                            fileid,
+                            _final_state_omission_reason(
+                                iter_config.a_beam, ladder, trainer._last_retry_rungs
+                            ),
+                            iteration,
+                        )
             except TerminalAlignmentError:
                 if fileid == "arctic_a0587" and iteration == accept_arctic_a0587_pass:
                     logger.warning(
@@ -1311,6 +1468,11 @@ def run_bw_training(
         total_retry_attempts += retry_attempts
         total_retry_recoveries += retried
         retry_yield = (total_retry_attempts, total_retry_recoveries)
+        for rung in range(len(ladder)):
+            total_rung_attempts[rung] += rung_attempts[rung]
+            total_rung_recoveries[rung] += rung_recoveries[rung]
+        pass_rung_yield = _rung_yield(ladder, rung_attempts, rung_recoveries)
+        stage_rung_yield = _rung_yield(ladder, total_rung_attempts, total_rung_recoveries)
         # Bind evidence to the input, not the update produced by this pass.
         stats = merged_stats or trainer.get_stats()
         health = {
@@ -1343,9 +1505,11 @@ def run_bw_training(
                 retry_attempts=retry_attempts,
                 retry_recoveries=retried,
                 retry_yield=retry_yield,
+                pass_rung_yield=pass_rung_yield,
+                stage_rung_yield=stage_rung_yield,
             )
             if processed + retried == 0:
-                _report_skip_summary(omitted_passes, retry_yield)
+                _report_skip_summary(omitted_passes, retry_yield, stage_rung_yield)
                 raise RuntimeError("No utterances processed successfully")
         except RuntimeError as error:
             telemetry_rows.append(
@@ -1364,6 +1528,7 @@ def run_bw_training(
                         "retried_utts": retried,
                         "retry_attempted_utts": retry_attempts,
                         "retry_recovered_utts": retried,
+                        **_rung_accounting(pass_rung_yield),
                         "skipped_utts": skipped,
                         "terminal_skips": terminal_skips,
                         "skip_reasons": skip_reasons,
@@ -1473,6 +1638,7 @@ def run_bw_training(
             "retried_utts": retried,
             "retry_attempted_utts": retry_attempts,
             "retry_recovered_utts": retried,
+            **_rung_accounting(pass_rung_yield),
             "skipped_utts": skipped,
             "skip_reasons": skip_reasons,
             "terminal_skips": terminal_skips,
@@ -1539,7 +1705,7 @@ def run_bw_training(
                 min_iterations,
             ):
                 if total_skipped or total_retry_attempts:
-                    _report_skip_summary(omitted_passes, retry_yield)
+                    _report_skip_summary(omitted_passes, retry_yield, stage_rung_yield)
                 if total_skipped:
                     logger.warning(
                         "WARNING: BW training skipped %d utterance updates in total",
@@ -1565,7 +1731,11 @@ def run_bw_training(
         del trainer
 
     if total_skipped or total_retry_attempts:
-        _report_skip_summary(omitted_passes, (total_retry_attempts, total_retry_recoveries))
+        _report_skip_summary(
+            omitted_passes,
+            (total_retry_attempts, total_retry_recoveries),
+            _rung_yield(ladder, total_rung_attempts, total_rung_recoveries),
+        )
     if total_skipped:
         logger.warning("WARNING: BW training skipped %d utterance updates in total", total_skipped)
     logger.info(
