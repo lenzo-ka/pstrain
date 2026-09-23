@@ -37,6 +37,28 @@ Always configure CMake from the repository root. The Makefile provides
 runtime-suite shortcut, not a complete verification verdict; use `make
 verified` for that verdict.
 
+## Changing the native interface
+
+Python reaches `libpstrainc` through the declarations in the `CDEF` string in
+`pstrain/lib/_cffi/cdef.py`. Because cffi resolves symbols lazily, a library
+built from older sources can load and then fail much later. Two load-time
+checks in `pstrain/lib/_cffi/core.py` reject such a stale library instead:
+
+- **Interface fingerprint.** `make cffi-exports-gen` writes a hash of the exact
+  `CDEF` text into `csrc/libs/libpstrain/pstrain_interface_fingerprint.h`,
+  alongside the linker export lists. The library returns it from
+  `pstrain_interface_fingerprint()`, and Python compares it with the hash of the
+  `CDEF` it loaded. After any edit to `CDEF`, rerun `make cffi-exports-gen` and
+  commit the regenerated files; `make config-check` fails until you do. No
+  version bump is needed for an added, removed, or re-typed function or a
+  changed struct.
+- **ABI version.** `PSTRAIN_ABI_VERSION` in
+  `csrc/libs/libpstrain/pstrain_align.h` must equal the same constant in
+  `core.py`. Bump both only for a change of meaning behind unchanged
+  declarations, such as a function whose signature stays the same while its
+  return contract, ownership rule, or units change. The fingerprint cannot see
+  that kind of change.
+
 ## Building documentation
 
 ```bash

@@ -155,6 +155,22 @@ typedef struct {
     s3wid_t silwid;	/**< FOR INTERNAL-USE ONLY */
 
     lts_t *lts_rules;     /**< The LTS rules */
+
+    /**
+     * Unsuffixed words in the dictionary file being read whose unsuffixed
+     * pronunciation was dropped because it uses a phone the acoustic model
+     * does not define.  Each key is an owned string and is also its own
+     * value, so that a surviving alternative can register it in ht as the
+     * word's lookup key.  Freed in dict_free().
+     */
+    hash_table_t *dropped_base;
+    /**
+     * The main dictionary's dropped_base, retired before the filler
+     * dictionary is read so that no alternative is promoted across the
+     * main/filler boundary.  Kept only because ht may still use its keys.
+     * Freed in dict_free().
+     */
+    hash_table_t *dropped_base_main;
 } dict_t;
 
 

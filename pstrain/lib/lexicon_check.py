@@ -6,21 +6,20 @@ another, and carry on with a quietly smaller lexicon; the end-of-load summary
 counts only what survived. The word then resurfaces much later, which reads
 like an out-of-vocabulary problem rather than a phone-inventory one.
 
-The two loaders do not agree on what happens next, so this module does not
-state one rule for both:
-
-* The alignment loader (``csrc/programs/sphinx3_align/dict.c``) drops the
-  whole dictionary line, and then refuses to add a ``word(2)`` variant whose
-  unsuffixed base is absent -- it ends the process. So a word whose unsuffixed
-  pronunciation is dropped while an alternative survives stops alignment
-  before the first utterance, including utterances that never use that word.
-* The training loader (``csrc/libs/libcommon/lexicon.c``) has no such rule.
-  It keeps the surviving alternative and carries on.
+When a word's unsuffixed pronunciation is dropped and an alternative such as
+``word(2)`` survives, both loaders keep the word usable through its surviving
+alternatives. The training loader (``csrc/libs/libcommon/lexicon.c``) chains
+them under the word, and multiple-pronunciation training considers every one.
+The alignment loader (``csrc/programs/sphinx3_align/dict.c``) makes the first
+surviving alternative in file order the word's base entry and links the rest
+to it, so alignment also considers every surviving alternative and the best
+one wins; it warns that it has done so. It does this only when the dropped
+line and the alternative are in the same dictionary file.
 
 This module makes the condition visible where it can be fixed: before the
 run, as one collected report that names every affected word, its
-pronunciation, the phones that are missing, and which of the two outcomes
-applies.
+pronunciation, the phones that are missing, and what each affected word now
+resolves to.
 """
 
 from __future__ import annotations
@@ -60,11 +59,12 @@ class UnsupportedPhoneReport:
         entries: The offending pronunciations, ordered by source then word.
         unresolvable_words: Base words left with no usable pronunciation at
             all. Utterances using them fail; other utterances are unaffected.
-        fatal_words: Base words whose unsuffixed pronunciation was dropped
-            while a suffixed alternative survived. The alignment loader ends
-            the process rather than load such a word, so the whole run fails.
-            Always empty for a check made against a phoneset rather than
-            against a trained model, because the training loader permits it.
+        resolved_to_alternative: Base words whose unsuffixed pronunciation
+            was dropped while a suffixed alternative survived. Training and
+            alignment both align such a word over all of its surviving
+            alternatives. Always empty for a check made against a phoneset
+            rather than against a trained model, because that check does not
+            see the spellings in the file.
         missing_by_base: Every missing phone for a base word, collected
             across all of its dropped pronunciations.
     """
@@ -73,7 +73,7 @@ class UnsupportedPhoneReport:
     inventory_size: int
     entries: tuple[UnsupportedPronunciation, ...] = ()
     unresolvable_words: frozenset[str] = frozenset()
-    fatal_words: frozenset[str] = frozenset()
+    resolved_to_alternative: frozenset[str] = frozenset()
     missing_by_base: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
     def __bool__(self) -> bool:
@@ -99,13 +99,8 @@ class UnsupportedPhoneReport:
             return f"All pronunciations use phones defined by {self.inventory}."
 
         missing = self.missing_phones
-        headline = (
-            "Alignment will not start: pronunciations use phones the model does not define"
-            if self.fatal_words
-            else "Pronunciations using phones the model does not define"
-        )
         lines = [
-            headline,
+            "Pronunciations using phones the model does not define",
             f"  Inventory: {self.inventory} ({self.inventory_size} phones)",
             f"  Affected:  {len(self.entries)} pronunciations, "
             f"{len(self.words)} words, {len(missing)} undefined phones",
@@ -134,14 +129,13 @@ class UnsupportedPhoneReport:
     def _explanations(self) -> list[str]:
         """Say what each affected word actually does to a run."""
         paragraphs = []
-        if self.fatal_words:
+        if self.resolved_to_alternative:
             paragraphs.append(
-                f"The unsuffixed pronunciation of {_name_words(self.fatal_words)} was "
-                "dropped while an alternative pronunciation survived. The aligner "
-                "refuses to load an alternative whose base is absent and ends the run, "
-                "so no utterance aligns -- including every utterance that does not use "
-                "these words. Training does not share this rule: its loader keeps the "
-                "surviving alternative and carries on."
+                f"The unsuffixed pronunciation of {_name_words(self.resolved_to_alternative)} "
+                "was dropped while an alternative pronunciation survived. Each of these "
+                "words is aligned over all of its surviving alternatives instead, in "
+                "alignment as in multiple-pronunciation training, and the best-matching "
+                "alternative is chosen for each utterance."
             )
         if self.unresolvable_words:
             paragraphs.append(
@@ -149,8 +143,13 @@ class UnsupportedPhoneReport:
                 "Utterances using these words fail as unresolvable transcript tokens, "
                 "which reads like an out-of-vocabulary problem but is not one."
             )
-        other = len(self.entries) - len(self.fatal_words) - len(self.unresolvable_words)
-        if other > 0:
+        explained = self.resolved_to_alternative | self.unresolvable_words
+        other = [
+            entry
+            for entry in self.entries
+            if entry.word != base_word(entry.word) and base_word(entry.word) not in explained
+        ]
+        if other:
             paragraphs.append(
                 "The remaining pronunciations are alternatives whose word keeps a "
                 "usable pronunciation, so those words still resolve."
@@ -300,10 +299,10 @@ def check_lexicon_phones(
 ) -> UnsupportedPhoneReport:
     """Validate several dictionaries against one phone inventory.
 
-    This is the training-loader view: a word that keeps any usable
-    pronunciation still resolves, and no combination of drops ends the run.
-    Use :func:`check_model_lexicon` for the alignment view, which has the
-    stricter rule.
+    This works on :class:`~pstrain.lib.dictionary.Dictionary` keys, which do
+    not keep the spellings in the file, so it reports only which words keep
+    no pronunciation at all. Use :func:`check_model_lexicon` to see what each
+    affected word resolves to.
 
     Args:
         phoneset: Inventory to validate against.
@@ -311,7 +310,7 @@ def check_lexicon_phones(
         inventory: Human-readable description of the inventory.
 
     Returns:
-        A collected :class:`UnsupportedPhoneReport` with no fatal words.
+        A collected :class:`UnsupportedPhoneReport`.
     """
     entries: list[UnsupportedPronunciation] = []
     dropped: dict[str, int] = {}
@@ -349,9 +348,10 @@ def check_model_lexicon(
     supplied, is checked alongside the main one, because the native loader
     reads both against the same inventory.
 
-    This reproduces the alignment loader's rules, including the one that ends
-    the run: a word whose unsuffixed pronunciation is dropped while a
-    suffixed alternative survives is reported in ``fatal_words``.
+    This reproduces the alignment loader's rules: a word whose unsuffixed
+    pronunciation is dropped before a suffixed alternative survives in the
+    same dictionary file is reported in ``resolved_to_alternative``, because
+    both loaders align it over its surviving alternatives.
 
     Args:
         model_dir: Acoustic model directory containing ``mdef``.
@@ -374,14 +374,20 @@ def check_model_lexicon(
         sources.append(("filler dictionary", Path(filler_dict)))
 
     entries: list[UnsupportedPronunciation] = []
-    # Per base word, across every source: whether an unsuffixed spelling was
-    # seen and kept or seen and dropped, and whether any spelling survived.
+    # Per base word, in file order: whether an unsuffixed spelling has been
+    # kept so far (across every source) or dropped (in the current source),
+    # whether any spelling survived, and which words took a surviving
+    # alternative as their base because the unsuffixed one had already been
+    # dropped from the same file.
     base_kept: set[str] = set()
-    base_dropped: set[str] = set()
     variant_kept: set[str] = set()
     any_kept: set[str] = set()
+    resolved: set[str] = set()
 
     for label, path in sources:
+        # The aligner never promotes across the main/filler boundary, so a
+        # base dropped from one file does not carry into the next.
+        base_dropped: set[str] = set()
         for word, phones in read_pronunciations(path):
             base = base_word(word)
             unsuffixed = word == base
@@ -398,18 +404,17 @@ def check_model_lexicon(
             any_kept.add(base)
             if unsuffixed:
                 base_kept.add(base)
-            else:
+            elif base not in variant_kept:
                 variant_kept.add(base)
+                # The aligner makes the first surviving alternative the base
+                # only when the unsuffixed line was read and dropped before
+                # it in the same file. An alternative with no such base is a
+                # different failure, one that does not depend on the phone
+                # inventory.
+                if base in base_dropped and base not in base_kept:
+                    resolved.add(base)
 
     affected = {base_word(entry.word) for entry in entries}
-    # The aligner ends the process when it adds a surviving variant whose
-    # unsuffixed base is absent. Attribute that to the phone inventory only
-    # when the base really was present and really was dropped.
-    fatal = {
-        base
-        for base in affected
-        if base in base_dropped and base not in base_kept and base in variant_kept
-    }
     unresolvable = {base for base in affected if base not in any_kept}
 
     return UnsupportedPhoneReport(
@@ -417,6 +422,6 @@ def check_model_lexicon(
         inventory_size=len(phoneset),
         entries=tuple(entries),
         unresolvable_words=frozenset(unresolvable),
-        fatal_words=frozenset(fatal),
+        resolved_to_alternative=frozenset(resolved),
         missing_by_base=_collect_missing_by_base(entries),
     )

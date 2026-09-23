@@ -47,6 +47,7 @@
  */
 
 #include "pstrain_align.h"
+#include "pstrain_interface_fingerprint.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -95,6 +96,12 @@ uint32
 pstrain_abi_version(void)
 {
     return PSTRAIN_ABI_VERSION;
+}
+
+const char *
+pstrain_interface_fingerprint(void)
+{
+    return PSTRAIN_INTERFACE_FINGERPRINT;
 }
 
 static void

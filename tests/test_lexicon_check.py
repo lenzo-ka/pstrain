@@ -8,11 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from pstrain.lib.alignment.batch import (
-    collect_phone_report,
-    explain_failure,
-    explain_init_failure,
-)
+from pstrain.lib.alignment.batch import collect_phone_report, explain_failure
 from pstrain.lib.dictionary import Dictionary
 from pstrain.lib.lexicon_check import (
     check_lexicon_phones,
@@ -175,38 +171,75 @@ class TestUnsupportedPronunciations:
 
         assert report.words == ("bear(2)",)
         assert report.unresolvable_words == frozenset()
-        assert report.fatal_words == frozenset()
+        assert report.resolved_to_alternative == frozenset()
         assert "still resolve" in report.format()
 
-    def test_a_dropped_base_with_a_surviving_alternative_stops_the_run(
-        self, tmp_path: Path
-    ) -> None:
-        # The aligner refuses to add "boeuf(2)" when "boeuf" is absent, and
-        # ends the process: this is a whole-run failure, not a per-word one.
+    def test_a_dropped_base_resolves_to_its_surviving_alternative(self, tmp_path: Path) -> None:
+        # Both loaders make "boeuf(2)" the pronunciation of "boeuf". The
+        # dropped pronunciation is still reported, and the report says what
+        # the word now resolves to rather than that the run will not start.
         dict_path = _dictionary_with(tmp_path, "boeuf B OE F\nboeuf(2) B AH F\n")
         report = check_model_lexicon(_MODEL, dict_path)
 
-        assert report.fatal_words == frozenset({"boeuf"})
+        assert report.words == ("boeuf",)
+        assert report.resolved_to_alternative == frozenset({"boeuf"})
         assert report.unresolvable_words == frozenset()
 
         text = report.format()
-        assert text.startswith("Alignment will not start")
+        assert text.startswith("Pronunciations using phones the model does not define")
+        assert "boeuf  B OE F  undefined: OE" in text
         # The paragraphs are wrapped, so compare against unwrapped text.
         prose = " ".join(text.split())
-        assert "no utterance aligns" in prose
-        assert "including every utterance that does not use these words" in prose
-        assert "Training does not share this rule" in prose
+        assert "aligned over all of its surviving alternatives" in prose
+        assert "first surviving" not in prose
+        assert "in alignment as in multiple-pronunciation training" in prose
+        assert "will not start" not in prose
+        assert "still resolve" not in prose
 
-    def test_an_alternative_written_before_its_base_is_not_fatal(self, tmp_path: Path) -> None:
-        # The native loader keys on the spelling in the file, and adds the
-        # unsuffixed "boeuf" whatever its line order, so nothing is orphaned.
-        # A check built on Dictionary keys would renumber these and call it
-        # fatal; this is the guard against that.
+    def test_a_word_with_two_survivors_is_aligned_over_both(self, tmp_path: Path) -> None:
+        dict_path = _dictionary_with(tmp_path, "boeuf B OE F\nboeuf(2) B AH F\nboeuf(3) F AH B\n")
+        report = check_model_lexicon(_MODEL, dict_path)
+
+        assert report.resolved_to_alternative == frozenset({"boeuf"})
+        prose = " ".join(report.format().split())
+        assert "aligned over all of its surviving alternatives" in prose
+        assert "best-matching alternative is chosen" in prose
+
+    def test_a_base_dropped_from_the_main_file_is_not_resolved_by_a_filler_variant(
+        self, tmp_path: Path
+    ) -> None:
+        # The aligner does not promote across the main/filler boundary.
+        dict_path = _dictionary_with(tmp_path, "boeuf B OE F\n")
+        filler_path = tmp_path / "filler.dict"
+        filler_path.write_text("boeuf(2) B AH F\n", encoding="utf-8")
+        report = check_model_lexicon(_MODEL, dict_path, filler_path)
+
+        assert report.resolved_to_alternative == frozenset()
+
+    def test_an_alternative_read_before_its_dropped_base_is_not_resolved(
+        self, tmp_path: Path
+    ) -> None:
+        # The aligner needs the base read before an alternative; an
+        # alternative with no base yet fails whatever the phones, so this
+        # check must not claim the word resolves.
+        dict_path = _dictionary_with(tmp_path, "boeuf(2) B AH F\nboeuf B OE F\n")
+        report = check_model_lexicon(_MODEL, dict_path)
+
+        assert report.words == ("boeuf",)
+        assert report.resolved_to_alternative == frozenset()
+        assert report.unresolvable_words == frozenset()
+        assert "resolves to" not in " ".join(report.format().split())
+
+    def test_a_dropped_alternative_before_its_base_leaves_the_base(self, tmp_path: Path) -> None:
+        # The native loader keys on the spelling in the file: the dropped line
+        # is "boeuf(2)", and the unsuffixed "boeuf" loads. A check built on
+        # Dictionary keys would renumber these and call the base dropped;
+        # this is the guard against that.
         dict_path = _dictionary_with(tmp_path, "boeuf(2) B OE F\nboeuf B AH F\n")
         report = check_model_lexicon(_MODEL, dict_path)
 
         assert report.words == ("boeuf(2)",)
-        assert report.fatal_words == frozenset()
+        assert report.resolved_to_alternative == frozenset()
         assert report.unresolvable_words == frozenset()
 
     def test_missing_phones_are_gathered_across_a_word_s_variants(self, tmp_path: Path) -> None:
@@ -271,23 +304,6 @@ class TestAlignmentPathReporting:
 
         assert "Not checking the dictionary" in caplog.text
         assert "0.2" in caplog.text
-
-    def test_init_failure_names_the_word_that_stopped_the_run(self, tmp_path: Path) -> None:
-        dict_path = _dictionary_with(tmp_path, "boeuf B OE F\nboeuf(2) B AH F\n")
-        report = collect_phone_report(_MODEL, dict_path)
-        assert report is not None
-
-        explained = explain_init_failure("Aligner init failed: boom", report)
-        assert explained.startswith("Aligner init failed: boom")
-        assert "refuses to start" in explained
-        assert "boeuf (OE)" in explained
-
-    def test_init_failures_with_no_fatal_word_are_left_alone(self, tmp_path: Path) -> None:
-        dict_path = _dictionary_with(tmp_path, "boeuf B OE F\n")
-        report = collect_phone_report(_MODEL, dict_path)
-
-        assert explain_init_failure("model file missing", report) == "model file missing"
-        assert explain_init_failure("model file missing", None) == "model file missing"
 
     def test_failure_message_names_the_phone_inventory_cause(self, tmp_path: Path) -> None:
         dict_path = _dictionary_with(tmp_path, "boeuf B OE F\n")

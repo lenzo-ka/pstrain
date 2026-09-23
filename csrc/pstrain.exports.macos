@@ -70,6 +70,7 @@ _pstrain_free_pset
 _pstrain_inc_comp
 _pstrain_init_gau
 _pstrain_init_mixw
+_pstrain_interface_fingerprint
 _pstrain_kdtree_build
 _pstrain_kmeans
 _pstrain_kmeans_init
