@@ -190,3 +190,19 @@ add_test(
     ${BW_FIXTURE}/model/mdef
     ${LEXICON_UNDEFINED_PHONE_DIR}
 )
+
+add_executable(test_align_dict_dropped_base test_align_dict_dropped_base.c)
+target_link_libraries(test_align_dict_dropped_base pstrainc)
+target_include_directories(test_align_dict_dropped_base
+  PRIVATE ${CMAKE_BINARY_DIR}
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../programs/sphinx3_align
+)
+
+set(ALIGN_DICT_DROPPED_BASE_DIR ${CMAKE_CURRENT_BINARY_DIR}/align_dict_dropped_base)
+file(MAKE_DIRECTORY ${ALIGN_DICT_DROPPED_BASE_DIR})
+add_test(
+  NAME align_dict_dropped_base
+  COMMAND test_align_dict_dropped_base
+    ${BW_FIXTURE}/model/mdef
+    ${ALIGN_DICT_DROPPED_BASE_DIR}
+)

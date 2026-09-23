@@ -28,13 +28,14 @@ the version in `pyproject.toml` is authoritative.
   the words surfaced much later as alignment failures that read like an
   out-of-vocabulary problem. Such a failure now says which word lost its
   pronunciation and which phone was missing.
-- The report distinguishes the case that stops alignment outright. When a
-  word's unsuffixed pronunciation is dropped and an alternative survives, the
-  aligner refuses to start and no utterance aligns, including utterances that
-  never use that word. The report says so before the run and names the word,
-  and the resulting failures carry the reason instead of an opaque
-  initialization error. Training does not share that rule, and the report
-  says which outcome applies.
+- `pstrain align` no longer stops before the first utterance when a word's
+  unsuffixed pronunciation uses a phone the model does not define and an
+  alternative pronunciation survives. The aligner now uses the first surviving
+  alternative as the word's pronunciation, as multiple-pronunciation training
+  already did, and warns that it has done so. Utterances that never use the
+  word align as before. The report still lists the dropped pronunciation and
+  says the word resolves to its alternative. An alternative listed with no
+  unsuffixed line for its word still stops the aligner.
 - A dictionary or model the check cannot read no longer turns the check off
   silently; the reason is reported.
 - `pstrain validate` and the input validation run by `pstrain train` name the

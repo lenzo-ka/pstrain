@@ -23,6 +23,7 @@ contracts behind each classified difference.
 | Shard partition position | Shipped default plus upstream-compatible alternative | Shipped default `remainder-first` distributes extra utterances across leading shards; opt-in `remainder-last` matches stock | Floor-sized leading shards and the entire remainder in the last shard | `sharding.partition_position`, manifest order, shard count, and produced partition manifest |
 | Shard reduction order | Aligned | Ascending shard-index reduction, independent of worker completion order | Ascending partition-index reduction | Accumulator inputs and reduction order |
 | Vendored byte swapping | Aligned safety fix | Exact-width unsigned intermediates avoid undefined signed shifts while preserving output bits | Signed shift expressions rely on implementation behavior | Serialized model and feature bytes |
+| Alignment dictionary, dropped base pronunciation | Deliberate deviation | A word whose unsuffixed pronunciation is dropped for a phone the model does not define resolves to its first surviving alternative, with a warning, as multiple-pronunciation training resolves it | The vendored aligner ends the process on the surviving alternative, so no utterance aligns | Dictionary, model phone inventory, and the alignment outcomes of utterances using the word |
 
 ## Inventory under multiple pronunciations
 
@@ -91,3 +92,27 @@ membership and reduction order are matched, accumulation is byte-identical.
 With different grouping, non-associative floating-point addition supplies a
 real but controllable seed. pstrain's guarantees and limits are recorded in
 [Baum-Welch sharding contract](bw-sharding-contract.md).
+
+## Dropped base pronunciations in the alignment dictionary
+
+Decision date: 2026-09-23.
+
+The alignment dictionary loader drops a pronunciation that uses a phone the
+acoustic model does not define. Upstream, when the dropped pronunciation is a
+word's unsuffixed one and an alternative such as `word(2)` survives, the loader
+ends the process on that alternative ("Missing base word"), so no utterance
+aligns, including utterances that never use the word. The training loader
+behaves differently: under multiple-pronunciation training, the default, the
+first surviving alternative in file order becomes the word's pronunciation, and
+the model is trained on it.
+
+pstrain's alignment loader deliberately follows training. The first surviving
+alternative read after the dropped line becomes the word's base entry, the
+unsuffixed spelling in a transcript reaches it, later alternatives link to it
+as usual, and the loader warns which alternative it is using. The pre-run
+phone report still lists the dropped pronunciation and says the word resolves
+to its alternative.
+
+The change is confined to a base that was read and dropped. An alternative
+read before any unsuffixed line for its word, including a dictionary that
+never has one, still ends the aligner as it does upstream.

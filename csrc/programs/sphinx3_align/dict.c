@@ -206,6 +206,29 @@ dict_add_word(dict_t * d, char *word, s3cipid_t * p, int32 np)
 
         /* Truncated to a baseword string; find its ID */
         if (hash_table_lookup(d->ht, word, &val) < 0) {
+            void *dropped;
+
+            /*
+             * pstrain divergence: when the base was present but dropped
+             * for a phone the model does not define, the first surviving
+             * alternative becomes the word's base entry, reachable under
+             * the unsuffixed spelling, as the training loader resolves it.
+             * Later alternatives link to it as usual.  A base that was
+             * never read at all is still fatal.
+             */
+            if (d->dropped_base
+                && hash_table_lookup(d->dropped_base, word, &dropped) == 0) {
+                /* The lookup above just failed, so this cannot collide */
+                hash_table_enter(d->ht, (char *) dropped,
+                                 (void *)(long)d->n_word);
+                word[len] = '(';
+                E_WARN("Using '%s' as the pronunciation of '%s': its "
+                       "unsuffixed pronunciation uses a phone the acoustic "
+                       "model does not define\n",
+                       word, (char *) dropped);
+                newwid = d->n_word++;
+                return (newwid);
+            }
             word[len] = '(';    /* Get back the original word */
             E_FATAL("Missing base word for '%s'\n", word);
         }
@@ -222,6 +245,30 @@ dict_add_word(dict_t * d, char *word, s3cipid_t * p, int32 np)
     newwid = d->n_word++;
 
     return (newwid);
+}
+
+
+/*
+ * Remember an unsuffixed word whose pronunciation was dropped for a phone the
+ * model does not define, so that dict_add_word() can tell a dropped base from
+ * one that was never there.  Alternatives are not recorded: dropping one
+ * leaves its word's base in place.
+ */
+static void
+dict_note_dropped_base(dict_t * d, char *word)
+{
+    int32 len;
+    char *key;
+
+    if ((len = dict_word2basestr(word)) > 0) {
+        word[len] = '(';        /* An alternative; restore it and ignore */
+        return;
+    }
+    if (d->dropped_base == NULL)
+        d->dropped_base = hash_table_new(64, HASH_CASE_YES);
+    key = ckd_salloc(word);     /* Freed in dict_free() */
+    if (hash_table_enter(d->dropped_base, key, key) != key)
+        ckd_free(key);          /* Already recorded */
 }
 
 
@@ -264,6 +311,7 @@ dict_read(FILE * fp, dict_t * d)
             if (NOT_S3CIPID(p[i - 1])) {
                 E_ERROR("Line %d: Phone '%s' is mising in the acoustic model; word '%s' ignored\n",
                         lineno, wptr[i], wptr[0]);
+                dict_note_dropped_base(d, wptr[0]);
                 break;
             }
         }
@@ -588,6 +636,15 @@ dict_free(dict_t * d)
             hash_table_free(d->pht);
         if (d->ht)
             hash_table_free(d->ht);
+        /* After ht, which may use these strings as keys but never frees them */
+        if (d->dropped_base) {
+            hash_iter_t *itor;
+
+            for (itor = hash_table_iter(d->dropped_base); itor;
+                 itor = hash_table_iter_next(itor))
+                ckd_free((void *) hash_entry_key(itor->ent));
+            hash_table_free(d->dropped_base);
+        }
         ckd_free((void *) d);
     }
 }

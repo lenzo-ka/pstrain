@@ -630,14 +630,56 @@ class TestAlignCorpus:
         assert "phone inventory" in job.errors["bad"]
         assert "boeuf (OE)" in job.errors["bad"]
 
-    def test_dropped_base_with_surviving_variant_fails_the_whole_run(self, tmp_path: Path) -> None:
-        # The aligner ends the process rather than load "boeuf(2)" with its
-        # base absent, so utterances that never use the word fail too. The
-        # report has to say that, and the failures have to carry the cause.
+    def test_dropped_base_resolves_to_its_surviving_variant(self, tmp_path: Path) -> None:
+        # "boeuf" uses a phone the model does not define and is dropped;
+        # "boeuf(2)" survives. The aligner resolves the word to it, as
+        # training does, rather than ending the run.
         model = _alignment_model(tmp_path)
         dict_path = tmp_path / "dictionary.dict"
         source = (_FIXTURES / "mini_arctic" / "dictionary.dict").read_text()
         dict_path.write_text(f"{source}boeuf B OE F\nboeuf(2) B AH F\n")
+        audio_dir = tmp_path / "audio"
+        audio_dir.mkdir()
+        for name in ("unrelated", "uses_word"):
+            shutil.copy(
+                _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
+                audio_dir / f"{name}.wav",
+            )
+
+        job = align_corpus(
+            transcripts={
+                "unrelated": f"<s> {_ALIGNMENT_TRANSCRIPT} </s>",
+                "uses_word": f"<s> {_ALIGNMENT_TRANSCRIPT} boeuf </s>",
+            },
+            audio_dir=audio_dir,
+            model_dir=model,
+            dict_path=dict_path,
+            filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
+        )
+
+        assert job.phone_report is not None
+        assert job.phone_report.resolved_to_alternative == frozenset({"boeuf"})
+        assert "will not start" not in job.phone_report.format()
+
+        assert job.errors == {}
+        assert job.n_aligned == 2
+        result = job.results["uses_word"]
+        (word,) = [segment for segment in result.words if segment.name == "boeuf(2)"]
+        phones = [
+            segment.name
+            for segment in result.phones
+            if word.start_frame <= segment.start_frame and segment.end_frame <= word.end_frame
+        ]
+        assert phones == ["B", "AH", "F"]
+
+    def test_variant_with_no_base_line_still_stops_the_aligner(self, tmp_path: Path) -> None:
+        # A dictionary that never had an unsuffixed line for a word is a
+        # separate case from a dropped one, and is left as it was: the
+        # aligner does not start.
+        model = _alignment_model(tmp_path)
+        dict_path = tmp_path / "dictionary.dict"
+        source = (_FIXTURES / "mini_arctic" / "dictionary.dict").read_text()
+        dict_path.write_text(f"{source}boeuf(2) B AH F\n")
         audio_dir = tmp_path / "audio"
         audio_dir.mkdir()
         shutil.copy(
@@ -665,16 +707,8 @@ class TestAlignCorpus:
         ):
             pass
 
-        assert job.phone_report is not None
-        assert job.phone_report.fatal_words == frozenset({"boeuf"})
-        assert job.phone_report.format().startswith("Alignment will not start")
-
-        # The transcript does not contain "boeuf", and still nothing aligns.
-        assert "boeuf" not in _ALIGNMENT_TRANSCRIPT
         assert job.n_aligned == 0
-        assert job.n_failed == 1
-        assert "refuses to start" in job.errors["unrelated"]
-        assert "boeuf (OE)" in job.errors["unrelated"]
+        assert "Missing base word for 'boeuf(2)'" in job.errors["unrelated"]
 
     def test_cli_prints_the_collected_phone_report(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
