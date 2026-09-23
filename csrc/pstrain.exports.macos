@@ -15,6 +15,7 @@ _pstrain_align_init
 _pstrain_align_last_error
 _pstrain_align_mfc_file
 _pstrain_align_mfcc
+_pstrain_align_min_frames
 _pstrain_align_result_free
 _pstrain_align_set_beam
 _pstrain_build_tree

@@ -715,3 +715,343 @@ def test_training_stops_on_native_false_return_before_checkpoint(
     assert row["stop_decision"] == "failed"
     assert expected in row["error"]
     assert row["total_frames"] > 0
+
+
+def _truncated_copy(source: Path, destination: Path, seconds: float) -> None:
+    """Write the first ``seconds`` of a mono WAV, leaving the transcript alone."""
+    import wave
+
+    with wave.open(str(source), "rb") as reader:
+        frame_rate = reader.getframerate()
+        payload = reader.readframes(int(frame_rate * seconds))
+        with wave.open(str(destination), "wb") as writer:
+            writer.setnchannels(reader.getnchannels())
+            writer.setsampwidth(reader.getsampwidth())
+            writer.setframerate(frame_rate)
+            writer.writeframes(payload)
+
+
+@requires_c_library
+def test_audio_too_short_for_its_transcript_is_named_not_searched_for(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A transcript that cannot fit in the audio is arithmetic, not a search failure.
+
+    An utterance HMM spends at least one frame in every emitting state it
+    passes through, so audio shorter than the shortest path through the graph
+    can never reach the final state. Widening the beam cannot help, and the
+    generic "final state not reached" message sends the reader looking for a
+    pruning problem that is not there.
+    """
+    import json
+
+    from pstrain.lib.bw import BW_CEPSTRAL_LENGTH, BWConfig
+    from pstrain.lib.features import read_sphinx_mfc
+    from pstrain.lib.pipeline import PipelineContext
+    from pstrain.lib.pipeline.tasks import build_pipeline
+    from pstrain.lib.setup import setup_project
+    from pstrain.lib.steps.train import run_bw_training
+
+    project = tmp_path / "project"
+    setup_project(
+        project,
+        transcription_path=FIXTURE / "transcription.txt",
+        audio_path=FIXTURE / "wav",
+        dictionary_path=FIXTURE / "dictionary.dict",
+        phoneset_path=FIXTURE / "phoneset.txt",
+        filler_dict_path=FIXTURE / "filler.dict",
+    )
+    context = PipelineContext.from_config(project)
+    # Genuinely short audio, extracted by the same front end as the rest of the
+    # corpus: half a second of speech carrying a nine-word transcript.
+    _truncated_copy(
+        context.audio_dir / "arctic_a0001.wav",
+        context.audio_dir / "arctic_short.wav",
+        seconds=0.5,
+    )
+    assert build_pipeline(context).run("flat", jobs=1) == 0
+
+    text = "author of the danger trail philip steels etc"
+    fileids = context.etc_dir / "short.fileids"
+    transcription = context.etc_dir / "short.transcription"
+    fileids.write_text("arctic_a0001\narctic_short\n")
+    transcription.write_text(f"arctic_a0001 {text}\narctic_short {text}\n")
+    frames = read_sphinx_mfc(
+        context.features_dir / "arctic_short.mfc", veclen=BW_CEPSTRAL_LENGTH
+    ).shape[0]
+
+    caplog.set_level(logging.WARNING, logger="pstrain.lib.steps.train")
+    output = tmp_path / "short-audio"
+    result = run_bw_training(
+        model_dir=context.model_dir("flat"),
+        output_dir=output,
+        features_dir=context.features_dir,
+        train_fileids=fileids,
+        transcription=transcription,
+        dictionary=context.shared_dir / "dictionary.dict",
+        filler_dict=context.filler_dict,
+        first_pass_2passvar=True,
+        n_iter=1,
+        config=BWConfig(pass2var=True, unobserved_gaussian_policy="zero"),
+        max_skip_fraction=0.6,
+    )
+    assert result.final_utts == 1
+    assert result.total_skipped == 1
+
+    # The diagnosis names the condition and both numbers, and the numbers are
+    # the real ones: the minimum exceeds what this audio actually supplies.
+    match = re.search(
+        r"arctic_short cannot be aligned at any beam width: its transcript needs at "
+        r"least (\d+) frames to reach the final state, and the audio has (\d+)",
+        caplog.text,
+    )
+    assert match is not None, caplog.text
+    required, available = int(match.group(1)), int(match.group(2))
+    assert available == frames
+    assert required > available
+    assert "no wider beam can change that, so the retry was skipped" in caplog.text
+
+    # No second forward pass was spent on an utterance no beam could recover.
+    assert "retrying once" not in caplog.text
+    row = json.loads((output / "bw_telemetry.json").read_text())["passes"][-1]
+    assert row["accounting"]["retry_attempted_utts"] == 0
+    assert row["accounting"]["retry_recovered_utts"] == 0
+
+    # The stage summary carries the condition rather than a beam width.
+    assert (
+        "omitted\tarctic_short\taudio has fewer frames than the transcript requires\tpasses 1"
+        in capsys.readouterr().out
+    )
+
+
+@requires_c_library
+def test_widened_beam_retry_reports_what_it_bought(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The retry costs a forward pass per failure, so it reports its own yield."""
+    import json
+
+    from pstrain.lib.bw import BWConfig
+    from pstrain.lib.pipeline import PipelineContext
+    from pstrain.lib.pipeline.tasks import build_pipeline
+    from pstrain.lib.setup import setup_project
+    from pstrain.lib.steps.train import run_bw_training
+
+    project = tmp_path / "project"
+    setup_project(
+        project,
+        transcription_path=FIXTURE / "transcription.txt",
+        audio_path=FIXTURE / "wav",
+        dictionary_path=FIXTURE / "dictionary.dict",
+        phoneset_path=FIXTURE / "phoneset.txt",
+        filler_dict_path=FIXTURE / "filler.dict",
+    )
+    context = PipelineContext.from_config(project)
+    assert build_pipeline(context).run("flat", jobs=1) == 0
+
+    fileids = context.etc_dir / "yield.fileids"
+    transcription = context.etc_dir / "yield.transcription"
+    fileids.write_text("arctic_a0001\n")
+    transcription.write_text("arctic_a0001 author of the danger trail philip steels etc\n")
+
+    caplog.set_level(logging.WARNING, logger="pstrain.lib.steps.train")
+    output = tmp_path / "retry-yield"
+    # 1e-1 prunes this utterance out at the normal beam; 1e-200 recovers it.
+    result = run_bw_training(
+        model_dir=context.model_dir("flat"),
+        output_dir=output,
+        features_dir=context.features_dir,
+        train_fileids=fileids,
+        transcription=transcription,
+        dictionary=context.shared_dir / "dictionary.dict",
+        filler_dict=context.filler_dict,
+        first_pass_2passvar=True,
+        n_iter=1,
+        config=BWConfig(pass2var=True, unobserved_gaussian_policy="zero", a_beam=1e-1),
+        retry_beam_factor=1e-1 / 1e-200,
+    )
+    assert result.final_utts == 1
+
+    assert "iteration 1 widened the beam on 1 utterance(s) and recovered 1" in caplog.text
+    assert "retry\tsecond-pass attempts 1\trecovered 1" in capsys.readouterr().out
+    row = json.loads((output / "bw_telemetry.json").read_text())["passes"][-1]
+    assert row["accounting"]["retry_attempted_utts"] == 1
+    assert row["accounting"]["retry_recovered_utts"] == 1
+
+
+def test_retry_yield_reports_attempts_that_recovered_nothing(
+    caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A retry that buys nothing is the reading the feature has to be able to give."""
+    from pstrain.lib.steps.train import _account_and_enforce_skips, _record_omission
+
+    omissions: dict[tuple[str, str], list[int]] = {}
+    for fileid in ("a", "b", "c"):
+        _record_omission(omissions, fileid, "final state not reached even at a_beam=1e-100", 1)
+    caplog.set_level(logging.WARNING, logger="pstrain.lib.steps.train")
+
+    _account_and_enforce_skips(
+        iteration=1,
+        skipped=3,
+        input_utts=100,
+        max_skip_fraction=0.5,
+        skipped_by_pass=[],
+        omitted_passes=omissions,
+        retry_attempts=3,
+        retry_recoveries=0,
+        retry_yield=(3, 0),
+    )
+    assert "iteration 1 widened the beam on 3 utterance(s) and recovered 0" in caplog.text
+    # Below the skip limit, so no summary is printed; the per-pass line stands alone.
+    assert "retry\tsecond-pass attempts" not in capsys.readouterr().out
+
+    from pstrain.lib.steps.train import _report_skip_summary
+
+    _report_skip_summary(omissions, (3, 0))
+    assert "retry\tsecond-pass attempts 3\trecovered 0" in capsys.readouterr().out
+
+
+def test_retry_yield_is_silent_when_the_retry_never_ran(
+    caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from pstrain.lib.steps.train import _account_and_enforce_skips, _report_skip_summary
+
+    caplog.set_level(logging.WARNING, logger="pstrain.lib.steps.train")
+    _account_and_enforce_skips(
+        iteration=1,
+        skipped=0,
+        input_utts=10,
+        max_skip_fraction=0.5,
+        skipped_by_pass=[],
+        omitted_passes={},
+        retry_attempts=0,
+        retry_recoveries=0,
+    )
+    _report_skip_summary({}, (0, 0))
+    assert "widened the beam" not in caplog.text
+    assert capsys.readouterr().out == ""
+
+
+@requires_c_library
+def test_converged_clean_run_does_not_claim_skips_it_did_not_have(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Printing the retry summary must not drag the skip warning along with it.
+
+    The converged tail prints both the stage omission summary and the total-skip
+    warning. Admitting the retry summary when nothing was skipped widened the
+    guard around both, so a clean run that used the retry announced skips it
+    never had.
+    """
+    from pstrain.lib.bw import BWConfig
+    from pstrain.lib.pipeline import PipelineContext
+    from pstrain.lib.pipeline.tasks import build_pipeline
+    from pstrain.lib.setup import setup_project
+    from pstrain.lib.steps.train import run_bw_training
+
+    project = tmp_path / "project"
+    setup_project(
+        project,
+        transcription_path=FIXTURE / "transcription.txt",
+        audio_path=FIXTURE / "wav",
+        dictionary_path=FIXTURE / "dictionary.dict",
+        phoneset_path=FIXTURE / "phoneset.txt",
+        filler_dict_path=FIXTURE / "filler.dict",
+    )
+    context = PipelineContext.from_config(project)
+    assert build_pipeline(context).run("flat", jobs=1) == 0
+
+    fileids = context.etc_dir / "converged.fileids"
+    transcription = context.etc_dir / "converged.transcription"
+    fileids.write_text("arctic_a0001\n")
+    transcription.write_text("arctic_a0001 author of the danger trail philip steels etc\n")
+
+    caplog.set_level(logging.WARNING, logger="pstrain.lib.steps.train")
+    result = run_bw_training(
+        model_dir=context.model_dir("flat"),
+        output_dir=tmp_path / "converged",
+        features_dir=context.features_dir,
+        train_fileids=fileids,
+        transcription=transcription,
+        dictionary=context.shared_dir / "dictionary.dict",
+        filler_dict=context.filler_dict,
+        first_pass_2passvar=True,
+        n_iter=4,
+        # A tight beam so every pass pays for the retry, and a threshold wide
+        # enough that the run converges and leaves through the converged tail.
+        config=BWConfig(pass2var=True, unobserved_gaussian_policy="zero", a_beam=1e-1),
+        retry_beam_factor=1e199,
+        convergence_ratio=1e6,
+    )
+    assert result.converged
+    assert result.total_skipped == 0
+
+    # The retry summary is still printed, because the retry did run.
+    assert "retry\tsecond-pass attempts" in capsys.readouterr().out
+    assert "widened the beam" in caplog.text
+    # But nothing was skipped, so nothing claims otherwise.
+    assert "skipped" not in caplog.text
+
+
+@requires_c_library
+def test_sharded_retry_attempts_are_summed_across_shards(tmp_path: Path) -> None:
+    """The merge path must carry the counter, not just the serial path.
+
+    ``multipron`` with one shard runs in this process; more than one shard goes
+    through ``_ShardResult`` and a pool merge, which is a different accounting
+    route for the same number.
+    """
+    import json
+
+    from pstrain.lib.bw import BWConfig
+    from pstrain.lib.pipeline import PipelineContext
+    from pstrain.lib.pipeline.tasks import build_pipeline
+    from pstrain.lib.setup import setup_project
+    from pstrain.lib.steps.train import run_bw_training
+
+    project = tmp_path / "project"
+    setup_project(
+        project,
+        transcription_path=FIXTURE / "transcription.txt",
+        audio_path=FIXTURE / "wav",
+        dictionary_path=FIXTURE / "dictionary.dict",
+        phoneset_path=FIXTURE / "phoneset.txt",
+        filler_dict_path=FIXTURE / "filler.dict",
+    )
+    context = PipelineContext.from_config(project)
+    assert build_pipeline(context).run("flat", jobs=1) == 0
+
+    text = "author of the danger trail philip steels etc"
+    fileids = context.etc_dir / "sharded.fileids"
+    transcription = context.etc_dir / "sharded.transcription"
+    ids = ["arctic_a0001", "arctic_a0002"]
+    fileids.write_text("".join(f"{fileid}\n" for fileid in ids))
+    transcription.write_text("".join(f"{fileid} {text}\n" for fileid in ids))
+
+    output = tmp_path / "sharded"
+    result = run_bw_training(
+        model_dir=context.model_dir("flat"),
+        output_dir=output,
+        features_dir=context.features_dir,
+        train_fileids=fileids,
+        transcription=transcription,
+        dictionary=context.shared_dir / "dictionary.dict",
+        filler_dict=context.filler_dict,
+        first_pass_2passvar=True,
+        n_iter=1,
+        config=BWConfig(pass2var=True, unobserved_gaussian_policy="zero", a_beam=1e-1),
+        retry_beam_factor=1e199,
+        n_shards=2,
+    )
+    assert result.final_utts == len(ids)
+
+    row = json.loads((output / "bw_telemetry.json").read_text())["passes"][-1]
+    assert row["accounting"]["retry_attempted_utts"] == len(ids)
+    assert row["accounting"]["retry_recovered_utts"] == len(ids)
+
+    # Each shard's own artifact records its share, and the shares add up.
+    artifacts = sorted((output / ".bw-accum" / "pass-01").glob("shard-*/artifact.json"))
+    assert len(artifacts) == 2
+    per_shard = [json.loads(path.read_text())["retry_attempts"] for path in artifacts]
+    assert sum(per_shard) == len(ids)
+    assert per_shard == [1, 1]
