@@ -30,12 +30,13 @@ the version in `pyproject.toml` is authoritative.
   pronunciation and which phone was missing.
 - `pstrain align` no longer stops before the first utterance when a word's
   unsuffixed pronunciation uses a phone the model does not define and an
-  alternative pronunciation survives. The aligner now uses the first surviving
-  alternative as the word's pronunciation, as multiple-pronunciation training
-  already did, and warns that it has done so. Utterances that never use the
-  word align as before. The report still lists the dropped pronunciation and
-  says the word resolves to its alternative. An alternative listed with no
-  unsuffixed line for its word still stops the aligner.
+  alternative pronunciation survives. The aligner now aligns the word over all
+  of its surviving alternatives, as multiple-pronunciation training already
+  did, and warns that it has done so. Utterances that never use the word align
+  as before. The report still lists the dropped pronunciation and says the word
+  is aligned over its surviving alternatives. An alternative listed with no
+  unsuffixed line before it in the same dictionary file still stops the
+  aligner.
 - A dictionary or model the check cannot read no longer turns the check off
   silently; the reason is reported.
 - `pstrain validate` and the input validation run by `pstrain train` name the

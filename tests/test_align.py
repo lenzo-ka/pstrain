@@ -672,6 +672,80 @@ class TestAlignCorpus:
         ]
         assert phones == ["B", "AH", "F"]
 
+    def test_dropped_base_aligns_over_every_surviving_variant(self, tmp_path: Path) -> None:
+        # The first survivor only becomes the word's base entry; the aligner
+        # still considers every surviving alternative. "boeuf(2)" needs more
+        # frames than the audio has, so only "boeuf(3)" can align.
+        model = _alignment_model(tmp_path)
+        dict_path = tmp_path / "dictionary.dict"
+        source = (_FIXTURES / "mini_arctic" / "dictionary.dict").read_text()
+        too_long = " ".join(["S", "IY"] * 50)
+        dict_path.write_text(f"{source}boeuf B OE F\nboeuf(2) {too_long}\nboeuf(3) B AH F\n")
+        audio_dir = tmp_path / "audio"
+        audio_dir.mkdir()
+        shutil.copy(
+            _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
+            audio_dir / "uses_word.wav",
+        )
+
+        job = align_corpus(
+            transcripts={"uses_word": f"<s> {_ALIGNMENT_TRANSCRIPT} boeuf </s>"},
+            audio_dir=audio_dir,
+            model_dir=model,
+            dict_path=dict_path,
+            filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
+        )
+
+        assert job.phone_report is not None
+        assert job.phone_report.resolved_to_alternative == frozenset({"boeuf"})
+        prose = " ".join(job.phone_report.format().split())
+        assert "aligned over all of its surviving alternatives" in prose
+
+        assert job.errors == {}
+        names = [segment.name for segment in job.results["uses_word"].words]
+        assert "boeuf(3)" in names
+        assert "boeuf(2)" not in names
+
+    def test_dropped_base_does_not_promote_a_filler_variant(self, tmp_path: Path) -> None:
+        # A base dropped from the main dictionary never promotes an
+        # alternative read from the filler dictionary: that would place the
+        # word in the filler range, where it could be inserted between words.
+        model = _alignment_model(tmp_path)
+        dict_path = tmp_path / "dictionary.dict"
+        source = (_FIXTURES / "mini_arctic" / "dictionary.dict").read_text()
+        dict_path.write_text(f"{source}boeuf B OE F\n")
+        filler_path = tmp_path / "filler.dict"
+        filler = (_FIXTURES / "mini_arctic" / "filler.dict").read_text()
+        filler_path.write_text(f"{filler}boeuf(2) B AH F\n")
+        audio_dir = tmp_path / "audio"
+        audio_dir.mkdir()
+        shutil.copy(
+            _FIXTURES / "mini_arctic" / "wav" / "arctic_a0001.wav",
+            audio_dir / "unrelated.wav",
+        )
+
+        job = align_corpus(
+            transcripts={"unrelated": f"<s> {_ALIGNMENT_TRANSCRIPT} </s>"},
+            audio_dir=audio_dir,
+            model_dir=model,
+            dict_path=dict_path,
+            filler_dict=filler_path,
+        )
+
+        # The aligner ended the native helper along with itself; start a fresh
+        # one on this module's import route (see the no-base-line test).
+        with Aligner(
+            model,
+            _FIXTURES / "mini_arctic" / "dictionary.dict",
+            filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
+        ):
+            pass
+
+        assert job.phone_report is not None
+        assert job.phone_report.resolved_to_alternative == frozenset()
+        assert job.n_aligned == 0
+        assert "Missing base word for 'boeuf(2)'" in job.errors["unrelated"]
+
     def test_variant_with_no_base_line_still_stops_the_aligner(self, tmp_path: Path) -> None:
         # A dictionary that never had an unsuffixed line for a word is a
         # separate case from a dropped one, and is left as it was: the

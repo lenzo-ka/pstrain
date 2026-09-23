@@ -7,12 +7,14 @@ counts only what survived. The word then resurfaces much later, which reads
 like an out-of-vocabulary problem rather than a phone-inventory one.
 
 When a word's unsuffixed pronunciation is dropped and an alternative such as
-``word(2)`` survives, both loaders resolve the word to its first surviving
-alternative in file order: the training loader
-(``csrc/libs/libcommon/lexicon.c``) through its variant chain under
-multiple-pronunciation training, and the alignment loader
-(``csrc/programs/sphinx3_align/dict.c``) by making that alternative the word's
-base entry and warning that it has done so.
+``word(2)`` survives, both loaders keep the word usable through its surviving
+alternatives. The training loader (``csrc/libs/libcommon/lexicon.c``) chains
+them under the word, and multiple-pronunciation training considers every one.
+The alignment loader (``csrc/programs/sphinx3_align/dict.c``) makes the first
+surviving alternative in file order the word's base entry and links the rest
+to it, so alignment also considers every surviving alternative and the best
+one wins; it warns that it has done so. It does this only when the dropped
+line and the alternative are in the same dictionary file.
 
 This module makes the condition visible where it can be fixed: before the
 run, as one collected report that names every affected word, its
@@ -59,8 +61,8 @@ class UnsupportedPhoneReport:
             all. Utterances using them fail; other utterances are unaffected.
         resolved_to_alternative: Base words whose unsuffixed pronunciation
             was dropped while a suffixed alternative survived. Training and
-            alignment both resolve such a word to its first surviving
-            alternative. Always empty for a check made against a phoneset
+            alignment both align such a word over all of its surviving
+            alternatives. Always empty for a check made against a phoneset
             rather than against a trained model, because that check does not
             see the spellings in the file.
         missing_by_base: Every missing phone for a base word, collected
@@ -131,9 +133,9 @@ class UnsupportedPhoneReport:
             paragraphs.append(
                 f"The unsuffixed pronunciation of {_name_words(self.resolved_to_alternative)} "
                 "was dropped while an alternative pronunciation survived. Each of these "
-                "words resolves to its first surviving alternative instead, in alignment "
-                "as in multiple-pronunciation training, so utterances using them are "
-                "aligned with that alternative."
+                "words is aligned over all of its surviving alternatives instead, in "
+                "alignment as in multiple-pronunciation training, and the best-matching "
+                "alternative is chosen for each utterance."
             )
         if self.unresolvable_words:
             paragraphs.append(
@@ -347,9 +349,9 @@ def check_model_lexicon(
     reads both against the same inventory.
 
     This reproduces the alignment loader's rules: a word whose unsuffixed
-    pronunciation is dropped before a suffixed alternative survives is
-    reported in ``resolved_to_alternative``, because both loaders resolve it
-    to that alternative.
+    pronunciation is dropped before a suffixed alternative survives in the
+    same dictionary file is reported in ``resolved_to_alternative``, because
+    both loaders align it over its surviving alternatives.
 
     Args:
         model_dir: Acoustic model directory containing ``mdef``.
@@ -372,17 +374,20 @@ def check_model_lexicon(
         sources.append(("filler dictionary", Path(filler_dict)))
 
     entries: list[UnsupportedPronunciation] = []
-    # Per base word, across every source and in file order: whether an
-    # unsuffixed spelling has been kept or dropped so far, whether any
-    # spelling survived, and which words took a surviving alternative as
-    # their base because the unsuffixed one had already been dropped.
+    # Per base word, in file order: whether an unsuffixed spelling has been
+    # kept so far (across every source) or dropped (in the current source),
+    # whether any spelling survived, and which words took a surviving
+    # alternative as their base because the unsuffixed one had already been
+    # dropped from the same file.
     base_kept: set[str] = set()
-    base_dropped: set[str] = set()
     variant_kept: set[str] = set()
     any_kept: set[str] = set()
     resolved: set[str] = set()
 
     for label, path in sources:
+        # The aligner never promotes across the main/filler boundary, so a
+        # base dropped from one file does not carry into the next.
+        base_dropped: set[str] = set()
         for word, phones in read_pronunciations(path):
             base = base_word(word)
             unsuffixed = word == base
@@ -403,8 +408,9 @@ def check_model_lexicon(
                 variant_kept.add(base)
                 # The aligner makes the first surviving alternative the base
                 # only when the unsuffixed line was read and dropped before
-                # it. An alternative with no base read yet is a different
-                # failure, one that does not depend on the phone inventory.
+                # it in the same file. An alternative with no such base is a
+                # different failure, one that does not depend on the phone
+                # inventory.
                 if base in base_dropped and base not in base_kept:
                     resolved.add(base)
 

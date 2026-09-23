@@ -2,11 +2,12 @@
  * The alignment dictionary drops a pronunciation that uses a phone the
  * acoustic model does not define.  When that was a word's unsuffixed
  * pronunciation and an alternative survives, the first surviving alternative
- * in file order becomes the word's base entry, as the training loader
- * resolves it, instead of ending the process.  Check that the unsuffixed
- * spelling reaches it, that later alternatives link to it, that the load
- * says which alternative is being used, and that dict_free releases
- * everything.
+ * in file order becomes the word's base entry instead of ending the process,
+ * and later alternatives link to it, so the word aligns over all of its
+ * surviving alternatives, as multiple-pronunciation training does.  Check
+ * that the unsuffixed spelling reaches the base entry, that the later
+ * alternative is on its chain, that the load says so, and that dict_free
+ * releases everything.
  *
  * Usage: test_align_dict_dropped_base <mdef> <scratch dir>
  */
@@ -118,9 +119,10 @@ main(int argc, char *argv[])
     log_text[log_size] = '\0';
     fclose(fp);
 
-    if (strstr(log_text, "Using 'boeuf(2)' as the pronunciation of 'boeuf'") == NULL) {
-        fprintf(stderr, "FAIL: the load does not say which alternative is "
-                        "used (%s:%d)\n", __FILE__, __LINE__);
+    if (strstr(log_text, "'boeuf' aligns over its surviving alternatives, "
+                         "with 'boeuf(2)' as its base entry") == NULL) {
+        fprintf(stderr, "FAIL: the load does not say how the word now "
+                        "resolves (%s:%d)\n", __FILE__, __LINE__);
         fputs(log_text, stderr);
         return 1;
     }

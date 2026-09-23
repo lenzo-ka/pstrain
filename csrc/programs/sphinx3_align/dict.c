@@ -209,12 +209,14 @@ dict_add_word(dict_t * d, char *word, s3cipid_t * p, int32 np)
             void *dropped;
 
             /*
-             * pstrain divergence: when the base was present but dropped
-             * for a phone the model does not define, the first surviving
-             * alternative becomes the word's base entry, reachable under
-             * the unsuffixed spelling, as the training loader resolves it.
-             * Later alternatives link to it as usual.  A base that was
-             * never read at all is still fatal.
+             * pstrain divergence: when the base was read and dropped from
+             * this same dictionary file for a phone the model does not
+             * define, the first surviving alternative becomes the word's
+             * base entry, reachable under the unsuffixed spelling.  Later
+             * alternatives link to it as usual, so the word aligns over
+             * all of its surviving alternatives, as multiple-pronunciation
+             * training does.  A base that was never read, or that was read
+             * in the other file, is still fatal.
              */
             if (d->dropped_base
                 && hash_table_lookup(d->dropped_base, word, &dropped) == 0) {
@@ -222,10 +224,10 @@ dict_add_word(dict_t * d, char *word, s3cipid_t * p, int32 np)
                 hash_table_enter(d->ht, (char *) dropped,
                                  (void *)(long)d->n_word);
                 word[len] = '(';
-                E_WARN("Using '%s' as the pronunciation of '%s': its "
-                       "unsuffixed pronunciation uses a phone the acoustic "
-                       "model does not define\n",
-                       word, (char *) dropped);
+                E_WARN("'%s' aligns over its surviving alternatives, with "
+                       "'%s' as its base entry: its unsuffixed pronunciation "
+                       "uses a phone the acoustic model does not define\n",
+                       (char *) dropped, word);
                 newwid = d->n_word++;
                 return (newwid);
             }
@@ -435,6 +437,11 @@ dict_init(mdef_t * mdef, const char *dictfile, const char *fillerfile,
     fclose(fp);
     E_INFO("%d words read\n", d->n_word);
 
+    /* A base dropped from the main dictionary must not promote an
+     * alternative read from the filler dictionary into the filler range. */
+    d->dropped_base_main = d->dropped_base;
+    d->dropped_base = NULL;
+
     /* Now the filler dictionary file, if it exists */
     d->filler_start = d->n_word;
     if (fillerfile) {
@@ -604,6 +611,19 @@ dict_word2basestr(char *word)
     return -1;
 }
 
+/* Free a dropped-base table and the key strings it owns. */
+static void
+dict_free_dropped(hash_table_t * h)
+{
+    hash_iter_t *itor;
+
+    if (h == NULL)
+        return;
+    for (itor = hash_table_iter(h); itor; itor = hash_table_iter_next(itor))
+        ckd_free((void *) hash_entry_key(itor->ent));
+    hash_table_free(h);
+}
+
 /* RAH 4.19.01, try to free memory allocated by the calls above.
    All testing I've done shows that this gets all the memory, however I've
    likely not tested all cases.
@@ -637,14 +657,8 @@ dict_free(dict_t * d)
         if (d->ht)
             hash_table_free(d->ht);
         /* After ht, which may use these strings as keys but never frees them */
-        if (d->dropped_base) {
-            hash_iter_t *itor;
-
-            for (itor = hash_table_iter(d->dropped_base); itor;
-                 itor = hash_table_iter_next(itor))
-                ckd_free((void *) hash_entry_key(itor->ent));
-            hash_table_free(d->dropped_base);
-        }
+        dict_free_dropped(d->dropped_base);
+        dict_free_dropped(d->dropped_base_main);
         ckd_free((void *) d);
     }
 }

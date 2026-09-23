@@ -190,10 +190,31 @@ class TestUnsupportedPronunciations:
         assert "boeuf  B OE F  undefined: OE" in text
         # The paragraphs are wrapped, so compare against unwrapped text.
         prose = " ".join(text.split())
-        assert "resolves to its first surviving alternative" in prose
+        assert "aligned over all of its surviving alternatives" in prose
+        assert "first surviving" not in prose
         assert "in alignment as in multiple-pronunciation training" in prose
         assert "will not start" not in prose
         assert "still resolve" not in prose
+
+    def test_a_word_with_two_survivors_is_aligned_over_both(self, tmp_path: Path) -> None:
+        dict_path = _dictionary_with(tmp_path, "boeuf B OE F\nboeuf(2) B AH F\nboeuf(3) F AH B\n")
+        report = check_model_lexicon(_MODEL, dict_path)
+
+        assert report.resolved_to_alternative == frozenset({"boeuf"})
+        prose = " ".join(report.format().split())
+        assert "aligned over all of its surviving alternatives" in prose
+        assert "best-matching alternative is chosen" in prose
+
+    def test_a_base_dropped_from_the_main_file_is_not_resolved_by_a_filler_variant(
+        self, tmp_path: Path
+    ) -> None:
+        # The aligner does not promote across the main/filler boundary.
+        dict_path = _dictionary_with(tmp_path, "boeuf B OE F\n")
+        filler_path = tmp_path / "filler.dict"
+        filler_path.write_text("boeuf(2) B AH F\n", encoding="utf-8")
+        report = check_model_lexicon(_MODEL, dict_path, filler_path)
+
+        assert report.resolved_to_alternative == frozenset()
 
     def test_an_alternative_read_before_its_dropped_base_is_not_resolved(
         self, tmp_path: Path
