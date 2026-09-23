@@ -452,10 +452,13 @@ logmath_log(logmath_t *lmath, float64 p)
     return (int)(log(p) * lmath->inv_log_of_base) >> lmath->t.shift;
 }
 
+/* Log values are negative, and left-shifting a negative int is undefined,
+ * so these scale by 2^shift with ldexp, which is exact and gives the value
+ * the shift was meant to. */
 float64
 logmath_exp(logmath_t *lmath, int logb_p)
 {
-    return pow(lmath->base, (float64)(logb_p << lmath->t.shift));
+    return pow(lmath->base, ldexp((float64)logb_p, lmath->t.shift));
 }
 
 int
@@ -467,7 +470,7 @@ logmath_ln_to_log(logmath_t *lmath, float64 log_p)
 float64
 logmath_log_to_ln(logmath_t *lmath, int logb_p)
 {
-    return (float64)(logb_p << lmath->t.shift) * lmath->log_of_base;
+    return ldexp((float64)logb_p, lmath->t.shift) * lmath->log_of_base;
 }
 
 int
@@ -489,7 +492,7 @@ logmath_log10_to_log_float(logmath_t *lmath, float64 log_p)
 float64
 logmath_log_to_log10(logmath_t *lmath, int logb_p)
 {
-    return (float64)(logb_p << lmath->t.shift) * lmath->log10_of_base;
+    return ldexp((float64)logb_p, lmath->t.shift) * lmath->log10_of_base;
 }
 
 float64

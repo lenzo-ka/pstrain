@@ -50,6 +50,7 @@
 #include "pstrain_interface_fingerprint.h"
 
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -72,9 +73,14 @@
  * argument table that main_align.c installs. */
 extern arg_t *cmd_ln_get_defn_for_align(void);
 
-/* Maximum cepstrum frames we'll allocate for a single utterance.  Matches
- * the constant baked into main_align.c so we stay aligned with the CLI's
- * limits. */
+/* The most frames one utterance may have (327.68 s at 100 frames per
+ * second).  This is the library path's only frame limit: every per-frame
+ * buffer, the feature array here and the aligner's per-frame score buffer
+ * (through align_init), is sized to it, and check_frame_limit() refuses a
+ * longer utterance before any feature or alignment work.  The standalone
+ * program keeps its own, lower S3_MAX_FRAMES.  It cannot rise past 32768
+ * without widening s3frmid_t, the 16-bit type segments carry frame numbers
+ * in. */
 #define PSTRAIN_ALIGN_MAX_FRAMES 32768
 
 struct pstrain_align_context_s {
@@ -240,7 +246,8 @@ pstrain_align_init(const char *mdef_path,
         feat = feat_array_alloc(kbcore_fcb(kbc), PSTRAIN_ALIGN_MAX_FRAMES);
     }
 
-    align_init(kbc->mdef, kbc->tmat, dict, c, kbc->logmath);
+    align_init(kbc->mdef, kbc->tmat, dict, c, kbc->logmath,
+               PSTRAIN_ALIGN_MAX_FRAMES);
 
     pstrain_align_context_t *ctx = ckd_calloc(1, sizeof(*ctx));
     ctx->config = c;
@@ -477,9 +484,12 @@ build_result(int want_phones, int want_states,
         r->states[i].name = arena->buf + st_offs[i];
     }
 
-    int32 total = 0;
+    /* Sum in 64 bits and saturate, as the aligner does for segment scores:
+     * a long utterance's total can pass the int32 range. */
+    int64 total = 0;
     for (const align_wdseg_t *w = wdseg; w; w = w->next) total += w->score;
-    r->total_score = total;
+    r->total_score = total < INT32_MIN ? INT32_MIN
+                   : total > INT32_MAX ? INT32_MAX : (int32)total;
     r->n_frames = n_frames;
 
     if (wd_offs) ckd_free(wd_offs);
@@ -510,6 +520,19 @@ pstrain_align_last_error(void)
     return g_last_error[0] ? g_last_error : NULL;
 }
 
+/* Refuse an utterance longer than the buffers are sized for. */
+static int
+check_frame_limit(const char *who, const char *utt_id, uint32 n_frames)
+{
+    if (n_frames <= PSTRAIN_ALIGN_MAX_FRAMES)
+        return 0;
+    set_error("%s: utterance %s has %u frames, more than the %d frames "
+              "the aligner accepts for one utterance; split it into "
+              "shorter utterances",
+              who, utt_id ? utt_id : "utt", n_frames, PSTRAIN_ALIGN_MAX_FRAMES);
+    return -1;
+}
+
 /* feat_s2mfc2feat_live wants mfcc_t** (an array of frame pointers). We
  * accept a contiguous float buffer from the caller, so we set up the
  * row-pointer table on the fly. */
@@ -520,11 +543,6 @@ prepare_feat_from_mfcc(const float *mfcc, uint32 n_frames, uint32 ncep,
     if ((int32)ncep != feat_cepsize(kbcore_fcb(kbc))) {
         set_error("pstrain_align: ncep=%u does not match model cepsize=%d",
                   ncep, feat_cepsize(kbcore_fcb(kbc)));
-        return -1;
-    }
-    if (n_frames > PSTRAIN_ALIGN_MAX_FRAMES) {
-        set_error("pstrain_align: n_frames=%u exceeds max=%d",
-                  n_frames, PSTRAIN_ALIGN_MAX_FRAMES);
         return -1;
     }
     mfcc_t **rows = ckd_calloc(n_frames, sizeof(mfcc_t *));
@@ -559,6 +577,9 @@ pstrain_align_mfcc(pstrain_align_context_t *ctx,
     *out_result = NULL;
 
     if (ctx->verbatim_tokens && validate_verbatim_tokens(transcript) < 0)
+        return -1;
+
+    if (check_frame_limit("pstrain_align_mfcc", utt_id, n_frames) < 0)
         return -1;
 
     int32 nfr = 0;
@@ -630,8 +651,19 @@ pstrain_align_mfc_file(pstrain_align_context_t *ctx,
     if (ctx->verbatim_tokens && validate_verbatim_tokens(transcript) < 0)
         return -1;
 
+    /* Count the file's frames from its header alone, so an over-long file
+     * gets the same refusal as an over-long matrix instead of a read error. */
     int32 nfr = feat_s2mfc2feat(kbcore_fcb(kbc), mfc_path, NULL, "",
-                                0, -1, feat, PSTRAIN_ALIGN_MAX_FRAMES);
+                                0, -1, NULL, -1);
+    if (nfr <= 0) {
+        set_error("pstrain_align_mfc_file: failed to read %s", mfc_path);
+        return -1;
+    }
+    if (check_frame_limit("pstrain_align_mfc_file", utt_id, (uint32)nfr) < 0)
+        return -1;
+
+    nfr = feat_s2mfc2feat(kbcore_fcb(kbc), mfc_path, NULL, "",
+                          0, -1, feat, PSTRAIN_ALIGN_MAX_FRAMES);
     if (nfr <= 0) {
         set_error("pstrain_align_mfc_file: failed to read %s", mfc_path);
         return -1;

@@ -155,7 +155,13 @@ typedef struct align_wdseg_s {
 } align_wdseg_t;
 
 
-int32 align_init(mdef_t * _mdef, tmat_t * _tmat, dict_t * _dict, cmd_ln_t *_config, logmath_t *_logmath);
+/**
+ * Initialize the aligner.  max_frames is the most frames one utterance may
+ * have: the per-frame score buffer is sized to it, and align_frame() refuses
+ * any frame beyond it.
+ */
+int32 align_init(mdef_t * _mdef, tmat_t * _tmat, dict_t * _dict, cmd_ln_t *_config, logmath_t *_logmath,
+                 int32 max_frames);
 
 void align_set_beam(float64 value);
 
@@ -186,9 +192,20 @@ void align_sen_active(uint8 * senlist,  /**< Out: senlist[s] TRUE iff active in 
     );
 
 
-/** Step time aligner one frame forward */
+/**
+ * Step time aligner one frame forward.  Returns 0, or -1 without doing
+ * anything when the utterance already has the max_frames given to
+ * align_init().
+ */
 int32 align_frame(int32 * senscr                /**< In: array of senone scores this frame */
     );
+
+
+/**
+ * Abandon the utterance begun by align_start_utt() without a result, freeing
+ * its search history.  Use instead of align_end_utt() when a frame fails.
+ */
+void align_abort_utt(void);
 
 
 /**<

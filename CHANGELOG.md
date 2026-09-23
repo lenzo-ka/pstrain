@@ -7,6 +7,17 @@ the version in `pyproject.toml` is authoritative.
 
 ### Changes
 
+- Aligning an utterance longer than 150 seconds (15,000 frames) no longer
+  corrupts the aligner's memory. Such alignments could kill the native worker,
+  and the ones that finished could not be trusted. Utterances up to 32,768
+  frames (about 327 seconds at 100 frames per second) now align correctly. A
+  longer one is refused before any work with a message naming its frame count
+  and the limit, from both `align_mfcc` and `align_mfc_file`.
+- Phone, word and total alignment scores for very long segments or utterances
+  now stop at the edge of the 32-bit range instead of wrapping around to
+  meaningless values.
+- Loading the aligner with a model that has only context-independent senones
+  no longer reads past the end of the model's senone table.
 - `retry_beam_factor`, for both training and alignment, now also accepts an
   ascending list of factors, each greater than 1 and each relative to the
   nominal beam. An utterance that misses its final state is retried at each
