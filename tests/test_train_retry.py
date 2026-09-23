@@ -654,6 +654,63 @@ def test_native_failed_pass_then_retry_matches_clean_wide_beam_model(
 
 
 @requires_c_library
+def test_native_retry_leaves_the_callers_features_untouched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The failed pass and the retry both normalize from the caller's cepstra.
+
+    Native Baum-Welch copies the cepstra before CMN runs, so the retry, which
+    passes the same array again, sees the features the first pass saw.
+    """
+    from pstrain.lib import native_worker
+    from pstrain.lib.bw import BWConfig, BWTrainer
+    from pstrain.lib.features import read_sphinx_mfc
+    from pstrain.lib.pipeline import PipelineContext
+    from pstrain.lib.pipeline.tasks import build_pipeline
+    from pstrain.lib.setup import setup_project
+
+    project = tmp_path / "project"
+    setup_project(
+        project,
+        transcription_path=FIXTURE / "transcription.txt",
+        audio_path=FIXTURE / "wav",
+        dictionary_path=FIXTURE / "dictionary.dict",
+        phoneset_path=FIXTURE / "phoneset.txt",
+        filler_dict_path=FIXTURE / "filler.dict",
+    )
+    context = PipelineContext.from_config(project)
+    assert build_pipeline(context).run("flat", jobs=1) == 0
+
+    monkeypatch.setattr(native_worker, "in_worker", lambda: True)
+    model = context.model_dir("flat")
+    tight_beam = 1e-1
+    trainer = BWTrainer(
+        model / "mdef",
+        model / "means",
+        model / "variances",
+        model / "mixture_weights",
+        model / "transition_matrices",
+        BWConfig(pass2var=True, unobserved_gaussian_policy="zero", a_beam=tight_beam),
+    )
+    trainer.set_dict(context.shared_dir / "dictionary.dict", context.filler_dict)
+    mfcc = np.ascontiguousarray(
+        read_sphinx_mfc(context.features_dir / "arctic_a0001.mfc", veclen=13), dtype=np.float32
+    )
+    before = mfcc.tobytes()
+
+    assert _process_with_final_state_retry(
+        trainer,
+        mfcc,
+        "<s> author of the danger trail philip steels etc </s>",
+        tight_beam,
+        tight_beam / 1e-200,
+        "arctic_a0001",
+    )
+    assert trainer._last_process_retried
+    assert mfcc.tobytes() == before
+
+
+@requires_c_library
 @pytest.mark.parametrize("failed_method", ["save_density_counts", "normalize", "save"])
 def test_training_stops_on_native_false_return_before_checkpoint(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failed_method: str

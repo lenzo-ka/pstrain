@@ -535,7 +535,14 @@ check_frame_limit(const char *who, const char *utt_id, uint32 n_frames)
 
 /* feat_s2mfc2feat_live wants mfcc_t** (an array of frame pointers). We
  * accept a contiguous float buffer from the caller, so we set up the
- * row-pointer table on the fly. */
+ * row-pointer table on the fly.
+ *
+ * The rows point into a copy this function owns, never into the caller's
+ * buffer: feature computation runs CMN and AGC in place through those
+ * pointers. Pointing them at the caller's memory rewrote the caller's
+ * cepstra on every alignment, so a second alignment of the same buffer,
+ * including every retry rung at a wider beam, normalized features that
+ * were already normalized. */
 static int
 prepare_feat_from_mfcc(const float *mfcc, uint32 n_frames, uint32 ncep,
                        int32 *out_nfr)
@@ -545,14 +552,18 @@ prepare_feat_from_mfcc(const float *mfcc, uint32 n_frames, uint32 ncep,
                   ncep, feat_cepsize(kbcore_fcb(kbc)));
         return -1;
     }
+    size_t n_values = (size_t)n_frames * ncep;
+    mfcc_t *cepstra = ckd_calloc(n_values ? n_values : 1, sizeof(mfcc_t));
+    memcpy(cepstra, mfcc, n_values * sizeof(mfcc_t));
     mfcc_t **rows = ckd_calloc(n_frames, sizeof(mfcc_t *));
     for (uint32 i = 0; i < n_frames; i++) {
-        rows[i] = (mfcc_t *)(mfcc + i * ncep);
+        rows[i] = cepstra + (size_t)i * ncep;
     }
     int32 nfr = (int32)n_frames;
     int32 produced = feat_s2mfc2feat_live(kbcore_fcb(kbc), rows, &nfr,
                                           TRUE, TRUE, feat);
     ckd_free(rows);
+    ckd_free(cepstra);
     if (produced < 0) {
         set_error("pstrain_align: feat_s2mfc2feat_live failed");
         return -1;

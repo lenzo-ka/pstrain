@@ -12,7 +12,8 @@
  * words land says nothing; what matters is that every frame is aligned.
  * Then check that one frame over the limit is refused with an error naming
  * the frame count and the limit, from both entry points, and that the
- * context still aligns afterwards.
+ * context still aligns afterwards.  Along the way, check that aligning from
+ * memory leaves the caller's cepstra byte for byte as they were.
  *
  * Usage: test_align_frame_limit <fixture dir> <scratch dir>
  *   <fixture dir> holds model/, dictionary.dict, filler.dict and
@@ -182,6 +183,16 @@ main(int argc, char *argv[])
         return 1;
     pstrain_align_result_free(r);
     r = NULL;
+
+    /* The cepstra are read only: normalization runs on the aligner's own
+     * copy, so the caller's buffer is exactly as it was. */
+    {
+        float *pristine = tile(utt, frames, total);
+        CHECK(pristine != NULL, "out of memory");
+        CHECK(memcmp(longest, pristine, (size_t)total * NCEP * sizeof(float)) == 0,
+              "aligning from memory leaves the caller's cepstra as they were");
+        free(pristine);
+    }
 
     /* One frame over the limit, from memory: refused, naming the limit. */
     rc = pstrain_align_mfcc(ctx, over, LIMIT + 1, NCEP, sent, "over", &r);

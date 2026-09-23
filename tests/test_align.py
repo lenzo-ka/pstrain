@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import shutil
 import sys
 import wave
@@ -53,6 +54,35 @@ def _final_state_case(tmp_path: Path, utterance_id: str) -> tuple[Path, str, Pat
         if line.startswith(f"{utterance_id} ")
     )
     return fixture, transcript, _alignment_model(tmp_path)
+
+
+@pytest.fixture(scope="module")
+def trained_ci(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
+    """A one-Gaussian CI model trained on the mini corpus, and its feature directory.
+
+    The final-state fixture model is flat: every senone scores alike, so it
+    aligns normalized and twice-normalized features identically and cannot
+    show what the features were. This model's senones differ.
+    """
+    if importlib.util.find_spec("fcntl") is None:
+        pytest.skip("building the mini-corpus model requires POSIX provenance locking")
+    from tests.numeric_harness import create_project
+
+    ctx = create_project(tmp_path_factory.mktemp("align-ci") / "project", "ci-1g")
+    return ctx.model_dir("ci-1g"), ctx.features_dir
+
+
+def _trained_ci_utterance(features: Path, utterance_id: str) -> tuple[np.ndarray, str]:
+    """One mini-corpus utterance's cepstra, as a contiguous float32 array, and transcript."""
+    from pstrain.lib.features import read_sphinx_mfc
+
+    transcript = next(
+        line.split(maxsplit=1)[1]
+        for line in (_FIXTURES / "mini_arctic" / "transcription.txt").read_text().splitlines()
+        if line.startswith(f"{utterance_id} ")
+    )
+    mfcc = read_sphinx_mfc(features / f"{utterance_id}.mfc", veclen=13)
+    return np.ascontiguousarray(mfcc, dtype=np.float32), transcript
 
 
 def _downsample_to_8khz(source: Path, output: Path) -> Path:
@@ -482,6 +512,98 @@ class TestAligner:
             assert hasattr(aligner, "_proxy")
             aligner.align_mfc_file(fixture / "arctic_a0336.mfc", transcript)
             assert aligner.retry_yield() == ((1e10, 1, 0), (1e40, 1, 1))
+
+    def test_align_mfcc_leaves_the_callers_features_untouched(
+        self, trained_ci: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Normalization works on the aligner's own copy, never the caller's array."""
+        from pstrain.lib import native_worker
+
+        monkeypatch.setattr(native_worker, "in_worker", lambda: True)
+        model, features = trained_ci
+        mfcc, transcript = _trained_ci_utterance(features, "arctic_a0004")
+        before = mfcc.tobytes()
+
+        with Aligner(
+            model,
+            _FIXTURES / "mini_arctic" / "dictionary.dict",
+            filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
+            include_phones=True,
+            include_states=True,
+        ) as aligner:
+            first = aligner.align_mfcc(mfcc, transcript, "arctic_a0004")
+            assert mfcc.tobytes() == before
+            second = aligner.align_mfcc(mfcc, transcript, "arctic_a0004")
+            assert mfcc.tobytes() == before
+
+        # The same array aligned twice is the same alignment twice.
+        assert second == first
+
+    @pytest.mark.parametrize(
+        ("utterance_id", "nominal", "ladder", "recovering_rung"),
+        [
+            ("arctic_a0004", 1e-10, [1e10], 1),
+            ("arctic_a0003", 1e-10, [1e10, 1e30], 2),
+            ("arctic_a0001", 1e-2, [1e3, 1e8, 1e18, 1e38], 3),
+        ],
+        ids=["one-rung", "second-of-two", "third-of-four"],
+    )
+    def test_each_rung_aligns_the_original_features(
+        self,
+        trained_ci: tuple[Path, Path],
+        monkeypatch: pytest.MonkeyPatch,
+        utterance_id: str,
+        nominal: float,
+        ladder: list[float],
+        recovering_rung: int,
+    ) -> None:
+        """A retry rung gives exactly the direct alignment at that rung's beam.
+
+        The utterance fails at the nominal beam. Each rung before the
+        recovering one fails, as a direct alignment at its beam does; the
+        recovering rung produces the direct alignment at its beam, segment for
+        segment and score for score. Every attempt starts from the caller's
+        cepstra, not from what an earlier attempt normalized.
+        """
+        from pstrain.lib import native_worker
+
+        monkeypatch.setattr(native_worker, "in_worker", lambda: True)
+        model, features = trained_ci
+        mfcc, transcript = _trained_ci_utterance(features, utterance_id)
+        original = mfcc.copy()
+        kwargs = {
+            "filler_dict": _FIXTURES / "mini_arctic" / "filler.dict",
+            "include_phones": True,
+            "include_states": True,
+        }
+        dictionary = _FIXTURES / "mini_arctic" / "dictionary.dict"
+
+        with Aligner(
+            model, dictionary, beam=nominal, retry_beam_factor=ladder, **kwargs
+        ) as aligner:
+            retried = aligner.align_mfcc(mfcc, transcript, utterance_id)
+            assert aligner._last_retry_rungs == recovering_rung
+        assert mfcc.tobytes() == original.tobytes()
+
+        for factor in [1.0, *ladder[: recovering_rung - 1]]:
+            with (
+                Aligner(
+                    model, dictionary, beam=nominal / factor, retry_beam_factor=1.0, **kwargs
+                ) as aligner,
+                pytest.raises(RuntimeError, match=r"rc=-3"),
+            ):
+                aligner.align_mfcc(original.copy(), transcript, utterance_id)
+
+        with Aligner(
+            model,
+            dictionary,
+            beam=nominal / ladder[recovering_rung - 1],
+            retry_beam_factor=1.0,
+            **kwargs,
+        ) as aligner:
+            direct = aligner.align_mfcc(original.copy(), transcript, utterance_id)
+
+        assert retried == direct
 
     def test_invalid_ladder_is_refused_before_loading_anything(self, tmp_path: Path) -> None:
         dict_path = tmp_path / "dict"
