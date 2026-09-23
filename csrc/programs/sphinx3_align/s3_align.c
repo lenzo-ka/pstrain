@@ -1268,6 +1268,27 @@ clamp_score(int64 v)
 }
 
 
+/* Free every history node of the current utterance. */
+static void
+hist_free(void)
+{
+    history_t *h;
+
+    while (hist_head) {
+        h = hist_head->alloc_next;
+        ckd_free((char *) hist_head);
+        hist_head = h;
+    }
+}
+
+
+void
+align_abort_utt(void)
+{
+    hist_free();
+}
+
+
 static void
 build_stseg(history_t * rooth)
 {
@@ -1457,12 +1478,7 @@ align_end_utt(align_stseg_t ** stseg_out,
     *phseg_out = align_phseg;
     *wdseg_out = align_wdseg;
 
-    /* delete history list */
-    while (hist_head) {
-        h = hist_head->alloc_next;
-        ckd_free((char *) hist_head);
-        hist_head = h;
-    }
+    hist_free();
 
     return (stail.hist ? 0 : -1);
 }

@@ -201,6 +201,13 @@ int32 align_frame(int32 * senscr                /**< In: array of senone scores 
     );
 
 
+/**
+ * Abandon the utterance begun by align_start_utt() without a result, freeing
+ * its search history.  Use instead of align_end_utt() when a frame fails.
+ */
+void align_abort_utt(void);
+
+
 /**<
  * Wind up utterance and return final result (READ-ONLY).  Results only valid until
  * the next utterance is begun.

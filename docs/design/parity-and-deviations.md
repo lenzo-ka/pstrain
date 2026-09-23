@@ -24,6 +24,10 @@ contracts behind each classified difference.
 | Shard reduction order | Aligned | Ascending shard-index reduction, independent of worker completion order | Ascending partition-index reduction | Accumulator inputs and reduction order |
 | Vendored byte swapping | Aligned safety fix | Exact-width unsigned intermediates avoid undefined signed shifts while preserving output bits | Signed shift expressions rely on implementation behavior | Serialized model and feature bytes |
 | Alignment dictionary, dropped base pronunciation | Deliberate deviation | A word whose unsuffixed pronunciation is dropped for a phone the model does not define takes its first surviving alternative as its base entry and aligns over all of its surviving alternatives, with a warning, as multiple-pronunciation training does | The aligner ends the process on the surviving alternative, so no utterance aligns | Dictionary, model phone inventory, and the alignment outcomes of utterances using the word |
+| Vendored log-math conversion | Aligned safety fix | Log-to-linear conversions scale by 2^shift with `ldexp`, preserving output at every shift pstrain uses | Left shift of a negative log value, which is undefined | Aligner model load and alignment scores |
+| Aligner CI-senone count | Aligned safety fix | The count of leading CI senones stops at the model's senone count, with no output change | Reads past the end of the senone table for a model with only CI senones | Model definition |
+| Library alignment frame limit | Deliberate deviation | The library path aligns up to 32,768 frames per utterance and refuses a longer one before any work, with a message naming its frame count and the limit | `sphinx3_align` stops at 15,000 frames | Utterance lengths, and which utterances are refused |
+| Alignment score range | Deliberate deviation | Phone, word and total scores beyond the int32 range saturate at the range edge | Such scores wrap around | Segment lengths and the reported phone, word and total scores |
 
 ## Inventory under multiple pronunciations
 

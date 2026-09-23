@@ -758,6 +758,7 @@ align_utt_capture(char *sent,
                                         kbcore_logmath(kbc));
         }
         if (align_frame(ascr->senscr) < 0) {
+            align_abort_utt();
             align_destroy_sent_hmm();
             E_ERROR("Utterance %s has more frames than the aligner accepts; "
                     "no alignment\n", uttid);
