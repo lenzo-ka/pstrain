@@ -175,3 +175,18 @@ add_test(
   NAME byteorder
   COMMAND test_byteorder ${CMAKE_CURRENT_BINARY_DIR}
 )
+
+add_executable(test_lexicon_undefined_phone test_lexicon_undefined_phone.c)
+target_link_libraries(test_lexicon_undefined_phone pstrainc)
+target_include_directories(test_lexicon_undefined_phone
+  PRIVATE ${CMAKE_BINARY_DIR}
+)
+
+set(LEXICON_UNDEFINED_PHONE_DIR ${CMAKE_CURRENT_BINARY_DIR}/lexicon_undefined_phone)
+file(MAKE_DIRECTORY ${LEXICON_UNDEFINED_PHONE_DIR})
+add_test(
+  NAME lexicon_undefined_phone
+  COMMAND test_lexicon_undefined_phone
+    ${BW_FIXTURE}/model/mdef
+    ${LEXICON_UNDEFINED_PHONE_DIR}
+)

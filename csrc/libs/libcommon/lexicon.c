@@ -223,6 +223,7 @@ lexicon_t *lexicon_read(lexicon_t *prior_lex,
     uint32    wid, start_wid;
     uint32    n_phone;
     uint32    lineno = 0;
+    uint32    n_undefined_phone = 0;
     int       reuse_entry = FALSE;
     char      *word;
 
@@ -281,6 +282,7 @@ lexicon_t *lexicon_read(lexicon_t *prior_lex,
 	if (add_phones(n_phone, next_entry, acmod_set) != S3_SUCCESS) {
 	    E_ERROR("pronunciation for %s has undefined phones; skipping.\n", word);
 	    lexicon_entry_free(next_entry);
+	    ++n_undefined_phone;
 	    continue;
 	}
 
@@ -291,6 +293,17 @@ lexicon_t *lexicon_read(lexicon_t *prior_lex,
 
     E_INFO("%d entries added from %s\n",
 	   wid - start_wid, filename);
+
+    /* The per-word lines above drown in a large build, and the count of
+     * entries added reports only what survived.  State the shortfall so a
+     * reader can see the lexicon is smaller than the file without
+     * diffing against its line count. */
+    if (n_undefined_phone > 0) {
+	E_ERROR("%u pronunciations in %s were dropped because they use phones "
+		"the model does not define; words left without any pronunciation "
+		"will fail later as unresolvable transcript tokens\n",
+		n_undefined_phone, filename);
+    }
 
     lineiter_free(line);
     fclose(lex_fp);

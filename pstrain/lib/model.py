@@ -295,9 +295,92 @@ __all__ = [
     "CDModel",
     "create_model",
     "get_model_class",
+    "read_ci_phones",
     "read_complete_model_feat_params",
     "require_complete_model",
 ]
+
+
+MODEL_DEF_VERSION = "0.3"
+
+
+def read_ci_phones(mdef_path: str | Path) -> list[str]:
+    """Read a model's context-independent phone inventory from its mdef.
+
+    The inventory is the set of phones the trained model actually defines.
+    A lexicon pronunciation that uses a phone outside it cannot be loaded:
+    the native lexicon reader drops that pronunciation, and the word then
+    fails much later as an unresolvable transcript token.
+
+    Args:
+        mdef_path: Path to a model definition file.
+
+    Returns:
+        The base (context-independent) phone names, in mdef order.
+
+    Raises:
+        FileNotFoundError: If the model definition does not exist.
+        ValueError: If the file is not a model definition this reader
+            understands.
+    """
+    path = Path(mdef_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"Model definition not found: {path}")
+
+    lines = []
+    for raw_line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if line:
+            lines.append(line)
+    if not lines:
+        raise ValueError(f"Model definition {path} has no content")
+
+    version = lines[0]
+    if version != MODEL_DEF_VERSION:
+        raise ValueError(
+            f"Model definition {path} declares version {version!r}; "
+            f"this reader understands {MODEL_DEF_VERSION!r}"
+        )
+
+    n_base: int | None = None
+    first_record = len(lines)
+    for index, line in enumerate(lines[1:], start=1):
+        fields = line.split()
+        if len(fields) == 2 and fields[1].startswith("n_"):
+            if fields[1] == "n_base":
+                try:
+                    n_base = int(fields[0])
+                except ValueError:
+                    raise ValueError(
+                        f"Model definition {path} declares a non-numeric n_base: {line!r}"
+                    ) from None
+            continue
+        first_record = index
+        break
+    if n_base is None:
+        raise ValueError(f"Model definition {path} has no n_base declaration")
+    if n_base < 1:
+        # An empty inventory would make every phone look undefined, which is
+        # a louder and more misleading answer than refusing the file.
+        raise ValueError(f"Model definition {path} declares no base phones")
+
+    records = lines[first_record:]
+    if len(records) < n_base:
+        raise ValueError(
+            f"Model definition {path} declares {n_base} base phones but holds "
+            f"{len(records)} model records"
+        )
+
+    phones: list[str] = []
+    for line in records[:n_base]:
+        fields = line.split()
+        if len(fields) < 3 or fields[1] != "-" or fields[2] != "-":
+            raise ValueError(
+                f"Model definition {path} has a context-dependent record among its "
+                f"first {n_base} records: {line!r}"
+            )
+        phones.append(fields[0])
+    return phones
 
 
 def read_complete_model_feat_params(model_dir: str | Path) -> dict[str, str]:

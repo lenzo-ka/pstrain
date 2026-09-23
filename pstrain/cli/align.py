@@ -101,6 +101,7 @@ class AlignCommand(Command):
     def execute(self, ctx: CommandContext) -> CommandResult:
         from pstrain.api.alignment import (
             align_corpus,
+            collect_phone_report,
             load_transcripts,
             save_ctm,
             save_textgrid,
@@ -178,6 +179,15 @@ class AlignCommand(Command):
             ctx.log("# Would align and write segmentations")
             return CommandResult.ok("Dry run complete")
 
+        # Report a dictionary the model's phone inventory cannot support
+        # before the corpus pass, not as scattered per-utterance failures
+        # after it.
+        phone_report = collect_phone_report(model_dir, dict_file, filler_dict)
+        if phone_report:
+            ctx.log("")
+            ctx.log(phone_report.format())
+            ctx.log("")
+
         ctx.log("Aligning...")
         job = align_corpus(
             transcripts=transcripts,
@@ -191,6 +201,7 @@ class AlignCommand(Command):
             retry_beam_factor=alignment_config.retry_beam_factor,
             failed_alignment=alignment_config.failed_alignment,
             verbatim_tokens=alignment_config.verbatim_tokens,
+            phone_report=phone_report,
         )
 
         ctx.log(

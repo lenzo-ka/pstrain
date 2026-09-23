@@ -17,7 +17,14 @@ Use cases:
 
 from __future__ import annotations
 
-from pstrain.lib.alignment.batch import AlignmentJob, align_corpus, load_transcripts
+from pstrain.lib.alignment.batch import (
+    AlignmentJob,
+    align_corpus,
+    collect_phone_report,
+    explain_failure,
+    explain_init_failure,
+    load_transcripts,
+)
 from pstrain.lib.alignment.core import (
     AlignedSegment,
     AlignmentResult,
@@ -39,6 +46,9 @@ __all__ = [
     "Aligner",
     "align_corpus",
     "align_utterance",
+    "collect_phone_report",
+    "explain_failure",
+    "explain_init_failure",
     "load_transcripts",
     "save_ctm",
     "save_textgrid",
