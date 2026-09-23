@@ -5,11 +5,6 @@ the version in `pyproject.toml` is authoritative.
 
 ## Unreleased
 
-### Upgrading
-
-- Rebuild source installations and custom native integrations together: the
-  native ABI is now 6. Published wheels bundle their matching native library.
-
 ### Changes
 
 - Training and `pstrain align` now say when an utterance cannot be aligned at

@@ -14,7 +14,7 @@ from pstrain.lib._cffi.cdef import CDEF
 
 _ffi: FFI | None = None
 _lib: Any = None
-PSTRAIN_ABI_VERSION = 6
+PSTRAIN_ABI_VERSION = 1
 
 
 def _find_library() -> Path:
@@ -61,14 +61,16 @@ def _init() -> tuple[FFI, Any]:
         raise RuntimeError(
             "libpstrainc ABI mismatch: Python expects ABI version "
             f"{PSTRAIN_ABI_VERSION}, but the library has no ABI version handshake "
-            "(pre-handshake library)"
+            f"(pre-handshake library). The native library at {lib_path} is stale; "
+            "rebuild it with `make build-c`."
         ) from exc
     if actual_abi != PSTRAIN_ABI_VERSION:
         _ffi = None
         _lib = None
         raise RuntimeError(
             "libpstrainc ABI mismatch: Python expects ABI version "
-            f"{PSTRAIN_ABI_VERSION}, library reports {actual_abi}"
+            f"{PSTRAIN_ABI_VERSION}, library reports {actual_abi}. "
+            f"The native library at {lib_path} is stale; rebuild it with `make build-c`."
         )
     _lib = lib
 
