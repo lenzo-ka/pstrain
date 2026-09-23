@@ -122,7 +122,9 @@ double pstrain_align_set_beam(pstrain_align_context_t *ctx, double beam);
  * Align one utterance from already-extracted MFCC frames.
  *
  * @param ctx Context.
- * @param mfcc Row-major MFCC matrix, shape (n_frames, ncep).
+ * @param mfcc Row-major MFCC matrix, shape (n_frames, ncep). Read only:
+ *        normalization runs on a private copy, so the buffer is left as it
+ *        was and aligning it again starts from the same cepstra.
  * @param n_frames Number of MFCC frames.
  * @param ncep Number of cepstral coefficients per frame.
  * @param transcript Reference transcript (word sequence, may include the

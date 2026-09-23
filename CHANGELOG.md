@@ -7,6 +7,16 @@ the version in `pyproject.toml` is authoritative.
 
 ### Changes
 
+- Alignment no longer changes the caller's feature array. `align_mfcc`
+  normalized the cepstra it was given in place, so aligning the same array a
+  second time normalized it again and could give a different answer. The
+  wider-beam retry, and each rung of a retry ladder, aligned that same array
+  again, so every alignment the retry recovered through `align_mfcc`,
+  `align_audio` or `pstrain align` was made from altered features, not the
+  caller's. Some utterances failed that would have aligned at the retry's beam,
+  and the ones that aligned could differ from a direct alignment at that beam.
+  A retry now gives exactly the alignment a direct alignment at its beam gives.
+  First-pass alignments, `align_mfc_file`, and training are unchanged.
 - Aligning an utterance longer than 150 seconds (15,000 frames) no longer
   corrupts the aligner's memory. Such alignments could kill the native worker,
   and the ones that finished could not be trusted. Utterances up to 32,768

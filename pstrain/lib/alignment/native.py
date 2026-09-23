@@ -457,7 +457,9 @@ class Aligner:
 
         Args:
             mfcc: Row-major MFCC matrix, shape ``(n_frames, ncep)``,
-                dtype ``float32``. ``ncep`` must match the model.
+                dtype ``float32``. ``ncep`` must match the model. It is not
+                modified: every attempt, retry rungs included, normalizes
+                its own copy.
             transcript: Word-level reference (sphinx ``<s>/</s>``
                 markers are tolerated and stripped).
             utterance_id: Identifier used in logging and stored on the
