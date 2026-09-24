@@ -27,6 +27,7 @@ from pstrain.lib.alignment.core import (
     AlignmentResult,
     RetryOutcome,
 )
+from pstrain.lib.alignment.coverage import AlignmentCoverage, alignment_coverage
 from pstrain.lib.alignment.native import Aligner
 from pstrain.lib.lexicon_check import (
     UnsupportedPhoneReport,
@@ -80,6 +81,11 @@ class AlignmentJob:
             when nothing was recovered, the check is off, or a threshold was
             supplied.
         retry_acceptance_target: The check's target, or ``None`` when it was off.
+        coverage: Mass and coverage by outcome, with thin-phone and other
+            flags (:class:`~pstrain.lib.alignment.coverage.AlignmentCoverage`).
+            Reporting only: it is computed after every acceptance decision and
+            changes none. ``None`` when the report was not requested or could
+            not be built.
     """
 
     model_dir: Path
@@ -94,6 +100,7 @@ class AlignmentJob:
     retry_rejections: dict[str, RetryOutcome] = field(default_factory=dict)
     retry_calibration: tuple[RetryCalibration, ...] = ()
     retry_acceptance_target: float | None = DEFAULT_RETRY_ACCEPTANCE_TARGET
+    coverage: AlignmentCoverage | None = None
 
     @property
     def success_rate(self) -> float:
@@ -192,6 +199,7 @@ def align_corpus(
     phone_report: UnsupportedPhoneReport | None = None,
     retry_acceptance_target: float | None = DEFAULT_RETRY_ACCEPTANCE_TARGET,
     retry_acceptance_threshold: float | Sequence[float] | None = None,
+    coverage_report: bool = True,
 ) -> AlignmentJob:
     """Align an entire corpus.
 
@@ -228,6 +236,9 @@ def align_corpus(
             at that rung is rejected.
         retry_acceptance_threshold: A threshold per rung, in nats per speech
             frame, to use instead of calibrating.
+        coverage_report: Attach the mass-and-coverage report
+            (:attr:`AlignmentJob.coverage`). It is built after the pass from
+            the outcomes already decided and never changes one.
 
     Returns:
         :class:`AlignmentJob` with all alignment results.
@@ -253,17 +264,24 @@ def align_corpus(
         if phone_report:
             logger.error("%s", phone_report.format())
 
+    def finish(job: AlignmentJob) -> AlignmentJob:
+        if coverage_report:
+            job.coverage = _coverage(job, transcripts, dict_path, filler_dict, audio_dir, audio_ext)
+        return job
+
     total = len(transcripts)
     if total == 0:
-        return AlignmentJob(
-            model_dir=model_dir,
-            n_utterances=0,
-            n_aligned=0,
-            n_failed=0,
-            results=results,
-            errors=errors,
-            phone_report=phone_report,
-            retry_acceptance_target=retry_acceptance_target,
+        return finish(
+            AlignmentJob(
+                model_dir=model_dir,
+                n_utterances=0,
+                n_aligned=0,
+                n_failed=0,
+                results=results,
+                errors=errors,
+                phone_report=phone_report,
+                retry_acceptance_target=retry_acceptance_target,
+            )
         )
 
     logger.info("Aligning %d utterances...", total)
@@ -297,15 +315,17 @@ def align_corpus(
         logger.error("%s", init_error)
         for utt_id in transcripts:
             errors[utt_id] = init_error
-        return AlignmentJob(
-            model_dir=model_dir,
-            n_utterances=total,
-            n_aligned=0,
-            n_failed=total,
-            results=results,
-            errors=errors,
-            phone_report=phone_report,
-            retry_acceptance_target=retry_acceptance_target,
+        return finish(
+            AlignmentJob(
+                model_dir=model_dir,
+                n_utterances=total,
+                n_aligned=0,
+                n_failed=total,
+                results=results,
+                errors=errors,
+                phone_report=phone_report,
+                retry_acceptance_target=retry_acceptance_target,
+            )
         )
 
     first_pass: list[str] = []
@@ -393,19 +413,39 @@ def align_corpus(
         100 * n_aligned / total,
     )
 
-    return AlignmentJob(
-        model_dir=model_dir,
-        n_utterances=total,
-        n_aligned=n_aligned,
-        n_failed=n_failed,
-        results=results,
-        errors=errors,
-        phone_report=phone_report,
-        retry_yield=retry_yield,
-        retry_rejections=rejections,
-        retry_calibration=calibration,
-        retry_acceptance_target=retry_acceptance_target,
+    return finish(
+        AlignmentJob(
+            model_dir=model_dir,
+            n_utterances=total,
+            n_aligned=n_aligned,
+            n_failed=n_failed,
+            results=results,
+            errors=errors,
+            phone_report=phone_report,
+            retry_yield=retry_yield,
+            retry_rejections=rejections,
+            retry_calibration=calibration,
+            retry_acceptance_target=retry_acceptance_target,
+        )
     )
+
+
+def _coverage(
+    job: AlignmentJob,
+    transcripts: dict[str, str],
+    dict_path: Path,
+    filler_dict: Path | None,
+    audio_dir: Path,
+    audio_ext: str,
+) -> AlignmentCoverage | None:
+    """Build the coverage report; a failure to build it never fails the run."""
+    try:
+        return alignment_coverage(
+            job, transcripts, dict_path, filler_dict, audio_dir=audio_dir, audio_ext=audio_ext
+        )
+    except Exception as exc:  # noqa: BLE001 - a report must never fail the alignment
+        logger.warning("Not reporting alignment mass and coverage: %s", exc)
+        return None
 
 
 def _brief_error(exc: Exception) -> str:

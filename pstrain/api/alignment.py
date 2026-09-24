@@ -1,7 +1,9 @@
 """Public API for forced-alignment operations."""
 
 from pstrain.lib.alignment import (
+    AlignmentCoverage,
     align_corpus,
+    alignment_coverage,
     collect_phone_report,
     load_transcripts,
     save_ctm,
@@ -9,7 +11,9 @@ from pstrain.lib.alignment import (
 )
 
 __all__ = [
+    "AlignmentCoverage",
     "align_corpus",
+    "alignment_coverage",
     "collect_phone_report",
     "load_transcripts",
     "save_ctm",
