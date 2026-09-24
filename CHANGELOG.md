@@ -7,6 +7,23 @@ the version in `pyproject.toml` is authoritative.
 
 ### Changes
 
+- The Arctic benchmark pin now describes the tests it runs. The forward gate's
+  documented bar was "no statistically significant regression", but the gate
+  has always passed a run only when the upper end of its paired interval
+  against the pinned rows is at or below zero. The pin document now states
+  that zero-margin bar: a run whose interval straddles zero fails, and moving
+  the recorded results is always a deliberate re-pin. The gate itself is
+  unchanged, and new tests hold it to that bar. The pin document and the
+  README also no longer present the big cell's speaker-stratified interval as
+  a clustering adjustment. For a paired delta it matches an utterance-level
+  interval over these three speakers, whose per-speaker deltas disagree in
+  sign. A speaker-level cluster bootstrap is wider and also straddles zero, so
+  the null conclusion stands, now stated for these three voices and not for
+  unseen voices in general. No recorded number or gate outcome changes.
+- `paired_delta_ci` now raises `ValueError` when asked to stratify by speaker
+  and an utterance ID has no `speaker/` prefix, or every speaker has a single
+  utterance. Either used to make each utterance its own stratum and return a
+  zero-width interval without complaint.
 - Forced alignment now retries an utterance that misses its final state once,
   at a beam of 1e-200 (`alignment.retry_beam_factor` 1e136 on the default
   1e-64 beam, up from 1e36, a retry at 1e-100), and checks every alignment

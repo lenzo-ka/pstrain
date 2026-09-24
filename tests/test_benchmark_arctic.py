@@ -1023,6 +1023,27 @@ def test_comparison_uses_true_cross_run_matched_pairs() -> None:
     assert not rows[-1]["pass"]
 
 
+def test_forward_gate_fails_an_interval_that_straddles_zero() -> None:
+    # The bar is zero-margin non-inferiority: a change whose effect cannot be
+    # told apart from a regression fails and needs a deliberate re-pin.
+    actual, record = _comparison_documents()
+    actual["results"]["on"]["big"] = _cell((0, 2, 1, 1), recorded=False)  # type: ignore[index]
+    row = compare_results(actual, record)[-1]
+    low, high = row["paired_delta_ci_95"]
+    assert low < 0 < high
+    assert row["delta"] == 0.0
+    assert not row["pass"]
+
+
+def test_forward_gate_passes_a_clear_improvement() -> None:
+    actual, record = _comparison_documents()
+    actual["results"]["on"]["big"] = _cell((0, 0, 1, 0), recorded=False)  # type: ignore[index]
+    row = compare_results(actual, record)[-1]
+    low, high = row["paired_delta_ci_95"]
+    assert low < high < 0
+    assert row["pass"]
+
+
 def test_comparison_records_decode_shortfall_without_blocking() -> None:
     actual, record = _comparison_documents()
     cell = actual["results"]["on"]["big"]
@@ -1118,6 +1139,45 @@ def test_record_schema_and_bootstrap_smoke() -> None:
     assert delta_low == delta_high == 0
     with pytest.raises(RuntimeError, match="missing required field: basis"):
         validate_record({"schema_version": RECORD_SCHEMA_VERSION})
+
+
+def test_speaker_stratified_bootstrap_refuses_ids_without_a_speaker() -> None:
+    # Without a guard, each unparseable ID became its own stratum and the
+    # interval collapsed to zero width even though the deltas disagree.
+    recorded = [["u1", 10, 1], ["u2", 10, 1], ["u3", 10, 1], ["u4", 10, 1]]
+    actual = {
+        "u1": {"ref_words": 10, "errors": 0},
+        "u2": {"ref_words": 10, "errors": 2},
+        "u3": {"ref_words": 10, "errors": 0},
+        "u4": {"ref_words": 10, "errors": 3},
+    }
+    low, high = paired_delta_ci(recorded, actual, speaker_stratified=False, resamples=200, seed=1)
+    assert low < high
+    with pytest.raises(ValueError, match="'u1'"):
+        paired_delta_ci(recorded, actual, speaker_stratified=True, resamples=200, seed=1)
+
+    empty_speaker = [["/u1", 10, 1], ["a/u2", 10, 1]]
+    with pytest.raises(ValueError, match="'/u1'"):
+        paired_delta_ci(
+            empty_speaker,
+            {"/u1": actual["u1"], "a/u2": actual["u2"]},
+            speaker_stratified=True,
+            resamples=200,
+            seed=1,
+        )
+
+
+def test_speaker_stratified_bootstrap_refuses_all_singleton_strata() -> None:
+    recorded = [["a/1", 10, 1], ["b/1", 10, 1], ["c/1", 10, 1]]
+    actual = {
+        "a/1": {"ref_words": 10, "errors": 0},
+        "b/1": {"ref_words": 10, "errors": 2},
+        "c/1": {"ref_words": 10, "errors": 3},
+    }
+    with pytest.raises(ValueError, match="one utterance in every speaker stratum"):
+        paired_delta_ci(recorded, actual, speaker_stratified=True, resamples=200, seed=1)
+    low, high = paired_delta_ci(recorded, actual, speaker_stratified=False, resamples=200, seed=1)
+    assert low < high
 
 
 def test_record_cells_bind_schema_owned_comparability() -> None:

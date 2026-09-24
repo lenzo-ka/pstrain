@@ -999,7 +999,14 @@ def paired_delta_ci(
     resamples: int = BOOTSTRAP_RESAMPLES,
     seed: int = BOOTSTRAP_SEED,
 ) -> list[float]:
-    """Bootstrap current-minus-recorded WER from aligned utterance rows."""
+    """Bootstrap current-minus-recorded WER from aligned utterance rows.
+
+    With ``speaker_stratified`` the speaker is the text before ``/`` in each
+    utterance ID, and utterances are resampled within their speaker. An ID
+    with no parseable speaker, or a layout in which every speaker has a single
+    utterance, raises ``ValueError``: either would make each utterance its own
+    stratum and silently return a zero-width interval.
+    """
     import numpy as np
 
     recorded = {str(row[0]): (int(row[1]), int(row[2])) for row in recorded_rows}
@@ -1023,8 +1030,21 @@ def paired_delta_ci(
             raise RuntimeError(f"matched-pair reference word mismatch for {utterance}")
     strata: dict[str, list[str]] = {}
     for utterance in sorted(recorded):
-        speaker = utterance.split("/", 1)[0] if speaker_stratified else "all"
+        if speaker_stratified:
+            speaker, separator, rest = utterance.partition("/")
+            if not (speaker and separator and rest):
+                raise ValueError(
+                    "speaker-stratified bootstrap cannot parse a speaker from utterance "
+                    f"ID {utterance!r}: expected 'speaker/utterance'"
+                )
+        else:
+            speaker = "all"
         strata.setdefault(speaker, []).append(utterance)
+    if len(strata) > 1 and all(len(utterances) == 1 for utterances in strata.values()):
+        raise ValueError(
+            "speaker-stratified bootstrap has one utterance in every speaker stratum, "
+            f"which would collapse the interval to zero width (e.g. {min(recorded)!r})"
+        )
     rng = np.random.default_rng(seed)
     samples = np.empty(resamples, dtype=np.float64)
     for start in range(0, resamples, 1000):

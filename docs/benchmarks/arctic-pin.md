@@ -135,9 +135,23 @@ identities are missing or incomplete.
 ## Baseline
 
 Delta is pstrain minus the preserved upstream oracle in WER percentage points.
-The bands are paired 95% bootstrap summaries, not iid confidence intervals:
-utterances are clustered by speaker rather than exchangeable independent
-observations. The big cells therefore resample within speaker strata.
+The bands are paired 95% percentile bootstrap summaries. The SLT-55 cells are
+one speaker and resample its utterances. The big cells resample utterances
+within each of their three speakers, holding each speaker's utterance count
+fixed. That conditions on those three speakers: for a paired delta it gives an
+interval numerically indistinguishable from an iid utterance bootstrap, and it
+does not account for speaker-to-speaker variation in the delta.
+
+That variation is present. In the live big cell the per-speaker deltas are
++0.67 pp for bdl, -0.54 pp for clb, and +0.52 pp for rms, so they disagree in
+sign, and their variance is roughly 2.7 times what within-speaker sampling
+alone would produce. A speaker-level cluster bootstrap over the recorded rows (draw
+the speakers with replacement, then utterances with replacement within each
+drawn speaker; 100,000 resamples, seed 7) gives [-0.59, +0.91] for the live big
+cell, about 65% wider than the tabled interval, and it too straddles zero. The
+null conclusion therefore holds under either method, but the tabled big-cell
+bands describe these three voices, which the model was not trained on. With
+three speakers, no interval supports a claim about unseen voices in general.
 
 <!-- BEGIN GENERATED BASELINE -->
 | Mode | Cell | pstrain WER | Oracle WER | Delta pp | Paired 95% CI | Paired decode | Implementation attribution | Interpretation |
@@ -185,8 +199,16 @@ era-to-era delta movement, and pin retraining supplies a further roughly
 
 ## Forward gate
 
-Future runs compare matched pairs against the pinned per-utterance rows. The
-acceptance bar is no statistically significant regression. The live cells'
+Future runs compare matched pairs against the pinned per-utterance rows. For
+each live cell the gate computes the paired 95% bootstrap interval of the
+current run minus the pinned rows, in WER percentage points, and passes only
+when the upper end of that interval is at or below zero. That is a
+non-inferiority test with a zero margin: a run passes when it reproduces the
+pinned rows exactly, or when its interval lies entirely at or below zero so the
+data rule out any worsening. An interval that straddles zero fails, even when
+the point estimate favors the new run, because that change cannot be told
+apart from a regression. The gate never absorbs a change to the recorded
+results: moving them is always a deliberate re-pin. The live cells'
 standing against the preserved upstream models is part of this documented
 baseline and is not itself a regression; the retired cells' larger gap is
 history and is not a target.
