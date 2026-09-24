@@ -1347,3 +1347,67 @@ def test_arctic_bm1_turnkey(tmp_path: Path) -> None:
     args = ["--work-dir", str(tmp_path)]
     args.extend(["--record", record] if record else ["--no-compare"])
     assert main(args) == 0
+
+
+def _committed_pin_record() -> dict[str, Any]:
+    path = Path(__file__).resolve().parents[1] / "evidence/arctic-pin/record.json"
+    loaded: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    return loaded
+
+
+def test_benchmark_compares_only_the_blocks_its_training_pipeline_consumes() -> None:
+    """Alignment is read only by ``pstrain align``, so the benchmark does not consume it."""
+    from pstrain.benchmarks.arctic import benchmark_consumed_blocks
+    from pstrain.lib.config.models import SEMANTIC_BLOCKS
+
+    blocks = benchmark_consumed_blocks()
+    assert "alignment" not in blocks
+    assert set(blocks) == set(SEMANTIC_BLOCKS) - {"alignment"}
+
+
+@pytest.mark.parametrize(
+    "alignment",
+    [
+        {"retry_beam_factor": 1e99},
+        {"retry_acceptance_target": 0.2, "beam": 1e-80},
+        {"retry_acceptance_target": None, "verbatim_tokens": True},
+    ],
+)
+def test_changing_a_shipped_alignment_default_leaves_the_pin_record_valid(
+    monkeypatch: pytest.MonkeyPatch, alignment: dict[str, Any]
+) -> None:
+    """The benchmark never runs forced alignment and freezes those settings itself."""
+    from pstrain.benchmarks.arctic import validate_record
+    from pstrain.lib.config import models
+
+    monkeypatch.setattr(models, "default_profile", lambda: Profile(alignment=alignment))
+    validate_record(_committed_pin_record())
+
+
+@pytest.mark.parametrize(
+    "shipped",
+    [
+        {"training": {"tree_directional_questions": False}},
+        {"features": {"dither": False}},
+        {"split": {"seed": 7}},
+    ],
+)
+def test_changing_a_shipped_default_the_benchmark_consumes_is_still_caught(
+    monkeypatch: pytest.MonkeyPatch, shipped: dict[str, Any]
+) -> None:
+    from pstrain.benchmarks.arctic import validate_record
+    from pstrain.lib.config import models
+
+    monkeypatch.setattr(models, "default_profile", lambda: Profile(**shipped))
+    with pytest.raises(RuntimeError, match="provenance/conditions consistency mismatch"):
+        validate_record(_committed_pin_record())
+
+
+def test_pin_freezes_its_alignment_settings_at_the_pinned_run() -> None:
+    from pstrain.benchmarks.arctic import PIN_CONFIGS
+
+    record = _committed_pin_record()
+    pinned = record["conditions"]["pin_conditions"]["on"]["alignment"]
+    assert PIN_CONFIGS["on"]["alignment"] == pinned
+    assert pinned["retry_beam_factor"] == 1e36
+    assert pinned["retry_acceptance_target"] is None

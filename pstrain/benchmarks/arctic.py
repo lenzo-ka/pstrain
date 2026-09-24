@@ -337,6 +337,17 @@ PIN_CONFIGS: dict[str, dict[str, Any]] = {
             "exclusion_schedule": {},
         },
         "split": {"test_count": 0, "seed": 42},
+        # The benchmark trains and decodes; it never runs forced alignment. Its
+        # alignment settings are frozen here at what the pinned run resolved, so
+        # changing a shipped alignment default does not touch the evidence record.
+        # The acceptance check did not exist then, so it is frozen off.
+        "alignment": {
+            "beam": 1e-64,
+            "retry_beam_factor": 1e36,
+            "retry_acceptance_target": None,
+            "failed_alignment": "recover",
+            "verbatim_tokens": False,
+        },
     },
     "on": {
         "description": "BM1 product-default multipron pin",
@@ -396,6 +407,17 @@ PIN_CONFIGS: dict[str, dict[str, Any]] = {
             "tied": {"max_iterations": 10, "min_iterations": 1, "convergence_ratio": 0.001},
         },
         "split": {"test_count": 0, "seed": 42},
+        # The benchmark trains and decodes; it never runs forced alignment. Its
+        # alignment settings are frozen here at what the pinned run resolved, so
+        # changing a shipped alignment default does not touch the evidence record.
+        # The acceptance check did not exist then, so it is frozen off.
+        "alignment": {
+            "beam": 1e-64,
+            "retry_beam_factor": 1e36,
+            "retry_acceptance_target": None,
+            "failed_alignment": "recover",
+            "verbatim_tokens": False,
+        },
     },
 }
 
@@ -702,6 +724,31 @@ def _configuration_leaves(value: Any, prefix: str = "") -> dict[str, Any]:
     return {prefix: value}
 
 
+def benchmark_consumed_blocks() -> tuple[str, ...]:
+    """The configuration blocks the Arctic benchmark actually runs on.
+
+    The benchmark builds its models with the training pipeline and scores them
+    with the decoder; it never runs forced alignment. A block counts as consumed
+    when every field in it is consumed by a training-pipeline stage, as the
+    resolver's consumer registry declares (``pipeline.*``). The ``alignment``
+    block is consumed only by ``pstrain align`` (``cli.align``), so it is not
+    consumed here: the benchmark freezes it in ``PIN_CONFIGS`` instead, and a
+    change to a shipped alignment default does not touch the evidence record.
+    """
+    from pstrain.lib.config.models import SEMANTIC_BLOCKS
+    from pstrain.lib.config.resolver import CONSUMERS
+
+    consumers: dict[str, set[str]] = {}
+    for path, (consumer, _block) in CONSUMERS.items():
+        consumers.setdefault(path.split(".", 1)[0], set()).add(consumer)
+    return tuple(
+        block
+        for block in SEMANTIC_BLOCKS
+        if consumers.get(block)
+        and all(consumer.startswith("pipeline.") for consumer in consumers[block])
+    )
+
+
 def configuration_provenance(
     profile: Any,
     *,
@@ -710,8 +757,13 @@ def configuration_provenance(
     override_reason: str | None = None,
     field_source_kinds: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Describe a resolved profile relative to the shipped schema defaults."""
-    from pstrain.lib.config.models import SEMANTIC_BLOCKS, Profile, default_profile
+    """Describe a resolved profile relative to the shipped schema defaults.
+
+    Only the blocks the benchmark consumes are compared
+    (:func:`benchmark_consumed_blocks`); a block it never runs cannot change
+    what it measured.
+    """
+    from pstrain.lib.config.models import Profile, default_profile
 
     if not isinstance(profile, Profile):
         profile = Profile.model_validate(profile)
@@ -722,8 +774,9 @@ def configuration_provenance(
     if source_kind == "explicit overrides" and not override_reason:
         raise ValueError("explicit override provenance requires override_reason")
 
-    actual = profile.model_dump(mode="json", include=set(SEMANTIC_BLOCKS))
-    shipped = default_profile().model_dump(mode="json", include=set(SEMANTIC_BLOCKS))
+    consumed = set(benchmark_consumed_blocks())
+    actual = profile.model_dump(mode="json", include=consumed)
+    shipped = default_profile().model_dump(mode="json", include=consumed)
     actual_leaves = _configuration_leaves(actual)
     shipped_leaves = _configuration_leaves(shipped)
     diff = [

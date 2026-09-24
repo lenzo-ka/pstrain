@@ -42,6 +42,12 @@ the version in `pyproject.toml` is authoritative.
     retry ran, with the rejected count. A recovered alignment carries its rung,
     beam, score and threshold in `AlignmentResult.retry`.
   - The training retry is unchanged.
+  - The Arctic benchmark does not run forced alignment. It now freezes its
+    alignment settings in its own configuration at the values its pinned run
+    resolved, with the new check frozen off, and its gate compares only the
+    configuration blocks the benchmark consumes against shipped defaults. The
+    evidence record is unchanged except for the one new field, adopted through
+    the pin check's `--adopt-uncovered` path.
 - Alignment no longer changes the caller's feature array. `align_mfcc`
   normalized the cepstra it was given in place, so aligning the same array a
   second time normalized it again and could give a different answer. The

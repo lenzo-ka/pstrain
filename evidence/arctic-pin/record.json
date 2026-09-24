@@ -182,8 +182,8 @@
         "alignment": {
           "beam": 1e-64,
           "failed_alignment": "recover",
-          "retry_acceptance_target": 0.05,
-          "retry_beam_factor": 1e+136,
+          "retry_acceptance_target": null,
+          "retry_beam_factor": 1e+36,
           "verbatim_tokens": false
         },
         "description": "BM1 product-default multipron pin",
@@ -400,7 +400,7 @@
       "models",
       "results"
     ],
-    "sha256": "206ed6094b4bd4c2a6d48e7f383f223c1c4fac2c971d4e07833be111ddccc871"
+    "sha256": "8d1e1ee64ea25700b854ef0f137440eadd1dc661b5db11524e11e31908e7df5a"
   },
   "resources": {
     "archives": {
