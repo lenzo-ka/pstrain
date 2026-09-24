@@ -13,14 +13,19 @@ or any default.
 
 ## Where it appears
 
-- `pstrain align` prints it after the per-rung retry line, under
+- `pstrain align` prints it last, after the per-rung retry line and after any
+  TextGrid and CTM output is written, under
   `Mass and coverage by outcome (reporting only; acceptance is unchanged)`.
+  If the report cannot be formatted, the command prints a warning in its
+  place, and every other output is still written.
 - `align_corpus` attaches it to the returned job as `AlignmentJob.coverage`, an
   `AlignmentCoverage`. `coverage.format()` returns the text report and
   `coverage.to_dict()` a JSON-serializable form. Pass `coverage_report=False`
   to skip it. If the report cannot be built, for example because the
-  dictionary cannot be read, the run logs a warning and `coverage` is `None`.
-  The alignment itself is unaffected.
+  dictionary cannot be read, the run logs a warning naming the error and
+  `coverage` is `None`. The alignment itself is unaffected. When the aligner
+  does not start, every utterance fails for that one reason, and no report is
+  built.
 - `alignment_coverage(job, transcripts, dict_path, ...)` builds the report for
   a finished job. Use it to pass your own speaker mapping or flag parameters.
 
@@ -50,7 +55,8 @@ counted with no duration, and the report says how many there were.
 takes the speaker to be the text before the first `/` in the utterance ID
 (`bdl/arctic_a0001` is speaker `bdl`), the same convention the Arctic
 benchmark uses. IDs without a `/` share one speaker, `(no speaker prefix)`,
-and the text report then says no speakers are named. Pass
+and the text report then says no speakers are named. An ID that starts with
+`/` has an empty prefix and counts as having no speaker prefix too. Pass
 `speaker_of=` to `alignment_coverage` to use another mapping. The text report
 lists each speaker when there are 20 or fewer, and otherwise gives counts.
 
@@ -61,15 +67,21 @@ lists each speaker when there are 20 or fewer, and otherwise gives counts.
   When phones were not captured (`--no-phones`), the aligned words are expanded
   through the dictionary, using the pronunciation variant the aligner chose.
 - For retry-rejected and not-recovered utterances there is no alignment to
-  read. Their transcripts are expanded through the dictionary instead, using
-  each word's first pronunciation. Words with no pronunciation are listed.
-- A triphone is written `L-P+R`: the phone with its neighbors in that sequence,
-  across word boundaries. The utterance edges count as `SIL`, and so does any
-  filler neighbor. Filler phones (`SIL` and the filler dictionary's phones)
-  are never counted as units. Aligned sequences include the pauses the aligner
-  inserted between words. Transcript expansions have none, so a cross-word
-  triphone from a failed utterance may be one that aligned utterances realized
-  with a pause.
+  read. Their transcripts are expanded through the dictionary instead. Each
+  word takes the pronunciation variant the aligned output chose most often
+  for that word, or the dictionary's first pronunciation when no aligned
+  utterance contains it. A word the aligner realizes as its second variant is
+  therefore not counted as a different unit where it failed. Words with no
+  pronunciation are listed.
+- Filler phones (`SIL` and the filler dictionary's phones) are never counted
+  as units.
+- A triphone is written `L-P+R`: the phone with its neighbors among the
+  utterance's speech phones, across word boundaries, with `SIL` at the
+  utterance edges. Fillers are removed before neighbors are taken. That
+  includes the pauses the aligner inserts between words. Transcript
+  expansions have no pauses, so this keeps the two on the same basis. For
+  example, `T` in "at the" is `AE-T+DH` whether or not the speaker paused
+  after "at", and a failed utterance with the same words counts the same unit.
 
 ## Flags
 
@@ -87,7 +99,9 @@ lists each speaker when there are 20 or fewer, and otherwise gives counts.
   (default 3); and
 - the share of those utterances that did not align (rejected or not recovered)
   is at least `thin_rate_ratio` (default 2.0) times the run's share of
-  utterances that did not align.
+  utterances that did not align. The comparison is exact and inclusive. The
+  ratio is taken as written in decimal, so with a ratio of 3.0 and a run
+  failure share of 10%, a phone failing 3 of its 10 utterances is flagged.
 
 A run with no failed utterances flags no thin phones. Accepted retries do not
 count as failures here. A phone that aligns only through retries is flagged as

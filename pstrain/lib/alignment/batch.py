@@ -84,8 +84,8 @@ class AlignmentJob:
         coverage: Mass and coverage by outcome, with thin-phone and other
             flags (:class:`~pstrain.lib.alignment.coverage.AlignmentCoverage`).
             Reporting only: it is computed after every acceptance decision and
-            changes none. ``None`` when the report was not requested or could
-            not be built.
+            changes none. ``None`` when the report was not requested, the
+            aligner did not start, or the report could not be built.
     """
 
     model_dir: Path
@@ -315,17 +315,16 @@ def align_corpus(
         logger.error("%s", init_error)
         for utt_id in transcripts:
             errors[utt_id] = init_error
-        return finish(
-            AlignmentJob(
-                model_dir=model_dir,
-                n_utterances=total,
-                n_aligned=0,
-                n_failed=total,
-                results=results,
-                errors=errors,
-                phone_report=phone_report,
-                retry_acceptance_target=retry_acceptance_target,
-            )
+        # No report: every utterance failed for the one reason already logged.
+        return AlignmentJob(
+            model_dir=model_dir,
+            n_utterances=total,
+            n_aligned=0,
+            n_failed=total,
+            results=results,
+            errors=errors,
+            phone_report=phone_report,
+            retry_acceptance_target=retry_acceptance_target,
         )
 
     first_pass: list[str] = []
@@ -444,7 +443,7 @@ def _coverage(
             job, transcripts, dict_path, filler_dict, audio_dir=audio_dir, audio_ext=audio_ext
         )
     except Exception as exc:  # noqa: BLE001 - a report must never fail the alignment
-        logger.warning("Not reporting alignment mass and coverage: %s", exc)
+        logger.warning("Not reporting alignment mass and coverage: %s: %s", type(exc).__name__, exc)
         return None
 
 

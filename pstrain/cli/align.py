@@ -271,12 +271,6 @@ class AlignCommand(Command):
                         line += " (supplied threshold)"
                 ctx.log(line)
 
-        if job.coverage is not None:
-            # Reporting only: which units and speakers the output covers, by
-            # outcome. Nothing here changes what was accepted.
-            for line in job.coverage.format().splitlines():
-                ctx.log(line)
-
         if ctx.args.output_dir and job.results:
             out_dir = Path(ctx.args.output_dir)
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -295,6 +289,21 @@ class AlignCommand(Command):
                             fh.write(src.read())
                         (ctm_path.parent / f"{utt_id}.ctm").unlink()
             ctx.log(f"CTM saved to: {ctm_path}")
+
+        if job.coverage is not None:
+            # Reporting only: which units and speakers the output covers, by
+            # outcome. Nothing here changes what was accepted, and a report
+            # that cannot be formatted costs only the report.
+            try:
+                report = job.coverage.format()
+            except Exception as exc:  # noqa: BLE001 - never fail the run over its report
+                ctx.log(
+                    "Warning: not printing the mass-and-coverage report: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+            else:
+                for line in report.splitlines():
+                    ctx.log(line)
 
         if job.errors:
             for utt_id, msg in list(job.errors.items())[:5]:

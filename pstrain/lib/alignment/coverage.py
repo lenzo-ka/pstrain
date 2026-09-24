@@ -25,11 +25,18 @@ What it counts:
   when phones were not captured, the aligned words expanded through the
   dictionary, using the pronunciation variant the aligner chose). For
   ``retry_rejected`` and ``not_recovered`` there is no alignment to read, so
-  the transcript's words are expanded through the dictionary using each
-  word's first pronunciation. A triphone is ``L-P+R``: the phone with its
-  neighbors in that sequence, across word boundaries, with ``SIL`` at the
-  utterance edges and any filler phone as a neighbor written ``SIL``.
-  Filler phones are never counted as units.
+  the transcript's words are expanded through the dictionary. Each word takes
+  the pronunciation variant the aligned output chose most often for it, or the
+  dictionary's first pronunciation when no aligned utterance contains it, so
+  that a word the aligner realized as ``the(2)`` is not counted as a
+  different unit in the utterances that failed. Filler phones (``SIL`` and the filler
+  dictionary's phones) are never counted as units. A triphone is ``L-P+R``:
+  the phone with its neighbors in the utterance's speech phones, across word
+  boundaries, with ``SIL`` at the utterance edges. Fillers, including the
+  pauses the aligner inserts between words, are removed before neighbors are
+  taken. That puts aligned utterances and transcript expansions, which have no
+  pauses, on the same basis, so a word boundary where the speaker paused does
+  not count as a different triphone.
 
 What it flags:
 
@@ -50,15 +57,18 @@ What it flags:
 A speaker is the text before the first ``/`` in the utterance ID, the same
 convention the Arctic benchmark uses for speaker-stratified statistics. pstrain
 has no other speaker notion on the alignment path. IDs with no ``/`` share one
-speaker, reported as ``(no speaker prefix)``. A caller with a better notion
+speaker, reported as ``(no speaker prefix)``, and so do IDs that start with
+``/``, whose prefix is empty. A caller with a better notion
 passes ``speaker_of`` to :func:`alignment_coverage`.
 """
 
 from __future__ import annotations
 
 import wave
-from collections.abc import Callable, Iterable, Mapping
+from collections import Counter
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
+from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -113,7 +123,10 @@ _TEXT_SPEAKER_LIMIT = 20
 
 
 def speaker_from_id(utterance_id: str) -> str:
-    """The text before the first ``/``, or :data:`NO_SPEAKER` when there is none."""
+    """The text before the first ``/``, or :data:`NO_SPEAKER` when there is none.
+
+    An ID that starts with ``/`` has an empty prefix, and so no speaker prefix.
+    """
     if "/" in utterance_id:
         speaker = utterance_id.split("/", 1)[0]
         if speaker:
@@ -428,21 +441,17 @@ def _duration(seconds: float) -> str:
 
 
 def triphones(phones: Iterable[str], filler_phones: frozenset[str]) -> list[str]:
-    """The ``L-P+R`` triphones of a phone sequence, fillers skipped as units.
+    """The ``L-P+R`` triphones of a phone sequence's speech phones.
 
-    The edges are ``SIL``, and a filler neighbor is written ``SIL``.
+    Fillers are removed first, so a pause between two phones does not change
+    their contexts; the utterance edges are ``SIL``.
     """
-    sequence = list(phones)
-    units = []
-    for index, phone in enumerate(sequence):
-        if phone in filler_phones:
-            continue
-        left = sequence[index - 1] if index > 0 else SILENCE
-        right = sequence[index + 1] if index + 1 < len(sequence) else SILENCE
-        left = SILENCE if left in filler_phones else left
-        right = SILENCE if right in filler_phones else right
-        units.append(f"{left}-{phone}+{right}")
-    return units
+    speech = [phone for phone in phones if phone not in filler_phones]
+    padded = [SILENCE, *speech, SILENCE]
+    return [
+        f"{padded[index - 1]}-{padded[index]}+{padded[index + 1]}"
+        for index in range(1, len(padded) - 1)
+    ]
 
 
 def build_coverage(
@@ -522,9 +531,14 @@ def _lost(units: Mapping[str, OutcomeSplit]) -> tuple[str, ...]:
 
 def _thin_phones(coverage: AlignmentCoverage) -> tuple[ThinPhone, ...]:
     """Apply the thin-phone rule; see the module docstring."""
-    if coverage.run_failure_rate <= 0:
+    run_failed = int(coverage.utterances.failed)
+    run_total = int(coverage.utterances.total)
+    if run_failed <= 0:
         return ()
-    bar = coverage.thin_rate_ratio * coverage.run_failure_rate
+    # failed / carriers >= ratio * run_failed / run_total, cross-multiplied and
+    # exact, so the bar is inclusive whatever the ratio. The ratio is taken as
+    # written in decimal: 3.0 is 3 and 1.4 is 7/5.
+    ratio = Fraction(str(coverage.thin_rate_ratio))
     flagged = []
     for phone, carriers in coverage.phone_carriers.items():
         first_pass = int(coverage.phones[phone].first_pass)
@@ -532,7 +546,7 @@ def _thin_phones(coverage: AlignmentCoverage) -> tuple[ThinPhone, ...]:
         failed = int(carriers.failed)
         if first_pass >= coverage.thin_tokens or n_carriers < coverage.thin_min_carriers:
             continue
-        if failed and failed / n_carriers >= bar:
+        if failed and failed * run_total >= ratio * run_failed * n_carriers:
             flagged.append(ThinPhone(phone, first_pass, n_carriers, failed))
     flagged.sort(key=lambda t: (-t.failure_rate, t.first_pass_tokens, t.phone))
     return tuple(flagged)
@@ -571,12 +585,17 @@ class _Lexicon:
         self.filler_phones = frozenset(filler_phones)
 
     def expand(
-        self, words: Iterable[str], *, chosen: bool
+        self,
+        words: Iterable[str],
+        *,
+        chosen: bool,
+        preferred: Mapping[str, str] | None = None,
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
         """Phones of ``words``, and the words that had no pronunciation.
 
-        With ``chosen`` a word's own spelling (``word(2)``) picks its variant;
-        otherwise the base word's first pronunciation is used.
+        With ``chosen`` a word's own spelling (``word(2)``) picks its variant.
+        Otherwise the spelling ``preferred`` gives for the base word is used,
+        and failing that the base word's first pronunciation.
         """
         phones: list[str] = []
         missing: list[str] = []
@@ -584,7 +603,11 @@ class _Lexicon:
             base = base_word(word)
             if base in self.filler_words:
                 continue
-            found = self.exact.get(word) if chosen else None
+            if chosen:
+                found = self.exact.get(word)
+            else:
+                spelling = preferred.get(base) if preferred is not None else None
+                found = self.exact.get(spelling) if spelling is not None else None
             if found is None:
                 found = self.first.get(base)
             if found is None:
@@ -650,39 +673,83 @@ def alignment_coverage(
     """
     lexicon = _Lexicon(Path(dict_path), Path(filler_dict) if filler_dict is not None else None)
     outcomes = job_outcomes(job, transcripts)
-    from_alignment = True
-    units: list[UtteranceUnits] = []
-    for utt_id, outcome in outcomes.items():
-        result = job.results.get(utt_id)
-        unexpanded: tuple[str, ...] = ()
-        if result is not None:
-            seconds: float | None = result.duration_time()
-            phones = _aligned_phones(result)
-            if phones is None:
-                from_alignment = False
-                phones, _ = lexicon.expand((w.name for w in result.words), chosen=True)
-        else:
-            seconds = (
-                _wav_seconds(Path(audio_dir) / f"{utt_id}{audio_ext}")
-                if audio_dir is not None
-                else None
+    aligned = [result for utt_id, result in job.results.items() if utt_id in outcomes]
+    from_alignment = all(result.phones for result in aligned)
+    preferred = _preferred_variants(aligned, lexicon.filler_words)
+
+    def units() -> Iterator[UtteranceUnits]:
+        for utt_id, outcome in outcomes.items():
+            yield _utterance_units(
+                job,
+                transcripts,
+                lexicon,
+                preferred,
+                utt_id,
+                outcome,
+                speaker_of,
+                audio_dir,
+                audio_ext,
             )
-            phones, unexpanded = lexicon.expand(transcripts[utt_id].split(), chosen=False)
-        units.append(
-            UtteranceUnits(
-                utterance_id=utt_id,
-                outcome=outcome,
-                speaker=speaker_of(utt_id),
-                seconds=seconds,
-                phones=phones,
-                unexpanded=unexpanded,
-            )
-        )
+
     return build_coverage(
-        units,
+        units(),
         lexicon.filler_phones,
         thin_tokens=thin_tokens,
         thin_min_carriers=thin_min_carriers,
         thin_rate_ratio=thin_rate_ratio,
         phones_from_alignment=from_alignment,
+    )
+
+
+def _preferred_variants(
+    aligned: Iterable[AlignmentResult], filler_words: frozenset[str]
+) -> dict[str, str]:
+    """Each word's spelling the aligner chose most often, by base word.
+
+    Ties go to the spelling seen first.
+    """
+    counts: dict[str, Counter[str]] = {}
+    for result in aligned:
+        for segment in result.words:
+            base = base_word(segment.name)
+            if base not in filler_words:
+                counts.setdefault(base, Counter())[segment.name] += 1
+    return {base: spellings.most_common(1)[0][0] for base, spellings in counts.items()}
+
+
+def _utterance_units(
+    job: AlignmentJob,
+    transcripts: Mapping[str, str],
+    lexicon: _Lexicon,
+    preferred: Mapping[str, str],
+    utt_id: str,
+    outcome: Outcome,
+    speaker_of: Callable[[str], str],
+    audio_dir: Path | None,
+    audio_ext: str,
+) -> UtteranceUnits:
+    """One utterance's outcome, speaker, duration and phones."""
+    result = job.results.get(utt_id)
+    unexpanded: tuple[str, ...] = ()
+    if result is not None:
+        seconds: float | None = result.duration_time()
+        phones = _aligned_phones(result)
+        if phones is None:
+            phones, _ = lexicon.expand((w.name for w in result.words), chosen=True)
+    else:
+        seconds = (
+            _wav_seconds(Path(audio_dir) / f"{utt_id}{audio_ext}")
+            if audio_dir is not None
+            else None
+        )
+        phones, unexpanded = lexicon.expand(
+            transcripts[utt_id].split(), chosen=False, preferred=preferred
+        )
+    return UtteranceUnits(
+        utterance_id=utt_id,
+        outcome=outcome,
+        speaker=speaker_of(utt_id),
+        seconds=seconds,
+        phones=phones,
+        unexpanded=unexpanded,
     )
