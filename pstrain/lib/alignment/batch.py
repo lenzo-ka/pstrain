@@ -8,12 +8,25 @@ exactly once per corpus pass.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from collections.abc import Sequence
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from pstrain.lib.alignment.core import DEFAULT_BEAM, DEFAULT_RETRY_BEAM_FACTOR, AlignmentResult
+from pstrain.lib.alignment.acceptance import (
+    DEFAULT_RETRY_ACCEPTANCE_TARGET,
+    AlignmentRejectedError,
+    RetryCalibration,
+    RungYield,
+    rejection_message,
+)
+from pstrain.lib.alignment.core import (
+    DEFAULT_BEAM,
+    DEFAULT_RETRY_BEAM_FACTOR,
+    AlignmentResult,
+    RetryOutcome,
+)
 from pstrain.lib.alignment.native import Aligner
 from pstrain.lib.lexicon_check import (
     UnsupportedPhoneReport,
@@ -52,11 +65,19 @@ class AlignmentJob:
         phone_report: Pronunciations the model's phone inventory cannot
             support, collected before the run. ``None`` when the model
             definition could not be read.
-        retry_yield: Per-rung ``(factor, attempted, recovered)`` for the
-            wider-beam final-state retry, in ladder order. ``attempted``
-            counts utterances that reached the rung; ``recovered`` counts
-            those it aligned. Empty when the retry is disabled or the
-            aligner never started.
+        retry_yield: Per-rung ``(factor, attempted, recovered, rejected)``
+            for the wider-beam final-state retry, in ladder order.
+            ``attempted`` counts utterances that reached the rung;
+            ``recovered`` counts those it aligned, and ``rejected`` those of
+            them the acceptance check rejected. Empty when the retry is
+            disabled or the aligner never started.
+        retry_rejections: The retry-recovered alignments the acceptance check
+            rejected, by utterance. Each is also in ``errors`` with its reason.
+        retry_calibration: The acceptance threshold calibrated for each rung
+            that recovered anything, when the run calibrated its own. Empty
+            when nothing was recovered, the check is off, or a threshold was
+            supplied.
+        retry_acceptance_target: The check's target, or ``None`` when it was off.
     """
 
     model_dir: Path
@@ -67,7 +88,10 @@ class AlignmentJob:
     errors: dict[str, str] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=datetime.now)
     phone_report: UnsupportedPhoneReport | None = None
-    retry_yield: tuple[tuple[float, int, int], ...] = ()
+    retry_yield: tuple[RungYield, ...] = ()
+    retry_rejections: dict[str, RetryOutcome] = field(default_factory=dict)
+    retry_calibration: tuple[RetryCalibration, ...] = ()
+    retry_acceptance_target: float | None = DEFAULT_RETRY_ACCEPTANCE_TARGET
 
     @property
     def success_rate(self) -> float:
@@ -164,6 +188,8 @@ def align_corpus(
     failed_alignment: Literal["recover", "abort", "omit"] = "recover",
     verbatim_tokens: bool = False,
     phone_report: UnsupportedPhoneReport | None = None,
+    retry_acceptance_target: float | None = DEFAULT_RETRY_ACCEPTANCE_TARGET,
+    retry_acceptance_threshold: float | Sequence[float] | None = None,
 ) -> AlignmentJob:
     """Align an entire corpus.
 
@@ -186,6 +212,20 @@ def align_corpus(
             model cannot support, so a caller that reported it before the
             run does not pay for the check or report it twice. When
             omitted, the check runs here and any finding is logged.
+        retry_acceptance_target: The retry acceptance check's quantile
+            (default 0.05); ``None`` accepts retries unchecked. A
+            retry-recovered alignment is accepted only if its speech score
+            reaches the threshold for its rung's beam; otherwise it is
+            recorded as failed, with the reason. First-pass alignments are
+            never checked. Unless a threshold is supplied, the run calibrates
+            its own after the corpus pass, and only if a retry recovered
+            anything: it realigns at most ``RETRY_ACCEPTANCE_MAX_SAMPLES``
+            (200) of its first-pass alignments, evenly spaced, at each such
+            rung's beam and takes this quantile of their scores. With fewer
+            than ``RETRY_ACCEPTANCE_MIN_SAMPLES`` (20) scored, every recovery
+            at that rung is rejected.
+        retry_acceptance_threshold: A threshold per rung, in nats per speech
+            frame, to use instead of calibrating.
 
     Returns:
         :class:`AlignmentJob` with all alignment results.
@@ -201,6 +241,8 @@ def align_corpus(
 
     results: dict[str, AlignmentResult] = {}
     errors: dict[str, str] = {}
+    rejections: dict[str, RetryOutcome] = {}
+    calibration: tuple[RetryCalibration, ...] = ()
     n_aligned = 0
     n_failed = 0
 
@@ -219,9 +261,18 @@ def align_corpus(
             results=results,
             errors=errors,
             phone_report=phone_report,
+            retry_acceptance_target=retry_acceptance_target,
         )
 
     logger.info("Aligning %d utterances...", total)
+    if retry_acceptance_target is None and failed_alignment == "recover":
+        logger.warning(
+            "The retry acceptance check is off: alignments a wider-beam retry "
+            "recovers are accepted unchecked."
+        )
+    # With the check on and no threshold supplied, the corpus calibrates its
+    # own: recoveries wait, unjudged, until the pass is over.
+    deferred = retry_acceptance_target is not None and retry_acceptance_threshold is None
 
     # If model_dir is missing required files Aligner raises before the
     # loop; surface that as a corpus-wide failure rather than per-utt.
@@ -233,6 +284,9 @@ def align_corpus(
             beam=beam,
             retry_beam_factor=retry_beam_factor,
             failed_alignment=failed_alignment,
+            retry_acceptance_target=retry_acceptance_target,
+            retry_acceptance_threshold=retry_acceptance_threshold,
+            retry_acceptance_deferred=deferred,
             include_phones=include_phones,
             verbatim_tokens=verbatim_tokens,
         )
@@ -249,8 +303,12 @@ def align_corpus(
             results=results,
             errors=errors,
             phone_report=phone_report,
+            retry_acceptance_target=retry_acceptance_target,
         )
 
+    first_pass: list[str] = []
+    pending: dict[str, AlignmentResult] = {}
+    deferred_rejections = [0] * len(aligner.retry_yield())
     try:
         for i, (utt_id, transcript) in enumerate(transcripts.items(), 1):
             audio_path = audio_dir / f"{utt_id}{audio_ext}"
@@ -265,16 +323,66 @@ def align_corpus(
 
             try:
                 result = aligner.align_audio(audio_path, transcript, utterance_id=utt_id)
-                results[utt_id] = result
-                n_aligned += 1
+            except AlignmentRejectedError as e:
+                rejections[utt_id] = e.outcome
+                errors[utt_id] = rejection_message(None, e.outcome)
+                n_failed += 1
+                logger.warning("Alignment rejected for %s: %s", utt_id, e)
+                continue
             except Exception as e:
                 message = explain_failure(_error_message(e), transcript, phone_report)
                 errors[utt_id] = message
                 n_failed += 1
                 logger.warning("Alignment failed for %s: %s", utt_id, message)
-        retry_yield = aligner.retry_yield()
+                continue
+            if result.retry is None:
+                first_pass.append(utt_id)
+            elif deferred:
+                pending[utt_id] = result
+                continue
+            results[utt_id] = result
+            n_aligned += 1
+
+        if pending:
+            calibration = _calibrate_pending(
+                aligner,
+                pending,
+                first_pass,
+                transcripts,
+                audio_dir,
+                audio_ext,
+                beam,
+                retry_acceptance_target or DEFAULT_RETRY_ACCEPTANCE_TARGET,
+            )
+            thresholds = {c.rung: c for c in calibration}
+            for utt_id, result in pending.items():
+                assert result.retry is not None
+                rung = thresholds[result.retry.rung]
+                judged = replace(result.retry, threshold=rung.threshold, basis=rung.basis)
+                if (
+                    judged.threshold is not None
+                    and judged.score is not None
+                    and judged.score >= judged.threshold
+                ):
+                    result.retry = judged
+                    results[utt_id] = result
+                    n_aligned += 1
+                    continue
+                rejections[utt_id] = judged
+                errors[utt_id] = rejection_message(None, judged)
+                deferred_rejections[judged.rung - 1] += 1
+                n_failed += 1
+                logger.warning("Alignment rejected for %s: %s", utt_id, errors[utt_id])
+        retry_yield = tuple(
+            rung._replace(rejected=rung.rejected + deferred_rejections[index])
+            for index, rung in enumerate(aligner.retry_yield())
+        )
     finally:
         aligner.close()
+
+    # Judging recoveries after the pass must not reorder the corpus.
+    results = {utt_id: results[utt_id] for utt_id in transcripts if utt_id in results}
+    errors = {utt_id: errors[utt_id] for utt_id in transcripts if utt_id in errors}
 
     logger.info(
         "Alignment complete: %d/%d successful (%.1f%%)",
@@ -292,7 +400,53 @@ def align_corpus(
         errors=errors,
         phone_report=phone_report,
         retry_yield=retry_yield,
+        retry_rejections=rejections,
+        retry_calibration=calibration,
+        retry_acceptance_target=retry_acceptance_target,
     )
+
+
+def _calibrate_pending(
+    aligner: Aligner,
+    pending: dict[str, AlignmentResult],
+    first_pass: list[str],
+    transcripts: dict[str, str],
+    audio_dir: Path,
+    audio_ext: str,
+    beam: float,
+    target: float,
+) -> tuple[RetryCalibration, ...]:
+    """Calibrate the threshold of every rung that recovered something.
+
+    Realigns this run's own first-pass successes at each such rung's beam; the
+    aligner samples at most ``RETRY_ACCEPTANCE_MAX_SAMPLES`` of them.
+    """
+    items = [(audio_dir / f"{utt_id}{audio_ext}", transcripts[utt_id]) for utt_id in first_pass]
+    rungs = sorted({result.retry.rung for result in pending.values() if result.retry is not None})
+    calibration = []
+    for rung in rungs:
+        try:
+            result = aligner.calibrate_rung(items, rung)
+        except Exception as exc:  # noqa: BLE001 - the recoveries are rejected, with the reason
+            factor = aligner.retry_yield()[rung - 1].factor
+            result = RetryCalibration(
+                rung=rung,
+                factor=factor,
+                beam=beam / factor,
+                target=target,
+                threshold=None,
+                n_scored=0,
+                error=_error_message(exc),
+            )
+        logger.info(
+            "Retry acceptance, rung %d: %s",
+            rung,
+            f"threshold {result.threshold:.3f} nats per speech frame, {result.basis}"
+            if result.threshold is not None
+            else result.basis,
+        )
+        calibration.append(result)
+    return tuple(calibration)
 
 
 def load_transcripts(transcript_file: Path) -> dict[str, str]:

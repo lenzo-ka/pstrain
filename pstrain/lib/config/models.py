@@ -429,10 +429,26 @@ class AlignmentConfig(StrictModel):
                 "Factor that widens the beam for one retry after an utterance fails to reach "
                 "its final state, where values at or below 1 disable the retry; or an ascending "
                 "list of factors, each greater than 1 and relative to the nominal beam, tried "
-                "in order until one succeeds"
+                "in order until one succeeds. The default retries once at 1e-200 on the "
+                "default beam. Retry-recovered alignments must pass the acceptance check "
+                "(``retry_acceptance_target``)"
             ),
         ),
-    ] = 1e36
+    ] = 1e136
+    retry_acceptance_target: Annotated[
+        float | None,
+        Field(
+            gt=0,
+            lt=0.5,
+            description=(
+                "Fraction of this run's normal first-pass alignments that the retry acceptance "
+                "check would reject, used to calibrate its threshold at each retry beam; a "
+                "retry-recovered alignment scoring below that threshold is treated as not "
+                "recovered. null accepts retries unchecked. First-pass alignments are never "
+                "checked"
+            ),
+        ),
+    ] = 0.05
     failed_alignment: Annotated[
         Literal["recover", "abort", "omit"],
         Field(

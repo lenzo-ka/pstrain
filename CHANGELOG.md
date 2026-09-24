@@ -7,6 +7,38 @@ the version in `pyproject.toml` is authoritative.
 
 ### Changes
 
+- Forced alignment now retries an utterance that misses its final state once,
+  at a beam of 1e-200 (`alignment.retry_beam_factor` 1e136 on the default
+  1e-64 beam, up from 1e36, a retry at 1e-100), and checks every alignment
+  the retry recovers. The next release waits on this change. Since the retry
+  was fixed to align the caller's own features, it really recovers utterances,
+  and a wider beam can also force a wrong transcript onto the audio. An
+  alignment the retry recovers is now kept only if its mean score per speech
+  frame reaches a threshold calibrated at the retry beam. It is rejected
+  otherwise, and the utterance fails as it did before the retry, with a reason
+  naming its score, the threshold and where the threshold came from.
+  Alignments that succeed on the first pass are never checked.
+  - `align_corpus` and `pstrain align` calibrate the threshold from the run's
+    own first-pass alignments, and only when the retry recovered something:
+    at most 200 of them, evenly spaced, are realigned at the retry beam, and
+    the threshold is the `alignment.retry_acceptance_target` quantile of their
+    scores (new, default 0.05). With fewer than 20, every recovery is
+    rejected, and the reason says so. `--retry-acceptance-threshold`, or
+    `retry_acceptance_threshold` in the API, supplies a threshold instead.
+    Setting the target to null turns the check off, and the run says so.
+  - Behavior change for single-utterance calls: `Aligner` and
+    `align_utterance` no longer retry unless given a threshold, since one
+    utterance cannot calibrate one. The failure says how to supply it, and
+    `Aligner.calibrate_retry_acceptance` computes it from known-good
+    utterances. Before this change such a call retried at 1e-100 and returned
+    whatever the retry found.
+  - The per-rung retry yield (`Aligner.retry_yield()`, `AlignmentJob.retry_yield`)
+    now has four fields, `(factor, attempted, recovered, rejected)`, where
+    `rejected` counts recoveries the check turned away. Code that unpacks three
+    values must be updated. `pstrain align` prints the retry line whenever a
+    retry ran, with the rejected count. A recovered alignment carries its rung,
+    beam, score and threshold in `AlignmentResult.retry`.
+  - The training retry is unchanged.
 - Alignment no longer changes the caller's feature array. `align_mfcc`
   normalized the cepstra it was given in place, so aligning the same array a
   second time normalized it again and could give a different answer. The
