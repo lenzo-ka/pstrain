@@ -545,3 +545,110 @@ class TestCli:
             assert "8 first-pass alignments realigned at beam 1e-200, 20 needed" in combined
             assert "Aligned 8/10" in combined
         assert "arctic_a0002: the retry at beam 1e-200 aligned it" in combined
+
+
+class TestSuppliedThresholdMustBeFinite:
+    """NaN compares false with every score, so it would accept every recovery.
+
+    An infinity would accept or reject every recovery. Either would turn the
+    check into a no-op or a blanket refusal while reporting that it ran.
+    """
+
+    @pytest.mark.parametrize("threshold", [math.nan, math.inf, -math.inf])
+    def test_aligner_refuses_a_non_finite_threshold(
+        self, trained_ci: tuple[Path, Path], threshold: float
+    ) -> None:
+        model, _ = trained_ci
+        with pytest.raises(ValueError, match="must be a finite number"):
+            _aligner(model, retry_acceptance_threshold=threshold)
+        with pytest.raises(ValueError, match="must be a finite number"):
+            _aligner(
+                model,
+                retry_beam_factor=[1e80, 1e180],
+                retry_acceptance_threshold=[-4.0, threshold],
+            )
+
+    def test_corpus_refuses_a_non_finite_threshold_before_aligning(
+        self, trained_ci: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        model, _ = trained_ci
+        audio, transcripts = _corpus(tmp_path, copies=1, rotated=True)
+        with pytest.raises(ValueError, match="must be a finite number"):
+            _corpus_job(model, audio, transcripts, retry_acceptance_threshold=math.nan)
+
+    @pytest.mark.parametrize("text", ["nan", "inf", "-inf"])
+    def test_cli_refuses_a_non_finite_threshold(
+        self,
+        trained_ci: tuple[Path, Path],
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        text: str,
+    ) -> None:
+        from pstrain.cli.cli import main
+
+        model, _ = trained_ci
+        transcript_file = tmp_path / "all.transcription"
+        texts = _transcripts()
+        transcript_file.write_text(f"<s> {texts['arctic_a0003']} </s> (arctic_a0003)\n")
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "pstrain",
+                "align",
+                str(model),
+                "--project-dir",
+                str(tmp_path),
+                "--transcripts",
+                str(transcript_file),
+                "--audio-dir",
+                str(_FIXTURES / "wav"),
+                "--dict",
+                str(_DICT),
+                # The joined form: argparse reads a bare "-inf" as an option.
+                f"--retry-acceptance-threshold={text}",
+            ],
+        )
+        with pytest.raises(SystemExit) as exited:
+            main()
+        assert exited.value.code != 0
+        assert "must be a finite number of nats per speech frame" in capsys.readouterr().err
+
+
+def test_calibration_lost_with_the_aligner_process_says_so_and_rejects(
+    trained_ci: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The helper dies just before calibration: every recovery is rejected, and the reason
+    names the lost process rather than suggesting a threshold."""
+    import os
+    import signal
+
+    from pstrain.lib import native_worker
+
+    model, _ = trained_ci
+    audio, transcripts = _corpus(tmp_path, copies=3)
+    calibrate_rung = Aligner.calibrate_rung
+
+    def killed_first(self: Aligner, *args: object, **kwargs: object) -> object:
+        worker = native_worker._owned_worker()
+        assert worker.pid is not None
+        os.kill(worker.pid, signal.SIGKILL)
+        assert worker._process is not None
+        worker._process.join()
+        return calibrate_rung(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Aligner, "calibrate_rung", killed_first)
+    job = _corpus_job(model, audio, transcripts)
+
+    (calibration,) = job.retry_calibration
+    assert calibration.threshold is None
+    assert calibration.aligner_lost
+    assert len(job.retry_rejections) == 6
+    for utterance_id in job.retry_rejections:
+        reason = job.errors[utterance_id]
+        assert "could not be calibrated because the aligner process was lost" in reason
+        assert "every recovery at this beam is rejected" in reason
+        assert "pass a retry acceptance threshold" not in reason
+        assert len(reason) < 400
+    assert job.retry_yield == (RungYield(_TO_1E200, 6, 6, 6),)

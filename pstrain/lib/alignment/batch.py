@@ -33,6 +33,7 @@ from pstrain.lib.lexicon_check import (
     base_word,
     check_model_lexicon,
 )
+from pstrain.lib.native_worker import PstrainNativeError, PstrainWorkerError
 from pstrain.lib.retry_ladder import RetryBeamFactor
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,7 @@ logger = logging.getLogger(__name__)
 # Cadence for "Progress: N/total" log lines during a long batch.
 _PROGRESS_LOG_EVERY = 100
 _ERROR_MESSAGE_LIMIT = 200
+_BRIEF_ERROR_LIMIT = 80
 
 
 def _error_message(exc: Exception) -> str:
@@ -406,6 +408,15 @@ def align_corpus(
     )
 
 
+def _brief_error(exc: Exception) -> str:
+    """Name an error in a few words: its type and the end of its diagnostic."""
+    detail = exc.diagnostic if isinstance(exc, PstrainNativeError) else str(exc)
+    detail = " ".join(detail.split())
+    if len(detail) > _BRIEF_ERROR_LIMIT:
+        detail = f"...{detail[-(_BRIEF_ERROR_LIMIT - 3) :]}"
+    return f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__
+
+
 def _calibrate_pending(
     aligner: Aligner,
     pending: dict[str, AlignmentResult],
@@ -436,7 +447,8 @@ def _calibrate_pending(
                 target=target,
                 threshold=None,
                 n_scored=0,
-                error=_error_message(exc),
+                error=_brief_error(exc),
+                aligner_lost=isinstance(exc, (PstrainNativeError, PstrainWorkerError)),
             )
         logger.info(
             "Retry acceptance, rung %d: %s",

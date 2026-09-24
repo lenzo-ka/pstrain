@@ -24,7 +24,10 @@ the version in `pyproject.toml` is authoritative.
     the threshold is the `alignment.retry_acceptance_target` quantile of their
     scores (new, default 0.05). With fewer than 20, every recovery is
     rejected, and the reason says so. `--retry-acceptance-threshold`, or
-    `retry_acceptance_threshold` in the API, supplies a threshold instead.
+    `retry_acceptance_threshold` in the API, supplies a threshold instead; it
+    must be a finite number, and NaN or an infinity is refused before any
+    alignment. If calibration cannot run because the aligner process was lost,
+    every recovery is rejected and the reason says so.
     Setting the target to null turns the check off, and the run says so.
   - Behavior change for single-utterance calls: `Aligner` and
     `align_utterance` no longer retry unless given a threshold, since one

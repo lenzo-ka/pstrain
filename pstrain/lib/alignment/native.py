@@ -21,6 +21,7 @@ Typical use::
 from __future__ import annotations
 
 import contextlib
+import math
 import numbers
 import struct
 import wave
@@ -424,6 +425,15 @@ class Aligner:
             values: tuple[float, ...] = (float(threshold),)
         else:
             values = tuple(float(value) for value in cast("Sequence[float]", threshold))
+        non_finite = [value for value in values if not math.isfinite(value)]
+        if non_finite:
+            # NaN compares false with every score, and an infinity accepts or
+            # rejects everything: each would turn the check into a no-op or a
+            # blanket refusal while reporting that it ran.
+            raise ValueError(
+                "retry_acceptance_threshold must be a finite number of nats per speech "
+                f"frame; got {non_finite[0]!r}"
+            )
         if len(values) != len(self._retry_rungs):
             raise ValueError(
                 f"retry_acceptance_threshold needs one threshold per retry rung: "

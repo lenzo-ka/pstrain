@@ -97,7 +97,9 @@ class RetryCalibration:
         threshold: The threshold, or ``None`` when too few alignments scored.
         n_scored: Alignments realigned at ``beam`` and scored.
         n_unaligned: Sampled alignments that did not align at ``beam``.
-        error: Why calibration itself failed, when it did.
+        error: Why calibration itself failed, when it did, in brief.
+        aligner_lost: Calibration could not run because the aligner's native
+            process was lost.
     """
 
     rung: int
@@ -108,18 +110,29 @@ class RetryCalibration:
     n_scored: int
     n_unaligned: int = 0
     error: str | None = None
+    aligner_lost: bool = False
 
     @property
     def basis(self) -> str:
         """Where the threshold came from, or why there is none, in words."""
+        if self.aligner_lost:
+            return (
+                "the threshold could not be calibrated because the aligner process was "
+                f"lost ({self.error}), so every recovery at this beam is rejected"
+            )
         if self.error is not None:
-            return f"the threshold could not be calibrated: {self.error}"
+            return (
+                f"the threshold could not be calibrated ({self.error}), so every recovery "
+                "at this beam is rejected"
+            )
         if self.threshold is None:
             plural = "" if self.n_scored == 1 else "s"
             return (
                 f"the threshold could not be calibrated: {self.n_scored} first-pass "
                 f"alignment{plural} realigned at beam {self.beam:.3g}, "
-                f"{RETRY_ACCEPTANCE_MIN_SAMPLES} needed (RETRY_ACCEPTANCE_MIN_SAMPLES)"
+                f"{RETRY_ACCEPTANCE_MIN_SAMPLES} needed (RETRY_ACCEPTANCE_MIN_SAMPLES); "
+                "pass a retry acceptance threshold, or set "
+                "alignment.retry_acceptance_target to null to accept retries unchecked"
             )
         return (
             f"{_percent(self.target)} quantile of {self.n_scored} first-pass alignments, "
@@ -240,10 +253,7 @@ def rejection_message(utterance_id: str | None, outcome: RetryOutcome) -> str:
     if utterance_id is not None:
         head = f"{utterance_id}: {head}"
     if outcome.threshold is None:
-        return (
-            f"{head}: {outcome.basis}; pass a retry acceptance threshold, or set "
-            "alignment.retry_acceptance_target to null to accept retries unchecked"
-        )
+        return f"{head}: {outcome.basis}"
     if outcome.score is None:
         return f"{head}: it has no speech frames to score"
     return (

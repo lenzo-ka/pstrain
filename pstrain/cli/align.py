@@ -8,9 +8,23 @@ with a single long-lived :class:`Aligner`.
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 
 from pstrain.cli.base import Command, CommandContext, CommandResult
+
+
+def _finite_float(text: str) -> float:
+    """A float argument that must be finite: NaN or an infinity would void the check."""
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a number: {text!r}") from None
+    if not math.isfinite(value):
+        raise argparse.ArgumentTypeError(
+            f"must be a finite number of nats per speech frame, not {text!r}"
+        )
+    return value
 
 
 class AlignCommand(Command):
@@ -99,7 +113,7 @@ class AlignCommand(Command):
         )
         parser.add_argument(
             "--retry-acceptance-threshold",
-            type=float,
+            type=_finite_float,
             action="append",
             default=None,
             metavar="NATS",
