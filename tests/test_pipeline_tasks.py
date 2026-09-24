@@ -1430,3 +1430,24 @@ def test_retry_beam_factor_fingerprints_as_written_not_by_effect(empty_project: 
     assert with_factor([1e10, 1e20]).provenance_path("training") != with_factor(
         [1e10]
     ).provenance_path("training")
+
+
+def test_alignment_settings_do_not_enter_the_training_fingerprint(empty_project: Path) -> None:
+    """Changing the alignment retry or its acceptance check rebuilds no model.
+
+    Forced alignment reads ``alignment.*``; Baum-Welch training reads
+    ``training.*``, and only that enters the training fingerprint.
+    """
+    base = PipelineContext.from_config(empty_project)
+    (empty_project / "etc" / "config.yaml").write_text(
+        "config_version: 1\n"
+        "alignment:\n"
+        "  retry_beam_factor: 1.0e+36\n"
+        "  retry_acceptance_target: null\n"
+    )
+    changed = PipelineContext.from_config(empty_project)
+
+    assert changed.resolved_config is not None
+    assert changed.resolved_config.profile.alignment.retry_acceptance_target is None
+    for stage in ("features", "split", "training"):
+        assert changed.provenance_path(stage) == base.provenance_path(stage)

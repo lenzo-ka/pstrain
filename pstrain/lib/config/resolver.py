@@ -144,6 +144,7 @@ CONSUMERS: dict[str, tuple[str, str]] = {
     "sharding.partition_position": ("pipeline.baum_welch", "sharding"),
     "alignment.beam": ("cli.align", "alignment"),
     "alignment.retry_beam_factor": ("cli.align", "alignment"),
+    "alignment.retry_acceptance_target": ("cli.align", "alignment"),
     "alignment.failed_alignment": ("cli.align", "alignment"),
     "alignment.verbatim_tokens": ("cli.align", "alignment"),
 }
@@ -225,6 +226,9 @@ CONSUMER_TOUCHES: dict[str, str] = {
     "sharding.partition_position": "sharding.partition_position",
     "alignment.beam": "resolved_config.profile.alignment.beam",
     "alignment.retry_beam_factor": "resolved_config.profile.alignment.retry_beam_factor",
+    "alignment.retry_acceptance_target": (
+        "resolved_config.profile.alignment.retry_acceptance_target"
+    ),
     "alignment.failed_alignment": "resolved_config.profile.alignment.failed_alignment",
     "alignment.verbatim_tokens": "resolved_config.profile.alignment.verbatim_tokens",
 }

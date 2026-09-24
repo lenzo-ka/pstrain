@@ -247,6 +247,9 @@ class TestAligner:
         aligner._beam = 1e-64
         aligner._retry_beam_factor = 1e36
         aligner._failed_alignment = "recover"
+        aligner._retry_acceptance_target = None
+        aligner._retry_thresholds = None
+        aligner._retry_acceptance_deferred = False
 
         # A non-final-state failure (rc != -3) is never retried.
         assert aligner._final_state_retry_beam(-2) is None
@@ -296,6 +299,7 @@ class TestAligner:
             model,
             fixture / "dictionary.dict",
             retry_beam_factor=1e40,
+            retry_acceptance_target=None,
             failed_alignment="recover",
             **kwargs,
         ) as aligner:
@@ -360,6 +364,9 @@ class TestAligner:
         aligner._beam = 1e-64
         aligner._retry_beam_factor = [1e36, 1e48]
         aligner._failed_alignment = "recover"
+        aligner._retry_acceptance_target = None
+        aligner._retry_thresholds = None
+        aligner._retry_acceptance_deferred = False
 
         assert aligner._final_state_retry_beam(-3, 0) == 1e-64 / 1e36
         assert aligner._final_state_retry_beam(-3, 1) == 1e-64 / 1e48
@@ -387,10 +394,11 @@ class TestAligner:
             filler_dict=fixture / "filler.dict",
             beam=1e-40,
             retry_beam_factor=[1e10, 1e40],
+            retry_acceptance_target=None,
         ) as aligner:
             result = aligner.align_mfc_file(fixture / f"{utterance_id}.mfc", transcript)
             assert aligner._last_retry_rungs == 2
-            assert aligner.retry_yield() == ((1e10, 1, 0), (1e40, 1, 1))
+            assert aligner.retry_yield() == ((1e10, 1, 0, 0), (1e40, 1, 1, 0))
             # The nominal beam is back in force after the climb.
             assert aligner.set_beam(1e-40) == pytest.approx(1e-40)
 
@@ -410,6 +418,7 @@ class TestAligner:
             filler_dict=fixture / "filler.dict",
             beam=1e-40,
             retry_beam_factor=[1e40, 1e60],
+            retry_acceptance_target=None,
         ) as aligner:
             beams: list[float] = []
             set_beam = aligner.set_beam
@@ -421,7 +430,7 @@ class TestAligner:
             monkeypatch.setattr(aligner, "set_beam", recording_set_beam)
             aligner.align_mfc_file(fixture / "arctic_a0336.mfc", transcript)
             assert aligner._last_retry_rungs == 1
-            assert aligner.retry_yield() == ((1e40, 1, 1), (1e60, 0, 0))
+            assert aligner.retry_yield() == ((1e40, 1, 1, 0), (1e60, 0, 0, 0))
 
         # One rung, then the nominal beam restored; 1e-100 was never tried.
         assert beams == [pytest.approx(1e-80), pytest.approx(1e-40)]
@@ -446,6 +455,7 @@ class TestAligner:
             filler_dict=fixture / "filler.dict",
             beam=1e-40,
             retry_beam_factor=[1e2, 1e5, 1e10],
+            retry_acceptance_target=None,
         ) as aligner:
             measured: list[str] = []
             minimum_frames = aligner.minimum_frames
@@ -463,7 +473,7 @@ class TestAligner:
             )
             assert measured == [transcript]
             assert aligner._last_retry_rungs == 3
-            assert aligner.retry_yield() == ((1e2, 1, 0), (1e5, 1, 0), (1e10, 1, 0))
+            assert aligner.retry_yield() == ((1e2, 1, 0, 0), (1e5, 1, 0, 0), (1e10, 1, 0, 0))
             assert aligner.set_beam(1e-40) == pytest.approx(1e-40)
 
     def test_infeasible_utterance_runs_no_rung_of_the_ladder(
@@ -481,6 +491,7 @@ class TestAligner:
             fixture / "dictionary.dict",
             filler_dict=fixture / "filler.dict",
             retry_beam_factor=[1e36, 1e48],
+            retry_acceptance_target=None,
         ) as aligner:
             required = aligner.minimum_frames(transcript)
             measured: list[str] = []
@@ -496,7 +507,7 @@ class TestAligner:
             assert measured == [transcript]
             assert aligner._last_alignment_retried is False
             assert aligner._last_retry_rungs == 0
-            assert aligner.retry_yield() == ((1e36, 0, 0), (1e48, 0, 0))
+            assert aligner.retry_yield() == ((1e36, 0, 0, 0), (1e48, 0, 0, 0))
 
     def test_ladder_yield_crosses_the_native_worker_boundary(self, tmp_path: Path) -> None:
         """The default aligner runs in a contained worker; its yield must come back."""
@@ -508,10 +519,11 @@ class TestAligner:
             filler_dict=fixture / "filler.dict",
             beam=1e-40,
             retry_beam_factor=[1e10, 1e40],
+            retry_acceptance_target=None,
         ) as aligner:
             assert hasattr(aligner, "_proxy")
             aligner.align_mfc_file(fixture / "arctic_a0336.mfc", transcript)
-            assert aligner.retry_yield() == ((1e10, 1, 0), (1e40, 1, 1))
+            assert aligner.retry_yield() == ((1e10, 1, 0, 0), (1e40, 1, 1, 0))
 
     def test_align_mfcc_leaves_the_callers_features_untouched(
         self, trained_ci: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
@@ -579,7 +591,12 @@ class TestAligner:
         dictionary = _FIXTURES / "mini_arctic" / "dictionary.dict"
 
         with Aligner(
-            model, dictionary, beam=nominal, retry_beam_factor=ladder, **kwargs
+            model,
+            dictionary,
+            beam=nominal,
+            retry_beam_factor=ladder,
+            retry_acceptance_target=None,
+            **kwargs,
         ) as aligner:
             retried = aligner.align_mfcc(mfcc, transcript, utterance_id)
             assert aligner._last_retry_rungs == recovering_rung
@@ -603,6 +620,10 @@ class TestAligner:
         ) as aligner:
             direct = aligner.align_mfcc(original.copy(), transcript, utterance_id)
 
+        assert retried.retry is not None
+        assert retried.retry.rung == recovering_rung
+        assert retried.retry.beam == nominal / ladder[recovering_rung - 1]
+        retried.retry = None
         assert retried == direct
 
     def test_invalid_ladder_is_refused_before_loading_anything(self, tmp_path: Path) -> None:
@@ -856,7 +877,7 @@ class TestAlignCorpus:
             def align_audio(self, *args: object, **kwargs: object) -> AlignmentResult:
                 return _sample_result("utt")
 
-            def retry_yield(self) -> tuple[tuple[float, int, int], ...]:
+            def retry_yield(self) -> tuple[tuple[float, int, int, int], ...]:
                 return ()
 
             def close(self) -> None:
@@ -881,8 +902,8 @@ class TestAlignCorpus:
     @pytest.mark.parametrize(
         ("factor", "expected_yield"),
         [
-            (1e20, ((1e20, 0, 0),)),
-            ([1e5, 1e10, 1e20], ((1e5, 1, 0), (1e10, 1, 1), (1e20, 0, 0))),
+            (1e20, ((1e20, 0, 0, 0),)),
+            ([1e5, 1e10, 1e20], ((1e5, 1, 0, 0), (1e10, 1, 1, 0), (1e20, 0, 0, 0))),
         ],
     )
     def test_worker_death_mid_corpus_keeps_the_partial_job_and_its_yield(
@@ -890,7 +911,7 @@ class TestAlignCorpus:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
         factor: float | list[float],
-        expected_yield: tuple[tuple[float, int, int], ...],
+        expected_yield: tuple[tuple[float, int, int, int], ...],
     ) -> None:
         """A helper killed mid-corpus must not discard the alignments already done.
 
@@ -936,6 +957,7 @@ class TestAlignCorpus:
             filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
             beam=1e-40 if isinstance(factor, list) else 1e-64,
             retry_beam_factor=factor,
+            retry_acceptance_target=None,
         )
 
         assert (job.n_aligned, job.n_failed) == (1, 2)
@@ -961,10 +983,11 @@ class TestAlignCorpus:
             filler_dict=_FIXTURES / "mini_arctic" / "filler.dict",
             beam=1e-40,
             retry_beam_factor=[1e5, 1e10, 1e20],
+            retry_acceptance_target=None,
         )
 
         assert job.n_aligned == 1
-        assert job.retry_yield == ((1e5, 1, 0), (1e10, 1, 1), (1e20, 0, 0))
+        assert job.retry_yield == ((1e5, 1, 0, 0), (1e10, 1, 1, 0), (1e20, 0, 0, 0))
 
     def test_verbatim_unknown_variant_preserves_token(self, tmp_path: Path) -> None:
         model = _alignment_model(tmp_path)
@@ -1234,6 +1257,7 @@ class TestAlignCorpus:
             "alignment:\n"
             "  beam: 1.0e-40\n"
             "  retry_beam_factor: [1.0e+10, 1.0e+20]\n"
+            "  retry_acceptance_target: null\n"
         )
         model = _alignment_model(tmp_path)
         transcript_file = project / "ladder.transcription"
@@ -1268,8 +1292,8 @@ class TestAlignCorpus:
         output = capsys.readouterr()
         combined = output.out + output.err
         assert "Aligned 1/1" in combined
-        assert "Retry rung 1 (factor 1e+10): 1 attempted, 0 recovered" in combined
-        assert "Retry rung 2 (factor 1e+20): 1 attempted, 1 recovered" in combined
+        assert "Retry rung 1 (factor 1e+10, beam 1e-50): 1 attempted, 0 recovered" in combined
+        assert "Retry rung 2 (factor 1e+20, beam 1e-60): 1 attempted, 1 recovered" in combined
 
     def test_profile_cli_unknown_variant_exits_nonzero_and_names_token(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]

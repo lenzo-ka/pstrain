@@ -108,6 +108,7 @@
       "on": {
         "alignment.beam": "project-profile",
         "alignment.failed_alignment": "project-profile",
+        "alignment.retry_acceptance_target": "project-profile",
         "alignment.retry_beam_factor": "project-profile",
         "alignment.verbatim_tokens": "project-profile",
         "description": "project-profile",
@@ -181,6 +182,7 @@
         "alignment": {
           "beam": 1e-64,
           "failed_alignment": "recover",
+          "retry_acceptance_target": null,
           "retry_beam_factor": 1e+36,
           "verbatim_tokens": false
         },
@@ -398,7 +400,7 @@
       "models",
       "results"
     ],
-    "sha256": "d8cbf2990faae24dab796f4784b6a506964273ed0bbeacf76f571c1facbf43f9"
+    "sha256": "8d1e1ee64ea25700b854ef0f137440eadd1dc661b5db11524e11e31908e7df5a"
   },
   "resources": {
     "archives": {

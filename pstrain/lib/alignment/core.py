@@ -17,13 +17,18 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from pstrain.lib.retry_ladder import RetryBeamFactor
 
 # Default pruning beam for the sphinx3 aligner. 1e-64 matches the
 # upstream sphinx3_align CLI default; it is wide enough for cd-1g
 # through cd-8g acoustic models on clean read speech.
 DEFAULT_BEAM = 1e-64
-DEFAULT_RETRY_BEAM_FACTOR = 1e36
+# One retry at 1e-200 on the default beam. A retry-recovered alignment must
+# pass the acceptance check (``pstrain.lib.alignment.acceptance``).
+DEFAULT_RETRY_BEAM_FACTOR = 1e136
+DEFAULT_RETRY_ACCEPTANCE_TARGET = 0.05
 
 # Default retained for callers constructing segments independently of a result.
 FRAME_SHIFT_SECONDS = 0.01
@@ -64,6 +69,30 @@ class AlignedSegment:
 
 
 @dataclass
+class RetryOutcome:
+    """How a wider-beam retry produced an alignment, and how the check judged it.
+
+    Attributes:
+        rung: The ladder rung that aligned it, counting from 1.
+        factor: That rung's retry beam factor.
+        beam: The beam the rung searched at (nominal beam / factor).
+        score: The alignment's speech score, in nats per speech frame: the
+            summed scores of its non-filler words over their frames. ``None``
+            when it has no speech frames.
+        threshold: The acceptance threshold it was judged against, in the same
+            units, or ``None`` when it was not judged.
+        basis: Where the threshold came from, or why there was none.
+    """
+
+    rung: int
+    factor: float
+    beam: float
+    score: float | None
+    threshold: float | None = None
+    basis: str = "not judged"
+
+
+@dataclass
 class AlignmentResult:
     """Complete alignment result for an utterance.
 
@@ -76,6 +105,8 @@ class AlignmentResult:
         n_frames: Total number of frames
         transcript: Original transcript
         frame_rate: Alignment frames per second, from the model record
+        retry: ``None`` for a first-pass alignment; for one a wider-beam retry
+            recovered, the rung, beam, score and acceptance threshold
     """
 
     utterance_id: str
@@ -86,6 +117,7 @@ class AlignmentResult:
     n_frames: int
     transcript: str = ""
     frame_rate: int = 100
+    retry: RetryOutcome | None = None
 
     @property
     def frame_shift(self) -> float:
@@ -108,6 +140,8 @@ def align_utterance(
     retry_beam_factor: RetryBeamFactor = DEFAULT_RETRY_BEAM_FACTOR,
     failed_alignment: Literal["recover", "abort", "omit"] = "recover",
     verbatim_tokens: bool = False,
+    retry_acceptance_target: float | None = DEFAULT_RETRY_ACCEPTANCE_TARGET,
+    retry_acceptance_threshold: float | Sequence[float] | None = None,
 ) -> AlignmentResult:
     """Align a single utterance.
 
@@ -134,6 +168,13 @@ def align_utterance(
             ``"abort"`` and ``"omit"`` do not retry.
         verbatim_tokens: Honor explicit pronunciation variants exactly. The
             default collapses suffixes and considers every alternative.
+        retry_acceptance_target: The retry acceptance check; ``None`` turns it
+            off. With it on, a final-state failure is retried only when
+            ``retry_acceptance_threshold`` is supplied, since a single
+            utterance cannot calibrate one (see
+            :meth:`~pstrain.lib.alignment.native.Aligner.calibrate_retry_acceptance`).
+        retry_acceptance_threshold: The threshold per retry rung, in nats per
+            speech frame at the rung's beam.
 
     Returns:
         :class:`AlignmentResult` with word- (and optionally phone-)
@@ -144,7 +185,9 @@ def align_utterance(
 
     Raises:
         FileNotFoundError: Audio file or model files are missing.
-        RuntimeError: Alignment fails (final state not reached, etc.).
+        RuntimeError: Alignment fails (final state not reached, etc.), or
+            the acceptance check rejects what the retry recovered
+            (:class:`~pstrain.lib.alignment.acceptance.AlignmentRejectedError`).
     """
     from pstrain.lib.alignment.native import Aligner
 
@@ -159,6 +202,8 @@ def align_utterance(
         beam=beam,
         retry_beam_factor=retry_beam_factor,
         failed_alignment=failed_alignment,
+        retry_acceptance_target=retry_acceptance_target,
+        retry_acceptance_threshold=retry_acceptance_threshold,
         include_phones=include_phones,
         verbatim_tokens=verbatim_tokens,
     ) as aligner:

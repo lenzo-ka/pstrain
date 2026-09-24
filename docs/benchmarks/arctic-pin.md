@@ -75,6 +75,14 @@ snapshot, and validation rejects disagreement between them. Its only semantic
 difference from shipped product defaults is `split.test_count=0`, which keeps
 the established external evaluation cells intact.
 
+The comparison with shipped defaults covers only the configuration blocks the
+benchmark consumes: those whose every field is read by a training-pipeline
+stage. The benchmark trains and decodes; it does not run forced alignment. So
+its alignment settings are frozen in its own configuration, at the values the
+pinned run resolved (the retry acceptance check, which did not exist then, is
+frozen off), and they are not compared with shipped defaults. A change to a
+shipped alignment default therefore does not touch the record.
+
 | Cells | Setting | Shipped default | Cell value | Winning source kind |
 |---|---|---:|---:|---|
 | on/slt55, on/big | `split.test_count` | `null` | `0` | `project-profile` |

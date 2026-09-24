@@ -8,9 +8,23 @@ with a single long-lived :class:`Aligner`.
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 
 from pstrain.cli.base import Command, CommandContext, CommandResult
+
+
+def _finite_float(text: str) -> float:
+    """A float argument that must be finite: NaN or an infinity would void the check."""
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a number: {text!r}") from None
+    if not math.isfinite(value):
+        raise argparse.ArgumentTypeError(
+            f"must be a finite number of nats per speech frame, not {text!r}"
+        )
+    return value
 
 
 class AlignCommand(Command):
@@ -97,6 +111,18 @@ class AlignCommand(Command):
             default=None,
             help="Viterbi pruning beam (default: alignment.beam from config)",
         )
+        parser.add_argument(
+            "--retry-acceptance-threshold",
+            type=_finite_float,
+            action="append",
+            default=None,
+            metavar="NATS",
+            help=(
+                "Acceptance threshold for alignments the wider-beam retry recovers, in nats "
+                "per speech frame at the retry beam; give it once per retry rung. Default: "
+                "calibrate from this run's first-pass alignments"
+            ),
+        )
 
     def execute(self, ctx: CommandContext) -> CommandResult:
         from pstrain.api.alignment import (
@@ -175,6 +201,17 @@ class AlignCommand(Command):
         ctx.log(f"  Dictionary: {dict_file}")
         ctx.log(f"  Phones:     {'yes' if include_phones else 'no'}")
         ctx.log(f"  Verbatim:   {'yes' if alignment_config.verbatim_tokens else 'no'}")
+        target = alignment_config.retry_acceptance_target
+        threshold = ctx.args.retry_acceptance_threshold
+        if alignment_config.failed_alignment != "recover":
+            check = "no retry"
+        elif target is None:
+            check = "off (retry-recovered alignments are accepted unchecked)"
+        elif threshold:
+            check = f"supplied threshold {', '.join(f'{t:g}' for t in threshold)}"
+        else:
+            check = f"calibrated at the {target * 100:g}% quantile of first-pass alignments"
+        ctx.log(f"  Retry check: {check}")
         if ctx.dry_run:
             ctx.log("# Would align and write segmentations")
             return CommandResult.ok("Dry run complete")
@@ -202,20 +239,37 @@ class AlignCommand(Command):
             failed_alignment=alignment_config.failed_alignment,
             verbatim_tokens=alignment_config.verbatim_tokens,
             phone_report=phone_report,
+            retry_acceptance_target=target,
+            retry_acceptance_threshold=threshold,
         )
 
         ctx.log(
             f"Aligned {job.n_aligned}/{job.n_utterances} "
             f"({job.success_rate * 100:.1f}%); {job.n_failed} failed"
         )
-        if len(job.retry_yield) > 1:
-            # A single retry has never had its own line; a ladder says what each
-            # rung bought, so its cost can be weighed against its yield.
-            for rung, (factor, attempted, recovered) in enumerate(job.retry_yield, start=1):
-                ctx.log(
-                    f"  Retry rung {rung} (factor {factor:.3g}): "
+        if len(job.retry_yield) > 1 or any(rung.attempted for rung in job.retry_yield):
+            # Say what each rung bought, and what the acceptance check turned
+            # away, so the retry's cost can be weighed against its yield.
+            calibrated = {c.rung: c for c in job.retry_calibration}
+            for rung, (factor, attempted, recovered, rejected) in enumerate(
+                job.retry_yield, start=1
+            ):
+                line = (
+                    f"  Retry rung {rung} (factor {factor:.3g}, beam {beam / factor:.3g}): "
                     f"{attempted} attempted, {recovered} recovered"
                 )
+                if job.retry_acceptance_target is not None and recovered:
+                    line += f", {rejected} rejected by the acceptance check"
+                    calibration = calibrated.get(rung)
+                    if calibration is not None:
+                        line += (
+                            f" (threshold {calibration.threshold:.2f}: {calibration.basis})"
+                            if calibration.threshold is not None
+                            else f" ({calibration.basis})"
+                        )
+                    elif threshold:
+                        line += " (supplied threshold)"
+                ctx.log(line)
 
         if ctx.args.output_dir and job.results:
             out_dir = Path(ctx.args.output_dir)

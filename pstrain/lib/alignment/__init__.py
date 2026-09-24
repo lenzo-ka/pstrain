@@ -17,6 +17,14 @@ Use cases:
 
 from __future__ import annotations
 
+from pstrain.lib.alignment.acceptance import (
+    DEFAULT_RETRY_ACCEPTANCE_TARGET,
+    RETRY_ACCEPTANCE_MAX_SAMPLES,
+    RETRY_ACCEPTANCE_MIN_SAMPLES,
+    AlignmentRejectedError,
+    RetryCalibration,
+    RungYield,
+)
 from pstrain.lib.alignment.batch import (
     AlignmentJob,
     align_corpus,
@@ -27,6 +35,7 @@ from pstrain.lib.alignment.batch import (
 from pstrain.lib.alignment.core import (
     AlignedSegment,
     AlignmentResult,
+    RetryOutcome,
     align_utterance,
 )
 from pstrain.lib.alignment.export import (
@@ -39,10 +48,17 @@ from pstrain.lib.alignment.export import (
 from pstrain.lib.alignment.native import Aligner
 
 __all__ = [
+    "DEFAULT_RETRY_ACCEPTANCE_TARGET",
+    "RETRY_ACCEPTANCE_MAX_SAMPLES",
+    "RETRY_ACCEPTANCE_MIN_SAMPLES",
     "AlignedSegment",
     "AlignmentJob",
+    "AlignmentRejectedError",
     "AlignmentResult",
     "Aligner",
+    "RetryCalibration",
+    "RetryOutcome",
+    "RungYield",
     "align_corpus",
     "align_utterance",
     "collect_phone_report",

@@ -21,17 +21,37 @@ Typical use::
 from __future__ import annotations
 
 import contextlib
+import math
+import numbers
 import struct
 import wave
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Self
+from typing import TYPE_CHECKING, Any, Literal, Self, cast
 
 import numpy as np
 
 from pstrain.lib import native_worker
 from pstrain.lib._cffi.core import _init
-from pstrain.lib.alignment.core import AlignedSegment, AlignmentResult
+from pstrain.lib.alignment.acceptance import (
+    DEFAULT_RETRY_ACCEPTANCE_TARGET,
+    RETRY_ACCEPTANCE_MAX_SAMPLES,
+    AlignmentRejectedError,
+    RetryCalibration,
+    RungYield,
+    calibration_from_scores,
+    evenly_spaced,
+    read_filler_words,
+    rejection_message,
+    speech_score,
+)
+from pstrain.lib.alignment.core import (
+    DEFAULT_RETRY_BEAM_FACTOR,
+    AlignedSegment,
+    AlignmentResult,
+    RetryOutcome,
+)
 from pstrain.lib.feasibility import infeasible_frames_message
 from pstrain.lib.features import FeatureExtractor
 from pstrain.lib.model import MODEL_FILES_REQUIRED, read_complete_model_feat_params
@@ -43,10 +63,23 @@ if TYPE_CHECKING:
 
 
 _DEFAULT_BEAM = 1e-64
-_DEFAULT_RETRY_BEAM_FACTOR = 1e36
+_DEFAULT_RETRY_BEAM_FACTOR = DEFAULT_RETRY_BEAM_FACTOR
 _DEFAULT_FEAT_TYPE = "1s_c_d_dd"
 _DEFAULT_CMN = "batch"
 _DEFAULT_AGC = "none"
+
+# Why a final-state failure was not retried: the retry's recovery could not
+# have been judged.
+_RETRY_WITHHELD = (
+    "; the wider-beam retry was not run, because an alignment it recovers must "
+    "pass the retry acceptance check, which needs a threshold: pass "
+    "retry_acceptance_threshold (Aligner.calibrate_retry_acceptance computes one "
+    "from known-good utterances), align the corpus with align_corpus, which "
+    "calibrates one, or set retry_acceptance_target=None to accept retries unchecked"
+)
+
+# A calibration item: audio (a WAV path) or an MFCC matrix, and its transcript.
+CalibrationItem = tuple["Path | str | npt.NDArray[np.float32]", str]
 
 
 class Aligner:
@@ -60,10 +93,32 @@ class Aligner:
         filler_dict: Filler / non-speech dictionary path. Optional.
         beam: Pruning beam (default 1e-64, matches sphinx3_align).
         retry_beam_factor: Factor that widens the beam for one retry after a
-            final-state failure; values at or below 1 disable the retry. An
+            final-state failure; values at or below 1 disable the retry. The
+            default, 1e136, retries once at 1e-200 on the default beam. An
             ascending sequence of factors, each greater than 1 and relative to
             ``beam``, is a ladder: its rungs run in order and the first success
             ends it. :meth:`retry_yield` reports what each rung bought.
+        retry_acceptance_target: The retry acceptance check (see
+            :mod:`pstrain.lib.alignment.acceptance`). A retry-recovered
+            alignment is accepted only if its speech score reaches a threshold
+            calibrated at this quantile (default 0.05) of normal alignments at
+            the rung's beam; a rejected one raises
+            :class:`~pstrain.lib.alignment.acceptance.AlignmentRejectedError`,
+            a ``RuntimeError``, as a failed retry would. First-pass alignments
+            are never checked. ``None`` turns the check off and accepts
+            retries unchecked. With the check on, the retry runs only when a
+            threshold is supplied, or when ``retry_acceptance_deferred`` is set;
+            otherwise a final-state failure is raised unretried, and says why.
+        retry_acceptance_threshold: The threshold, in nats per speech frame at
+            the rung's beam: one number per ladder rung, or one number for a
+            single retry. :meth:`calibrate_retry_acceptance` computes it from
+            known-good utterances, realigning at most
+            ``RETRY_ACCEPTANCE_MAX_SAMPLES`` (200) and needing at least
+            ``RETRY_ACCEPTANCE_MIN_SAMPLES`` (20) of them to align.
+        retry_acceptance_deferred: Run the retry and return what it recovers
+            unjudged, with its score in ``result.retry``, for a caller that
+            calibrates and judges it itself, as
+            :func:`~pstrain.lib.alignment.batch.align_corpus` does.
         failed_alignment: ``"recover"`` retries final-state failures;
             ``"abort"`` and ``"omit"`` raise without retrying.
         insert_sil: Insert optional inter-word silences (default ``True``).
@@ -99,6 +154,9 @@ class Aligner:
         beam: float = _DEFAULT_BEAM,
         retry_beam_factor: RetryBeamFactor = _DEFAULT_RETRY_BEAM_FACTOR,
         failed_alignment: Literal["recover", "abort", "omit"] = "recover",
+        retry_acceptance_target: float | None = DEFAULT_RETRY_ACCEPTANCE_TARGET,
+        retry_acceptance_threshold: float | Sequence[float] | None = None,
+        retry_acceptance_deferred: bool = False,
         insert_sil: bool = True,
         include_phones: bool = True,
         include_states: bool = False,
@@ -120,6 +178,9 @@ class Aligner:
         # An invalid factor list fails here, before any model is loaded.
         self._retry_rungs = retry_ladder(retry_beam_factor)
         self._retry_beam_factor = retry_beam_factor
+        # The nominal beam, kept on both sides of the helper boundary: the
+        # rung beams reported and calibrated here are relative to it.
+        self._beam = beam
         # Per-rung counts live in the object the caller holds. Behind the
         # native worker that is this parent-side proxy, so a worker that dies
         # mid-corpus takes none of the counts already gathered with it.
@@ -127,6 +188,17 @@ class Aligner:
         self._last_retry_rungs = 0
         self._retry_rung_attempts = [0] * len(self._retry_rungs)
         self._retry_rung_recoveries = [0] * len(self._retry_rungs)
+        self._retry_rung_rejections = [0] * len(self._retry_rungs)
+        if retry_acceptance_target is not None and not (0.0 < retry_acceptance_target < 0.5):
+            raise ValueError(
+                "retry_acceptance_target must be greater than 0 and less than 0.5, or None "
+                f"to turn the check off; got {retry_acceptance_target!r}"
+            )
+        self._retry_acceptance_target = retry_acceptance_target
+        self._retry_thresholds = self._rung_thresholds(retry_acceptance_threshold)
+        self._retry_acceptance_deferred = retry_acceptance_deferred
+        self._retry_withheld = False
+        self._filler_words = read_filler_words(filler_dict)
         model_dir = Path(model_dir)
         dict_path = Path(dict_path)
         if not model_dir.is_dir():
@@ -155,6 +227,12 @@ class Aligner:
                     "beam": beam,
                     "retry_beam_factor": retry_beam_factor,
                     "failed_alignment": failed_alignment,
+                    # Judging happens here, beside the counts. The helper runs
+                    # the retry unchecked when this side can judge or defer
+                    # what it recovers, and withholds it otherwise.
+                    "retry_acceptance_target": (
+                        None if self._retry_permitted else retry_acceptance_target
+                    ),
                     "insert_sil": insert_sil,
                     "include_phones": include_phones,
                     "include_states": include_states,
@@ -337,6 +415,41 @@ class Aligner:
             return None
         return required, n_frames
 
+    def _rung_thresholds(
+        self, threshold: float | Sequence[float] | None
+    ) -> tuple[float, ...] | None:
+        """One supplied acceptance threshold per ladder rung, or ``None``."""
+        if threshold is None:
+            return None
+        if isinstance(threshold, numbers.Real):
+            values: tuple[float, ...] = (float(threshold),)
+        else:
+            values = tuple(float(value) for value in cast("Sequence[float]", threshold))
+        non_finite = [value for value in values if not math.isfinite(value)]
+        if non_finite:
+            # NaN compares false with every score, and an infinity accepts or
+            # rejects everything: each would turn the check into a no-op or a
+            # blanket refusal while reporting that it ran.
+            raise ValueError(
+                "retry_acceptance_threshold must be a finite number of nats per speech "
+                f"frame; got {non_finite[0]!r}"
+            )
+        if len(values) != len(self._retry_rungs):
+            raise ValueError(
+                f"retry_acceptance_threshold needs one threshold per retry rung: "
+                f"{len(self._retry_rungs)} rung(s), {len(values)} threshold(s)"
+            )
+        return values
+
+    @property
+    def _retry_permitted(self) -> bool:
+        """Whether whatever the retry recovers can be judged, or need not be."""
+        return (
+            self._retry_acceptance_target is None
+            or self._retry_thresholds is not None
+            or self._retry_acceptance_deferred
+        )
+
     def _final_state_retry_beam(self, rc: int, rung: int = 0) -> float | None:
         """Return the beam for retry ladder rung ``rung``, or ``None`` to stop.
 
@@ -345,14 +458,20 @@ class Aligner:
         factor of the ladder in turn (a smaller value is a wider beam). Any other
         rc or policy, a single factor at or below 1, or a ladder already climbed
         ends the retry. Asking for rung 0 starts a new utterance's accounting.
+        So does a retry whose recovery could not be judged: with the acceptance
+        check on and no threshold, no rung runs (``_retry_withheld``).
         """
         if rung == 0:
             self._last_alignment_retried = False
             self._last_retry_rungs = 0
+            self._retry_withheld = False
         if rc != -3 or self._failed_alignment != "recover":
             return None
         rungs = retry_ladder(self._retry_beam_factor)
         if rung >= len(rungs):
+            return None
+        if not self._retry_permitted:
+            self._retry_withheld = True
             return None
         self._last_alignment_retried = True
         return self._beam / rungs[rung]
@@ -386,6 +505,143 @@ class Aligner:
         if recovered and 0 < rungs_run <= len(self._retry_rung_recoveries):
             self._retry_rung_recoveries[rungs_run - 1] += 1
 
+    def _failure_message(self, prefix: str, rc: int) -> str:
+        """The native failure, and why no retry ran when one was withheld."""
+        err = self._last_error()
+        message = f"{prefix}: {err or f'rc={rc}'}"
+        if self._retry_withheld:
+            message += _RETRY_WITHHELD
+        return message
+
+    def _recovered(self, result: AlignmentResult) -> AlignmentResult:
+        """Attach the retry's rung, beam and speech score to what it recovered."""
+        rung = self._last_retry_rungs
+        if rung <= 0:
+            return result
+        factor = self._retry_rungs[rung - 1]
+        result.retry = RetryOutcome(
+            rung=rung,
+            factor=factor,
+            beam=self._beam / factor,
+            score=speech_score(result, self._filler_words),
+        )
+        return result
+
+    def _judge_retry(self, result: AlignmentResult) -> AlignmentResult:
+        """Apply the acceptance check to a retry-recovered alignment.
+
+        Runs once, in the object the caller holds, beside the per-rung counts.
+        A first-pass alignment passes untouched. With the check off, or
+        deferred to the caller, the recovery is returned as it is.
+        """
+        outcome = result.retry
+        if outcome is None:
+            return result
+        if self._retry_acceptance_target is None:
+            result.retry = replace(outcome, basis="acceptance check off")
+            return result
+        if self._retry_thresholds is None:
+            # Deferred: the caller calibrates and judges.
+            result.retry = replace(outcome, threshold=None, basis="not judged")
+            return result
+        threshold = self._retry_thresholds[outcome.rung - 1]
+        judged = replace(outcome, threshold=threshold, basis="supplied threshold")
+        if judged.score is None or judged.score < threshold:
+            self._record_rejection(judged.rung)
+            raise AlignmentRejectedError(rejection_message(result.utterance_id, judged), judged)
+        result.retry = judged
+        return result
+
+    def _record_rejection(self, rung: int) -> None:
+        """Count a recovery the acceptance check rejected against its rung."""
+        if 0 < rung <= len(self._retry_rung_rejections):
+            self._retry_rung_rejections[rung - 1] += 1
+
+    def _scores_at_rung(self, items: Sequence[CalibrationItem], rung: int) -> list[float | None]:
+        """Align each item directly at a rung's beam, with no retry, and score it.
+
+        Returns each alignment's speech score, or ``None`` for an item that did
+        not align there. Runs where the native aligner lives.
+        """
+        if hasattr(self, "_proxy"):
+            return list(self._proxy.call("_scores_at_rung", list(items), rung))
+        factor = self._retry_rungs[rung - 1]
+        previous_beam = self.set_beam(self._beam / factor)
+        saved = (self._retry_beam_factor, self._last_retry_rungs, self._last_alignment_retried)
+        self._retry_beam_factor = 1.0
+        scores: list[float | None] = []
+        try:
+            for index, (source, transcript) in enumerate(items):
+                utterance_id = f"calibration-{index}"
+                try:
+                    if isinstance(source, np.ndarray):
+                        result = self.align_mfcc(source, transcript, utterance_id)
+                    else:
+                        result = self.align_audio(source, transcript, utterance_id)
+                except (RuntimeError, OSError, ValueError):
+                    scores.append(None)
+                    continue
+                scores.append(speech_score(result, self._filler_words))
+        finally:
+            self._retry_beam_factor, self._last_retry_rungs, self._last_alignment_retried = saved
+            self.set_beam(previous_beam)
+        return scores
+
+    def calibrate_rung(
+        self,
+        items: Sequence[CalibrationItem],
+        rung: int,
+        target: float | None = None,
+    ) -> RetryCalibration:
+        """Calibrate one ladder rung's acceptance threshold.
+
+        Realigns at most ``RETRY_ACCEPTANCE_MAX_SAMPLES`` (200) of ``items``,
+        evenly spaced, directly at the rung's beam with no retry, and takes the
+        ``target`` quantile of their speech scores (by default this aligner's
+        target, or 0.05 when its check is off). With fewer than
+        ``RETRY_ACCEPTANCE_MIN_SAMPLES`` (20) scored, the threshold is ``None``.
+        """
+        if not 0 < rung <= len(self._retry_rungs):
+            raise ValueError(f"rung {rung} is not a rung of this aligner's retry ladder")
+        if target is None:
+            target = self._retry_acceptance_target or DEFAULT_RETRY_ACCEPTANCE_TARGET
+        sample = evenly_spaced(list(items), RETRY_ACCEPTANCE_MAX_SAMPLES)
+        factor = self._retry_rungs[rung - 1]
+        return calibration_from_scores(
+            self._scores_at_rung(sample, rung),
+            rung=rung,
+            factor=factor,
+            beam=self._beam / factor,
+            target=target,
+        )
+
+    def calibrate_retry_acceptance(
+        self,
+        items: Iterable[CalibrationItem],
+        target: float | None = None,
+    ) -> tuple[float, ...]:
+        """Acceptance thresholds for every rung, from known-good utterances.
+
+        ``items`` are ``(audio, transcript)`` pairs, where audio is a WAV path
+        or an MFCC matrix, that align normally. Each rung realigns at most
+        ``RETRY_ACCEPTANCE_MAX_SAMPLES`` (200) of them at its own beam. Pass the
+        result as ``retry_acceptance_threshold``.
+
+        Raises:
+            ValueError: No retry is configured, or fewer than
+                ``RETRY_ACCEPTANCE_MIN_SAMPLES`` (20) items aligned at a rung.
+        """
+        if not self._retry_rungs:
+            raise ValueError("no wider-beam retry is configured, so there is nothing to calibrate")
+        pairs = list(items)
+        thresholds: list[float] = []
+        for rung in range(1, len(self._retry_rungs) + 1):
+            calibration = self.calibrate_rung(pairs, rung, target)
+            if calibration.threshold is None:
+                raise ValueError(calibration.basis)
+            thresholds.append(calibration.threshold)
+        return tuple(thresholds)
+
     def _align_reporting_rungs(self, method: str, *args: Any) -> tuple[AlignmentResult, int]:
         """Worker side: align, and say how many rungs the climb ran."""
         self._last_retry_rungs = 0
@@ -403,7 +659,7 @@ class Aligner:
         self._last_retry_rungs = int(rungs)
         self._last_alignment_retried = self._last_retry_rungs > 0
         self._record_retry(self._last_retry_rungs, recovered=True)
-        return result
+        return self._judge_retry(result)
 
     def _count_proxied_failure(self) -> None:
         """Parent side: count the rungs a failed climb ran, if the worker can still say.
@@ -420,19 +676,22 @@ class Aligner:
             self._last_alignment_retried = rungs > 0
             self._record_retry(rungs, recovered=False)
 
-    def retry_yield(self) -> tuple[tuple[float, int, int], ...]:
-        """Per-rung ``(factor, attempted, recovered)`` over this aligner's life.
+    def retry_yield(self) -> tuple[RungYield, ...]:
+        """Per-rung ``(factor, attempted, recovered, rejected)`` over this aligner's life.
 
         One entry per ladder rung, in order. ``attempted`` counts utterances
         that reached the rung, so it counts only retries that actually ran;
-        ``recovered`` counts the utterances that rung aligned. With a single
-        factor the one entry is the whole retry's yield.
+        ``recovered`` counts the utterances that rung aligned, and ``rejected``
+        those of them the acceptance check then rejected. With a single factor
+        the one entry is the whole retry's yield.
         """
         return tuple(
-            zip(
+            RungYield(*counts)
+            for counts in zip(
                 self._retry_rungs,
                 self._retry_rung_attempts,
                 self._retry_rung_recoveries,
+                self._retry_rung_rejections,
                 strict=True,
             )
         )
@@ -522,12 +781,12 @@ class Aligner:
             ),
         )
         if rc != 0:
-            err = self._last_error()
-            raise RuntimeError(f"pstrain_align_mfcc failed: {err or f'rc={rc}'}")
+            raise RuntimeError(self._failure_message("pstrain_align_mfcc failed", rc))
         try:
-            return self._unpack_result(out_pp[0], utterance_id, transcript)
+            result = self._recovered(self._unpack_result(out_pp[0], utterance_id, transcript))
         finally:
             self._lib.pstrain_align_result_free(out_pp[0])
+        return self._judge_retry(result)
 
     def align_mfc_file(
         self,
@@ -581,12 +840,12 @@ class Aligner:
             ),
         )
         if rc != 0:
-            err = self._last_error()
-            raise RuntimeError(f"pstrain_align_mfc_file failed: {err or f'rc={rc}'}")
+            raise RuntimeError(self._failure_message("pstrain_align_mfc_file failed", rc))
         try:
-            return self._unpack_result(out_pp[0], utt_id, transcript)
+            result = self._recovered(self._unpack_result(out_pp[0], utt_id, transcript))
         finally:
             self._lib.pstrain_align_result_free(out_pp[0])
+        return self._judge_retry(result)
 
     def align_audio(
         self,
@@ -690,4 +949,4 @@ class Aligner:
         )
 
 
-__all__ = ["Aligner"]
+__all__ = ["Aligner", "CalibrationItem"]

@@ -83,7 +83,7 @@ def test_active_names_and_defaults_are_canonical() -> None:
     assert profile.runner.jobs is None
     assert profile.alignment.verbatim_tokens is False
     assert profile.alignment.beam == 1e-64
-    assert profile.alignment.retry_beam_factor == 1e36
+    assert profile.alignment.retry_beam_factor == 1e136
     assert profile.alignment.failed_alignment == "recover"
     with pytest.raises(ValueError):
         FeatureConfig.model_validate({"num_ceps": 26})
@@ -159,9 +159,9 @@ def test_retry_beam_factor_accepts_a_number_or_a_ladder_and_defaults_are_one_run
     from pstrain.lib.retry_ladder import retry_ladder
 
     # Defaults stay single numbers, so every existing run is a one-rung ladder.
-    assert Profile().alignment.retry_beam_factor == 1e36
+    assert Profile().alignment.retry_beam_factor == 1e136
     assert Profile().training.retry_beam_factor == 1e10
-    assert retry_ladder(Profile().alignment.retry_beam_factor) == (1e36,)
+    assert retry_ladder(Profile().alignment.retry_beam_factor) == (1e136,)
     assert retry_ladder(1.0) == ()
 
     (tmp_path / "etc").mkdir()
@@ -502,3 +502,35 @@ def test_existing_complete_profile_keeps_optional_variance_floor_default(
             == "schema-default"
         )
     assert config.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    ("target", "message"),
+    [
+        (0, "greater than 0"),
+        (0.0, "greater than 0"),
+        (-0.1, "greater than 0"),
+        (0.5, "less than 0.5"),
+        (0.9, "less than 0.5"),
+        ("x", "valid number"),
+    ],
+)
+def test_retry_acceptance_target_is_a_fraction_below_one_half(target: object, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        AlignmentConfig(retry_acceptance_target=target)  # type: ignore[arg-type]
+
+
+def test_retry_acceptance_target_defaults_to_five_percent_and_null_turns_it_off(
+    tmp_path: Path,
+) -> None:
+    assert AlignmentConfig().retry_acceptance_target == 0.05
+    assert AlignmentConfig(retry_acceptance_target=None).retry_acceptance_target is None
+    assert AlignmentConfig(retry_acceptance_target=0.02).retry_acceptance_target == 0.02
+    (tmp_path / "etc").mkdir()
+    (tmp_path / "etc" / "config.yaml").write_text(
+        "config_version: 1\nalignment:\n  retry_acceptance_target: null\n"
+    )
+    resolved = resolve_config(tmp_path)
+    assert resolved.profile.alignment.retry_acceptance_target is None
+    reference = get_parameter("alignment.retry_acceptance_target")
+    assert reference is not None
