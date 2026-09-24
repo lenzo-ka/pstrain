@@ -38,6 +38,10 @@ from pstrain.lib.alignment.core import (
     RetryOutcome,
     align_utterance,
 )
+from pstrain.lib.alignment.coverage import (
+    AlignmentCoverage,
+    alignment_coverage,
+)
 from pstrain.lib.alignment.export import (
     save_ctm,
     save_textgrid,
@@ -52,6 +56,7 @@ __all__ = [
     "RETRY_ACCEPTANCE_MAX_SAMPLES",
     "RETRY_ACCEPTANCE_MIN_SAMPLES",
     "AlignedSegment",
+    "AlignmentCoverage",
     "AlignmentJob",
     "AlignmentRejectedError",
     "AlignmentResult",
@@ -61,6 +66,7 @@ __all__ = [
     "RungYield",
     "align_corpus",
     "align_utterance",
+    "alignment_coverage",
     "collect_phone_report",
     "explain_failure",
     "load_transcripts",

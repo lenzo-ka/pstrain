@@ -271,6 +271,12 @@ class AlignCommand(Command):
                         line += " (supplied threshold)"
                 ctx.log(line)
 
+        if job.coverage is not None:
+            # Reporting only: which units and speakers the output covers, by
+            # outcome. Nothing here changes what was accepted.
+            for line in job.coverage.format().splitlines():
+                ctx.log(line)
+
         if ctx.args.output_dir and job.results:
             out_dir = Path(ctx.args.output_dir)
             out_dir.mkdir(parents=True, exist_ok=True)

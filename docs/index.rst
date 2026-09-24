@@ -10,6 +10,7 @@ pstrain is an acoustic model training toolkit.
    getting-started
    input-formats
    examples
+   alignment-coverage
    support
    package-safety
    glossary

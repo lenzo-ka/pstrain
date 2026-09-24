@@ -7,6 +7,22 @@ the version in `pyproject.toml` is authoritative.
 
 ### Changes
 
+- Forced alignment now reports the mass and coverage of what it aligned. Each
+  utterance ends in one outcome: first pass, retry accepted, retry rejected,
+  or not recovered. `pstrain align` prints utterance counts and audio duration
+  for each outcome, overall and per speaker, and phone and triphone token
+  counts by outcome. It flags speakers left with no aligned audio, phones and
+  triphones that align only through accepted retries or appear only in failed
+  utterances, and thin phones: phones with fewer than 50 first-pass tokens,
+  in at least 3 utterances, whose utterances fail at least twice as often as
+  the run's. Those may point at a lexicon or model problem. `align_corpus`
+  attaches the report as `AlignmentJob.coverage`, with a text form and a
+  JSON-serializable form, and `alignment_coverage` builds it for a finished
+  job with your own speaker mapping or thresholds. A speaker is the text
+  before the first `/` in the utterance ID. The report is reporting only. It
+  is built after every acceptance decision and changes none: which recoveries
+  are accepted, the threshold, its calibration and every default are
+  unchanged. See `docs/alignment-coverage.md`.
 - The Arctic benchmark pin now describes the tests it runs. The forward gate's
   documented bar was "no statistically significant regression", but the gate
   has always passed a run only when the upper end of its paired interval
