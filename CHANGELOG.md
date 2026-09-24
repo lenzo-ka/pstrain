@@ -5,8 +5,101 @@ the version in `pyproject.toml` is authoritative.
 
 ## Unreleased
 
+## 0.5.0 - 2026-09-24
+
+### Upgrading from 0.4.1
+
+- Code that unpacks the per-rung retry yield (`Aligner.retry_yield()`,
+  `AlignmentJob.retry_yield`) as three values must unpack four:
+  `(factor, attempted, recovered, rejected)`.
+- `Aligner` and `align_utterance` no longer retry a failed utterance unless
+  given a retry acceptance threshold, since one utterance cannot calibrate one.
+  They used to retry at a beam of 1e-100 and return whatever the retry found.
+  The failure says how to supply a threshold; compute one from known-good
+  utterances with `Aligner.calibrate_retry_acceptance`.
+- Forced alignment now retries at a wider beam by default, and an alignment
+  the retry recovers must pass an acceptance check, so utterances that 0.4.1
+  recovered may now be rejected and fail. Set
+  `alignment.retry_acceptance_target` to null to accept recoveries unchecked,
+  or supply a threshold with `--retry-acceptance-threshold`.
+- `paired_delta_ci` now raises `ValueError` when asked to stratify by speaker
+  and an utterance ID has no `speaker/` prefix, or every speaker has a single
+  utterance. Either used to make each utterance its own stratum and return a
+  zero-width interval. Give utterance IDs a `speaker/` prefix, or do not
+  stratify.
+
+### Fixes
+
+- Alignment no longer changes the caller's feature array. `align_mfcc`
+  normalized the cepstra it was given in place, so aligning the same array a
+  second time normalized it again and could give a different answer. The
+  wider-beam retry, and each rung of a retry ladder, aligned that same array
+  again, so every alignment the retry recovered through `align_mfcc`,
+  `align_audio` or `pstrain align` was made from altered features. Some
+  utterances failed that would have aligned at the retry's beam, and the ones
+  that aligned could differ from a direct alignment at that beam. A retry now
+  gives exactly the alignment a direct alignment at its beam gives. First-pass
+  alignments, `align_mfc_file`, and training are unchanged.
+- Aligning an utterance longer than 150 seconds (15,000 frames) no longer
+  corrupts the aligner's memory. Such alignments could kill the native worker,
+  and the ones that finished could not be trusted. Utterances up to 32,768
+  frames (about 327 seconds at 100 frames per second) now align correctly. A
+  longer one is refused before any work, by both `align_mfcc` and
+  `align_mfc_file`, with a message naming its frame count and the limit.
+- Phone, word and total alignment scores for very long segments or utterances
+  now stop at the edge of the 32-bit range instead of wrapping around to
+  meaningless values.
+- Loading the aligner with a model that has only context-independent senones
+  no longer reads past the end of the model's senone table.
+- `pstrain align` no longer stops before the first utterance when a word's
+  unsuffixed pronunciation uses a phone the model does not define and an
+  alternative pronunciation survives. The aligner now aligns the word over all
+  of its surviving alternatives, as multiple-pronunciation training already
+  did, and warns that it has done so. Utterances that never use the word align
+  as before. An alternative listed with no unsuffixed line before it in the
+  same dictionary file still stops the aligner.
+- With `failed_alignment` set to `omit`, an utterance dropped for the same
+  reason on later passes is now reported once for the stage rather than once
+  per pass. The stage omission summary still lists every pass it was dropped
+  on.
+
 ### Changes
 
+- Forced alignment now retries an utterance that misses its final state once,
+  at a beam of 1e-200 (`alignment.retry_beam_factor` 1e136 on the default
+  1e-64 beam, up from 1e36, a retry at 1e-100), and checks every alignment
+  the retry recovers. Now that the retry aligns the caller's own features, it
+  really recovers utterances, and a wider beam can also force a wrong
+  transcript onto the audio. A recovered alignment is kept only if its mean
+  score per speech frame reaches a threshold calibrated at the retry beam.
+  Otherwise it is rejected, and the utterance fails as it did before the
+  retry, with a reason naming its score, the threshold and where the
+  threshold came from. Alignments that succeed on the first pass are never
+  checked, and the training retry is unchanged.
+  - `align_corpus` and `pstrain align` calibrate the threshold from the run's
+    own first-pass alignments, and only when the retry recovered something:
+    at most 200 of them, evenly spaced, are realigned at the retry beam, and
+    the threshold is the `alignment.retry_acceptance_target` quantile of their
+    scores (new, default 0.05). With fewer than 20, or if the aligner process
+    was lost during calibration, every recovery is rejected and the reason
+    says so. `--retry-acceptance-threshold`, or `retry_acceptance_threshold`
+    in the API, supplies a threshold instead; it must be a finite number, and
+    NaN or an infinity is refused before any alignment. Setting the target to
+    null turns the check off, and the run says so.
+  - `pstrain align` prints the retry line whenever a retry ran, with the
+    rejected count. A recovered alignment carries its rung, beam, score and
+    threshold in `AlignmentResult.retry`.
+- `retry_beam_factor`, for both training and alignment, now also accepts an
+  ascending list of factors, each greater than 1 and each relative to the
+  nominal beam. An utterance that misses its final state is retried at each
+  factor in turn until one succeeds, and the nominal beam is restored
+  afterward. A single number means exactly what it did before. The training
+  default is unchanged; the alignment default changed, as described above.
+  With more than one factor, training reports what each rung attempted and
+  recovered, per pass, in the stage summary and in telemetry, and
+  `pstrain align` prints the same per rung. An utterance too short for its
+  transcript still runs no retry at all, and its frame budget is measured once
+  per failure, not once per rung.
 - Forced alignment now reports the mass and coverage of what it aligned. Each
   utterance ends in one outcome: first pass, retry accepted, retry rejected,
   or not recovered. `pstrain align` prints utterance counts and audio duration
@@ -24,12 +117,41 @@ the version in `pyproject.toml` is authoritative.
   chose. Triphone contexts skip pauses, so a word boundary where a speaker
   paused is the same unit as in a failed utterance. `pstrain align` prints
   the report after writing TextGrid and CTM output, and a report that cannot
-  be built or formatted only warns. The report is reporting only. It
-  is built after every acceptance decision and changes none: which recoveries
-  are accepted, the threshold, its calibration and every default are
-  unchanged. See `docs/alignment-coverage.md`.
-- The Arctic benchmark pin now describes the tests it runs. The forward gate's
-  documented bar was "no statistically significant regression", but the gate
+  be built or formatted only warns. The report is built after every
+  acceptance decision and changes none. See `docs/alignment-coverage.md`.
+- Training and `pstrain align` now say when an utterance cannot be aligned at
+  any beam width because its transcript needs more frames than the audio has.
+  The report names the required minimum and the frames available instead of
+  the generic "final state not reached", and the wider-beam retry is skipped,
+  since no beam can recover such an utterance. The minimum is measured on the
+  graph the engine actually built, so it is exact for that model and
+  dictionary.
+- Every Baum-Welch pass now reports how many utterances the wider-beam retry
+  was spent on and how many it recovered, and the training telemetry records
+  the same pair per pass. The stage summary totals the second forward passes
+  across every pass, so an utterance retried on three passes counts three
+  times there. When the retry runs has not changed.
+- `pstrain align` now checks the pronunciation dictionary against the phone
+  inventory the model was trained on, and prints one collected report before
+  the run naming every word whose pronunciation uses a phone the model does
+  not define. Those pronunciations were already being dropped silently, so
+  the words surfaced much later as alignment failures that read like an
+  out-of-vocabulary problem. Such a failure now says which word lost its
+  pronunciation and which phone was missing. When a word is aligned over its
+  surviving alternatives, the report says so. A dictionary or model the check
+  cannot read no longer turns the check off silently; the reason is reported.
+- `pstrain validate` and the input validation run by `pstrain train` name the
+  affected words and their pronunciations when the dictionary uses phones
+  outside the phoneset, rather than counting the phones alone. The native
+  lexicon loader states how many pronunciations it dropped for undefined
+  phones, so its end-of-load summary no longer reports only the entries that
+  loaded.
+- A source checkout whose Python code has moved ahead of its native library now
+  fails at import with a message naming the stale library and `make build-c`,
+  for any change to the declared native interface. Previously such a library
+  could load and fail later, deep inside a run.
+- The Arctic benchmark pin now describes the tests it runs. Its documented
+  forward-gate bar was "no statistically significant regression", but the gate
   has always passed a run only when the upper end of its paired interval
   against the pinned rows is at or below zero. The pin document now states
   that zero-margin bar: a run whose interval straddles zero fails, and moving
@@ -41,125 +163,11 @@ the version in `pyproject.toml` is authoritative.
   sign. A speaker-level cluster bootstrap is wider and also straddles zero, so
   the null conclusion stands, now stated for these three voices and not for
   unseen voices in general. No recorded number or gate outcome changes.
-- `paired_delta_ci` now raises `ValueError` when asked to stratify by speaker
-  and an utterance ID has no `speaker/` prefix, or every speaker has a single
-  utterance. Either used to make each utterance its own stratum and return a
-  zero-width interval without complaint.
-- Forced alignment now retries an utterance that misses its final state once,
-  at a beam of 1e-200 (`alignment.retry_beam_factor` 1e136 on the default
-  1e-64 beam, up from 1e36, a retry at 1e-100), and checks every alignment
-  the retry recovers. The next release waits on this change. Since the retry
-  was fixed to align the caller's own features, it really recovers utterances,
-  and a wider beam can also force a wrong transcript onto the audio. An
-  alignment the retry recovers is now kept only if its mean score per speech
-  frame reaches a threshold calibrated at the retry beam. It is rejected
-  otherwise, and the utterance fails as it did before the retry, with a reason
-  naming its score, the threshold and where the threshold came from.
-  Alignments that succeed on the first pass are never checked.
-  - `align_corpus` and `pstrain align` calibrate the threshold from the run's
-    own first-pass alignments, and only when the retry recovered something:
-    at most 200 of them, evenly spaced, are realigned at the retry beam, and
-    the threshold is the `alignment.retry_acceptance_target` quantile of their
-    scores (new, default 0.05). With fewer than 20, every recovery is
-    rejected, and the reason says so. `--retry-acceptance-threshold`, or
-    `retry_acceptance_threshold` in the API, supplies a threshold instead; it
-    must be a finite number, and NaN or an infinity is refused before any
-    alignment. If calibration cannot run because the aligner process was lost,
-    every recovery is rejected and the reason says so.
-    Setting the target to null turns the check off, and the run says so.
-  - Behavior change for single-utterance calls: `Aligner` and
-    `align_utterance` no longer retry unless given a threshold, since one
-    utterance cannot calibrate one. The failure says how to supply it, and
-    `Aligner.calibrate_retry_acceptance` computes it from known-good
-    utterances. Before this change such a call retried at 1e-100 and returned
-    whatever the retry found.
-  - The per-rung retry yield (`Aligner.retry_yield()`, `AlignmentJob.retry_yield`)
-    now has four fields, `(factor, attempted, recovered, rejected)`, where
-    `rejected` counts recoveries the check turned away. Code that unpacks three
-    values must be updated. `pstrain align` prints the retry line whenever a
-    retry ran, with the rejected count. A recovered alignment carries its rung,
-    beam, score and threshold in `AlignmentResult.retry`.
-  - The training retry is unchanged.
-  - The Arctic benchmark does not run forced alignment. It now freezes its
-    alignment settings in its own configuration at the values its pinned run
-    resolved, with the new check frozen off, and its gate compares only the
-    configuration blocks the benchmark consumes against shipped defaults. The
-    evidence record is unchanged except for the one new field, adopted through
-    the pin check's `--adopt-uncovered` path.
-- Alignment no longer changes the caller's feature array. `align_mfcc`
-  normalized the cepstra it was given in place, so aligning the same array a
-  second time normalized it again and could give a different answer. The
-  wider-beam retry, and each rung of a retry ladder, aligned that same array
-  again, so every alignment the retry recovered through `align_mfcc`,
-  `align_audio` or `pstrain align` was made from altered features, not the
-  caller's. Some utterances failed that would have aligned at the retry's beam,
-  and the ones that aligned could differ from a direct alignment at that beam.
-  A retry now gives exactly the alignment a direct alignment at its beam gives.
-  First-pass alignments, `align_mfc_file`, and training are unchanged.
-- Aligning an utterance longer than 150 seconds (15,000 frames) no longer
-  corrupts the aligner's memory. Such alignments could kill the native worker,
-  and the ones that finished could not be trusted. Utterances up to 32,768
-  frames (about 327 seconds at 100 frames per second) now align correctly. A
-  longer one is refused before any work with a message naming its frame count
-  and the limit, from both `align_mfcc` and `align_mfc_file`.
-- Phone, word and total alignment scores for very long segments or utterances
-  now stop at the edge of the 32-bit range instead of wrapping around to
-  meaningless values.
-- Loading the aligner with a model that has only context-independent senones
-  no longer reads past the end of the model's senone table.
-- `retry_beam_factor`, for both training and alignment, now also accepts an
-  ascending list of factors, each greater than 1 and each relative to the
-  nominal beam. An utterance that misses its final state is retried at each
-  factor in turn until one succeeds, and the nominal beam is restored
-  afterward. A single number means exactly what it did before, and the defaults
-  are unchanged. With more than one factor, training reports what each rung
-  attempted and recovered, per pass, in the stage summary, and in telemetry,
-  and `pstrain align` prints the same per rung. An utterance too short for its
-  transcript still runs no retry at all, and its frame budget is measured once
-  per failure, not once per rung.
-- A source checkout whose Python code has moved ahead of its native library now
-  fails at import with a message naming the stale library and `make build-c`,
-  for any change to the declared native interface. Previously such a library
-  could load and fail later, deep inside a run, unless someone had remembered
-  to bump a version number by hand.
-- Training and `pstrain align` now say when an utterance cannot be aligned at
-  any beam width because its transcript needs more frames than the audio has.
-  The report names the required minimum and the frames available instead of the
-  generic "final state not reached", and the wider-beam retry is skipped, since
-  no beam can recover such an utterance. The minimum is measured on the graph
-  the engine actually built, so it is exact for that model and dictionary.
-- Every Baum-Welch pass now reports how many utterances the wider-beam retry was
-  spent on and how many it recovered, and the training telemetry records the same
-  pair per pass. The stage summary totals the second forward passes across every
-  pass, so an utterance retried on three passes counts three times there.
-  Nothing about when the retry runs has changed; it simply says what it bought.
-- With `failed_alignment` set to `omit`, an utterance dropped for the same reason
-  on later passes is now reported once for the stage rather than once per pass.
-  The stage omission summary still lists every pass it was dropped on.
-- `pstrain align` now checks the pronunciation dictionary against the phone
-  inventory the model was trained on, and prints one collected report before
-  the run naming every word whose pronunciation uses a phone the model does
-  not define. Those pronunciations were already being dropped silently, so
-  the words surfaced much later as alignment failures that read like an
-  out-of-vocabulary problem. Such a failure now says which word lost its
-  pronunciation and which phone was missing.
-- `pstrain align` no longer stops before the first utterance when a word's
-  unsuffixed pronunciation uses a phone the model does not define and an
-  alternative pronunciation survives. The aligner now aligns the word over all
-  of its surviving alternatives, as multiple-pronunciation training already
-  did, and warns that it has done so. Utterances that never use the word align
-  as before. The report still lists the dropped pronunciation and says the word
-  is aligned over its surviving alternatives. An alternative listed with no
-  unsuffixed line before it in the same dictionary file still stops the
-  aligner.
-- A dictionary or model the check cannot read no longer turns the check off
-  silently; the reason is reported.
-- `pstrain validate` and the input validation run by `pstrain train` name the
-  affected words and their pronunciations when the dictionary uses phones
-  outside the phoneset, rather than counting the phones alone.
-- The native lexicon loader states how many pronunciations it dropped for
-  undefined phones, so its end-of-load summary no longer reports only the
-  entries that loaded.
+- The Arctic benchmark does not run forced alignment. It now freezes its
+  alignment settings in its own configuration at the values its pinned run
+  resolved, with the new acceptance check off, and its gate compares only the
+  configuration blocks the benchmark consumes against shipped defaults. The
+  recorded evidence is unchanged except for the one new setting.
 
 ## 0.4.1 - 2026-09-16
 
