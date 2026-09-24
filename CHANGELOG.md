@@ -19,7 +19,12 @@ the version in `pyproject.toml` is authoritative.
   attaches the report as `AlignmentJob.coverage`, with a text form and a
   JSON-serializable form, and `alignment_coverage` builds it for a finished
   job with your own speaker mapping or thresholds. A speaker is the text
-  before the first `/` in the utterance ID. The report is reporting only. It
+  before the first `/` in the utterance ID. Failed utterances are counted from
+  their transcripts, using the pronunciation variants the aligned output
+  chose. Triphone contexts skip pauses, so a word boundary where a speaker
+  paused is the same unit as in a failed utterance. `pstrain align` prints
+  the report after writing TextGrid and CTM output, and a report that cannot
+  be built or formatted only warns. The report is reporting only. It
   is built after every acceptance decision and changes none: which recoveries
   are accepted, the threshold, its calibration and every default are
   unchanged. See `docs/alignment-coverage.md`.

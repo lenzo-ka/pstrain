@@ -65,9 +65,13 @@ class TestSpeakerAndTriphones:
         assert speaker_from_id("arctic_a0001") == NO_SPEAKER
         assert speaker_from_id("/arctic_a0001") == NO_SPEAKER
 
-    def test_triphones_use_silence_at_the_edges_and_for_filler_neighbors(self) -> None:
+    def test_triphones_drop_fillers_before_taking_neighbors(self) -> None:
         phones = ["SIL", "HH", "AH", "+NOISE+", "L", "OW", "SIL"]
-        assert triphones(phones, _FILLERS) == ["SIL-HH+AH", "HH-AH+SIL", "SIL-L+OW", "L-OW+SIL"]
+        assert triphones(phones, _FILLERS) == ["SIL-HH+AH", "HH-AH+L", "AH-L+OW", "L-OW+SIL"]
+        # A pause between two phones leaves their contexts as they are without it.
+        assert triphones(["AE", "T", "SIL", "DH", "AH"], _FILLERS) == triphones(
+            ["AE", "T", "DH", "AH"], _FILLERS
+        )
         assert triphones(["AH"], _FILLERS) == ["SIL-AH+SIL"]
         assert triphones([], _FILLERS) == []
 
@@ -150,7 +154,10 @@ class TestUnits:
         }
         # Carriers count utterances, not tokens.
         assert coverage.phone_carriers["AH"].first_pass == 1
-        assert coverage.triphones["SIL-AH+SIL"].as_dict()["first_pass"] == 1
+        # The pause inside u1 is dropped before contexts are taken: AH B AH.
+        assert set(coverage.triphones) == {"SIL-AH+B", "AH-B+AH", "B-AH+SIL", "SIL-AH+SIL"}
+        assert coverage.triphones["B-AH+SIL"].first_pass == 1
+        assert coverage.triphones["SIL-AH+SIL"].as_dict()["first_pass"] == 0
         assert coverage.triphones["SIL-AH+SIL"].as_dict()["retry_accepted"] == 1
 
     def test_retry_only_and_lost_units_are_flagged(self) -> None:
@@ -249,15 +256,22 @@ class TestThinPhoneRule:
     def test_the_rate_bar_is_inclusive(self) -> None:
         # ZH: 1 of 4 carriers failed (25%). Others: 20 ok, 4 failed, so the run
         # fails 5 of 28. The bar is ratio x 5/28; 25% meets it at 1.4 exactly.
-        at_bar = 0.25 / (5 / 28)
-        coverage = self._run(
-            thin_first_pass=3, thin_failed=1, others_failed=4, thin_rate_ratio=at_bar
-        )
+        coverage = self._run(thin_first_pass=3, thin_failed=1, others_failed=4, thin_rate_ratio=1.4)
         assert [t.phone for t in coverage.thin_phones] == ["ZH"]
-        above = self._run(
-            thin_first_pass=3, thin_failed=1, others_failed=4, thin_rate_ratio=at_bar * 1.01
-        )
+        above = self._run(thin_first_pass=3, thin_failed=1, others_failed=4, thin_rate_ratio=1.41)
         assert above.thin_phones == ()
+
+    def test_the_bar_is_exact_where_floating_point_is_not(self) -> None:
+        # The run fails 10 of 100 (0.1); ZH fails 3 of its 10 carriers (0.3).
+        # In floating point 3.0 * 0.1 is 0.30000000000000004, above 0.3.
+        assert 3.0 * 0.1 > 3 / 10
+        coverage = self._run(
+            thin_first_pass=7, thin_failed=3, others_ok=83, others_failed=7, thin_rate_ratio=3.0
+        )
+        assert coverage.utterances.total == 100
+        assert coverage.run_failure_rate == pytest.approx(0.1)
+        (thin,) = coverage.thin_phones
+        assert (thin.phone, thin.carriers, thin.failed_carriers) == ("ZH", 10, 3)
 
     def test_accepted_retries_are_not_failures(self) -> None:
         # ZH's carriers all needed the retry, but it accepted them: nothing lost.
@@ -312,14 +326,17 @@ def _result(
     phones: list[str],
     n_frames: int = 150,
     retry: RetryOutcome | None = None,
+    frame_rate: int = 100,
 ) -> AlignmentResult:
     return AlignmentResult(
         utterance_id=utterance_id,
         words=[AlignedSegment(w, i, i) for i, w in enumerate(words)],
         phones=[AlignedSegment(p, i, i) for i, p in enumerate(phones)],
-        states=[],
-        total_score=0,
+        states=[AlignedSegment(f"p0.s{i}", i, i, -i) for i in range(3)],
+        total_score=-12,
         n_frames=n_frames,
+        transcript=" ".join(words),
+        frame_rate=frame_rate,
         retry=retry,
     )
 
@@ -351,8 +368,11 @@ class TestFromAJob:
                     n_frames=200,
                 ),
                 # Phones not captured: the aligned words give them, with the
-                # variant the aligner chose.
-                "spk/retried": _result("spk/retried", ["<s>", "a(2)", "</s>"], [], retry=retry),
+                # variant the aligner chose. At 50 frames a second, 150
+                # frames are 3 seconds.
+                "spk/retried": _result(
+                    "spk/retried", ["<s>", "a(2)", "</s>"], [], retry=retry, frame_rate=50
+                ),
             },
             errors={
                 "other/rejected": "rejected",
@@ -385,7 +405,7 @@ class TestFromAJob:
         }
         assert job_outcomes(job, transcripts) == coverage.outcomes
         assert coverage.seconds.first_pass == pytest.approx(2.0)
-        assert coverage.seconds.retry_accepted == pytest.approx(1.5)
+        assert coverage.seconds.retry_accepted == pytest.approx(3.0)
         assert coverage.seconds.retry_rejected == pytest.approx(2.5)
         assert coverage.seconds.not_recovered == pytest.approx(1.5)
         assert coverage.n_duration_unknown == 1
@@ -393,22 +413,35 @@ class TestFromAJob:
         assert coverage.phones_from_alignment is False
         # a(2) is EY in both aligned utterances.
         assert coverage.phones["EY"].aligned == 2
-        # Failed transcripts use each word's first pronunciation: a -> AH,
-        # again -> AH G EH N, across -> AH K R AO S.
+        # Failed transcripts take the variant the aligned output chose, a(2) ->
+        # EY, and otherwise each word's first pronunciation: again -> AH G EH N,
+        # across -> AH K R AO S.
+        assert coverage.phones["EY"].as_dict() == {
+            "first_pass": 1,
+            "retry_accepted": 1,
+            "retry_rejected": 0,
+            "not_recovered": 2,
+        }
         assert coverage.phones["AH"].as_dict() == {
             "first_pass": 0,
             "retry_accepted": 0,
             "retry_rejected": 1,
-            "not_recovered": 3,
+            "not_recovered": 1,
         }
         assert coverage.triphones["SIL-AH+G"].retry_rejected == 1
-        assert coverage.triphones["AH-AH+K"].not_recovered == 1
+        assert coverage.triphones["EY-AH+K"].not_recovered == 1
+        # "a" alone is SIL-EY+SIL in every outcome, so it is not lost.
+        assert coverage.triphones["SIL-EY+SIL"].aligned == 2
+        assert "SIL-EY+SIL" not in coverage.lost_triphones
         assert coverage.unexpanded_words == {"zzyzx": 1}
         assert "EY" not in coverage.lost_phones
         assert "AH" in coverage.lost_phones
 
     def test_a_report_that_cannot_be_built_does_not_fail_the_run(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         audio = tmp_path / "audio"
         audio.mkdir()
@@ -432,8 +465,59 @@ class TestFromAJob:
 
         monkeypatch.setattr("pstrain.lib.alignment.batch.Aligner", FakeAligner)
         monkeypatch.setattr("pstrain.lib.alignment.batch.alignment_coverage", broken)
-        job = align_corpus({"utt": "hello"}, audio, tmp_path, _DICT)
+        with caplog.at_level("WARNING", logger="pstrain.lib.alignment.batch"):
+            job = align_corpus({"utt": "hello"}, audio, tmp_path, _DICT)
         assert (job.n_aligned, job.coverage) == (1, None)
+        assert "Not reporting alignment mass and coverage: KeyError: 'boom'" in caplog.text
+
+    def test_no_report_when_the_aligner_did_not_start(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class FailingAligner:
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                raise RuntimeError("no model")
+
+        def unexpected(*args: object, **kwargs: object) -> AlignmentCoverage:
+            raise AssertionError("the report was built")
+
+        monkeypatch.setattr("pstrain.lib.alignment.batch.Aligner", FailingAligner)
+        monkeypatch.setattr("pstrain.lib.alignment.batch.alignment_coverage", unexpected)
+        job = align_corpus({"utt": "a"}, tmp_path, tmp_path, _DICT)
+        assert (job.n_failed, job.coverage) == (1, None)
+        assert job.errors["utt"].startswith("Aligner init failed")
+
+    def test_a_pause_at_a_word_boundary_is_not_a_lost_triphone(self, tmp_path: Path) -> None:
+        """Aligned utterances pause between "at" and "the"; a failed one has the
+        same words. The cross-word triphone T-DH+AH is the same unit in both."""
+        aligned = {
+            f"spk/ok{i}": _result(
+                f"spk/ok{i}",
+                ["<s>", "at", "<sil>", "the", "</s>"],
+                ["SIL", "AE", "T", "SIL", "DH", "AH", "SIL"],
+            )
+            for i in range(2)
+        }
+        job = AlignmentJob(
+            model_dir=tmp_path,
+            n_utterances=3,
+            n_aligned=2,
+            n_failed=1,
+            results=aligned,
+            errors={"spk/failed": "failed"},
+        )
+        transcripts = dict.fromkeys([*aligned, "spk/failed"], "<s> at the </s>")
+
+        coverage = alignment_coverage(job, transcripts, _DICT, _FILLER)
+
+        assert coverage.triphones["AE-T+DH"].as_dict() == {
+            "first_pass": 2,
+            "retry_accepted": 0,
+            "retry_rejected": 0,
+            "not_recovered": 1,
+        }
+        assert "AE-T+SIL" not in coverage.triphones
+        assert coverage.lost_triphones == ()
+        assert coverage.lost_phones == ()
 
     def test_the_report_can_be_turned_off(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -510,7 +594,10 @@ def _speaker_corpus(tmp_path: Path) -> tuple[Path, dict[str, str]]:
 def _decisions(job: AlignmentJob) -> dict[str, object]:
     """Everything the acceptance check decided, with the report left out."""
     return {
-        "results": {u: (r.retry, r.n_frames, r.words, r.phones) for u, r in job.results.items()},
+        "results": {
+            u: (r.retry, r.n_frames, r.words, r.phones, r.states, r.total_score, r.transcript)
+            for u, r in job.results.items()
+        },
         "errors": job.errors,
         "rejections": job.retry_rejections,
         "yield": job.retry_yield,
@@ -586,13 +673,17 @@ def test_the_report_changes_no_outcome_and_no_acceptance_decision(
     json.dumps(coverage.to_dict())
 
 
-def test_cli_prints_the_report_after_the_retry_line(
+@pytest.mark.parametrize("formats", [True, False], ids=["prints", "format-fails"])
+def test_cli_prints_the_report_after_the_retry_line_and_after_writing_output(
     trained_ci: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     in_process: None,
+    formats: bool,
 ) -> None:
+    """The report comes after the retry line and the written segmentations, and
+    a report that cannot be formatted warns without losing any output."""
     from pstrain.cli.cli import main
 
     project = tmp_path / "project"
@@ -603,6 +694,14 @@ def test_cli_prints_the_report_after_the_retry_line(
     audio, transcripts = _speaker_corpus(tmp_path)
     transcript_file = project / "all.transcription"
     transcript_file.write_text("".join(f"<s> {t} </s> ({u})\n" for u, t in transcripts.items()))
+    out_dir = tmp_path / "textgrids"
+    ctm = tmp_path / "all.ctm"
+    if not formats:
+
+        def broken(self: AlignmentCoverage) -> str:
+            raise ValueError("cannot format")
+
+        monkeypatch.setattr(AlignmentCoverage, "format", broken)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -620,15 +719,29 @@ def test_cli_prints_the_report_after_the_retry_line(
             str(_DICT),
             "--filler-dict",
             str(_FILLER),
+            "--output-dir",
+            str(out_dir),
+            "--ctm",
+            str(ctm),
         ],
     )
     main()
     combined = "".join(capsys.readouterr())
-    retry = combined.index("Retry rung 1")
-    report = combined.index(
-        "Mass and coverage by outcome (reporting only; acceptance is unchanged)"
-    )
-    assert retry < report
-    assert "Speakers: 4;" in combined
-    assert "    rot: " in combined
-    assert "  first pass " in combined
+    assert sorted(out_dir.rglob("*.TextGrid"))
+    assert ctm.read_text()
+    written = combined.index("CTM saved to:")
+    assert combined.index("Retry rung 1") < written
+    if formats:
+        report = combined.index(
+            "Mass and coverage by outcome (reporting only; acceptance is unchanged)"
+        )
+        assert written < report
+        assert "Speakers: 4;" in combined
+        assert "    rot: " in combined
+        assert "  first pass " in combined
+    else:
+        assert "Mass and coverage by outcome" not in combined
+        assert (
+            "Warning: not printing the mass-and-coverage report: ValueError: cannot format"
+            in combined
+        )
